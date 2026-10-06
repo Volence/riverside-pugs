@@ -17,6 +17,11 @@ const ROOM_LIVE = new Set<RoomPhase>(['ready', 'veto', 'lineup', 'server', 'conn
 /** Phases where the match holds a server booking, so a reset cancels it. */
 const BOOKED = new Set<RoomPhase>(['connect', 'live', 'confirming']);
 const CORRECTABLE = new Set(['done', 'forfeit']);
+/** A match with a result: its technical pauses stay listed on the desk, but
+ *  Warn and Forfeit the game are live tools only (final review ruling); a
+ *  finished match is changed through the result tools instead. */
+const FINISHED = new Set(['done', 'forfeit', 'bye']);
+const finished = (m: PlayMatch): boolean => FINISHED.has(m.status) || m.phase === 'done';
 /** T2's labels, kept for the statuses that predate rooms. Every other
  *  status (veto, lineup, booking, connect, live, confirming, admin_hold) reads
  *  its label from the match's room phase through PHASE_TEXT instead. */
@@ -157,6 +162,7 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
   /** Plan T5: the match's technical pauses, each with a Warn and, while its
    *  game is the one being played, a Forfeit the game. */
   const canTech = d.pauses.length > 0;
+  const canRule = !finished(m);
   const chapters = d.liveGame?.chapters ?? [];
   const fourIds = four.split(/[\s,]+/).filter(Boolean);
   const chapterLabel = (c: { ordinal: number; map: string }) => `Chapter ${c.ordinal + 1}: ${c.map}`;
@@ -285,7 +291,7 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
                   {`Game ${p.game}${p.tiebreak ? ' tiebreak' : ''}, ${team}, ${p.cause === 'disconnect' ? 'disconnect' : 'technical'}${p.reason !== null ? `: "${p.reason}"` : ''}${p.byName ? ` by ${p.byName}` : ''}${flag}`}
                   {p.penalty !== null
                     ? ` (${p.penalty === 'warning' ? 'warned' : 'game forfeited'}${p.penaltyNote ? `: ${p.penaltyNote}` : ''})`
-                    : (
+                    : canRule && (
                       <>
                         {' '}
                         <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.techPenaltyEventMatch(eventId, m.id, p.id, 'warning'),
@@ -346,7 +352,7 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
           )}
         </>
       )}
-      {editable && m.desk && (ROOM_LIVE.has(m.phase) || m.phase === 'waiting') && <DeskTools eventId={eventId} m={m} run={run} busy={busy} />}
+      {editable && m.desk && (ROOM_LIVE.has(m.phase) || m.phase === 'waiting' || (finished(m) && m.desk.pauses.length > 0)) && <DeskTools eventId={eventId} m={m} run={run} busy={busy} />}
     </li>
   );
 }
