@@ -17,6 +17,7 @@ import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
 import { tellCheckinOpen, tellDropped, tellRosterAdded } from '../events/notices.js';
+import type { RoomClock } from '../events/roomClock.js';
 
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; startsAt: string; stages: number; updatedAt: string;
@@ -63,7 +64,7 @@ export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
  * request over one.
  */
 export async function adminEventRoutes(
-  app: FastifyInstance, opts: { db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string },
+  app: FastifyInstance, opts: { db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock },
 ): Promise<void> {
   const { db } = opts;
   const requireAdmin = makeRequireAdmin(db);

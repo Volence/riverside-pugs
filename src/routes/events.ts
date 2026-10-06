@@ -12,6 +12,7 @@ import * as V from '../events/validate.js';
 import { eventListItems, eventView, myEventView } from '../events/views.js';
 import { tellRosterAdded } from '../events/notices.js';
 import type { Notifier } from '../notify/notify.js';
+import type { RoomClock } from '../events/roomClock.js';
 
 const NOT_FOUND = { error: 'not found' };
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -26,7 +27,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
  * that does not exist, so whether a draft exists cannot be read off the answer.
  */
 export async function eventRoutes(
-  app: FastifyInstance, opts: { db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string },
+  app: FastifyInstance, opts: { db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock },
 ): Promise<void> {
   const { db } = opts;
   const optionalViewer = makeOptionalViewer(db);

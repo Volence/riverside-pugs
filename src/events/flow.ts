@@ -180,6 +180,29 @@ export async function recordResultFlow(
   return r;
 }
 
+/** A forfeit the room's clock decides (plan T3a Ruling 2). expect re-checks
+ *  the match inside the event's chain, so an admin result or a reset that
+ *  landed first is never overwritten (Ruling 12). Settles after, as a
+ *  result does. */
+export async function forfeitMatch(
+  db: DB, o: { eventId: number; matchId: number; winner: 'a' | 'b'; expect: (m: P.MatchRow) => boolean; now?: Date },
+): Promise<V.Checked<P.MatchRow>> {
+  const r = await serialize(o.eventId, async (): Promise<V.Checked<P.MatchRow>> => {
+    const m = P.getMatch(db, o.matchId);
+    if (!m || m.event_id !== o.eventId) return V.fail('match_not_found');
+    if (!o.expect(m)) return V.fail('changed');
+    return report(db, m, null, { winner: o.winner, scoreA: null, scoreB: null, forfeit: true }, o.now);
+  });
+  if (r.ok) {
+    try {
+      await settleEvent(db, { eventId: o.eventId, now: o.now });
+    } catch (err) {
+      console.error(`[events] settle after a forfeit in event ${o.eventId} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return r;
+}
+
 export function settleEvent(db: DB, o: { eventId: number; now?: Date }): Promise<void> {
   return serialize(o.eventId, async () => {
     for (let i = 0; i < 100; i++) if (!(await settleOnce(db, o.eventId, o.now))) return;
@@ -196,7 +219,8 @@ async function settleOnce(db: DB, eventId: number, now?: Date): Promise<boolean>
   const entrants = P.stageEntrants(stage);
   const out = outOf(db, entrants);
 
-  // Forfeit every eligible waiting match in this pass, not just the first
+  // Forfeit every eligible waiting or room-open match in this pass (an open
+  // room counts since plan T3a Ruling 15), not just the first
   // (Ruling 2, fix round 1): a round robin league of any size can have many
   // one-side-disqualified matches waiting at once, and settleEvent's own
   // retry cap is for the stage/round steps below, not a budget for how many
@@ -206,9 +230,9 @@ async function settleOnce(db: DB, eventId: number, now?: Date): Promise<boolean>
   // down the bracket).
   let forfeited = false;
   for (const snap of P.matchesOf(db, stage.id)) {
-    if (snap.status !== 'waiting' || snap.entry_a === null || snap.entry_b === null) continue;
+    if (!(snap.status === 'waiting' || P.ROOM_OPEN.has(snap.status)) || snap.entry_a === null || snap.entry_b === null) continue;
     const m = P.getMatch(db, snap.id);
-    if (!m || m.status !== 'waiting' || m.entry_a === null || m.entry_b === null) continue;
+    if (!m || !(m.status === 'waiting' || P.ROOM_OPEN.has(m.status)) || m.entry_a === null || m.entry_b === null) continue;
     const aOut = out.has(m.entry_a);
     if (aOut === out.has(m.entry_b)) continue;
     const r = await report(db, m, null, { winner: aOut ? 'b' : 'a', scoreA: null, scoreB: null, forfeit: true }, now);

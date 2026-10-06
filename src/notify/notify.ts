@@ -16,7 +16,7 @@ export type NotifyType =
   | 'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_recovered' | 'booking_cancelled' | 'booking_no_show'
   | 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined'
   | 'scrim_review'
-  | 'event_checkin_open' | 'event_dropped' | 'event_roster_added';
+  | 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit';
 
 export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_invite', label: 'Someone invites me to a booked server' },
@@ -35,6 +35,8 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'event_checkin_open', label: 'Check-in opens for an event my team entered' },
   { type: 'event_dropped', label: 'My team\'s event entry is dropped' },
   { type: 'event_roster_added', label: 'Someone puts me on an event roster' },
+  { type: 'event_match_room', label: 'My tournament match room opens: ready up and veto' },
+  { type: 'event_match_forfeit', label: 'A tournament match of mine is a forfeit because a team did not ready up' },
 ];
 
 export function isNotifyType(v: unknown): v is NotifyType {

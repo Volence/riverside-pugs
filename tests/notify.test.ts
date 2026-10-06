@@ -32,6 +32,12 @@ describe('preferences', () => {
     expect(wants(db, A, 'booking_ready')).toBe(true);
     expect(prefsOf(db, A).map((p) => p.type)).toEqual(NOTIFY_TYPES.map((t) => t.type));
   });
+  it('lists the two match room DMs (plan T3a)', () => {
+    expect(NOTIFY_TYPES.filter((t) => t.type === 'event_match_room' || t.type === 'event_match_forfeit')).toEqual([
+      { type: 'event_match_room', label: 'My tournament match room opens: ready up and veto' },
+      { type: 'event_match_forfeit', label: 'A tournament match of mine is a forfeit because a team did not ready up' },
+    ]);
+  });
 });
 
 describe('Notifier', () => {

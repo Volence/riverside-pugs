@@ -6,7 +6,7 @@ import * as N from '../src/events/entries.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { DE, LEAGUE, RR, SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 import * as R from '../src/events/room.js';
-import { TIMERS } from './roomFixture.js';
+import { TIMERS, roomFixture } from './roomFixture.js';
 
 const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -358,5 +358,21 @@ describe('event flow, final review fixes', () => {
     const same = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'a', scoreA: 12, scoreB: 5 }, now: NOW });
     expect(same.ok).toBe(true);
     expect(P.getMatch(f.db, ready.id)!.status).toBe('veto');
+  });
+  it('forfeitMatch refuses when the match moved on before its turn in the chain (plan T3a Ruling 12)', async () => {
+    const f = await roomFixture();
+    ok(R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: f.matchId, by: ADMIN, result: { winner: 'a', scoreA: 9, scoreB: 1 }, now: NOW }));
+    const r = await F.forfeitMatch(f.db, { eventId: f.eventId, matchId: f.matchId, winner: 'b', expect: (m) => m.status === 'veto', now: NOW });
+    expect(r).toEqual({ ok: false, error: 'changed' });
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'done', winner_entry: f.entryA });
+  });
+
+  it('forfeits a disqualified team\'s open room on settle (plan T3a Ruling 15)', async () => {
+    const f = await roomFixture();
+    ok(R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    ok(N.disqualifyEntry(f.db, { entryId: f.entryB, by: ADMIN, reason: 'left', now: NOW }));
+    await F.settleEvent(f.db, { eventId: f.eventId, now: NOW });
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'forfeit', winner_entry: f.entryA });
   });
 });

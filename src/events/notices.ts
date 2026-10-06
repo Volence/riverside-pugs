@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
 import * as N from './entries.js';
+import * as P from './play.js';
 import { eventMessage, type EventNotifyType } from './messages.js';
 
 /**
@@ -40,4 +41,25 @@ export function tellRosterAdded(d: NoticeDeps, eventId: number, entryId: number,
   for (const p of added) {
     if (p.steamid !== by) tell(d, [p.steamid], eventId, 'event_roster_added', { entryId, by, role: p.role });
   }
+}
+
+/** Everyone on either roster of a match: starters, subs and coach (plan T3a
+ *  Ruling 2). */
+function rostersOf(d: NoticeDeps, matchId: number): string[] {
+  const m = P.getMatch(d.db, matchId);
+  if (!m) return [];
+  return [m.entry_a, m.entry_b].flatMap((id) => {
+    if (id === null) return [];
+    const r = N.rosterOf(d.db, id);
+    return [...r.starters, ...r.subs, ...(r.coach ? [r.coach] : [])];
+  });
+}
+
+/** A match room opened: both rosters. */
+export function tellRoomOpen(d: NoticeDeps, eventId: number, matchId: number): void {
+  tell(d, rostersOf(d, matchId), eventId, 'event_match_room', { matchId });
+}
+/** A match ended as a forfeit at the ready deadline: both rosters. */
+export function tellReadyForfeit(d: NoticeDeps, eventId: number, matchId: number): void {
+  tell(d, rostersOf(d, matchId), eventId, 'event_match_forfeit', { matchId });
 }
