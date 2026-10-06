@@ -492,6 +492,66 @@ CREATE TABLE IF NOT EXISTS event_matches (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS event_matches_slot ON event_matches (stage_id, grp, round, slot);
 CREATE UNIQUE INDEX IF NOT EXISTS event_matches_bm ON event_matches (stage_id, bm_match_id) WHERE bm_match_id IS NOT NULL;
+-- The match room (tournaments plan T3a). Only src/events/room.ts writes
+-- these. event_vetoes is the replayable log of a match's veto (src/events/
+-- veto.ts reads it back); step numbers run 0, 1, 2 ... with no gaps.
+-- event_games are the games the veto settled, rewritten from the replay
+-- after each action; match_id and tiebreak_of are filled by plan T3b.
+-- event_lineups.steamids is a JSON array of exactly four steamids; game is
+-- 1 in T3a. The two prefs tables hold what a team's managers saved for the
+-- timers to act from (Ruling 7) and the default four (Ruling 9).
+CREATE TABLE IF NOT EXISTS event_vetoes (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_match_id INTEGER NOT NULL REFERENCES event_matches(id),
+  step           INTEGER NOT NULL,
+  side           TEXT NOT NULL CHECK (side IN ('a','b')),
+  entry_id       INTEGER NOT NULL REFERENCES event_entries(id),
+  action         TEXT NOT NULL CHECK (action IN ('first','second','ban','pick','survivors','infected')),
+  campaign       TEXT,
+  by_steamid     TEXT,
+  auto           INTEGER NOT NULL DEFAULT 0 CHECK (auto IN (0,1)),
+  at             TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_vetoes_step ON event_vetoes (event_match_id, step);
+CREATE TABLE IF NOT EXISTS event_games (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_match_id  INTEGER NOT NULL REFERENCES event_matches(id),
+  ordinal         INTEGER NOT NULL,
+  campaign        TEXT NOT NULL,
+  picked_by       INTEGER REFERENCES event_entries(id),
+  side_by         INTEGER REFERENCES event_entries(id),
+  first_survivors INTEGER REFERENCES event_entries(id),
+  match_id        INTEGER REFERENCES matches(id),
+  tiebreak_of     INTEGER REFERENCES event_games(id),
+  created_at      TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_games_ordinal ON event_games (event_match_id, ordinal);
+CREATE TABLE IF NOT EXISTS event_lineups (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_match_id INTEGER NOT NULL REFERENCES event_matches(id),
+  game           INTEGER NOT NULL,
+  entry_id       INTEGER NOT NULL REFERENCES event_entries(id),
+  steamids       TEXT NOT NULL,
+  locked_by      TEXT,
+  auto           INTEGER NOT NULL DEFAULT 0 CHECK (auto IN (0,1)),
+  locked_at      TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS event_lineups_one ON event_lineups (event_match_id, game, entry_id);
+CREATE TABLE IF NOT EXISTS event_entry_prefs (
+  entry_id     INTEGER PRIMARY KEY REFERENCES event_entries(id),
+  default_four TEXT,
+  side         TEXT CHECK (side IN ('survivors','infected')),
+  updated_by   TEXT,
+  updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS event_campaign_prefs (
+  entry_id   INTEGER NOT NULL REFERENCES event_entries(id),
+  stage_id   INTEGER NOT NULL REFERENCES event_stages(id),
+  campaigns  TEXT NOT NULL,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (entry_id, stage_id)
+);
 CREATE TABLE IF NOT EXISTS match_players (
   match_id INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT NOT NULL REFERENCES players(steamid),
@@ -1388,6 +1448,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   booking_allow_block_minutes: '30',
   booking_gone_minutes: '3',
   booking_recover_wait_minutes: '20',
+  // Tournaments plan T3a: the match room's timers.
+  event_ready_minutes: '10',
+  event_veto_step_seconds: '60',
+  event_lineup_minutes: '5',
   // Scrim board plan 1: campaigns the accepting captain may add on top of the
   // poster's list.
   scrim_accept_campaigns_max: '2',
@@ -1785,6 +1849,17 @@ export function openDb(path: string): DB {
   // Tournaments plan T3a: a stage's veto knobs (src/events/vetoConfig.ts).
   // Null on stages made before it; stageSettingsOf reads those from veto_type.
   ensureColumn(db, 'event_stages', 'veto_json', 'TEXT');
+  // Tournaments plan T3a: the match room. room_higher is the higher seed's
+  // side when the room opened (Ruling 5); room_seed the coin bits
+  // (src/events/veto.ts coin); deadline the current phase's (ready, a veto
+  // step, lineups) and null otherwise.
+  ensureColumn(db, 'event_matches', 'room_opened_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'room_higher', "TEXT CHECK (room_higher IN ('a','b'))");
+  ensureColumn(db, 'event_matches', 'room_seed', 'INTEGER');
+  ensureColumn(db, 'event_matches', 'ready_a_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'ready_b_at', 'TEXT');
+  ensureColumn(db, 'event_matches', 'deadline', 'TEXT');
+  ensureColumn(db, 'event_matches', 'hold_reason', 'TEXT');
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');

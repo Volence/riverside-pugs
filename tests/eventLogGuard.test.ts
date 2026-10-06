@@ -6,10 +6,12 @@ import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
 import * as P from '../src/events/play.js';
 import * as V from '../src/events/validate.js';
+import * as R from '../src/events/room.js';
 import { createBracket, reportResult } from '../src/events/bracket.js';
 import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './eventFixture.js';
 import { A, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
+import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -299,8 +301,8 @@ describe('event_log guard', () => {
     const rows = (f: PlayFixture) => JSON.stringify(['events', 'event_stages', 'event_entries', 'event_matches']
       .map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()));
 
-    it('only src/events/play.ts writes event_matches', () => {
-      const offenders = walk('src').filter((f) => f !== 'src/events/play.ts')
+    it('only src/events/play.ts and src/events/room.ts write event_matches', () => {
+      const offenders = walk('src').filter((f) => f !== 'src/events/play.ts' && f !== 'src/events/room.ts')
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(MATCH_WRITERS) ?? []).length > 0);
       expect(offenders).toEqual([]);
     });
@@ -354,5 +356,61 @@ describe('event_log guard', () => {
       expect(() => P.recordResult(g.db, { matchId: ready.id, by: ADMIN, result: aWins, bracket: { data: reported, baseRev }, now: NOW })).toThrow(/audit down/);
       expect(rows(g)).toBe(beforeResult);
     });
+  });
+
+  /** Plan T3a: src/events/room.ts is the only writer of the room tables,
+   *  and its mutations follow the same one-row rule. Task 4 adds actVeto,
+   *  lockLineup and savePrefs to ROOM_MUTATIONS and its reads to ROOM_READS. */
+  describe('room guard (src/events/room.ts)', () => {
+    const ROOM_TABLES = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_vetoes|event_games|event_lineups|event_entry_prefs|event_campaign_prefs)\b/gi;
+    const ROOM_READS = new Set(['roomTimers', 'vetoActions', 'vetoInput', 'roomState', 'gamesOf', 'lineupsOf', 'sideOf', 'entryOn', 'playableOf', 'busyEntries', 'isParticipant']);
+    const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+    const open = (f: RoomFixture) => {
+      const r = R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW });
+      if (!r.ok) throw new Error(r.error);
+    };
+    const ROOM_MUTATIONS: Record<string, { action: string; actor: string | null; setup: (f: RoomFixture) => void; run: (f: RoomFixture) => V.Checked<unknown> }> = {
+      openRoom: { action: 'room_opened', actor: null, setup: () => {}, run: (f) => R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }) },
+      readyUp: { action: 'room_ready', actor: A[0]!, setup: open, run: (f) => R.readyUp(f.db, { matchId: f.matchId, steamid: A[0]!, timers: TIMERS, now: at(1) }) },
+      holdMatch: { action: 'match_held', actor: null, setup: open, run: (f) => R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'nobody_ready', now: at(10) }) },
+      resetRoom: { action: 'room_reset', actor: ADMIN, setup: open, run: (f) => R.resetRoom(f.db, { matchId: f.matchId, by: ADMIN, now: at(1) }) },
+      resumeDeadline: { action: 'room_resumed', actor: null, setup: open, run: (f) => R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(30) }) },
+    };
+    const rows = (f: RoomFixture) => JSON.stringify(['event_matches', 'event_vetoes', 'event_games', 'event_lineups', 'event_entry_prefs', 'event_campaign_prefs']
+      .map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()));
+
+    it('only src/events/room.ts writes the room tables', () => {
+      const offenders = walk('src').filter((f) => f !== 'src/events/room.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(ROOM_TABLES) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+      // room.ts itself is seen by the scan (its writes are spelled out, not built).
+      expect((readFileSync(join(root, 'src/events/room.ts'), 'utf8').match(ROOM_TABLES) ?? []).length).toBeGreaterThan(0);
+    });
+
+    it('every exported function of room.ts is a known read or a guarded mutation', () => {
+      const fns = Object.entries(R).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !ROOM_READS.has(k)).sort()).toEqual(Object.keys(ROOM_MUTATIONS).sort());
+    });
+
+    for (const [name, m] of Object.entries(ROOM_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, async () => {
+        const f = await roomFixture();
+        m.setup(f);
+        const before = logCount(f);
+        const r = m.run(f);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(f)).toBe(before + 1);
+        expect(f.db.prepare('SELECT action, actor FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action, actor: m.actor });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, async () => {
+        const f = await roomFixture();
+        m.setup(f);
+        const before = rows(f);
+        f.db.exec(`CREATE TRIGGER room_log_down_${name} BEFORE INSERT ON event_log WHEN NEW.action = '${m.action}' BEGIN SELECT RAISE(ABORT, 'audit down'); END`);
+        expect(() => m.run(f)).toThrow(/audit down/);
+        expect(rows(f)).toBe(before);
+      });
+    }
   });
 });

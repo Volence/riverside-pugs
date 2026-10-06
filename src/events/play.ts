@@ -23,12 +23,17 @@ export interface MatchRow {
   scheduled_at: string | null; window_start: string | null; window_end: string | null; booking_id: number | null;
   winner_entry: number | null; score_a: number | null; score_b: number | null; result_source: 'auto' | 'admin' | 'forfeit' | null;
   created_at: string; finished_at: string | null;
+  room_opened_at: string | null; room_higher: 'a' | 'b' | null; room_seed: number | null; ready_a_at: string | null;
+  ready_b_at: string | null; deadline: string | null; hold_reason: string | null;
 }
 export interface NewRound { round: number; pairs: [number, number][]; bye: number | null }
 export interface StagePlan { stageId: number; entrants: number[]; bracket: BracketData | null; rounds: NewRound[] }
 export interface StageOutcome { ranks: { entryId: number; rank: number }[]; advance: number[] }
 
 export const RESOLVED: ReadonlySet<MatchStatus> = new Set<MatchStatus>(['done', 'forfeit', 'bye']);
+/** States of a match whose room is open (plan T3a; T3b uses connect, live
+ *  and confirming). A result may be entered from any of them. */
+export const ROOM_OPEN: ReadonlySet<MatchStatus> = new Set<MatchStatus>(['veto', 'lineup', 'booking', 'connect', 'live', 'confirming', 'admin_hold']);
 
 const iso = (now?: Date): string => (now ?? new Date()).toISOString();
 const sameList = (x: number[], y: number[]): boolean => x.length === y.length && x.every((v, i) => v === y[i]);
@@ -96,7 +101,11 @@ function syncBracket(db: DB, eventId: number, stageId: number, data: BracketData
       ins.run(eventId, stageId, b.group, b.round, b.number, b.bmId, b.a, b.b, status, b.winner, b.scoreA, b.scoreB, at, resolved ? at : null);
       continue;
     }
-    upd.run(b.a, b.b, status, b.winner, b.scoreA, b.scoreB, resolved ? row.result_source : null, resolved ? row.finished_at ?? at : null, row.id);
+    // A match whose room is open keeps its room state while its bracket
+    // match is still ready (plan T3a); recordResult refuses any change to
+    // its teams (room_open_downstream) before this runs.
+    const keep = ROOM_OPEN.has(row.status) && b.state === 'ready';
+    upd.run(b.a, b.b, keep ? row.status : status, b.winner, b.scoreA, b.scoreB, resolved ? row.result_source : null, resolved ? row.finished_at ?? at : null, row.id);
   }
   const del = db.prepare('DELETE FROM event_matches WHERE id = ?');
   for (const [bmId, row] of rows) if (!seen.has(bmId) && !RESOLVED.has(row.status)) del.run(row.id);
@@ -159,11 +168,12 @@ export function recordResult(
     const stage = E.getStage(db, m.stage_id)!;
     const ev = E.getEvent(db, m.event_id)!;
     if (ev.status !== 'live' || stage.status !== 'live') return V.fail('not_live');
-    if (m.entry_a === null || m.entry_b === null || !(m.status === 'waiting' || m.status === 'done' || m.status === 'forfeit')) {
-      return V.fail('match_not_open');
-    }
+    // A first result comes from waiting or from any open room state (plan
+    // T3a: staff may enter one at any point of the room).
+    const first = m.status === 'waiting' || ROOM_OPEN.has(m.status);
+    if (m.entry_a === null || m.entry_b === null || !(first || m.status === 'done' || m.status === 'forfeit')) return V.fail('match_not_open');
     if ((m.bm_match_id === null) !== (o.bracket === null)) return V.fail('bad_request');
-    const correction = m.status !== 'waiting';
+    const correction = !first;
     if (correction && m.bm_match_id === null && totalRounds(stage) !== null && laterRound(db, stage.id, m.round)) return V.fail('result_locked');
     const winner = o.result.winner === 'a' ? m.entry_a : m.entry_b;
     // A dropped or disqualified team never beats one still in, even by a
@@ -173,13 +183,20 @@ export function recordResult(
     if (isOut(winner) && !isOut(loser)) return V.fail('winner_out');
     if (o.bracket) {
       if (stage.bracket_rev !== o.bracket.baseRev) return V.fail('changed');
+      // Ruling 14: never change the teams of a match whose room is open.
+      const byBm = new Map(bracketMatches(o.bracket.data).map((b) => [b.bmId, b]));
+      for (const row of matchesOf(db, stage.id)) {
+        if (row.id === m.id || !ROOM_OPEN.has(row.status) || row.bm_match_id === null) continue;
+        const b = byBm.get(row.bm_match_id);
+        if (!b || b.a !== row.entry_a || b.b !== row.entry_b) return V.fail('room_open_downstream');
+      }
       db.prepare('UPDATE event_stages SET bracket_json = ?, bracket_rev = bracket_rev + 1, updated_at = ? WHERE id = ?')
         .run(JSON.stringify(o.bracket.data), at, stage.id);
       syncBracket(db, ev.id, stage.id, o.bracket.data, at);
       if (getMatch(db, m.id)?.winner_entry !== winner) throw new Error(`bracket disagrees with the result of event match ${m.id}`);
     }
     db.prepare(
-      'UPDATE event_matches SET status = ?, winner_entry = ?, score_a = ?, score_b = ?, result_source = ?, finished_at = ? WHERE id = ?',
+      'UPDATE event_matches SET status = ?, winner_entry = ?, score_a = ?, score_b = ?, result_source = ?, finished_at = ?, deadline = NULL WHERE id = ?',
     ).run(o.result.forfeit ? 'forfeit' : 'done', winner, o.result.scoreA, o.result.scoreB, o.result.forfeit ? 'forfeit' : 'admin', at, m.id);
     E.logEvent(db, ev.id, o.by, 'result_recorded', at, {
       matchId: m.id, winner, scoreA: o.result.scoreA, scoreB: o.result.scoreB, forfeit: o.result.forfeit, correction,
