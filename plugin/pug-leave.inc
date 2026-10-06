@@ -113,7 +113,7 @@ public Action Event_LeaveDisconnect(Event event, const char[] name, bool dontBro
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	if (client <= 0 || client > MaxClients || IsFakeClient(client)) return Plugin_Continue;
 	int slot = g_iClientRoster[client];
-	if (slot < 0 || g_fAbsentSince[slot] > 0.0) return Plugin_Continue;
+	if (slot < 0 || g_fAbsentSince[slot] > 0.0 || Tourney_SlotOut(slot)) return Plugin_Continue;
 
 	g_fAbsentSince[slot] = GetEngineTime();
 	GetClientName(client, g_sLeaveName[slot], sizeof(g_sLeaveName[]));
@@ -262,6 +262,8 @@ void LeaveTryPause()
 
 void LeaveUnpauseNow()
 {
+	// The staff freeze holds the pause; Tourney_Lift calls this once lifted, so nothing is lost.
+	if (TourneyFrozen()) return;
 	g_bLeavePaused = false;
 	if (!LeaveRotoblinPaused()) return;
 	// Rotoblin unpauses on a short countdown once both teams are ready.
@@ -307,6 +309,24 @@ void LeaveRelease(int slot)
 	// So the 60, 30 and 10 second warnings are announced again if they had
 	// already been before the hold.
 	g_iLeaveWarned[slot] = 0;
+}
+
+/** A slot subbed out (pug-tourney.inc): whatever it was spending or holding
+ *  is forgotten, so a replaced player who never comes back is not an
+ *  abandon. If the pause was waiting for them alone, it is handed to the
+ *  teams to lift. */
+void LeaveForget(int slot)
+{
+	if (slot < 0 || slot >= MAX_ROSTER) return;
+	g_fAbsentSince[slot] = 0.0;
+	g_fHoldSince[slot] = 0.0;
+	g_iLeaveWarned[slot] = 0;
+	if (g_bLeavePaused && !LeaveAnyAbsent())
+	{
+		g_bLeavePaused = false;
+		g_bLeaveUnpausing = false;
+		PrintToChatAll("\x04[PUG]\x01 Nobody is missing any more. Both teams type \x05!ready\x01 to unpause.");
+	}
 }
 
 /** Seconds until the ceiling releases this slot's hold, 0 when not held. */

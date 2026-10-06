@@ -116,6 +116,8 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	// and takes !staff. A pending /mod detail line still wins below.
 	g_bSayTeam[client] = StrEqual(command, "say_team", false);
 	if (!g_bAwaitDetails[client] && StaffChat_OnSay(client, text)) return Plugin_Stop;
+	// A tournament box's !sub, !admin and !lift (pug-tourney.inc); a pending /mod detail line still wins below.
+	if (!g_bAwaitDetails[client] && Tourney_OnSay(client, text)) return Plugin_Stop;
 
 	if (g_bAwaitDetails[client])
 	{
