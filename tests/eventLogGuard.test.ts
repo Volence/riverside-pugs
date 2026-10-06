@@ -34,7 +34,7 @@ import { presetConfig } from '../src/events/vetoConfig.js';
 const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
 const ENTRY_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_entries|event_entry_players)\b/gi;
 const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts']);
-const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf']);
+const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf', 'scheduleOf']);
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
 const HELPERS = new Set(['logEvent']);
 
@@ -53,6 +53,10 @@ const MUTATIONS: Record<string, { from: 'draft' | 'announced' | 'registration'; 
   cancelEvent: { from: 'announced', action: 'cancelled', run: ({ db, eventId }) => E.cancelEvent(db, { eventId, by: ADMIN, reason: 'Not enough teams', now: NOW }) },
   setEventBanner: { from: 'announced', action: 'banner_set', run: ({ db, eventId }) => E.setEventBanner(db, { eventId, by: ADMIN, bannerKey: 'a'.repeat(64), now: NOW }) },
   openCheckin: { from: 'registration', action: 'checkin_opened', run: ({ db, eventId }) => E.openCheckin(db, { eventId, by: ADMIN, now: NOW }) },
+  setRoundSchedule: {
+    from: 'draft', action: 'schedule_set',
+    run: ({ db, eventId, s2 }) => E.setRoundSchedule(db, { eventId, stageId: s2, by: ADMIN, rounds: [{ round: 1, at: START }], now: NOW }),
+  },
 };
 
 const SPECIAL = new Set(['deleteDraftEvent']);
@@ -272,7 +276,7 @@ describe('event_log guard', () => {
    *  its mutations follow the same one-row rule. */
   describe('play guard (src/events/play.ts)', () => {
     const MATCH_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+event_matches\b/gi;
-    const PLAY_READS = new Set(['getMatch', 'matchesOf', 'stageEntrants', 'stageBracket', 'activeSeeded', 'totalRounds']);
+    const PLAY_READS = new Set(['getMatch', 'matchesOf', 'stageEntrants', 'stageBracket', 'activeSeeded', 'totalRounds', 'roundTimes']);
     const aWins = { winner: 'a' as const, scoreA: 10, scoreB: 5, forfeit: false };
     const ok = <T>(r: V.Checked<T>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
     const plan = (f: PlayFixture): P.StagePlan => ({
@@ -296,6 +300,10 @@ describe('event_log guard', () => {
       finishStage: {
         action: 'stage_finished', actor: null, setup: (f) => { started(f); allPlayed(f); },
         run: (f) => P.finishStage(f.db, { stageId: f.stages[0]!, outcome: { ranks: f.entries.map((entryId, i) => ({ entryId, rank: i + 1 })), advance: [] }, next: null, now: NOW }),
+      },
+      applySchedule: {
+        action: 'schedule_applied', actor: ADMIN, setup: started,
+        run: (f) => P.applySchedule(f.db, { stageId: f.stages[0]!, by: ADMIN, now: NOW }),
       },
     };
     const fixture = () => playFixture({ stages: [SWISS(2, null)], entries: 4 });

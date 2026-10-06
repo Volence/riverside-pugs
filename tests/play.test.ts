@@ -6,6 +6,7 @@ import { createBracket, bracketMatches } from '../src/events/bracket.js';
 import { repeatedRoundRobin } from '../src/events/league.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { LEAGUE, SE, SWISS, playFixture } from './playFixture.js';
+import { startEventFlow } from '../src/events/flow.js';
 
 const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -171,5 +172,38 @@ describe('play writer', () => {
     expect(E.eventLog(f.db, f.eventId)).toHaveLength(logs);
     ok(N.disqualifyEntry(f.db, { entryId: m1!.entry_a!, by: ADMIN, reason: 'left', now: NOW }));
     expect(ok(P.recordResult(f.db, { matchId: m1!.id, by: ADMIN, result: bWins, bracket: null, now: NOW })).winner_entry).toBe(m1!.entry_b);
+  });
+
+  it('stamps a league round with its week as the window and the schedule row as the default time, keeping an agreed time through a restamp (plan T4)', async () => {
+    const f = playFixture({ stages: [LEAGUE(4, 2, 'round_robin', null, '2026-10-12')], entries: 4 });
+    await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW });
+    const ms = P.matchesOf(f.db, f.stages[0]!);
+    expect(ms.filter((m) => m.round === 1).map((m) => [m.scheduled_at, m.schedule_source, m.window_start, m.window_end, m.not_before]))
+      .toEqual([[null, null, '2026-10-12T00:00:00.000Z', '2026-10-18T23:59:59.000Z', null], [null, null, '2026-10-12T00:00:00.000Z', '2026-10-18T23:59:59.000Z', null]]);
+    expect(ms.find((m) => m.round === 3)).toMatchObject({ window_start: '2026-10-19T00:00:00.000Z', window_end: '2026-10-25T23:59:59.000Z' });
+    const rows = [{ round: 1, at: '2026-10-14T21:00:00Z', from: '2026-10-12T00:00:00Z', to: '2026-10-18T23:59:59Z' }, { round: 2, at: '2026-10-17T21:00:00Z', from: '2026-10-12T00:00:00Z', to: '2026-10-18T23:59:59Z' }];
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: rows, now: NOW }).ok).toBe(true);
+    const first = ms.find((m) => m.round === 1)!;
+    // A captain agreed another time for one match before the organizer moved the default (test setup only: schedule.ts writes this in Task 3).
+    f.db.prepare("UPDATE event_matches SET scheduled_at = '2026-10-16T20:00:00.000Z', schedule_source = 'agreed' WHERE id = ?").run(first.id);
+    const r = P.applySchedule(f.db, { stageId: f.stages[0]!, by: ADMIN, now: NOW });
+    expect(r).toEqual({ ok: true, value: { stamped: 8 } });
+    const after = P.matchesOf(f.db, f.stages[0]!);
+    expect(after.find((m) => m.id === first.id)).toMatchObject({ scheduled_at: '2026-10-16T20:00:00.000Z', schedule_source: 'agreed' });
+    expect(after.filter((m) => m.round === 1 && m.id !== first.id).map((m) => [m.scheduled_at, m.schedule_source])).toEqual([['2026-10-14T21:00:00.000Z', 'default']]);
+    expect(after.filter((m) => m.round === 2).map((m) => m.scheduled_at)).toEqual(['2026-10-17T21:00:00.000Z', '2026-10-17T21:00:00.000Z']);
+    expect(after.filter((m) => m.round === 3).map((m) => m.scheduled_at)).toEqual([null, null]);
+    expect(f.db.prepare('SELECT action, detail FROM event_log ORDER BY id DESC LIMIT 1').get()).toMatchObject({ action: 'schedule_applied' });
+  });
+
+  it('stamps a rolling bracket round\'s date as not_before and never a window (plan T4 Ruling 3)', async () => {
+    const f = playFixture({ stages: [SE()], entries: 4 });
+    expect(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: [{ round: 2, at: '2026-10-24T21:00:00Z' }], now: NOW }).ok).toBe(true);
+    await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW });
+    const ms = P.matchesOf(f.db, f.stages[0]!);
+    expect(ms.filter((m) => m.round === 1).every((m) => m.not_before === null && m.scheduled_at === null && m.window_start === null)).toBe(true);
+    expect(ms.find((m) => m.round === 2)).toMatchObject({ not_before: '2026-10-24T21:00:00.000Z', scheduled_at: null, window_start: null, window_end: null, schedule_source: null });
+    expect(P.roundTimes(E.getStage(f.db, f.stages[0]!)!, 2, NOW.toISOString())).toEqual({ at: '2026-10-24T21:00:00.000Z', from: null, to: null });
+    expect(P.applySchedule(f.db, { stageId: 999, by: ADMIN, now: NOW })).toEqual({ ok: false, error: 'stage_not_found' });
   });
 });

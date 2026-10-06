@@ -3,6 +3,7 @@ import { bracketMatches, type BracketData } from './bracket.js';
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as V from './validate.js';
+import { weekWindow } from './league.js';
 
 /**
  * Every write to event_matches, and the moves of an event and its stages
@@ -73,13 +74,42 @@ export function totalRounds(stage: E.StageRow): number | null {
   return null;
 }
 
+/** What a round's matches are stamped with (plan T4 Ruling 2): the stage's
+ *  schedule row; else, for a league, its week as the window with no
+ *  default time (Ruling 4); else nothing. fallbackStart is the day week 1
+ *  starts when the league has no season start and the stage no started_at
+ *  yet (openStage writes started_at before it inserts rounds). */
+export function roundTimes(stage: E.StageRow, round: number, fallbackStart: string): { at: string | null; from: string | null; to: string | null } {
+  const row = E.scheduleOf(stage).find((r) => r.round === round);
+  if (row) return { at: row.at, from: row.from, to: row.to };
+  const s = E.stageSettingsOf(stage);
+  if (s.type !== 'league') return { at: null, from: null, to: null };
+  const c = s.config as V.StageConfigs['league'];
+  const w = weekWindow(c.seasonStart ?? (stage.started_at ?? fallbackStart).slice(0, 10), round, c.matchesPerWeek);
+  return { at: null, from: w.from, to: w.to };
+}
+
+interface Stamp { not_before: string | null; scheduled_at: string | null; source: 'default' | null; from: string | null; to: string | null }
+
+/** A window stage's match carries the default time and the window; a
+ *  rolling stage's match carries the date as not_before (Ruling 3). */
+function stampOf(db: DB, stageId: number, round: number, at: string): Stamp {
+  const stage = E.getStage(db, stageId)!;
+  const t = roundTimes(stage, round, at);
+  return stage.scheduling === 'window'
+    ? { not_before: null, scheduled_at: t.at, source: t.at !== null ? 'default' : null, from: t.from, to: t.to }
+    : { not_before: t.at, scheduled_at: null, source: null, from: null, to: null };
+}
+
 function insertRound(db: DB, eventId: number, stageId: number, r: NewRound, at: string): void {
   const ins = db.prepare(
-    `INSERT INTO event_matches (event_id, stage_id, grp, round, slot, entry_a, entry_b, status, winner_entry, created_at, finished_at)
-     VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO event_matches (event_id, stage_id, grp, round, slot, entry_a, entry_b, status, winner_entry, created_at, finished_at,
+       not_before, scheduled_at, schedule_source, window_start, window_end)
+     VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  r.pairs.forEach(([a, b], i) => ins.run(eventId, stageId, r.round, i + 1, a, b, 'waiting', null, at, null));
-  if (r.bye !== null) ins.run(eventId, stageId, r.round, r.pairs.length + 1, r.bye, null, 'bye', r.bye, at, at);
+  const s = stampOf(db, stageId, r.round, at);
+  r.pairs.forEach(([a, b], i) => ins.run(eventId, stageId, r.round, i + 1, a, b, 'waiting', null, at, null, s.not_before, s.scheduled_at, s.source, s.from, s.to));
+  if (r.bye !== null) ins.run(eventId, stageId, r.round, r.pairs.length + 1, r.bye, null, 'bye', r.bye, at, at, s.not_before, s.scheduled_at, s.source, s.from, s.to);
 }
 
 /** Brings the stage's rows in line with its bracket: inserts new matches,
@@ -90,8 +120,9 @@ function insertRound(db: DB, eventId: number, stageId: number, r: NewRound, at: 
 function syncBracket(db: DB, eventId: number, stageId: number, data: BracketData, at: string): void {
   const rows = new Map(matchesOf(db, stageId).filter((m) => m.bm_match_id !== null).map((m) => [m.bm_match_id!, m]));
   const ins = db.prepare(
-    `INSERT INTO event_matches (event_id, stage_id, grp, round, slot, bm_match_id, entry_a, entry_b, status, winner_entry, score_a, score_b, created_at, finished_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO event_matches (event_id, stage_id, grp, round, slot, bm_match_id, entry_a, entry_b, status, winner_entry, score_a, score_b, created_at, finished_at,
+       not_before, scheduled_at, schedule_source, window_start, window_end)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const upd = db.prepare(
     `UPDATE event_matches SET entry_a = ?, entry_b = ?, status = ?, winner_entry = ?, score_a = ?, score_b = ?,
@@ -104,7 +135,9 @@ function syncBracket(db: DB, eventId: number, stageId: number, data: BracketData
     const resolved = b.state === 'done';
     const row = rows.get(b.bmId);
     if (!row) {
-      ins.run(eventId, stageId, b.group, b.round, b.number, b.bmId, b.a, b.b, status, b.winner, b.scoreA, b.scoreB, at, resolved ? at : null);
+      const s = stampOf(db, stageId, b.round, at);
+      ins.run(eventId, stageId, b.group, b.round, b.number, b.bmId, b.a, b.b, status, b.winner, b.scoreA, b.scoreB, at, resolved ? at : null,
+        s.not_before, s.scheduled_at, s.source, s.from, s.to);
       continue;
     }
     // A match whose room is open keeps its room state while its bracket
@@ -274,5 +307,35 @@ export function finishStage(db: DB, o: { stageId: number; outcome: StageOutcome;
     }
     E.logEvent(db, ev.id, null, 'stage_finished', at, { stageId: stage.id, advance: o.outcome.advance, eventFinished: !o.next });
     return V.ok({ eventFinished: !o.next });
+  })();
+}
+
+/** Plan T4 Ruling 2: the stage's schedule, stamped again onto every match
+ *  that has not started (pending or waiting). The window and not_before
+ *  are the organizer's and always follow the schedule; a time a captain
+ *  agreed or staff set (schedule_source agreed or staff) is kept, and a
+ *  match whose room is open is not touched. by is null when the engine
+ *  calls it. */
+export function applySchedule(db: DB, o: { stageId: number; by: string | null; now?: Date }): V.Checked<{ stamped: number }> {
+  const at = iso(o.now);
+  return db.transaction((): V.Checked<{ stamped: number }> => {
+    const stage = E.getStage(db, o.stageId);
+    if (!stage) return V.fail('stage_not_found');
+    if (stage.status === 'finished') return V.fail('schedule_locked');
+    const upd = db.prepare(
+      `UPDATE event_matches SET not_before = ?, window_start = ?, window_end = ?,
+         scheduled_at = CASE WHEN schedule_source IN ('agreed', 'staff') THEN scheduled_at ELSE ? END,
+         schedule_source = CASE WHEN schedule_source IN ('agreed', 'staff') THEN schedule_source ELSE ? END
+       WHERE id = ?`,
+    );
+    let stamped = 0;
+    for (const m of matchesOf(db, stage.id)) {
+      if (m.status !== 'pending' && m.status !== 'waiting') continue;
+      const s = stampOf(db, stage.id, m.round, at);
+      upd.run(s.not_before, s.from, s.to, s.scheduled_at, s.source, m.id);
+      stamped++;
+    }
+    E.logEvent(db, stage.event_id, o.by, 'schedule_applied', at, { stageId: stage.id, stamped });
+    return V.ok({ stamped });
   })();
 }
