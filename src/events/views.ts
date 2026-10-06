@@ -7,7 +7,8 @@ import * as E from './events.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import type * as V from './validate.js';
-import { STAGE_LABEL, VETO_LABEL, chaptersLabel, rulesLines, stageSummary } from './format.js';
+import { STAGE_LABEL, chaptersLabel, rulesLines, stageSummary } from './format.js';
+import { vetoSummary } from './vetoConfig.js';
 import { stagePlayViews, type StagePlayView } from './playViews.js';
 
 /** What the public event list and event page show (spec section 7). */
@@ -93,7 +94,7 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
       const rules = stageRules(db, s);
       return {
         ordinal: s.ordinal, type: st.type, summary: stageSummary(st.type, st.config, st.advanceCount),
-        veto: VETO_LABEL[st.vetoType], chapters: chaptersLabel(st.chapters), scheduling: st.scheduling,
+        veto: vetoSummary(st.veto, st.campaignPool.length), chapters: chaptersLabel(st.chapters), scheduling: st.scheduling,
         rulesetName: (rulesetName.get(st.rulesetId) as { name: string } | undefined)?.name ?? null,
         rules: rules ? rulesLines(rules) : [],
         gameConfig: (configLabel.get(st.gameConfig) as { label: string } | undefined)?.label ?? st.gameConfig,

@@ -125,7 +125,9 @@ describe('stages', () => {
       ok: true,
       value: {
         type: 'swiss', config: { rounds: 4 }, rulesetId: 2, gameConfig: 'standard', campaignPool: CTX.defaultPool,
-        vetoType: 'ban_to_one', chapters: null, scheduling: 'rolling', advanceCount: null,
+        vetoType: 'ban_to_one',
+        veto: { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' },
+        chapters: null, scheduling: 'rolling', advanceCount: null,
       },
     });
     expect(V.parseStageConfig('double_elim', undefined)).toEqual({ ok: true, value: { grandFinalReset: true } });
@@ -166,7 +168,9 @@ describe('stages', () => {
     expect(bad(V.parseStage(stage({ campaignPool: ['not_a_campaign'] }), CTX))).toBe('bad_pool');
     expect(V.parseStage(stage({ campaignPool: ['no_mercy'] }), CTX).ok).toBe(true);
     expect(bad(V.parseStage(stage({ campaignPool: ['no_mercy'], vetoType: 'home_away' }), CTX))).toBe('bad_pool_for_veto');
-    expect(bad(V.parseStage(stage({ campaignPool: SEVEN.slice(0, 6), vetoType: 'pick_ban' }), CTX))).toBe('bad_pool_for_veto');
+    // Plan T3a: pick_ban needs a pool of at least PRESET_MIN_POOL.pick_ban (5), not exactly 7.
+    expect(bad(V.parseStage(stage({ campaignPool: SEVEN.slice(0, 4), vetoType: 'pick_ban' }), CTX))).toBe('bad_pool_for_veto');
+    expect(V.parseStage(stage({ campaignPool: SEVEN.slice(0, 6), vetoType: 'pick_ban' }), CTX).ok).toBe(true);
     expect(V.parseStage(stage({ campaignPool: SEVEN, vetoType: 'pick_ban' }), CTX).ok).toBe(true);
     expect(bad(V.parseStage(stage({ vetoType: 'coin' }), CTX))).toBe('bad_veto');
   });
@@ -183,6 +187,25 @@ describe('stages', () => {
     expect(V.parseStage(base, CTX)).toEqual({ ok: false, error: 'bad_group_advance' });
     expect(V.parseStage({ ...base, advanceCount: 8 }, CTX).ok).toBe(true);
     expect(V.parseStage({ ...base, advanceCount: null }, CTX).ok).toBe(true);
+  });
+
+  it('reads a stage veto as knobs, or as a preset name, and keeps veto_type as its family (plan T3a)', () => {
+    const pool7 = [...CTX.campaigns].slice(0, 7);
+    expect(pool7).toHaveLength(7);
+    const knobs = { games: 3, banTo: 3, firstBan: 'higher_chooses', firstPick: 'higher', laterPicks: 'loser', lateBans: 0, sides: 'non_picker' };
+    const r = V.parseStage(stage({ campaignPool: pool7, veto: knobs }), CTX);
+    expect(r.ok && r.value.veto).toEqual(knobs);
+    expect(r.ok && r.value.vetoType).toBe('pick_ban');
+    const legacy = V.parseStage(stage({ campaignPool: pool7, vetoType: 'pick_ban' }), CTX);
+    expect(legacy.ok && legacy.value.veto).toMatchObject({ games: 3, banTo: 5, lateBans: 2 });
+    const preset = V.parseStage(stage({ campaignPool: pool7, vetoType: 'loser_picks' }), CTX);
+    expect(preset.ok && preset.value.veto).toEqual(knobs);
+  });
+
+  it('refuses a veto the pool cannot run (plan T3a)', () => {
+    const r = V.parseStage(stage({ campaignPool: ['no_mercy', 'dead_air'], veto: { games: 3, banTo: 3, firstBan: 'higher', firstPick: 'higher', laterPicks: 'loser', lateBans: 0, sides: 'coin' } }), CTX);
+    expect(r).toEqual({ ok: false, error: 'bad_pool_for_veto' });
+    expect(V.parseStage(stage({ vetoType: 'nonsense' }), CTX)).toEqual({ ok: false, error: 'bad_veto' });
   });
 });
 

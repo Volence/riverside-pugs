@@ -1,5 +1,6 @@
 import { findSlurs } from '../slurs.js';
 import { hasUnsafeChars } from '../profileFields.js';
+import { parseVetoConfig, presetConfig, vetoFamily, VETO_PRESETS, PRESET_MIN_POOL, type VetoConfig, type VetoPreset } from './vetoConfig.js';
 
 /**
  * Every rule about an event's and a stage's settings (tournaments spec part
@@ -28,8 +29,6 @@ export const CANCEL_REASON_MAX = 300;
 export const POOL_MAX = 12;
 export const LEAGUE_MATCHES_MAX = 40;
 export const STAGES_MAX = 5;
-/** ban, ban, pick, pick, ban, ban, decider (spec section 4, pick_ban). */
-export const PICK_BAN_POOL = 7;
 /** Words the routes use for themselves, or may later. */
 export const RESERVED_EVENT_SLUGS: ReadonlySet<string> = new Set(['new', 'edit', 'mine', 'admin', 'logos', 'banners', 'options']);
 
@@ -52,8 +51,8 @@ export const EVENT_ERRORS = {
   pug_ruleset: { status: 400, text: 'PUG rules are for PUGs; copy them into a new ruleset for scrims and events.' },
   bad_game_config: { status: 400, text: 'Pick a game config that is turned on.' },
   bad_pool: { status: 400, text: `A campaign pool is 1 to ${POOL_MAX} different campaigns from the poolable list.` },
-  bad_pool_for_veto: { status: 400, text: `Home and away needs at least 2 campaigns; pick and ban needs exactly ${PICK_BAN_POOL}.` },
-  bad_veto: { status: 400, text: 'The veto is ban to one, home and away, or pick and ban.' },
+  bad_pool_for_veto: { status: 400, text: 'The campaign pool is too small for this veto: it needs at least as many campaigns as the veto bans down to.' },
+  bad_veto: { status: 400, text: 'Those veto settings do not fit together. Pick a preset, or check the series length, the bans and who picks.' },
   bad_chapters: { status: 400, text: 'Chapters is standard, or 1 to 5.' },
   bad_scheduling: { status: 400, text: 'Scheduling is rolling or in windows.' },
   league_needs_window: { status: 400, text: 'A league stage is played in scheduled windows.' },
@@ -128,7 +127,7 @@ export type StageConfig = StageConfigs[StageType];
 
 export interface StageSettings {
   type: StageType; config: StageConfig; rulesetId: number; gameConfig: string; campaignPool: string[];
-  vetoType: VetoType; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
+  vetoType: VetoType; veto: VetoConfig; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
 }
 export interface StageContext {
   campaigns: ReadonlySet<string>; rulesetIds: ReadonlySet<number>; pugRulesetId: number | null;
@@ -382,13 +381,6 @@ export function parsePool(raw: unknown, allowed: ReadonlySet<string>): Checked<s
   return ok(out);
 }
 
-/** Enough campaigns for the veto to run (spec section 4). */
-export function poolFitsVeto(veto: VetoType, size: number): boolean {
-  if (veto === 'home_away') return size >= 2;
-  if (veto === 'pick_ban') return size === PICK_BAN_POOL;
-  return size >= 1;
-}
-
 export function parseStage(raw: unknown, ctx: StageContext): Checked<StageSettings> {
   if (!isObj(raw)) return fail('bad_request');
   const type = raw.type;
@@ -402,9 +394,20 @@ export function parseStage(raw: unknown, ctx: StageContext): Checked<StageSettin
   if (typeof gameConfig !== 'string' || !ctx.gameConfigs.has(gameConfig)) return fail('bad_game_config');
   const pool = parsePool(raw.campaignPool ?? ctx.defaultPool, ctx.campaigns);
   if (!pool.ok) return pool;
-  const vetoType = raw.vetoType ?? 'ban_to_one';
-  if (!oneOf(VETO_TYPES, vetoType)) return fail('bad_veto');
-  if (!poolFitsVeto(vetoType, pool.value.length)) return fail('bad_pool_for_veto');
+  // Plan T3a: knobs win; a preset name (the T2 desk sends vetoType) is
+  // filled from the pool size; nothing at all is ban to one.
+  let veto: VetoConfig;
+  if (raw.veto !== undefined) {
+    const v = parseVetoConfig(raw.veto, pool.value.length);
+    if (!v.ok) return fail(v.error);
+    veto = v.value;
+  } else {
+    const name = raw.vetoType ?? 'ban_to_one';
+    if (!oneOf(VETO_PRESETS, name)) return fail('bad_veto');
+    if (pool.value.length < PRESET_MIN_POOL[name as VetoPreset]) return fail('bad_pool_for_veto');
+    veto = presetConfig(name as VetoPreset, pool.value.length);
+  }
+  const vetoType = vetoFamily(veto);
   const chapters = intOrNull(raw.chapters, 1, 5);
   if (chapters === undefined) return fail('bad_chapters');
   const scheduling = raw.scheduling ?? (type === 'league' ? 'window' : 'rolling');
@@ -417,7 +420,7 @@ export function parseStage(raw: unknown, ctx: StageContext): Checked<StageSettin
   }
   return ok({
     type, config: config.value, rulesetId: rulesetId as number, gameConfig, campaignPool: pool.value,
-    vetoType, chapters, scheduling, advanceCount,
+    vetoType, veto, chapters, scheduling, advanceCount,
   });
 }
 

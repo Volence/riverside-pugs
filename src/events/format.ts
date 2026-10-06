@@ -1,13 +1,10 @@
 import type { MatchRules } from '../rulesets.js';
-import type { StageConfig, StageConfigs, StageType, VetoType } from './validate.js';
+import type { StageConfig, StageConfigs, StageType } from './validate.js';
 
 /** What the event page and the desk say about a stage and its rules. */
 
 export const STAGE_LABEL: Record<StageType, string> = {
   single_elim: 'Single elimination', double_elim: 'Double elimination', round_robin: 'Round robin', swiss: 'Swiss', league: 'League',
-};
-export const VETO_LABEL: Record<VetoType, string> = {
-  ban_to_one: 'Ban to one (Bo1)', home_away: 'Home and away (Bo2 aggregate)', pick_ban: 'Pick and ban (Bo3)',
 };
 
 type AnyConfig = Partial<StageConfigs['single_elim'] & StageConfigs['double_elim'] & StageConfigs['round_robin'] & StageConfigs['swiss'] & StageConfigs['league']>;

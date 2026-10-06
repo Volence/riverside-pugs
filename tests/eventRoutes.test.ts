@@ -86,7 +86,9 @@ describe('GET /api/events/:slug', () => {
     });
     expect(v.stages.map((s: { summary: string }) => s.summary)).toEqual(['Swiss, 4 rounds, top 8 advance', 'Single elimination, third-place match']);
     expect(v.stages[1]).toMatchObject({
-      ordinal: 2, type: 'single_elim', veto: 'Ban to one (Bo1)', chapters: '3 chapters', scheduling: 'rolling',
+      ordinal: 2, type: 'single_elim',
+      veto: 'Bo1: no bans, the higher seed chooses to go first or second, the team that did not pick chooses sides.',
+      chapters: '3 chapters', scheduling: 'rolling',
       rulesetName: 'Standard Cup', gameConfig: expect.any(String), campaigns: [{ slug: 'dead_air', name: 'Dead Air' }],
     });
     expect(v.stages[0].rules).toContain('No-show grace: 15 minutes');
