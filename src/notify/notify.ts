@@ -37,7 +37,7 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'event_dropped', label: 'My team\'s event entry is dropped' },
   { type: 'event_roster_added', label: 'Someone puts me on an event roster' },
   { type: 'event_match_room', label: 'My tournament match room opens: ready up and veto' },
-  { type: 'event_match_forfeit', label: 'A tournament match of mine is a forfeit because a team did not ready up' },
+  { type: 'event_match_forfeit', label: 'A tournament match of mine is a forfeit because a team did not ready up in the match room or did not show on the server' },
   { type: 'event_match_connect', label: 'My tournament server is ready, with the connect line' },
   { type: 'event_match_result', label: 'A tournament match of mine finished and is in its confirm window' },
 ];

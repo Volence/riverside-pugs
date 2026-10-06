@@ -231,6 +231,11 @@ const toLive = async () => {
   ok(R.startLive(f.db, { matchId: f.matchId, now: at(6) }));
   return f;
 };
+/** Game 1 played and recorded (Rats 900 to 400): the Bo1 is over, so the confirm window may open. */
+const playGame1 = (f: RoomFixture) => {
+  ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(7) }));
+  ok(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: 900, scoreB: 400, forfeit: null, now: at(50) }));
+};
 
 describe('series writer (plan T3b)', () => {
   it('walks booking, connect, live, a recorded game and the confirm window, one log row each', async () => {
@@ -279,13 +284,27 @@ describe('series writer (plan T3b)', () => {
   it('files a dispute with a reason, from a manager, before the deadline, and nowhere else', async () => {
     const f = await toLive();
     expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'They had five', now: at(7) })).toEqual({ ok: false, error: 'not_confirm_phase' });
+    playGame1(f);
     ok(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }));
     expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'no', now: at(61) })).toEqual({ ok: false, error: 'bad_reason' });
     expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[2], reason: 'They had five', now: at(61) })).toEqual({ ok: false, error: 'not_manager' });
-    expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'They had five', now: at(75) })).toEqual({ ok: false, error: 'room_closed' });
+    expect(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'They had five', now: at(75) })).toEqual({ ok: false, error: 'confirm_closed' });
     const m = ok(R.disputeMatch(f.db, { matchId: f.matchId, steamid: B[0], reason: 'They had five on map 3', now: at(70) }));
     expect(m).toMatchObject({ status: 'admin_hold', hold_reason: 'dispute', dispute_side: 'b', dispute_by: B[0], dispute_reason: 'They had five on map 3', disputed_at: at(70).toISOString(), deadline: null });
     expect(lastAction(f)).toEqual({ action: 'match_disputed', actor: B[0] });
+  });
+
+  it('opens the confirm window only once the series is over', async () => {
+    const f = await toLive();
+    expect(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(30) })).toEqual({ ok: false, error: 'changed' });
+    ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(7) }));
+    // A tied game is not a result: a tiebreak comes first.
+    ok(R.recordGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, scoreA: 500, scoreB: 500, forfeit: null, now: at(50) }));
+    expect(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(51) })).toEqual({ ok: false, error: 'changed' });
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('live');
+    const g = await toLive();
+    playGame1(g);
+    expect(ok(R.startConfirm(g.db, { matchId: g.matchId, timers: TIMERS, now: at(60) })).status).toBe('confirming');
   });
 
   it('adds a tiebreak game under its series game with the replayed map and the sides, nine at most', async () => {
@@ -320,7 +339,8 @@ describe('series writer (plan T3b)', () => {
     const st = R.roomState(f.db, P.getMatch(f.db, f.matchId)!);
     expect(st.next).toEqual({ kind: 'pick', by: 'a', game: 2 });
     expect(ok(R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }))).toMatchObject({ status: 'live', deadline: new Date(at(60).getTime() + 60_000).toISOString() });
-    expect(R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) })).toEqual({ ok: false, error: 'not_live_phase' });
+    // A pick already open is not opened again.
+    expect(R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) })).toEqual({ ok: false, error: 'changed' });
     expect(veto(f, B[0], 7, 'pick', POOL7[4]!, 61)).toEqual({ ok: false, error: 'not_your_turn' });
     const picked = ok(veto(f, A[0], 7, 'pick', POOL7[4]!, 61));
     expect(picked).toMatchObject({ status: 'live', deadline: new Date(at(61).getTime() + 60_000).toISOString() });
@@ -346,6 +366,7 @@ describe('series writer (plan T3b)', () => {
     const f = await toLive();
     expect(ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'crash', now: at(20) })).status).toBe('admin_hold');
     const g = await toLive();
+    playGame1(g);
     ok(R.startConfirm(g.db, { matchId: g.matchId, timers: TIMERS, now: at(60) }));
     expect(ok(R.holdMatch(g.db, { matchId: g.matchId, by: ADMIN, reason: 'look', now: at(61) }))).toMatchObject({ status: 'admin_hold', deadline: null });
   });
@@ -358,6 +379,7 @@ describe('series writer (plan T3b)', () => {
     ok(R.startLive(f.db, { matchId: f.matchId, now: at(6) }));
     f.db.prepare('UPDATE event_matches SET deadline = ? WHERE id = ?').run(at(7).toISOString(), f.matchId);
     expect(ok(R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) })).deadline).toBe(new Date(at(60).getTime() + 60_000).toISOString());
+    playGame1(f);
     ok(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(61) }));
     expect(ok(R.resumeDeadline(f.db, { matchId: f.matchId, timers: TIMERS, now: at(120) })).deadline).toBe(at(135).toISOString());
   });

@@ -89,7 +89,7 @@ export function eventMessage(
       } else {
         const winner = m.winner_entry === m.entry_a ? a : b;
         const loser = m.winner_entry === m.entry_a ? b : a;
-        content = `${a} vs ${b} in ${event} is a forfeit win for ${winner}: ${loser} ${extra.why === 'server' ? 'did not have four players on the server when the grace ended' : 'did not ready up in time'}.`;
+        content = `${a} vs ${b} in ${event} is a forfeit win for ${winner}: ${loser} ${extra.why === 'server' ? 'did not have four players on the server when the grace to connect ended' : 'did not press Ready in the match room in time'}.`;
       }
       return {
         content, embeds: [],

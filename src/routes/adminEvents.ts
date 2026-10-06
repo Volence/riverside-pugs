@@ -66,7 +66,11 @@ export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
  * request over one.
  */
 export async function adminEventRoutes(
-  app: FastifyInstance, opts: { db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock },
+  app: FastifyInstance, opts: {
+    db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock;
+    /** The series engine (plan T3b): a result entered here ends the match's running booking. */
+    series?: { staffResult(matchId: number, by: string): void };
+  },
 ): Promise<void> {
   const { db } = opts;
   const requireAdmin = makeRequireAdmin(db);
@@ -384,6 +388,8 @@ export async function adminEventRoutes(
     const rooms = new Set([matchId, ...roomMatches(ev.id).map((m) => m.id)]);
     const r = await recordResultFlow(db, { eventId: ev.id, matchId, by: me, result: req.body ?? {} });
     if (!r.ok) return refuse(reply, r.error);
+    // T3b ledger ruling: a result entered while the match's booking still runs ends that booking as a staff end.
+    try { opts.series?.staffResult(matchId, me); } catch (err) { console.error(`[events] ending the booking of match ${matchId} after a staff result failed:`, err instanceof Error ? err.message : err); }
     for (const id of rooms) opts.rooms?.pushChange(id);
     logAdmin(db, me, 'event_result', ev.id, {
       matchId, winner: r.value.winner_entry, scoreA: r.value.score_a, scoreB: r.value.score_b, source: r.value.result_source,

@@ -408,8 +408,13 @@ describe('event_log guard', () => {
       playing(f);
       must(R.linkGame(f.db, { matchId: f.matchId, gameId: game1(f).id, gameMatchId: fakeMatch(f), now: at(6) }));
     };
+    // Game 1 recorded: the Bo1 is over, so the confirm window may open.
+    const recorded = (f: RoomFixture) => {
+      linked(f);
+      must(R.recordGame(f.db, { matchId: f.matchId, gameId: game1(f).id, scoreA: 300, scoreB: 700, forfeit: null, now: at(30) }));
+    };
     const confirming = (f: RoomFixture) => {
-      playing(f);
+      recorded(f);
       must(R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }));
     };
     // room.test.ts's loser picks opening, driven to a recorded game 1 (the
@@ -469,7 +474,7 @@ describe('event_log guard', () => {
         run: (f) => R.addTiebreak(f.db, { matchId: f.matchId, ofGameId: game1(f).id, map: 'l4d_vs_hospital05_rooftop', firstSurvivors: 'a', now: at(30) }),
       },
       openPick: { action: 'pick_opened', actor: null, setup: pickDue, run: (f) => R.openPick(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }) },
-      startConfirm: { action: 'match_confirming', actor: null, setup: playing, run: (f) => R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }) },
+      startConfirm: { action: 'match_confirming', actor: null, setup: recorded, run: (f) => R.startConfirm(f.db, { matchId: f.matchId, timers: TIMERS, now: at(60) }) },
       confirmResult: { action: 'result_confirmed', actor: A[0]!, setup: confirming, run: (f) => R.confirmResult(f.db, { matchId: f.matchId, steamid: A[0]!, now: at(61) }) },
       disputeMatch: {
         action: 'match_disputed', actor: B[0]!, setup: confirming,
