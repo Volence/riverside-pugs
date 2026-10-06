@@ -116,6 +116,17 @@ describe('restoreSnapshot', () => {
     expect(db.prepare('SELECT MAX(ordinal) AS o FROM match_rounds WHERE match_id = ?').get(m)).toEqual({ o: 0 });
   });
 
+  it('a sub who joined on a dropped map plays the replayed chapter; crash recovery keeps joined_map as stored (plan T3c)', () => {
+    round(0, 1, 'a', 400); round(0, 2, 'b', 350);
+    round(1, 1, 'a', 200); round(1, 2, 'b', 500);
+    db.prepare("INSERT INTO players (steamid, name, status) VALUES ('76561199000000009', 'sub', 'active')").run();
+    db.prepare("INSERT INTO match_players (match_id, player_id, team, source, joined_map) VALUES (?, '76561199000000009', 'a', 'web', 2)").run(m);
+    expect(restoreSnapshot(db, m, { replayFrom: 1 })!.roster).toContainEqual({ steamid: '76561199000000009', team: 'a', joinedMap: 1 });
+    expect(restoreSnapshot(db, m, { replayFrom: 1 })!.roster).toContainEqual({ steamid: B[0], team: 'b', joinedMap: 1 });
+    expect(restoreSnapshot(db, m, { replayFrom: 0 })!.roster).toContainEqual({ steamid: B[0], team: 'b', joinedMap: 0 });
+    expect(restoreSnapshot(db, m)!.roster).toContainEqual({ steamid: '76561199000000009', team: 'a', joinedMap: 2 });
+  });
+
   it('lists the replayable chapters, never the finale (plan T3c)', () => {
     round(0, 1, 'a', 400); round(0, 2, 'b', 350);
     round(1, 1, 'a', 200); round(1, 2, 'b', 500);

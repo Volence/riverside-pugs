@@ -86,7 +86,10 @@ export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: nu
   const firstSurv: 'a' | 'b' = totA > totB ? 'a' : totB > totA ? 'b' : prev ?? 'a';
 
   const roster = (db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = ? ORDER BY team, player_id').all(matchId) as
-    { player_id: string; team: 'a' | 'b'; joined_map: number }[]).map((r) => ({ steamid: r.player_id, team: r.team, joinedMap: r.joined_map }));
+    { player_id: string; team: 'a' | 'b'; joined_map: number }[])
+    // A replay from an earlier chapter drops the maps a later sub joined on,
+    // so their joined map comes back to the replayed one: they play it now.
+    .map((r) => ({ steamid: r.player_id, team: r.team, joinedMap: opts.replayFrom !== undefined ? Math.min(r.joined_map, maps.length) : r.joined_map }));
   const maxSeq = (db.prepare('SELECT MAX(seq) AS s FROM match_live_events WHERE match_id = ?').get(matchId) as { s: number | null }).s ?? 0;
 
   return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, roster, nextSeq: maxSeq + 1 };
