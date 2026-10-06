@@ -56,6 +56,7 @@ export function vetoState(inp: VetoInput): VetoState {
   const higher = inp.higher;
   const st: VetoState = { first: null, remaining: [...inp.pool], bans: [], games: [], next: { kind: 'done' }, used: 0 };
   let lastBanner: Side | null = null;
+  let lastPicker: Side | null = null;
   const take = (step: Extract<Step, { by: Side }>): VetoAction => {
     const a = inp.actions[st.used];
     if (!a) {
@@ -74,7 +75,10 @@ export function vetoState(inp: VetoInput): VetoState {
   };
   try {
     const openingBans = inp.pool.length - c.banTo;
-    const usesOrder = openingBans > 0 || c.lateBans > 0 || c.firstPick === 'first' || c.firstPick === 'second';
+    // Game 1 is a decider (no pick) only in a Bo1 left with one campaign, so
+    // firstPick first or second uses the order only when a pick exists.
+    const pickExists = c.games > 1 || inp.pool.length - Math.max(0, openingBans) > 1;
+    const usesOrder = openingBans > 0 || c.lateBans > 0 || (pickExists && (c.firstPick === 'first' || c.firstPick === 'second'));
     if (usesOrder) {
       if (c.firstBan === 'higher_chooses') st.first = take({ kind: 'order', by: higher }).action === 'first' ? higher : other(higher);
       else st.first = c.firstBan === 'higher' ? higher : c.firstBan === 'lower' ? other(higher) : coin(inp.seed, 0);
@@ -95,8 +99,8 @@ export function vetoState(inp: VetoInput): VetoState {
         picker = other(inp.winners[g - 2]!);
       }
       if (g === c.games && c.games > 1 && c.laterPicks === 'alternate') {
-        const lastPicker = pickerOf(g - 1);
-        for (let i = 0; i < c.lateBans; i++) ban(i % 2 === 0 ? other(lastPicker) : lastPicker);
+        const prevPicker = pickerOf(g - 1);
+        for (let i = 0; i < c.lateBans; i++) ban(i % 2 === 0 ? other(prevPicker) : prevPicker);
       }
       let campaign: string;
       let pickedBy: Side | null = null;
@@ -105,11 +109,14 @@ export function vetoState(inp: VetoInput): VetoState {
       } else {
         campaign = take({ kind: 'pick', by: picker, game: g }).campaign!;
         pickedBy = picker;
+        lastPicker = picker;
       }
       st.remaining = st.remaining.filter((x) => x !== campaign);
       // Ruling 6: the non-picker; for a decider, the team that did not make
-      // the last ban; with no bans at all, the higher seed.
-      const by: Side = c.sides === 'higher' ? higher : pickedBy ? other(pickedBy) : lastBanner ? other(lastBanner) : higher;
+      // the last ban, else the team that did not make the last pick (an
+      // earlier game's), else the higher seed.
+      const by: Side = c.sides === 'higher' ? higher : pickedBy ? other(pickedBy)
+        : lastBanner ? other(lastBanner) : lastPicker ? other(lastPicker) : higher;
       const slot: GameSlot = { game: g, campaign, pickedBy, sideBy: c.sides === 'coin' ? null : by, firstSurvivors: null };
       st.games.push(slot);
       if (c.sides === 'coin') {
