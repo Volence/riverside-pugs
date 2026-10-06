@@ -73,7 +73,8 @@ describe('event schema', () => {
   it('has event_matches with every match-flow status and the stage bracket columns (plan T2)', () => {
     const db = openDb(':memory:');
     const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
-    expect(cols('event_matches')).toEqual([
+    // The T2 columns, in order; plan T3a adds the room columns after them.
+    expect(cols('event_matches').slice(0, 22)).toEqual([
       'id', 'event_id', 'stage_id', 'grp', 'round', 'slot', 'bm_match_id', 'entry_a', 'entry_b', 'status', 'best_of',
       'not_before', 'scheduled_at', 'window_start', 'window_end', 'booking_id', 'winner_entry', 'score_a', 'score_b',
       'result_source', 'created_at', 'finished_at',
@@ -105,5 +106,18 @@ describe('T1b columns', () => {
     expect(add).toThrow(/UNIQUE/);
     db.prepare("UPDATE event_entries SET status = 'dropped' WHERE event_id = ?").run(id);
     expect(add).not.toThrow();
+  });
+
+  it('has the match room tables and columns (plan T3a)', () => {
+    const db = openDb(':memory:');
+    const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols('event_matches')).toEqual(expect.arrayContaining(['room_opened_at', 'room_higher', 'room_seed', 'ready_a_at', 'ready_b_at', 'deadline', 'hold_reason']));
+    expect(cols('event_vetoes')).toEqual(['id', 'event_match_id', 'step', 'side', 'entry_id', 'action', 'campaign', 'by_steamid', 'auto', 'at']);
+    expect(cols('event_games')).toEqual(['id', 'event_match_id', 'ordinal', 'campaign', 'picked_by', 'side_by', 'first_survivors', 'match_id', 'tiebreak_of', 'created_at']);
+    expect(cols('event_lineups')).toEqual(['id', 'event_match_id', 'game', 'entry_id', 'steamids', 'locked_by', 'auto', 'locked_at']);
+    expect(cols('event_entry_prefs')).toEqual(['entry_id', 'default_four', 'side', 'updated_by', 'updated_at']);
+    expect(cols('event_campaign_prefs')).toEqual(['entry_id', 'stage_id', 'campaigns', 'updated_by', 'updated_at']);
+    const setting = (k: string) => (db.prepare('SELECT value FROM settings WHERE key = ?').get(k) as { value: string }).value;
+    expect([setting('event_ready_minutes'), setting('event_veto_step_seconds'), setting('event_lineup_minutes')]).toEqual(['10', '60', '5']);
   });
 });

@@ -5,6 +5,8 @@ import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { DE, LEAGUE, RR, SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
+import * as R from '../src/events/room.js';
+import { TIMERS } from './roomFixture.js';
 
 const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -340,5 +342,21 @@ describe('event flow, final review fixes', () => {
     ok(N.disqualifyEntry(f.db, { entryId: m2.entry_b!, by: ADMIN, reason: 'left', now: NOW }));
     expect(P.getMatch(f.db, m2.id)!.status).toBe('waiting');
     ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m2.id, by: ADMIN, now: NOW, result: { winner: 'b', forfeit: true } }));
+  });
+
+  it('keeps a bracket match\'s room status through another match\'s result, and refuses a correction that would change its teams (plan T3a)', async () => {
+    const f = playFixture({ stages: [SE()], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const semis = P.matchesOf(f.db, f.stages[0]!).filter((m) => m.status === 'waiting');
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'a', scoreA: 10, scoreB: 5 }, now: NOW }));
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[1]!.id, by: ADMIN, result: { winner: 'a', scoreA: 10, scoreB: 5 }, now: NOW }));
+    const ready = P.matchesOf(f.db, f.stages[0]!).find((m) => m.round === 2 && m.status === 'waiting')!;
+    ok(R.openRoom(f.db, { matchId: ready.id, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    const fix = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'b', scoreA: 5, scoreB: 10 }, now: NOW });
+    expect(fix).toEqual({ ok: false, error: 'room_open_downstream' });
+    expect(P.getMatch(f.db, ready.id)!.status).toBe('veto');
+    const same = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'a', scoreA: 12, scoreB: 5 }, now: NOW });
+    expect(same.ok).toBe(true);
+    expect(P.getMatch(f.db, ready.id)!.status).toBe('veto');
   });
 });

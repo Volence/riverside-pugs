@@ -100,6 +100,19 @@ export const EVENT_ERRORS = {
   changed: { status: 409, text: 'The event changed while this was being saved. Reload and try again.' },
   elim_not_last: { status: 400, text: 'An elimination bracket is always the last stage.' },
   bad_group_advance: { status: 400, text: 'With groups, the advance count has to split evenly across the groups.' },
+  entry_busy: { status: 409, text: 'One of these teams is already in another match room.' },
+  not_ready_phase: { status: 409, text: 'This match is not waiting for teams to ready up.' },
+  room_closed: { status: 409, text: 'The ready check for this match has closed.' },
+  already_ready: { status: 409, text: 'Your team is already ready.' },
+  not_veto_phase: { status: 409, text: 'The veto is not running for this match.' },
+  step_taken: { status: 409, text: 'That step was already taken. The room has moved on.' },
+  not_your_turn: { status: 409, text: 'It is the other team\'s turn.' },
+  bad_veto_action: { status: 400, text: 'That is not a choice this step allows.' },
+  not_lineup_phase: { status: 409, text: 'Lineups are not open for this match.' },
+  lineup_locked: { status: 409, text: 'Your lineup is already locked.' },
+  bad_lineup: { status: 400, text: 'A lineup is exactly four different players from your starters and subs.' },
+  bad_prefs: { status: 400, text: 'Preferences: a default four from your starters and subs (or none), a side, and campaigns from each stage\'s pool, each once.' },
+  room_open_downstream: { status: 409, text: 'A later match already has its match room open; reset that room first.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type EventError = keyof typeof EVENT_ERRORS;
 
