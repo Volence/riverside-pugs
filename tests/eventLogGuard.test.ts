@@ -615,8 +615,8 @@ describe('event_log guard', () => {
     };
     const rows = (f: RoomFixture) => JSON.stringify(['event_matches', 'event_reschedules'].map((t) => f.db.prepare(`SELECT * FROM ${t} ORDER BY id`).all()));
 
-    it('only src/events/schedule.ts writes event_reschedules', () => {
-      const offenders = walk('src').filter((f) => f !== 'src/events/schedule.ts')
+    it('only src/events/schedule.ts (and the account merge) writes event_reschedules', () => {
+      const offenders = walk('src').filter((f) => f !== 'src/events/schedule.ts' && f !== 'src/mergePlayers.ts')
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(SCHEDULE_TABLE) ?? []).length > 0);
       expect(offenders).toEqual([]);
     });

@@ -553,7 +553,8 @@ CREATE TABLE IF NOT EXISTS event_campaign_prefs (
   PRIMARY KEY (entry_id, stage_id)
 );
 -- Reschedule proposals (tournaments plan T4, spec section 5). Only
--- src/events/schedule.ts writes this table. One open proposal per match;
+-- src/events/schedule.ts writes this table (and the account merge moves its
+-- steamids, src/mergePlayers.ts). One open proposal per match;
 -- auto_accept_at is null when the proposal needs an answer (made less than
 -- 48 hours before its time); reminded_at records the 24-hour DM.
 CREATE TABLE IF NOT EXISTS event_reschedules (
