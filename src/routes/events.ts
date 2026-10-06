@@ -32,8 +32,14 @@ const HEX64 = /^[0-9a-f]{64}$/;
 export async function eventRoutes(
   app: FastifyInstance, opts: {
     db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock;
-    /** The series engine (plan T3b): a pick on a live match hands the series on (Task 8 uses it). */
-    series?: { afterPick(matchId: number): void };
+    /** The series engine (plan T3b): a pick on a live match hands the series
+     *  on; confirm and dispute run the result's confirm window. */
+    series?: {
+      confirm(matchId: number, steamid: string): Promise<V.Checked<unknown>>;
+      dispute(matchId: number, steamid: string, reason: unknown): V.Checked<unknown>;
+      afterPick(matchId: number): void;
+      reset(matchId: number, by: string): V.Checked<unknown>;
+    };
   },
 ): Promise<void> {
   const { db } = opts;
@@ -176,7 +182,7 @@ export async function eventRoutes(
     return matchRoomView(db, ev, m, v.viewer, isStaff(v.viewer));
   });
 
-  for (const action of ['ready', 'veto', 'lineup'] as const) {
+  for (const action of ['ready', 'veto', 'lineup', 'confirm', 'dispute'] as const) {
     app.post(`/api/events/:slug/matches/:id/${action}`, async (req, reply) => {
       const me = allowedActive(req, reply);
       if (!me) return;
@@ -184,15 +190,23 @@ export async function eventRoutes(
       const ev = visibleEvent(p.slug, me);
       const m = ev && matchIn(ev, p.id);
       if (!ev || !m) return refuse(reply, { error: 'match_not_found' });
-      const body = (req.body ?? {}) as { step?: unknown; action?: unknown; campaign?: unknown; steamids?: unknown };
+      const body = (req.body ?? {}) as { step?: unknown; action?: unknown; campaign?: unknown; steamids?: unknown; reason?: unknown };
       const timers = R.roomTimers(db);
       let r: V.Checked<unknown>;
       if (action === 'ready') r = R.readyUp(db, { matchId: m.id, steamid: me, timers });
       else if (action === 'veto') {
         if (typeof body.step !== 'number' || !Number.isInteger(body.step)) return refuse(reply, { error: 'bad_veto_action' });
         r = R.actVeto(db, { matchId: m.id, steamid: me, step: body.step, action: body.action, campaign: body.campaign ?? null, timers });
+      } else if (action === 'confirm') {
+        if (!opts.series) return reply.code(404).send(NOT_FOUND);
+        r = await opts.series.confirm(m.id, me);
+      } else if (action === 'dispute') {
+        if (!opts.series) return reply.code(404).send(NOT_FOUND);
+        r = opts.series.dispute(m.id, me, body.reason);
       } else r = R.lockLineup(db, { matchId: m.id, steamid: me, steamids: body.steamids, timers });
       if (!r.ok) return refuse(reply, r);
+      // T3b Ruling 4: a pick on a live match may have settled the next game.
+      if (action === 'veto' && P.getMatch(db, m.id)?.status === 'live') opts.series?.afterPick(m.id);
       opts.rooms?.pushChange(m.id);
       return {};
     });

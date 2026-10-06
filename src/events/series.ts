@@ -493,22 +493,30 @@ export class SeriesEngine {
     this.continueSeries(matchId);
   }
 
-  /** Ruling 9: the automatic result, once the window passed or both confirmed. */
-  async finalize(matchId: number, now: Date): Promise<void> {
+  /** Ruling 9: the automatic result, once the window passed or both
+   *  confirmed. Resolves true when it changed the match (the result was
+   *  recorded or the match was held), false when it did nothing or the
+   *  result was refused, so the room clock pushes only on a change. */
+  async finalize(matchId: number, now: Date): Promise<boolean> {
     const m = P.getMatch(this.db, matchId);
-    if (!m || m.status !== 'confirming') return;
+    if (!m || m.status !== 'confirming') return false;
     const due = (m.deadline !== null && m.deadline <= now.toISOString()) || (m.confirm_a_at !== null && m.confirm_b_at !== null);
-    if (!due) return;
+    if (!due) return false;
     const s = E.stageSettingsOf(E.getStage(this.db, m.stage_id)!);
     const result = seriesResult(seriesVerdict(s.veto, R.seriesGames(this.db, m)));
     if (!result) {
-      if (R.holdMatch(this.db, { matchId: m.id, by: null, reason: 'no_result', now }).ok) this.alert(m, 'its confirm window ended but the games do not add up to a result. It is on hold.');
-      this.push(m.id);
-      return;
+      const held = R.holdMatch(this.db, { matchId: m.id, by: null, reason: 'no_result', now }).ok;
+      if (held) {
+        this.alert(m, 'its confirm window ended but the games do not add up to a result. It is on hold.');
+        this.push(m.id);
+      }
+      return held;
     }
     const r = await autoResultFlow(this.db, { eventId: m.event_id, matchId: m.id, result, expect: (x) => x.status === 'confirming', now });
-    if (r.ok) console.log(`[series] match ${m.id}: result recorded (${result.scoreA ?? '-'} to ${result.scoreB ?? '-'}${result.forfeit ? ', forfeit' : ''})`);
+    if (!r.ok) return false;
+    console.log(`[series] match ${m.id}: result recorded (${result.scoreA ?? '-'} to ${result.scoreB ?? '-'}${result.forfeit ? ', forfeit' : ''})`);
     this.push(m.id);
+    return true;
   }
 
   async confirm(matchId: number, steamid: string, now = new Date(this.now())): Promise<V.Checked<P.MatchRow>> {

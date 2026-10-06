@@ -7,6 +7,7 @@ import * as R from '../src/events/room.js';
 import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS } from '../src/events/series.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
 import { adminEventRoutes } from '../src/routes/adminEvents.js';
+import { eventRoutes } from '../src/routes/events.js';
 import type { AdminEvent } from '../src/adminFeed.js';
 import { authedCookie } from './helpers.js';
 import { ADMIN } from './eventFixture.js';
@@ -492,5 +493,40 @@ describe('SeriesEngine: robustness (T3b Task 6 review)', () => {
     expect(line).not.toContain('closes in 5 minutes');
     expect(f.booking().close_at).toBeNull();
     expect(f.send).toHaveBeenCalledWith(expect.anything(), 'event_match_result', expect.objectContaining({ content: expect.stringContaining('Rats beat Bats 1 game to 0.') }));
+  });
+});
+
+describe('SeriesEngine: the pick route on a live match (plan T3b Task 8)', () => {
+  let f: SeriesFixture;
+  afterEach(() => { vi.restoreAllMocks(); f?.close(); });
+
+  it('hands a human pick and side choice on a live match to the engine, which schedules the next game', async () => {
+    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 300, b: 200 }, { map: 'm2', a: 100, b: 400 }]);
+    expect(R.roomState(f.db, f.match()).next).toEqual({ kind: 'pick', by: 'b', game: 2 });
+    const afterPick = vi.spyOn(f.series, 'afterPick');
+    const app = Fastify();
+    await app.register(cookie, { secret: 'x'.repeat(32) });
+    await app.register(eventRoutes, { db: f.db, store: () => { throw new Error('no store'); }, publicUrl: 'https://x', series: f.series });
+    await app.ready();
+    try {
+      const url = (a: string) => `/api/events/${f.slug}/matches/${f.matchId}/${a}`;
+      const pick = await app.inject({ method: 'POST', url: url('veto'), cookies: authedCookie(app, f.db, BATS[0]!), payload: { step: 7, action: 'pick', campaign: POOL7[4] } });
+      expect(pick.statusCode).toBe(200);
+      expect(afterPick).toHaveBeenCalledTimes(1);
+      expect(f.booking().next_campaign).toBeNull();
+      // A refused pick hands nothing on.
+      expect((await app.inject({ method: 'POST', url: url('veto'), cookies: authedCookie(app, f.db, BATS[0]!), payload: { step: 8, action: 'survivors' } })).statusCode).toBe(409);
+      expect(afterPick).toHaveBeenCalledTimes(1);
+      const side = await app.inject({ method: 'POST', url: url('veto'), cookies: authedCookie(app, f.db, A[0]!), payload: { step: 8, action: 'survivors' } });
+      expect(side.statusCode).toBe(200);
+      expect(afterPick).toHaveBeenCalledTimes(2);
+      expect(f.booking()).toMatchObject({ next_campaign: POOL7[4], games_allowed: 2 });
+    } finally {
+      await app.close();
+    }
   });
 });

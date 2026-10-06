@@ -68,8 +68,15 @@ export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
 export async function adminEventRoutes(
   app: FastifyInstance, opts: {
     db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock;
-    /** The series engine (plan T3b): a result entered here ends the match's running booking. */
-    series?: { staffResult(matchId: number, by: string): void };
+    /** The series engine (plan T3b): a result entered here ends the match's
+     *  running booking, and a room reset cancels its booking first. */
+    series?: {
+      confirm(matchId: number, steamid: string): Promise<V.Checked<unknown>>;
+      dispute(matchId: number, steamid: string, reason: unknown): V.Checked<unknown>;
+      afterPick(matchId: number): void;
+      reset(matchId: number, by: string): V.Checked<unknown>;
+      staffResult(matchId: number, by: string): void;
+    };
   },
 ): Promise<void> {
   const { db } = opts;
@@ -414,7 +421,7 @@ export async function adminEventRoutes(
       if (action === 'hold' && reason.length < 3) return refuse(reply, 'bad_reason');
       const r = action === 'open-room'
         ? R.openRoom(db, { matchId: m.id, by: me, higher: higherSide(db, m), seed: randomInt(2 ** 31), timers: R.roomTimers(db) })
-        : action === 'reset-room' ? R.resetRoom(db, { matchId: m.id, by: me }) : R.holdMatch(db, { matchId: m.id, by: me, reason });
+        : action === 'reset-room' ? (opts.series ? opts.series.reset(m.id, me) : R.resetRoom(db, { matchId: m.id, by: me })) : R.holdMatch(db, { matchId: m.id, by: me, reason });
       if (!r.ok) return refuse(reply, r.error);
       if (action === 'open-room') tellRoomOpen(opts, ev.id, m.id);
       opts.rooms?.pushChange(m.id);

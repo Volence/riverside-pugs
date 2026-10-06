@@ -12,7 +12,7 @@ import type * as V from './validate.js';
 
 /** Where a match's room stands (plan T3a). Lives here rather than in
  *  roomViews.ts, which imports this file; roomViews.ts re-exports it. */
-export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'hold' | 'done';
+export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'connect' | 'live' | 'confirming' | 'hold' | 'done';
 
 export function phaseOf(m: Pick<P.MatchRow, 'status' | 'ready_a_at' | 'ready_b_at'>): RoomPhase {
   switch (m.status) {
@@ -20,9 +20,12 @@ export function phaseOf(m: Pick<P.MatchRow, 'status' | 'ready_a_at' | 'ready_b_a
     case 'waiting': return 'waiting';
     case 'veto': return m.ready_a_at !== null && m.ready_b_at !== null ? 'veto' : 'ready';
     case 'lineup': return 'lineup';
+    case 'booking': return 'server';
+    case 'connect': return 'connect';
+    case 'live': return 'live';
+    case 'confirming': return 'confirming';
     case 'admin_hold': return 'hold';
-    case 'done': case 'forfeit': case 'bye': return 'done';
-    default: return 'server';
+    default: return 'done';
   }
 }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as E from '../src/events/events.js';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
@@ -6,6 +6,7 @@ import { matchRoomView, phaseOf, prefsView } from '../src/events/roomViews.js';
 import { NOW } from './eventFixture.js';
 import { A, B, OUTSIDER } from './entryFixture.js';
 import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { seriesFixture, type SeriesFixture, MIN } from './seriesFixture.js';
 
 const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
 const view = (f: RoomFixture, viewer: string | null, staff = false) =>
@@ -83,5 +84,59 @@ describe('prefsView', () => {
     expect(v).toMatchObject({ entryId: f.entryA, defaultFour: null, side: 'infected' });
     expect(v.roster.map((p) => p.steamid)).toEqual(A.slice(0, 5));
     expect(v.stages).toEqual([{ stageId: f.stageId, ordinal: 1, pool: [expect.objectContaining({ slug: 'no_mercy' }), expect.objectContaining({ slug: 'dead_air' })], order: ['dead_air'] }]);
+  });
+});
+
+describe('matchRoomView with a server and a series (plan T3b)', () => {
+  let f: SeriesFixture;
+  afterEach(() => f?.close());
+  const sview = (viewer: string | null, staff = false) => matchRoomView(f.db, E.getEvent(f.db, f.eventId)!, P.getMatch(f.db, f.matchId)!, viewer, staff, new Date(f.t.t));
+
+  it('shows the connect line only to the booking\'s people and staff, with the grace and who is on', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.box.humans = [...A.slice(0, 4), B[0]!];
+    f.t.t += MIN;
+    await f.tick();
+    const b = f.booking();
+    const mine = sview(A[4]);
+    expect(mine.phase).toBe('connect');
+    expect(mine.server).toEqual({ state: 'ready', name: 'box', since: b.created_at, connect: { host: '10.0.0.1', port: 27015, password: b.password }, present: { a: 4, b: 1 }, graceEndsAt: f.match().deadline });
+    expect(sview(OUTSIDER).server!.connect).toBeNull();
+    expect(sview(B[4]).server!.connect).toBeNull();
+    expect(sview('76561199000000700', true).server!.connect).not.toBeNull();
+    expect(mine.games).toEqual([expect.objectContaining({ game: 1, ordinal: 1, tiebreak: false, state: 'live', scoreA: null, matchId: f.gameOf(1).match_id, live: null })]);
+    expect(mine.series).toEqual({ bestOf: 1, totalScore: false, winsA: 0, winsB: 0, totalA: 0, totalB: 0, over: false, winner: null });
+  });
+
+  it('shows waiting for a server, then the live score, the pick step, the result and the confirm window', async () => {
+    f = await seriesFixture();
+    f.db.prepare("UPDATE servers SET status = 'live'").run();
+    await f.tick();
+    expect(sview(null).server).toMatchObject({ state: 'waiting', name: null, connect: null });
+    expect(sview(null).phase).toBe('server');
+    f.db.prepare("UPDATE servers SET status = 'idle'").run();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!, 'l4d_vs_hospital02_subway');
+    f.db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score) VALUES (?, 0, 1, 'a', 120), (?, 0, 2, 'b', 80)").run(g1.match_id!, g1.match_id!);
+    const live = sview(null);
+    expect(live.phase).toBe('live');
+    // Match team a is Bats: 120 for Bats is score_b for the room.
+    expect(live.games[0]!.live).toEqual({ map: 'l4d_vs_hospital02_subway', scoreA: 80, scoreB: 120 });
+    f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital02_subway', a: 300, b: 400 }]);
+    const done = sview(null);
+    expect(done.phase).toBe('confirming');
+    expect(done.games[0]).toMatchObject({ state: 'done', scoreA: 400, scoreB: 300, winner: 'a', live: null });
+    expect(done.series).toMatchObject({ winsA: 1, winsB: 0, over: true, winner: 'a' });
+    expect(done.confirm).toEqual({ deadline: f.match().deadline, a: false, b: false });
+    expect(done.dispute).toBeNull();
+    f.series.dispute(f.matchId, B[0]!, 'Rats had five', new Date(f.t.t));
+    expect(sview(null)).toMatchObject({ phase: 'hold', holdReason: 'dispute', dispute: { side: 'b', byName: expect.any(String), reason: 'Rats had five' } });
+  });
+
+  it('maps the series statuses to phases', () => {
+    const m = (status: P.MatchStatus) => ({ status, ready_a_at: 'x', ready_b_at: 'y' }) as P.MatchRow;
+    expect(['booking', 'connect', 'live', 'confirming'].map((s) => phaseOf(m(s as P.MatchStatus)))).toEqual(['server', 'connect', 'live', 'confirming']);
   });
 });
