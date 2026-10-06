@@ -1934,12 +1934,26 @@ export interface EventStageView {
   ordinal: number; type: StageType; summary: string; veto: string; chapters: string; scheduling: Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
 }
-export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null }
+export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null }
+export interface PlayEntry { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; out: boolean }
+export interface PlayMatch {
+  id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
+  winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean;
+}
+export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
+export interface PlayStanding {
+  entry: PlayEntry; group: number; rank: number; groupRank: number; played: number; wins: number; losses: number;
+  points: number; buchholz: number; scoreDiff: number;
+}
+export interface StagePlayView {
+  ordinal: number; type: string; status: 'live' | 'finished'; layout: 'bracket' | 'table';
+  groups: { number: number; label: string }[]; rounds: PlayRound[]; standings: PlayStanding[]; advanceCount: number | null;
+}
 export interface EventView {
   slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; organizerName: string | null;
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
   eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster;
-  stages: EventStageView[]; entries: EventEntryView[];
+  stages: EventStageView[]; entries: EventEntryView[]; play: StagePlayView[];
   finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
   lockedAt: string | null; checkinOpensAt: string | null; checkinClosesAt: string | null;
 }

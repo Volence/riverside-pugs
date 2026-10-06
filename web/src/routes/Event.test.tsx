@@ -28,7 +28,7 @@ const view = (over: Partial<EventView> = {}): EventView => ({
       scheduling: 'rolling', rulesetName: 'Standard Cup', rules: [], gameConfig: 'Standard', campaigns: [{ slug: 'dead_air', name: 'Dead Air' }],
     },
   ],
-  entries: [], finishedAt: null, cancelledAt: null, cancelReason: null,
+  entries: [], play: [], finishedAt: null, cancelledAt: null, cancelReason: null,
   lockedAt: null, checkinOpensAt: null, checkinClosesAt: null,
   ...over,
 });
@@ -116,7 +116,7 @@ describe('EventPage', () => {
 
   it('marks a waitlisted entry', async () => {
     mockEvents.get.mockResolvedValue(view({
-      entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'registered', waitlist: 2 }],
+      entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'registered', waitlist: 2, placement: null }],
     }));
     render(<EventPage slug="riverside-cup" session={session} />);
     expect(await screen.findByText('Waitlist 2')).toBeTruthy();
@@ -124,9 +124,21 @@ describe('EventPage', () => {
 
   it('marks a checked-in entry', async () => {
     mockEvents.get.mockResolvedValue(view({
-      entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'checked_in', waitlist: null }],
+      entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: null, status: 'checked_in', waitlist: null, placement: null }],
     }));
     render(<EventPage slug="riverside-cup" session={session} />);
     expect(await screen.findByText('Checked in')).toBeTruthy();
+  });
+
+  it('shows a live stage and the placements of a finished event', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      status: 'finished',
+      entries: [{ id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: 1, status: 'placed', waitlist: null, placement: 1 }],
+      play: [{ ordinal: 1, type: 'single_elim', status: 'finished', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null,
+        rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [] }] }],
+    }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    expect(await screen.findByText(/Stage 1: bracket/)).toBeTruthy();
+    expect(screen.getByText('1st')).toBeTruthy();
   });
 });

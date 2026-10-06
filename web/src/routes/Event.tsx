@@ -4,8 +4,9 @@ import { RichText } from '../components/RichText';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { STATUS_LABEL, untilText, whenText } from '../eventFormat';
+import { STATUS_LABEL, placementText, untilText, whenText } from '../eventFormat';
 import { EntryPanel } from './event/EntryPanel';
+import { StagePlay } from './event/StagePlay';
 
 const BEFORE_START = new Set(['draft', 'announced', 'registration', 'checkin']);
 
@@ -67,6 +68,14 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
     return () => ctl.abort();
   }, [slug, session.kind, gen]);
 
+  // Plan T2 Ruling 16: while the event is live, refetch once a minute
+  // without clearing the page, so brackets and standings move on their own.
+  useEffect(() => {
+    if (ev?.status !== 'live') return;
+    const t = setInterval(() => { eventsApi.get(slug).then(setEv, () => { /* keep what is shown */ }); }, 60_000);
+    return () => clearInterval(t);
+  }, [slug, ev?.status]);
+
   if (missing) return <main class="page page--profile"><PageHeader title="Event" /><Empty>No such event, or events are not open yet.</Empty></main>;
   if (failed) return <main class="page page--profile"><PageHeader title="Event" /><p class="error" role="alert">Could not load this event. Try again in a moment.</p></main>;
   if (!ev) return <main class="page page--profile"><PageHeader title="Event" /></main>;
@@ -88,6 +97,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       {ev.status === 'draft' && <p class="warning">Draft: only staff can see this page.</p>}
       {ev.status === 'cancelled' && <p class="warning">This event was cancelled{ev.cancelReason ? `: ${ev.cancelReason}` : '.'}</p>}
       {ev.description && <Panel><RichText class="eventdesc" text={ev.description} /></Panel>}
+      {ev.play.map((s) => <StagePlay key={s.ordinal} stage={s} />)}
       <Panel>
         <h3>Format</h3>
         {ev.stages.length === 0 ? <Empty>The format is not set yet.</Empty> : (
@@ -134,6 +144,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
                   {e.status === 'checked_in' && <span class="chip chip--ok">Checked in</span>}
                   {e.waitlist !== null && <span class="chip">Waitlist {e.waitlist}</span>}
                   {e.status === 'disqualified' && <span class="chip chip--bad">Disqualified</span>}
+                  {e.placement !== null && <span class="chip chip--ok">{placementText(e.placement)}</span>}
                 </li>
               ))}
             </ul>

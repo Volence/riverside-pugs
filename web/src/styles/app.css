@@ -3521,6 +3521,21 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .eventrules { margin: var(--sp-2) 0; padding-left: var(--sp-5); }
 .eventpool { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) 0 0; }
 
+/* Plan T2: brackets, standings and rounds on the event page. */
+.bracket { display: flex; gap: var(--sp-3); overflow-x: auto; padding-bottom: var(--sp-1); }
+.bracket__round { display: flex; flex-direction: column; justify-content: space-around; gap: var(--sp-2); min-width: 180px; }
+.matchcard { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.matchcard__side { display: flex; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); }
+.matchcard__side + .matchcard__side { border-top: 1px solid var(--border); }
+.matchcard__side--won { font-weight: 700; }
+.matchcard__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.matchcard__score { font-variant-numeric: tabular-nums; }
+.matchcard--pending { opacity: 0.7; }
+.playtable { width: 100%; border-collapse: collapse; }
+.playtable th, .playtable td { padding: var(--sp-1) var(--sp-2); text-align: left; font-variant-numeric: tabular-nums; }
+.playround { margin-top: var(--sp-3); }
+.playround__matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-2); margin-top: var(--sp-1); }
+
 /* Setup > Rulesets and Game configs (rulesets editor plan): rows in the
    admin-list look, a summary line under the name, the row's buttons below. */
 .rulesetlist li > p { margin: var(--sp-1) 0 0; }
