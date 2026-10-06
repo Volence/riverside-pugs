@@ -1936,6 +1936,10 @@ export function openDb(path: string): DB {
   // agreed proposal, or staff. The time columns themselves date from T2.
   ensureColumn(db, 'event_stages', 'schedule_json', 'TEXT');
   ensureColumn(db, 'event_matches', 'schedule_source', "TEXT CHECK (schedule_source IN ('default','agreed','staff'))");
+  // Tournaments plan T5: why a game was forfeited (src/dumpParse.ts ForfeitWhy),
+  // on the game's matches row and on its event_games row.
+  ensureColumn(db, 'matches', 'forfeit_why', "TEXT CHECK (forfeit_why IN ('gg','disconnect','staff'))");
+  ensureColumn(db, 'event_games', 'forfeit_why', "TEXT CHECK (forfeit_why IN ('gg','disconnect','staff'))");
   // Moderators: may work tickets and nothing else. Deliberately not read by
   // serverAdmins.ts, so the flag grants nothing on a game server.
   ensureColumn(db, 'players', 'is_mod', 'INTEGER NOT NULL DEFAULT 0');

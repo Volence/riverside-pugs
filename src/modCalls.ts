@@ -24,15 +24,15 @@ const HOUR_MS = 60 * 60_000;
 export const REASON_LABELS: Record<ModCallReason, string> = {
   cheating: 'Cheating', toxicity: 'Toxic / team fighting', griefing: 'Griefing / throwing',
   afk: 'AFK / no comms', english: 'Not speaking English', broke: 'Something broke', other: 'Other',
-  admin: 'Tournament: admin needed',
+  admin: 'Tournament: admin needed', tech: 'Tournament: technical pause flagged',
 };
 
 /** The ticket category a call files under. `broke` is about the server and
- *  `admin` about the match (a tournament box's !admin), neither a person, so
- *  neither ever files. */
+ *  `admin` and `tech` about the match (a tournament box's !admin, and its
+ *  !flag on a technical pause), none of them a person, so none ever files. */
 const CATEGORY: Record<ModCallReason, ReportCategory | null> = {
   cheating: 'cheating', toxicity: 'toxicity', griefing: 'griefing', afk: 'afk', english: 'other', other: 'other', broke: null,
-  admin: null,
+  admin: null, tech: null,
 };
 
 export interface ModCallRow {
@@ -108,8 +108,9 @@ export function handleModCall(
   const nowIso = now.toISOString();
   const caller = resolveAlias(db, ev.steamid);
   // `broke` is about the server and `admin` (a tournament box's !admin,
-  // plan T3c) about the match: whoever the line named is not the subject.
-  const targetKind: ModCallRow['target_kind'] = ev.reason === 'broke' || ev.reason === 'admin'
+  // plan T3c) and `tech` (its !flag, plan T5) about the match: whoever the
+  // line named is not the subject.
+  const targetKind: ModCallRow['target_kind'] = ev.reason === 'broke' || ev.reason === 'admin' || ev.reason === 'tech'
     ? 'none'
     : ev.target === 'team' || ev.target === 'general' || ev.target === 'none' ? ev.target : 'player';
   const target = targetKind === 'player' ? resolveAlias(db, ev.target) : null;

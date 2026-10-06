@@ -60,6 +60,11 @@ describe('PUGCALL parsing', () => {
     expect(parse(full().replace('reason=cheating', 'reason=admin').replace(`target=${T}`, 'target=none'))).toMatchObject({ reason: 'admin', target: 'none', steamid: P });
   });
 
+  it('takes reason=tech, a tournament box\'s !flag (plan T5)', () => {
+    const ev = parse(`PUGCALL steamid=76561199000000801 target=none tteam=3 reason=tech match=42 ord=1 half=2 tms=5000 via=game map=l4d_vs_hospital02_subway text=Team A technical pause: router | looks fake`);
+    expect(ev).toMatchObject({ kind: 'call', reason: 'tech', target: 'none', text: 'Team A technical pause: router | looks fake' });
+  });
+
   it.each([
     `PUGCALL steamid=123 target=team tteam=2 reason=other match=0 ord=0 half=0 tms=-1 via=game text=`,
     `PUGCALL steamid=${P} target=bob tteam=2 reason=other match=0 ord=0 half=0 tms=-1 via=game text=`,

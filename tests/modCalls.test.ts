@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
-import { handleModCall, onModCall, onModCallHandled, markModCallHandled, getModCall, FOLD_WINDOW_MS, type ModCallEvent } from '../src/modCalls.js';
+import { handleModCall, onModCall, onModCallHandled, markModCallHandled, getModCall, FOLD_WINDOW_MS, REASON_LABELS, type ModCallEvent } from '../src/modCalls.js';
 import { addAlias } from '../src/aliases.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
@@ -148,6 +148,12 @@ describe('handleModCall', () => {
     expect(db.prepare('SELECT COUNT(*) n FROM ticket_reports').get()).toEqual({ n: 0 });
     const again = call({ reason: 'admin', target: 'none', steamid: IDS[1] }, 60_000);
     expect(again.folded_into).toBe(row.id);
+  });
+
+  it('never files for a flagged technical pause and keeps no target (plan T5)', () => {
+    const row = call({ reason: 'tech', target: 'none', text: 'Team A technical pause: router | looks fake' });
+    expect(row).toMatchObject({ reason: 'tech', target_kind: 'none', target_steamid: null, ticket_id: null, pinged: 1 });
+    expect(REASON_LABELS.tech).toBe('Tournament: technical pause flagged');
   });
 });
 

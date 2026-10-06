@@ -17,8 +17,10 @@ export type WatchedCvar = typeof WATCHED_CVARS[number];
 export const CVAR_ACTS = ['held', 'fixed', 'live'] as const;
 export type CvarAct = typeof CVAR_ACTS[number];
 /** Reasons an in-game /mod call (src/modCalls.ts) can give. `admin` is a
- *  tournament box's `!admin`. Anything else on a PUGCALL line is refused. */
-export const MOD_CALL_REASONS = ['cheating', 'toxicity', 'griefing', 'afk', 'english', 'broke', 'other', 'admin'] as const;
+ *  tournament box's `!admin`. `tech` is a tournament box's `!flag` on the
+ *  other team's technical pause (plan T5). Anything else on a PUGCALL line is
+ *  refused. */
+export const MOD_CALL_REASONS = ['cheating', 'toxicity', 'griefing', 'afk', 'english', 'broke', 'other', 'admin', 'tech'] as const;
 export type ModCallReason = (typeof MOD_CALL_REASONS)[number];
 /** Events emitted by the queue side games plugin (pug-sidegame.sp). */
 export const SIDE_EVENTS = ['join', 'part', 'ready', 'vote', 'mapstart', 'mapend'] as const;
@@ -93,6 +95,10 @@ export interface LilacReason {
  *  an admin's !forceunpause while frozen. */
 export type AdminPauseCause = 'call' | 'staff' | 'reset' | 'forced';
 
+/** What a TECH line reports (plan T5): a technical pause began, ended, ran
+ *  out of technical time, or was flagged by the other team. */
+export type TechEventKind = 'start' | 'end' | 'over' | 'flag';
+
 export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
@@ -117,11 +123,24 @@ export type LogEvent =
   | ({ kind: 'gg' } & GgLine)
   // A captain's !sub on a tournament box (pug-match 0.3.25, plan T3c): the
   // plugin resolved the names and judged the moment; the site decides.
-  | { kind: 'sub_request'; token: string; by: string; out: string; in: string; map: number }
+  // emergency (pug-match 0.3.26, plan T5): a mid-chapter sub for a
+  // disconnected player. Present only when the line said emergency=1.
+  | { kind: 'sub_request'; token: string; by: string; out: string; in: string; map: number; emergency?: boolean }
   // The staff freeze of a tournament box changed (plan T3c). by is null for
   // the site's own command.
   // cause 'forced' (pug-match 0.3.25): an admin's !forceunpause lifted the freeze.
   | { kind: 'admin_pause'; token: string; on: boolean; by: string | null; cause: AdminPauseCause }
+  /** A technical pause on a tournament box (pug-match 0.3.26, plan T5): its
+   *  start, end, overrun into tactical pauses, or the other team's flag. team
+   *  is the box's pug team; the series engine orients it. used and budget are
+   *  technical seconds, or the team's reconnect seconds for cause disconnect.
+   *  tactical matters on `over` only: N >= 0 means the pause ran on as a
+   *  tactical pause with N tactical pauses left; -1 means the team had none
+   *  left and the game unpaused; null (the key absent) means it ran on as a
+   *  tactical pause with tactical pauses unlimited (sm_pug_pause_limit 0).
+   *  Other events never carry the key and read null. text is the reason
+   *  (start) or the flag's note, and may be empty. */
+  | { kind: 'tech'; token: string; event: TechEventKind; id: number; team: 'a' | 'b'; cause: 'call' | 'disconnect'; by: string | null; used: number; budget: number; tactical: number | null; text: string }
   | { kind: 'player'; token: string; steamid: string; event: 'connect' | 'disconnect' }
   | { kind: 'match_end'; token: string; a: number; b: number; winner: 'a' | 'b' | 'draw' }
   // Emitted by !load_4v4p for a match started in-game rather than by us. The
@@ -922,7 +941,7 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       const inId = steamId64Of(rest.in ?? '');
       const map = intOf(rest.map);
       if (!by || !out || !inId || map === null || map < 0) return null;
-      return { kind: 'sub_request', token, by, out, in: inId, map };
+      return { kind: 'sub_request', token, by, out, in: inId, map, ...(rest.emergency === '1' ? { emergency: true } : {}) };
     }
     case 'ADMINPAUSE': {
       if (rest.state !== 'on' && rest.state !== 'off') return null;
@@ -930,6 +949,26 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (rest.by !== undefined && rest.by !== 'site' && !by) return null;
       const cause = rest.cause === 'call' || rest.cause === 'reset' || rest.cause === 'forced' ? rest.cause : 'staff';
       return { kind: 'admin_pause', token, on: rest.state === 'on', by, cause };
+    }
+    case 'TECH': {
+      // text= runs to the end of the line (the reason or a note), so the keys
+      // are read from what comes before it, as PUGCALL's are.
+      const at = line.indexOf(' text=');
+      const head = kv((at < 0 ? line : line.slice(0, at)).split(/\s+/).slice(3));
+      const text = at < 0 ? '' : line.slice(at + ' text='.length).trim().slice(0, 300);
+      const event = head.event;
+      if (event !== 'start' && event !== 'end' && event !== 'over' && event !== 'flag') return null;
+      if (head.team !== 'a' && head.team !== 'b') return null;
+      if (head.cause !== 'call' && head.cause !== 'disconnect') return null;
+      const id = intOf(head.id), used = intOf(head.used), budget = intOf(head.budget);
+      if (id === null || id <= 0 || used === null || used < 0 || budget === null || budget < 0) return null;
+      const by = head.by === undefined || head.by === 'none' ? null : steamId64Of(head.by);
+      if (head.by !== undefined && head.by !== 'none' && !by) return null;
+      const tactical = head.tactical === undefined ? null : intOf(head.tactical);
+      return {
+        kind: 'tech', token, event, id, team: head.team, cause: head.cause, by, used, budget,
+        tactical: tactical !== null && tactical >= -1 ? tactical : null, text,
+      };
     }
     case 'PROBLEM':
       // A short machine code, never free text: kv() splits on whitespace and

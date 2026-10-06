@@ -49,6 +49,17 @@ describe('completeMatch', () => {
     expect((db.prepare('SELECT forfeit_team FROM matches WHERE id = ?').get(other) as any).forfeit_team).toBeNull();
   });
 
+  it('stores why a game was forfeited, gg for a bare forfeit and null without one (plan T5)', () => {
+    expect(completeMatch(db, matchId, { ...dumpFor(matchId), forfeit: 'a', forfeitWhy: 'disconnect' })).toBe(true);
+    expect(db.prepare('SELECT forfeit_team, forfeit_why FROM matches WHERE id = ?').get(matchId)).toEqual({ forfeit_team: 'a', forfeit_why: 'disconnect' });
+    const gg = seedLiveMatch(db);
+    expect(completeMatch(db, gg, { ...dumpFor(gg), forfeit: 'a' })).toBe(true);
+    expect(db.prepare('SELECT forfeit_why FROM matches WHERE id = ?').get(gg)).toEqual({ forfeit_why: 'gg' });
+    const plain = seedLiveMatch(db);
+    expect(completeMatch(db, plain, dumpFor(plain))).toBe(true);
+    expect(db.prepare('SELECT forfeit_why FROM matches WHERE id = ?').get(plain)).toEqual({ forfeit_why: null });
+  });
+
   it('persists match result, per-map scores, per-player stats, and ratings in one go', () => {
     expect(completeMatch(db, matchId, dumpFor(matchId))).toBe(true);
     const m = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId) as any;
