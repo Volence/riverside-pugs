@@ -64,7 +64,9 @@ describe('the staff forum post', () => {
     expect(text).toContain(`https://pug.test/admin/people/tickets/${id}`);
     expect(text).toContain('player5');
     expect(text).toContain(`https://pug.test/match/${matchId}?ordinal=2&half=1&t=61500`);
-    expect(text).toContain('**player0** · griefing');
+    expect(text).toContain('**player0** (Team A) · griefing');
+    // Each side named: a teammate's report reads differently from an opponent's.
+    expect(text).toContain('accused on Team B');
     expect(text).toContain('> kept killing us');
     expect(buttons(row.thread_id)).toEqual([
       `t:${id}:claim=Claim`, `t:${id}:close=Close`, `link=https://pug.test/admin/people/tickets/${id}`, `t:${id}:contact=Contact reporter`,
@@ -84,7 +86,7 @@ describe('the staff forum post', () => {
     expect(inThread).toHaveLength(2);
     expect(JSON.stringify(inThread[1].payload)).toMatch(/another report/i);
     expect(JSON.stringify(inThread[1].payload)).toContain('cheating');
-    expect(JSON.stringify(inThread[1].payload)).toContain('**player1** · cheating');
+    expect(JSON.stringify(inThread[1].payload)).toContain('**player1** (Team A) · cheating');
     expect(JSON.stringify(inThread[1].payload)).toContain('> walls');
     expect(JSON.stringify(cardOf(threadId))).toContain('2 from 2 people');
     expect(t.threadsById.get(threadId)!.tags).toEqual(['open', 'griefing', 'cheating']);

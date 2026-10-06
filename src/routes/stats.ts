@@ -28,6 +28,8 @@ import { leaderboardData, profileData } from '../playerQueries.js';
 import { listSeasons } from '../seasons.js';
 import { sameName } from '../identity.js';
 import { sessionsForMatch } from '../sourcetvSessions.js';
+import { abortCauseOf, abortParties } from '../matchAborts.js';
+import { isActiveStaff } from '../serverChat.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
@@ -312,9 +314,18 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // sessions exist at all.
     const sourcetv = viewer && isAdminViewer(viewer) ? sessionsForMatch(db, id) : undefined;
 
+    // Who an abort was about (never connected, turned away by the file
+    // check, walked) and what each got, staff only: the public wording of an
+    // abort names nobody at fault (ABORT_REASON). Absent for anyone else.
+    const aborted = (match as { state: string; voidedAt: string | null }).state === 'aborted'
+      && (match as { voidedAt: string | null }).voidedAt === null;
+    const abortWho = aborted && viewer && isActiveStaff(db, viewer)
+      ? { reason: abortCauseOf(db, id), parties: abortParties(db, id) } : undefined;
+
     return {
       ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS,
       ...(forecast ? { forecast } : {}),
+      ...(abortWho ? { abortWho } : {}),
       ...(sourcetv ? { sourcetv } : {}),
     };
   });

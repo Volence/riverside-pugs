@@ -407,6 +407,9 @@ export interface MatchDetail {
    *  anyone else. A session is evidence of a connection watching, never proof
    *  of who was behind it. */
   sourcetv?: SourceTvSession[];
+  /** An aborted match's why, and who never got in or walked with what it
+   *  cost them. Staff only, absent for anyone else. */
+  abortWho?: AbortWho;
   /** Per-round side attribution. An empty array means this match predates
    *  round capture, which is NOT the same as a match that had no rounds. */
   rounds: {
@@ -917,6 +920,8 @@ export interface AdminOverview {
     id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; abandonedBy: string | null;
     /** Uncleared no-show penalties it handed out. Optional for an older server. */
     noShows?: number;
+    /** Who it was about and what each got. Optional for an older server. */
+    parties?: AbortParty[];
   }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
@@ -1363,6 +1368,8 @@ export interface TicketSummary {
 export interface TicketReport {
   id: number; reporterId: string | null; reporterDiscordId: string | null; reporterName: string | null; category: string; text: string;
   matchId: number | null; campaign: string | null; moment: { ordinal: number; half: number; tMs: number } | null; createdAt: string;
+  /** Each side's team in that match, null when off its roster. */
+  reporterTeam?: 'a' | 'b' | null; targetTeam?: 'a' | 'b' | null;
   /** The shared community entry the report is about. Optional only for a browser holding new JS against an older server. */
   entry?: { id: number; kind: CommunityKind; title: string; removed: boolean } | null;
   /** 'game' when an in-game /mod call filed it. Optional for an older server. */
@@ -2752,3 +2759,11 @@ export interface ConductSection {
     recent: { matchId: number; mapOrdinal: number; half: number | null; seconds: number | null; startedAt: string }[];
   };
 }
+
+/** One player an abort was about (src/matchAborts.ts). `outcome` is already
+ *  in words: "1 h queue timeout (1st no-show in 7 days)". */
+export interface AbortParty {
+  steamid: string; name: string; team: 'a' | 'b' | null;
+  role: 'no_show' | 'file_check' | 'abandon'; what: string; outcome: string;
+}
+export interface AbortWho { reason: string | null; parties: AbortParty[] }

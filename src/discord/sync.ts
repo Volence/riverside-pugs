@@ -11,12 +11,12 @@ import {
 } from './messageStore.js';
 import {
   renderCancelled, renderLobby, renderLobbyFailed, renderMatch, renderMatchAborted, renderPanel, renderQueueAlert,
-  renderResult, type MatchCardState, type PlayerView, type ResultPlayer,
+  renderResult, type MatchCardState, type MatchView, type PlayerView, type ResultPlayer,
 } from './presenter.js';
 import { getSetting } from '../settings.js';
 import { safeThresholds } from '../matchmaker.js';
 import { sideGamesEnabled, type SidePublicView } from '../sideGames.js';
-import { ABORT_REASON, anyRequeued, type AbortCause } from '../matchAborts.js';
+import { ABORT_REASON, abortParties, anyRequeued, type AbortCause } from '../matchAborts.js';
 
 /** How long the "PUG #N was aborted" line stays in #queue-here. Long enough
  *  for the people watching the queue to read it, short enough that aborts do
@@ -239,7 +239,7 @@ export class DiscordSync {
         : row.state === 'aborted' ? 'aborted'
           : row.state === 'live' ? 'live'
             : row.server_id === null ? 'waiting' : 'configuring';
-      const payload = renderMatch({
+      const view: MatchView = {
         matchId,
         campaignName: campaignDisplayName(this.deps.db, row.campaign),
         publicUrl: this.deps.publicUrl,
@@ -249,7 +249,8 @@ export class DiscordSync {
         voice: this.deps.voice?.channelsFor(matchId) ?? null,
         unlinked: [...teamA, ...teamB].map((p) => this.player(p)).filter((p) => !p.discordId).map((p) => p.name),
         canSpectate: spectateFor(db, row.server_id) !== null,
-      });
+      };
+      const payload = renderMatch(view);
       // Skipped for 'aborted': closeMatchCard below moves the card to the
       // admin channel, and editing it in place first would both cost an extra
       // Discord call and flash the outcome in #queue-here on the way out.
@@ -296,7 +297,16 @@ export class DiscordSync {
         await this.drop('live', m.ref);
         await this.drop('match', m.ref);
       } else if (state === 'aborted') {
-        await this.closeMatchCard(m, payload);
+        // The admin channel's copy says why, and who never got in or walked
+        // with what it cost them. Only that copy: the public fallback in
+        // closeMatchCard keeps ABORT_REASON's rule of naming nobody.
+        await this.closeMatchCard(m, payload, renderMatch({
+          ...view,
+          abort: {
+            reason: row.abort_cause ? ABORT_REASON[row.abort_cause] : null,
+            parties: abortParties(db, matchId),
+          },
+        }));
         await this.drop('live', m.ref);
         // Only for an abort that says why: one from before the cause was
         // recorded, or written by hand, gets no line rather than a vague one.
@@ -505,6 +515,7 @@ export class DiscordSync {
   private async closeMatchCard(
     m: { ref: string; channel_id: string; message_id: string },
     payload: MessagePayload,
+    adminPayload: MessagePayload,
   ): Promise<void> {
     const db = this.deps.db;
     const admin = getSetting(db, 'discord_admin_channel_id') || '';
@@ -521,7 +532,7 @@ export class DiscordSync {
       console.error('[discord] removing an aborted match card failed:', err);
     });
     this.hashes.delete(m.message_id);
-    await this.deps.transport.send(admin, payload).catch((err) => {
+    await this.deps.transport.send(admin, adminPayload).catch((err) => {
       console.error('[discord] posting an aborted match to the admin channel failed:', err);
     });
   }

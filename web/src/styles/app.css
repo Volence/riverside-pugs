@@ -2288,6 +2288,9 @@ tbody tr.is-lifted td { opacity: 0.55; }
    their own rules. */
 .integrity-clips { list-style: none; margin: 0; padding: 0; }
 .admin-list .integrity-clips li { padding: 0; border-bottom: 0; }
+/* Who an aborted match was about, under its row or in the match page's notice. */
+.abort-parties { list-style: none; margin: var(--sp-1) 0 0; padding: 0; font-size: var(--fs-dense); overflow-wrap: anywhere; }
+.admin-list .abort-parties li { padding: 0; border-bottom: 0; }
 /* Alts tab: one group of related accounts per block. */
 .admin-cluster { padding: var(--sp-3) 0; border-top: 1px solid var(--border); }
 .admin-cluster p { margin: 0; overflow-wrap: anywhere; }

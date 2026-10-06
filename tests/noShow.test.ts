@@ -224,7 +224,16 @@ describe('no-show deadline extension and file check rejects', () => {
     expect(penaltyHistory(db, IDS[5])).toEqual([]);
     expect(penaltyHistory(db, IDS[6]).map((p) => p.kind)).toEqual(['no_show']);
     expect(penaltyHistory(db, IDS[7]).map((p) => p.kind)).toEqual(['no_show']);
-    expect(texts[0]).toMatch(/One player was rejected by the file check/);
+    // Each named with their side, the turned-away apart from the no-shows.
+    expect(texts[0]).toMatch(/Never connected: \*\*[^*]+\*\* \(Team [AB]\), \*\*[^*]+\*\* \(Team [AB]\)\./);
+    expect(texts[0]).toMatch(/Rejected by the file check, so they did try and got no penalty: \*\*[^*]+\*\* \(Team [AB]\)\./);
+    // The staff record of the abort: who, which side, and what it cost.
+    const { abortParties } = await import('../src/matchAborts.js');
+    const parties = abortParties(db, id);
+    expect(parties.map((p) => [p.steamid, p.role])).toEqual([[IDS[5], 'file_check'], [IDS[6], 'no_show'], [IDS[7], 'no_show']]);
+    expect(parties[0].outcome).toBe('rejected by the file check, so no penalty');
+    expect(parties[1].outcome).toBe('1 h queue timeout (1st no-show in 7 days)');
+    expect(parties.every((p) => p.team === 'a' || p.team === 'b')).toBe(true);
     const roles = db.prepare('SELECT player_id, role FROM match_abort_notices WHERE match_id = ? ORDER BY player_id').all(id);
     expect(roles).toContainEqual({ player_id: IDS[5], role: 'file_check' });
     expect(roles).toContainEqual({ player_id: IDS[7], role: 'culprit' });

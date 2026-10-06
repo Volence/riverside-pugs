@@ -7,7 +7,7 @@ import { matchForecast, recomputeSeasonRatings } from '../rating.js';
 import { getServer, PICK_ORDER_SQL } from '../serverPool.js';
 import type { LogAuth } from '../logAuth.js';
 import { serverPasswordFor } from '../matchToken.js';
-import { noteMatchAborted } from '../matchAborts.js';
+import { abortParties, noteMatchAborted } from '../matchAborts.js';
 import { clearMatchNoShows } from '../penalties.js';
 
 export function adminOverview(db: DB, logAuth?: LogAuth) {
@@ -104,6 +104,8 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
     noShows: (db.prepare(
       "SELECT COUNT(*) AS n FROM penalties WHERE match_id = ? AND kind = 'no_show' AND cleared_at IS NULL",
     ).get(m.id) as { n: number }).n,
+    // Who never got in or walked, by name and side, with what it cost them.
+    parties: abortParties(db, m.id),
   }));
   // The anti-cheat capture pipeline's health sits with the servers it comes
   // from, not on the People queue, which is about people.

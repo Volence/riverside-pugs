@@ -122,8 +122,9 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
                 <strong>{r.category}</strong> from {r.reporterId
                   ? <a href={`/player/${r.reporterId}`}>{r.reporterName ?? r.reporterId}</a>
                   : <span title={`Discord member ${r.reporterDiscordId}`}>{r.reporterName ?? 'a Discord member'} <small>(Discord only)</small></span>}
+                {r.reporterTeam && <> (Team {r.reporterTeam.toUpperCase()})</>}
                 <span class="muted"> · {fmtTime(r.createdAt)}{r.source === 'game' ? ' · from in game' : ''}</span>
-                {r.matchId !== null && <> · <a href={`/match/${r.matchId}`}>#{r.matchId}{r.campaign ? ` ${campaignName(r.campaign)}` : ''}</a></>}
+                {r.matchId !== null && <> · <a href={`/match/${r.matchId}`}>#{r.matchId}{r.campaign ? ` ${campaignName(r.campaign)}` : ''}</a>{r.targetTeam && <>, accused on Team {r.targetTeam.toUpperCase()}</>}</>}
                 {r.matchId !== null && r.moment && <> · <a href={`/match/${r.matchId}?ordinal=${r.moment.ordinal}&half=${r.moment.half}&t=${r.moment.tMs}`}>replay moment</a></>}
                 {r.entry && <> · shared {r.entry.kind === 'hud' ? 'HUD' : 'crosshair'} <a href={`/community/${r.entry.id}`}>{r.entry.title}</a>{r.entry.removed ? ' (removed)' : ''}</>}
                 {open && <> · <button class="chip" type="button" disabled={busy}

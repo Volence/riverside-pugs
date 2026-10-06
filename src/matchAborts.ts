@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { offenseTimeout } from './penalties.js';
 
 /**
  * What happens to the people in a match once it has been aborted.
@@ -174,4 +175,92 @@ export function dismissAbortNotices(db: DB, steamid: string, now = new Date()): 
  *  the public line that says so. */
 export function anyRequeued(db: DB, matchId: number): boolean {
   return db.prepare('SELECT 1 FROM match_abort_notices WHERE match_id = ? AND requeued = 1 LIMIT 1').get(matchId) !== undefined;
+}
+
+/** One rostered player an abort was about: someone who never got in, or
+ *  the leaver, with what it cost them. Staff surfaces only: the public
+ *  wording (ABORT_REASON) names nobody. */
+export interface AbortParty {
+  steamid: string;
+  name: string;
+  team: 'a' | 'b' | null;
+  role: 'no_show' | 'file_check' | 'abandon';
+  /** The role in words: "never connected", "never got in", "ran out of
+   *  reconnect time". */
+  what: string;
+  /** What happened to them, in words: "1 h queue timeout (2nd no-show in 7
+   *  days)", "rejected by the file check, so no penalty", "banned 1 day". */
+  outcome: string;
+}
+
+function fmtMinutes(m: number): string {
+  if (m >= 1440 && m % 1440 === 0) return `${m / 1440} day${m === 1440 ? '' : 's'}`;
+  if (m >= 60 && m % 60 === 0) return `${m / 60} h`;
+  return `${m} min`;
+}
+
+const ROLE_WORDS: Record<AbortParty['role'], string> = {
+  no_show: 'never connected', file_check: 'never got in', abandon: 'ran out of reconnect time',
+};
+
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+
+/**
+ * Who an aborted match was about and what each got, in roster order.
+ *
+ * The roles come from match_abort_notices, which every abort path writes.
+ * An abort from before that table only has its penalties and ban rows, so
+ * those are read too: a no_show penalty or an "Abandoned match #N" ban
+ * names its player either way.
+ */
+export function abortParties(db: DB, matchId: number): AbortParty[] {
+  const cause = (db.prepare('SELECT abort_cause FROM matches WHERE id = ?').get(matchId) as
+    { abort_cause: AbortCause | null } | undefined)?.abort_cause ?? null;
+  const roster = db.prepare(
+    `SELECT mp.player_id, COALESCE(p.name, mp.player_id) AS name, mp.team, n.role FROM match_players mp
+     LEFT JOIN players p ON p.steamid = mp.player_id
+     LEFT JOIN match_abort_notices n ON n.match_id = mp.match_id AND n.player_id = mp.player_id
+     WHERE mp.match_id = ? ORDER BY mp.rowid`,
+  ).all(matchId) as { player_id: string; name: string; team: 'a' | 'b'; role: AbortRole | null }[];
+  const penalties = new Map((db.prepare(
+    "SELECT player_id, MAX(id) AS id FROM penalties WHERE match_id = ? AND kind = 'no_show' GROUP BY player_id",
+  ).all(matchId) as { player_id: string; id: number }[]).map((r) => [r.player_id, r.id]));
+  const bans = new Map((db.prepare(
+    'SELECT player_id, created_at, expires_at, lifted_at FROM bans WHERE reason = ? ORDER BY id',
+  ).all(`Abandoned match #${matchId}`) as { player_id: string; created_at: string; expires_at: string | null; lifted_at: string | null }[])
+    .map((b) => [b.player_id, b]));
+
+  const out: AbortParty[] = [];
+  for (const r of roster) {
+    const ban = bans.get(r.player_id);
+    const penaltyId = penalties.get(r.player_id);
+    let role: AbortParty['role'] | null = null;
+    if (r.role === 'file_check') role = 'file_check';
+    else if (ban || (r.role === 'culprit' && cause === 'abandon')) role = 'abandon';
+    else if (penaltyId !== undefined || r.role === 'culprit') role = 'no_show';
+    if (!role) continue;
+
+    let outcome: string;
+    if (role === 'file_check') outcome = 'rejected by the file check, so no penalty';
+    else if (role === 'abandon') {
+      const minutes = ban?.expires_at ? Math.round((Date.parse(ban.expires_at) - Date.parse(ban.created_at)) / 60_000) : null;
+      outcome = !ban ? 'left, no ban on record'
+        : `banned ${minutes === null ? 'permanently' : fmtMinutes(minutes)}${ban.lifted_at ? ', since lifted' : ''}`;
+    } else {
+      const t = penaltyId === undefined ? null : offenseTimeout(db, penaltyId);
+      outcome = !t ? 'no penalty recorded (penalties were off)'
+        : t.cleared ? 'no-show penalty cleared by staff'
+          : `${fmtMinutes(t.minutes)} queue timeout (${ordinal(t.offense)} no-show in ${t.windowDays} days)`;
+    }
+    out.push({ steamid: r.player_id, name: r.name, team: r.team, role, what: ROLE_WORDS[role], outcome });
+  }
+  return out;
+}
+
+/** The public reason an aborted match ended, or null when it predates the
+ *  cause column. */
+export function abortCauseOf(db: DB, matchId: number): string | null {
+  const c = (db.prepare('SELECT abort_cause FROM matches WHERE id = ?').get(matchId) as
+    { abort_cause: AbortCause | null } | undefined)?.abort_cause;
+  return c ? ABORT_REASON[c] : null;
 }
