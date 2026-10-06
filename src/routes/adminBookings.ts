@@ -6,13 +6,17 @@ import { getServer } from '../serverPool.js';
 import * as B from '../bookings/bookings.js';
 import type { BookingRunner } from '../bookings/runner.js';
 import { toxicFlag } from '../scrims/reviews.js';
+import { bookingLimits, scrimsHolding } from '../bookings/rules.js';
 
 export interface AdminBookingRow {
-  id: number; state: string; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
+  id: number; purpose: 'scrim' | 'tournament'; state: string; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
   server: string | null; peak: { a: number; b: number }; endReason: string | null;
   /** Plan 2 Ruling 6: a side whose team (or pickup captain) carries the toxic flag. */
   toxic: { a: boolean; b: boolean };
 }
+
+/** Server priority (Ruling 9): the scrim cap, how much of it is in use, and the PUG reserve. */
+export interface AdminBookingPriority { scrimMax: number; scrimsHolding: number; pugReserve: number }
 
 /**
  * The staff side of bookings (plan 4a): every open booking and those that
@@ -37,14 +41,15 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
     const bookings: AdminBookingRow[] = rows.map((b) => {
       const [a, s] = B.sidesOf(db, b.id);
       return {
-        id: b.id, state: b.state, ending: b.ending_at !== null, startsAt: b.starts_at, endsAt: b.ends_at,
+        id: b.id, purpose: b.purpose, state: b.state, ending: b.ending_at !== null, startsAt: b.starts_at, endsAt: b.ends_at,
         aName: B.sideName(db, a), bName: B.sideName(db, s),
         server: b.server_id !== null ? getServer(db, b.server_id)?.name ?? null : null,
         peak: { a: a.peak_present, b: s.peak_present }, endReason: b.end_reason,
         toxic: { a: toxicFlag(db, party(a), nowMs), b: toxicFlag(db, party(s), nowMs) },
       };
     });
-    return { bookings };
+    const limits = bookingLimits(db);
+    return { bookings, priority: { scrimMax: limits.scrimMax, scrimsHolding: scrimsHolding(db), pugReserve: limits.reserve } satisfies AdminBookingPriority };
   });
 
   app.post('/api/admin/bookings/:id/cancel', async (req, reply) => {

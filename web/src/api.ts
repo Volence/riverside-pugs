@@ -2359,11 +2359,14 @@ export const scrimsApi = {
 };
 
 export interface AdminBookingRow {
-  id: number; state: BookingState; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
+  id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean; startsAt: string; endsAt: string; aName: string; bName: string;
   server: string | null; peak: { a: number; b: number }; endReason: string | null;
   /** Plan 2 Ruling 6: a side whose team (or pickup captain) carries the toxic flag. */
   toxic: { a: boolean; b: boolean };
 }
+
+/** src/routes/adminBookings.ts: the scrim cap, how much of it is in use, and the PUG reserve (server priority Ruling 9). */
+export interface AdminBookingPriority { scrimMax: number; scrimsHolding: number; pugReserve: number }
 
 /** src/routes/adminEvents.ts */
 export interface AdminEventRow {
@@ -2483,7 +2486,7 @@ export const adminApi = {
   serverLogAuth: (id: number, mode: LogAuthMode) => post(`/api/admin/servers/${id}/log-auth`, { mode }),
   dlc4Check: () => post<{ results: { id: number; name: string; hasDlc4: boolean }[] }>('/api/admin/servers/dlc4-check'),
   syncServerAdmins: () => post<{ results: { serverId: number; server: string; ok: boolean; error?: string }[] }>('/api/admin/servers/admins-sync'),
-  bookings: (signal?: AbortSignal) => get<{ bookings: AdminBookingRow[] }>('/api/admin/bookings', signal),
+  bookings: (signal?: AbortSignal) => get<{ bookings: AdminBookingRow[]; priority?: AdminBookingPriority }>('/api/admin/bookings', signal),
   cancelBooking: (id: number, reason: string) => post(`/api/admin/bookings/${id}/cancel`, { reason }),
   /** +1 campaign, staff side: a named campaign is appended to the playlist. */
   extendBooking: (id: number, campaign?: string) => post(`/api/admin/bookings/${id}/extend`, campaign ? { campaign } : {}),
