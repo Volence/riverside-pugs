@@ -1921,7 +1921,7 @@ export interface StageConfigs {
 export type StageConfig = StageConfigs[StageType];
 export interface StageSettings {
   type: StageType; config: StageConfig; rulesetId: number; gameConfig: string; campaignPool: string[];
-  vetoType: VetoType; veto?: VetoConfig; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
+  vetoType: VetoType; veto: VetoConfig; chapters: number | null; scheduling: Scheduling; advanceCount: number | null;
 }
 export type { VetoConfig };
 export interface EventFields {
@@ -1938,9 +1938,11 @@ export interface EventStageView {
 }
 export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null }
 export interface PlayEntry { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; out: boolean }
+/** Mirrors src/events/playViews.ts's RoomPhase. */
+export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'hold' | 'done';
 export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
-  winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean;
+  winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean; phase: RoomPhase;
 }
 export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
 export interface PlayStanding {
@@ -1988,6 +1990,29 @@ export interface RegisterOptionView { teamId: number; name: string; tag: string;
 export interface MyEventView { entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean }
 export const entryLogoUrl = (key: string): string => `/api/events/logos/${key}.png`;
 
+// ---------- the match room (tournaments plan T3a; mirrors src/events/roomViews.ts) ----------
+
+export interface RoomCampaign { slug: string; name: string; state: 'open' | 'banned' | 'picked' | 'decider'; by: 'a' | 'b' | null; game: number | null }
+export type VetoActionKind = 'first' | 'second' | 'ban' | 'pick' | 'survivors' | 'infected';
+export interface RoomLogLine { step: number; side: 'a' | 'b'; action: VetoActionKind; campaign: string | null; campaignName: string | null; auto: boolean; at: string }
+export interface RoomGame { game: number; campaign: string; campaignName: string; pickedBy: 'a' | 'b' | null; sideBy: 'a' | 'b' | null; firstSurvivors: 'a' | 'b' | null }
+export interface RoomPlayer { steamid: string; name: string }
+/** a and b are null only while a bracket match still waits for its teams. */
+export interface MatchRoomView {
+  id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
+  higher: 'a' | 'b' | null; deadline: string | null; serverNow: string; ready: { a: boolean; b: boolean };
+  vetoSummary: string; pool: RoomCampaign[]; log: RoomLogLine[]; games: RoomGame[];
+  next: { kind: 'order' | 'ban' | 'pick' | 'side'; by: 'a' | 'b'; game: number | null; step: number } | { kind: 'wait'; game: number } | null;
+  lineups: { a: RoomPlayer[] | null; b: RoomPlayer[] | null; aLocked: boolean; bLocked: boolean };
+  holdReason: string | null;
+  result: { winner: 'a' | 'b'; scoreA: number | null; scoreB: number | null; forfeit: boolean } | null;
+  me: { side: 'a' | 'b'; manager: boolean; playable: RoomPlayer[]; defaultFour: string[] | null } | null;
+}
+export interface PrefsView {
+  entryId: number; defaultFour: string[] | null; side: 'survivors' | 'infected' | null; roster: RoomPlayer[];
+  stages: { stageId: number; ordinal: number; pool: { slug: string; name: string }[]; order: string[] }[];
+}
+
 export const eventsApi = {
   list: (signal?: AbortSignal) => get<{ events: EventListItem[] }>('/api/events', signal),
   get: (slug: string, signal?: AbortSignal) => get<EventView>(`/api/events/${enc(slug)}`, signal),
@@ -1997,6 +2022,15 @@ export const eventsApi = {
   withdraw: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/withdraw`),
   checkIn: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/checkin`),
   leave: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/leave`),
+  /** The match room (plan T3a). */
+  room: (slug: string, id: number, signal?: AbortSignal) => get<MatchRoomView>(`/api/events/${enc(slug)}/matches/${id}`, signal),
+  ready: (slug: string, id: number) => post(`/api/events/${enc(slug)}/matches/${id}/ready`),
+  veto: (slug: string, id: number, step: number, action: string, campaign: string | null = null) =>
+    post(`/api/events/${enc(slug)}/matches/${id}/veto`, { step, action, campaign }),
+  lineup: (slug: string, id: number, steamids: string[]) => post(`/api/events/${enc(slug)}/matches/${id}/lineup`, { steamids }),
+  prefs: (slug: string, entryId: number, signal?: AbortSignal) => get<PrefsView>(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, signal),
+  savePrefs: (slug: string, entryId: number, body: { defaultFour: string[] | null; side: 'survivors' | 'infected' | null; campaigns: Record<string, string[]> }) =>
+    post(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, body),
 };
 
 export interface TeamScrim {
@@ -2401,6 +2435,10 @@ export const adminApi = {
   startEvent: (id: number) => post(`/api/admin/events/${id}/start`),
   recordEventResult: (id: number, matchId: number, body: { winner: 'a' | 'b'; scoreA?: number; scoreB?: number; forfeit?: boolean }) =>
     post(`/api/admin/events/${id}/matches/${matchId}/result`, body),
+  /** The match room, opened or reset by hand, or held (plan T3a Ruling 13). */
+  openEventRoom: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/open-room`),
+  resetEventRoom: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/reset-room`),
+  holdEventMatch: (id: number, matchId: number, reason: string) => post(`/api/admin/events/${id}/matches/${matchId}/hold`, { reason }),
   /** Setup > Rulesets and Game configs (rulesets editor plan). */
   rulesets: (signal?: AbortSignal) => get<{ rulesets: AdminRuleset[] }>('/api/admin/rulesets', signal),
   createRuleset: (copyFrom: number, name: string) => post<{ id: number }>('/api/admin/rulesets', { copyFrom, name }),

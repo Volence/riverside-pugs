@@ -17,7 +17,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const team = (id: number, name: string) => ({ id, name, tag: '', logoKey: null, seed: id, out: false });
 const m = (over: Partial<PlayMatch> = {}): PlayMatch => ({
   id: 7, group: 1, round: 1, slot: 1, a: team(1, 'Rats'), b: team(2, 'Bats'), status: 'waiting', winner: null,
-  scoreA: null, scoreB: null, forfeit: false, bye: false, ...over,
+  scoreA: null, scoreB: null, forfeit: false, bye: false, phase: 'waiting', ...over,
 });
 const play = (over: Partial<AdminEventPlay> = {}): AdminEventPlay => ({
   status: 'live', lockedAt: 'x', startsAt: '2026-10-10T20:00:00.000Z', seeded: 2, ...over,

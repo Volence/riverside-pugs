@@ -3536,6 +3536,42 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .playround { margin-top: var(--sp-3); }
 .playround__matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-2); margin-top: var(--sp-1); }
 
+/* Plan T3a: the match room page (EventMatch.tsx, VetoBoard.tsx,
+   LineupPanel.tsx). One column at phone width; nothing here scrolls
+   sideways at 390 px. */
+.room { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.room__sub { margin: var(--sp-1) 0 0; color: var(--text-muted); font-size: var(--fs-dense); overflow-wrap: anywhere; }
+.room__clock { font-variant-numeric: tabular-nums; }
+.room__ready { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.room__ready li { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.room__games { list-style: none; margin: var(--sp-3) 0 0; padding: var(--sp-3) 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--sp-1); }
+.room__log { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
+/* Reuses the event status chip's border/colour roles: ready and veto read
+   as live, lineup as checkin, server and hold as a warning, done as finished. */
+.roomphase--ready, .roomphase--veto { border-color: var(--rule); color: var(--accent); }
+.roomphase--lineup { border-color: var(--border-strong); color: var(--text); }
+.roomphase--server, .roomphase--hold { color: var(--accent); }
+.roomphase--done { color: var(--win); }
+.roomphase--pending, .roomphase--waiting { color: var(--text-muted); }
+
+.vetoboard { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.vetoboard__turn { margin: 0; }
+.vetoboard__pool { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--sp-2); }
+.vetotile { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2); border: 1px solid var(--border); min-width: 0; }
+.vetotile__name { font-weight: 600; overflow-wrap: anywhere; }
+.vetotile__state { color: var(--text-muted); font-size: var(--fs-dense); }
+.vetotile--banned { opacity: 0.6; }
+.vetotile--banned .vetotile__name { text-decoration: line-through; }
+.vetotile--picked, .vetotile--decider { border-color: var(--accent); }
+.vetoboard__choice { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+.lineups { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.lineup { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.lineup ul { list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
+.lineup--hidden { color: var(--text-muted); font-size: var(--fs-dense); }
+.lineup--pick { display: flex; flex-direction: column; gap: var(--sp-1); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
+.lineup--pick label { display: flex; align-items: center; gap: var(--sp-2); }
+
 /* Setup > Rulesets and Game configs (rulesets editor plan): rows in the
    admin-list look, a summary line under the name, the row's buttons below. */
 .rulesetlist li > p { margin: var(--sp-1) 0 0; }

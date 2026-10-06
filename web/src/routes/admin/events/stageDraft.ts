@@ -1,4 +1,5 @@
 import type { AdminEventOptions, Scheduling, StageConfig, StageConfigs, StageSettings, StageType, VetoType } from '../../../api';
+import { presetConfig } from '../../../../../src/events/vetoConfig';
 
 /**
  * The stage form's own state: every type's settings at once, so switching the
@@ -45,7 +46,11 @@ export function configOf(d: StageDraft): StageConfig {
 export function settingsFrom(d: StageDraft): StageSettings {
   return {
     type: d.type, config: configOf(d), rulesetId: d.rulesetId, gameConfig: d.gameConfig, campaignPool: d.campaignPool,
-    vetoType: d.vetoType, chapters: d.chapters, scheduling: d.type === 'league' ? 'window' : d.scheduling, advanceCount: d.advanceCount,
+    // The form only offers the three presets today, so the full veto knobs
+    // are just that preset applied to the chosen pool size; the server
+    // would derive the same thing from vetoType alone if veto were left out.
+    vetoType: d.vetoType, veto: presetConfig(d.vetoType, d.campaignPool.length),
+    chapters: d.chapters, scheduling: d.type === 'league' ? 'window' : d.scheduling, advanceCount: d.advanceCount,
   };
 }
 
