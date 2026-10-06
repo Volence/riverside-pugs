@@ -23,6 +23,8 @@ export const SHOWN_MIN = 4;
 /** Players, ringers and spectators one side may list. */
 export const PEOPLE_PER_SIDE = 12;
 export const NO_SHOW_WINDOW_DAYS = 30;
+/** The grace to connect when a booking's rules carry none (plan T3c Ruling 7). */
+export const DEFAULT_GRACE_MINUTES = 15;
 /** A campaign with too little history is assumed to take this long. */
 export const DEFAULT_CAMPAIGN_MINUTES = 60;
 /** An invite nobody confirms expires this long after it was made... */

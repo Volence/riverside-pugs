@@ -8,7 +8,7 @@ import { getTeam } from '../teams/teams.js';
 import { getPlayer } from '../players.js';
 import * as B from '../bookings/bookings.js';
 import { gamesPlayed } from '../bookings/games.js';
-import { SHOWN_MIN } from '../bookings/rules.js';
+import { DEFAULT_GRACE_MINUTES, SHOWN_MIN } from '../bookings/rules.js';
 import { CLOSE_GRACE_MS, NEXT_DELAY_MS, type TournamentHooks } from '../bookings/runner.js';
 import { addTournamentSub, createTournamentGame, gameLinesOf, isPendingGame, isUnstartedGame } from '../bookings/tournamentGames.js';
 import { replayableChapters, restoreSnapshot, type RestoreSnapshot } from '../bookings/restore.js';
@@ -110,8 +110,8 @@ export const SUB_NOT_BETWEEN = 'not between chapters';
 /** How long after a replay or a move the box's reset line for it is still
  *  expected (UDP log lines arrive within moments or never). */
 export const RESET_EXPECT_MS = 2 * 60_000;
-/** The grace to connect when a booking's rules carry none (Ruling 7). */
-export const DEFAULT_GRACE_MINUTES = 15;
+/** The grace to connect when a booking's rules carry none (Ruling 7); the runner's fallback too. */
+export { DEFAULT_GRACE_MINUTES };
 
 interface ExpectedReset { gameMatchId: number; frozenId: number; until: number | null }
 
@@ -917,9 +917,10 @@ export class SeriesEngine {
    *  refused has aborted the game and the gameLost hook has held the match
    *  by the time this answers replay_failed; a box that did not answer the
    *  abort leaves the game live and the match as it was (replay_no_answer);
-   *  one that answered the abort but not the resume has dropped its match
-   *  and any freeze with it, while the site keeps the game live for staff
-   *  to replay again (replay_dropped). */
+   *  one that answered the abort but not the resume on every try has
+   *  dropped its match and any freeze with it; the runner hands the booking
+   *  to crash recovery, which restores the game at its current chapter, for
+   *  staff to replay again once it is back (replay_dropped). */
   async replayChapter(matchId: number, by: string, ordinal: unknown): Promise<V.Checked<{ map: string }>> {
     const m = P.getMatch(this.db, matchId);
     if (!m) return V.fail('match_not_found');
@@ -975,7 +976,7 @@ export class SeriesEngine {
     if (old === null) return V.fail('no_box');
     const r = R.noteMove(this.db, { matchId: m.id, by, fromServerId: old, now: new Date(this.now()) });
     if (!r.ok) return r;
-    const lifted = frozen ? ' The staff freeze is lifted (the new box starts unfrozen); freeze it again from the Events desk if needed.' : '';
+    const lifted = frozen ? ' The freeze is lifted (the new box starts unfrozen); freeze it again from the Events desk if needed.' : '';
     this.alert(m, `staff moved it off ${getServer(this.db, old)?.name ?? `server ${old}`}. It takes the first idle box in its region and the game is restored there; with none free it waits, then is held.${lifted}`);
     tellStaffAction(this.deps, m.event_id, m.id, 'server_moved');
     this.push(m.id);

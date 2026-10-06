@@ -156,10 +156,14 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
     if (!el) return;
     setOpen(el.open);
     if (!el.open) return;
-    el.ownerDocument.querySelectorAll<HTMLDetailsElement>('details.desktools').forEach((other) => {
+    // Scoped to this Play panel: another panel's open tools are not ours to close.
+    const root: ParentNode = el.closest('.playpanel') ?? el.ownerDocument;
+    root.querySelectorAll<HTMLDetailsElement>('details.desktools').forEach((other) => {
       if (other !== el) other.open = false;
     });
   };
+  // A phase with no tool (confirming, for one) shows no empty disclosure.
+  if (!canAct && !canReopen && !canBox) return null;
   return (
     <details class="desktools" ref={detailsRef} open={open} onToggle={onToggle}>
       <summary>{`Staff tools: ${names}`}</summary>
@@ -289,7 +293,7 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
   if (!data) return <Panel><h3>Play</h3></Panel>;
   const before = data.status === 'registration' || data.status === 'checkin';
   return (
-    <Panel>
+    <Panel class="playpanel">
       <h3>Play</h3>
       {before && data.lockedAt === null && <p class="muted">The event can start once the entry list is final. It starts by itself at the start time.</p>}
       {before && data.lockedAt !== null && (
