@@ -97,12 +97,14 @@ export function boxNeedsGame(statusBody: string, matchId: number): boolean {
 /** A sub's roster row on a tournament game (plan T3c Ruling 5): source web,
  *  joined_map the maps finished so far, so the dump's STAT line finds a row
  *  and the rating of a pug never applies anyway (kind tournament). A second
- *  call for the same player changes nothing. */
-export function addTournamentSub(db: DB, o: { matchId: number; inId: string; team: 'a' | 'b'; now?: Date }): { joinedMap: number } {
+ *  call for the same player changes nothing. Null, with nothing written,
+ *  for a match that is not a tournament game. */
+export function addTournamentSub(db: DB, o: { matchId: number; inId: string; team: 'a' | 'b'; now?: Date }): { joinedMap: number } | null {
   const now = o.now ?? new Date();
   return db.transaction(() => {
-    const row = db.prepare('SELECT booking_id FROM matches WHERE id = ?').get(o.matchId) as { booking_id: number | null } | undefined;
+    const row = db.prepare('SELECT booking_id, kind FROM matches WHERE id = ?').get(o.matchId) as { booking_id: number | null; kind: string } | undefined;
     if (!row) throw new Error(`match ${o.matchId} does not exist`);
+    if (row.kind !== 'tournament') return null;
     const joinedMap = (db.prepare(
       'SELECT COUNT(DISTINCT ordinal) AS n FROM match_rounds WHERE match_id = ? AND half = 2 AND ended_at IS NOT NULL',
     ).get(o.matchId) as { n: number }).n;

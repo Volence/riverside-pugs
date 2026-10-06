@@ -148,4 +148,48 @@ describe('swapPlayer and beginMove (plan T3c)', () => {
     expect(addTournamentSub(db, { matchId: g.matchId, inId: P[8]!, team: 'b', now: NOW })).toEqual({ joinedMap: 1 });
     expect(db.prepare('SELECT team FROM match_players WHERE match_id = ? AND player_id = ?').get(g.matchId, P[8]!)).toEqual({ team: 'a' });
   });
+
+  it('swapPlayer refuses a booking that is over, an invited person, and pins a ringer coming in as a player', () => {
+    const id = booked();
+    const add = db.prepare("INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, 'a', ?, ?, ?, ?, ?)");
+    add.run(id, P[9]!, 'spectator', 'invited', P[0]!, NOW.toISOString());
+    expect(swapPlayer(db, { bookingId: id, side: 'a', outId: P[0]!, inId: P[9]!, now: NOW })).toEqual({ ok: false, error: 'not_person' });
+    db.prepare("UPDATE booking_people SET role = 'ringer', status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(id, P[9]!);
+    expect(swapPlayer(db, { bookingId: id, side: 'a', outId: P[0]!, inId: P[9]!, now: NOW })).toEqual({ ok: true, value: null });
+    expect(peopleOf(db, id).filter((p) => p.steamid === P[9] || p.steamid === P[0]).map((p) => `${p.steamid}:${p.role}`).sort())
+      .toEqual([`${P[0]}:spectator`, `${P[9]}:player`].sort());
+    db.prepare('UPDATE bookings SET ending_at = ? WHERE id = ?').run(NOW.toISOString(), id);
+    expect(swapPlayer(db, { bookingId: id, side: 'a', outId: P[1]!, inId: P[8]!, now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(swapPlayer(db, { bookingId: 9999, side: 'a', outId: P[1]!, inId: P[8]!, now: NOW })).toEqual({ ok: false, error: 'not_found' });
+  });
+
+  it('beginMove takes an active booking off its box with one event, and refuses one that is ending', () => {
+    const id = booked();
+    const serverId = addServer(db, { name: 'box', host: '10.0.0.1', port: 27015, rconPort: 1, rconPassword: 'x' });
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(serverId);
+    expect(holdBox(db, id, serverId, NOW)).toBe(true);
+    markSetup(db, id, NOW);
+    markReady(db, id, NOW);
+    db.prepare("UPDATE bookings SET state = 'active' WHERE id = ?").run(id);
+    db.prepare('UPDATE bookings SET ending_at = ? WHERE id = ?').run(NOW.toISOString(), id);
+    expect(beginMove(db, id, NOW)).toBeNull();
+    expect(getBooking(db, id)).toMatchObject({ server_id: serverId, recovering_at: null });
+    db.prepare('UPDATE bookings SET ending_at = NULL WHERE id = ?').run(id);
+    expect(beginMove(db, id, NOW)).toBe(serverId);
+    expect(getBooking(db, id)).toMatchObject({ server_id: null, recover_reason: 'gone', state: 'active' });
+    expect(db.prepare("SELECT detail FROM booking_events WHERE booking_id = ? AND event = 'box_moved_by_staff'").all(id)).toEqual([{ detail: JSON.stringify({ serverId }) }]);
+  });
+
+  it('addTournamentSub writes one sub_added event, none on a second call, and nothing on a PUG match', () => {
+    const id = booked();
+    const serverId = addServer(db, { name: 'box', host: '10.0.0.1', port: 27015, rconPort: 1, rconPassword: 'x' });
+    const g = createTournamentGame(db, { bookingId: id, serverId, campaign: 'no_mercy', teams: { a: P.slice(0, 4), b: P.slice(4, 8) }, bookingSideA: 'a', now: NOW });
+    addTournamentSub(db, { matchId: g.matchId, inId: P[8]!, team: 'a', now: NOW });
+    addTournamentSub(db, { matchId: g.matchId, inId: P[8]!, team: 'a', now: NOW });
+    expect(db.prepare("SELECT detail FROM booking_events WHERE booking_id = ? AND event = 'sub_added'").all(id))
+      .toEqual([{ detail: JSON.stringify({ matchId: g.matchId, steamid: P[8], team: 'a', joinedMap: 0 }) }]);
+    const pug = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, origin) VALUES ((SELECT MAX(id) FROM seasons), 'live', 'no_mercy', 'in_game')").run().lastInsertRowid);
+    expect(addTournamentSub(db, { matchId: pug, inId: P[8]!, team: 'a', now: NOW })).toBeNull();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_players WHERE match_id = ?').get(pug)).toEqual({ n: 0 });
+  });
 });
