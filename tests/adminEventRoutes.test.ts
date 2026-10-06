@@ -46,6 +46,15 @@ describe('the Events desk routes', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM events').get()).toEqual({ n: 0 });
   });
 
+  it('lists each stage\'s round schedule and how many rounds it will have (plan T4)', async () => {
+    const { id } = (await call('POST', '/api/admin/events', ADMIN, { name: 'Riverside League', startsAt: start(), entryKind: 'team' })).json();
+    await call('POST', `/api/admin/events/${id}/stages`, ADMIN, { type: 'league', config: { matches: 6, matchesPerWeek: 2, pairing: 'swiss', seasonStart: '2026-10-12' }, rulesetId: cup() });
+    await call('POST', `/api/admin/events/${id}/stages`, ADMIN, { type: 'single_elim', rulesetId: cup() });
+    const stages = (await call('GET', `/api/admin/events/${id}`, MOD)).json().stages;
+    expect(stages[0]).toMatchObject({ schedule: [], roundsKnown: 6 });
+    expect(stages[1]).toMatchObject({ schedule: [], roundsKnown: null });
+  });
+
   it('a mod reads an event, its stages and its history, and every write answers 403', async () => {
     const { id } = (await call('POST', '/api/admin/events', ADMIN, { name: 'Riverside Cup', startsAt: start(), entryKind: 'team' })).json();
     await call('POST', `/api/admin/events/${id}/stages`, ADMIN, { type: 'single_elim', rulesetId: cup() });

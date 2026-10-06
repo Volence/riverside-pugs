@@ -10,6 +10,7 @@ import * as R from './room.js';
 import { stageTable } from './flow.js';
 import { groupLabel, roundLabel } from './format.js';
 import { weekDates, weekOfRound } from './league.js';
+import { openProposal, proposalsOf } from './schedule.js';
 import type * as V from './validate.js';
 
 /** Brackets, standings and rounds of the stages that have started (plan T2),
@@ -38,6 +39,8 @@ export interface PlayEntry { id: number; name: string; tag: string; logoKey: str
 export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
   winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean; phase: RoomPhase;
+  /** Plan T4: the match's time (UTC ISO) and where it came from; null with no time. */
+  scheduledAt: string | null; scheduleSource: 'default' | 'agreed' | 'staff' | null;
   /** Staff only (plan T3c Ruling 16): filled by stagePlayViews with staff: true. */
   desk?: PlayMatchDesk;
 }
@@ -49,10 +52,17 @@ export interface PlayMatchDesk {
   booking: { id: number; state: string; serverName: string | null; recovering: boolean } | null;
   liveGame: { matchId: number; campaign: string; chapters: { ordinal: number; map: string }[] } | null;
   subs: { a: number; b: number };
+  /** Plan T4: a window stage's match only. */
+  schedule: { windowStart: string | null; windowEnd: string | null; proposal: { side: 'a' | 'b'; byName: string; time: string; autoAcceptAt: string | null } | null; proposals: number } | null;
 }
 /** dates: a league round's week, first and last day (YYYY-MM-DD); null for
- *  every other stage type. */
-export interface PlayRound { group: number; round: number; label: string; dates: { from: string; to: string } | null; matches: PlayMatch[] }
+ *  every other stage type. defaultAt: a window round's default time or a
+ *  rolling round's date (plan T4 Rulings 2 and 3); window: the round's
+ *  window on a window stage. */
+export interface PlayRound {
+  group: number; round: number; label: string; dates: { from: string; to: string } | null;
+  defaultAt: string | null; window: { from: string; to: string } | null; matches: PlayMatch[];
+}
 export interface PlayStanding {
   entry: PlayEntry; group: number; rank: number; groupRank: number; played: number; wins: number; losses: number;
   points: number; buchholz: number; scoreDiff: number;
@@ -86,6 +96,10 @@ function stageLabels(ev: E.EventRow, s: E.StageRow, ms: P.MatchRow[]) {
     labelType,
     label: (grp: number, round: number) => roundLabel(labelType, st.config, grp, round, last.get(grp)!),
     dates: (round: number) => (league && seasonStart ? weekDates(seasonStart, weekOfRound(round, league.matchesPerWeek)) : null),
+    times: (round: number) => {
+      const t = P.roundTimes(s, round, s.started_at ?? ev.starts_at);
+      return { defaultAt: t.at, window: t.from !== null && t.to !== null ? { from: t.from, to: t.to } : null };
+    },
   };
 }
 
@@ -107,6 +121,14 @@ function deskOf(db: DB, m: P.MatchRow): PlayMatchDesk {
     booking: booking ? { id: booking.id, state: B.isOpen(booking) ? booking.state : 'ended', serverName: server?.name ?? null, recovering: booking.recovering_at !== null } : null,
     liveGame: live ? { matchId: live.match_id!, campaign: live.campaign, chapters: replayableChapters(db, live.match_id!) } : null,
     subs: { a: R.subsUsed(db, m, 'a'), b: R.subsUsed(db, m, 'b') },
+    schedule: E.getStage(db, m.stage_id)!.scheduling !== 'window' ? null : (() => {
+      const p = openProposal(db, m.id);
+      return {
+        windowStart: m.window_start, windowEnd: m.window_end,
+        proposal: p ? { side: p.side, byName: getPlayer(db, p.proposed_by)?.name ?? 'a captain', time: p.proposed_time, autoAcceptAt: p.auto_accept_at } : null,
+        proposals: proposalsOf(db, m.id).length,
+      };
+    })(),
   };
 }
 
@@ -118,12 +140,12 @@ export function stagePlayViews(db: DB, ev: E.EventRow, opts: { staff?: boolean }
     const st = E.stageSettingsOf(s);
     const elim = st.type === 'single_elim' || st.type === 'double_elim';
     const ms = P.matchesOf(db, s.id);
-    const { labelType, label, dates } = stageLabels(ev, s, ms);
+    const { labelType, label, dates, times } = stageLabels(ev, s, ms);
     const rounds: PlayRound[] = [];
     for (const m of ms) {
       let r = rounds.find((x) => x.group === m.grp && x.round === m.round);
       if (!r) {
-        r = { group: m.grp, round: m.round, label: label(m.grp, m.round), dates: dates(m.round), matches: [] };
+        r = { group: m.grp, round: m.round, label: label(m.grp, m.round), dates: dates(m.round), ...times(m.round), matches: [] };
         rounds.push(r);
       }
       const resolved = P.RESOLVED.has(m.status);
@@ -131,6 +153,7 @@ export function stagePlayViews(db: DB, ev: E.EventRow, opts: { staff?: boolean }
         id: m.id, group: m.grp, round: m.round, slot: m.slot, a: entry(m.entry_a), b: entry(m.entry_b), status: m.status,
         winner: !resolved || m.winner_entry === null ? null : m.winner_entry === m.entry_a ? 'a' : 'b',
         scoreA: m.score_a, scoreB: m.score_b, forfeit: m.status === 'forfeit', bye: m.status === 'bye', phase: phaseOf(m),
+        scheduledAt: m.scheduled_at, scheduleSource: m.schedule_source,
       };
       if (opts.staff) row.desk = deskOf(db, m);
       r.matches.push(row);

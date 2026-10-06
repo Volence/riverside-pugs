@@ -72,8 +72,9 @@ export function reminderAt(createdMs: number, autoAcceptIso: string | null): str
   return t >= createdMs + REMINDER_MIN_GAP_MS ? new Date(t).toISOString() : null;
 }
 
-/** The match, waiting in a live window stage with a window whose end has not passed, both teams in. */
-function schedulable(db: DB, matchId: number, at: string): V.Checked<{ m: P.MatchRow; ev: E.EventRow }> {
+/** The match, waiting in a live window stage with a window whose end has not passed, both teams in.
+ *  Read-only: the room view (roomViews.ts) asks it too, so its buttons match what the writes accept. */
+export function schedulable(db: DB, matchId: number, at: string): V.Checked<{ m: P.MatchRow; ev: E.EventRow }> {
   const m = P.getMatch(db, matchId);
   if (!m) return V.fail('match_not_found');
   const ev = E.getEvent(db, m.event_id)!;
