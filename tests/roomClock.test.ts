@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
-import { RoomClock, dueRooms, higherSide } from '../src/events/roomClock.js';
+import { RoomClock, dueRooms, dueWindowRooms, higherSide } from '../src/events/roomClock.js';
+import * as S from '../src/events/schedule.js';
 import type { Notifier } from '../src/notify/notify.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { A, B } from './entryFixture.js';
-import { POOL7, TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { POOL7, TIMERS, roomFixture, windowFixture, type RoomFixture } from './roomFixture.js';
 import { MIN, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
 import { RR, SE, SWISS, playFixture } from './playFixture.js';
@@ -349,5 +350,99 @@ describe('RoomClock with the series (plan T3b)', () => {
     expect(f.match()).toMatchObject({ status: 'booking', booking_id: null });
     await f.clock.tick();
     expect(f.match().booking_id).not.toBeNull();
+  });
+});
+
+describe('RoomClock: window stages (plan T4)', () => {
+  const H = 60;
+  const hours = (h: number) => at(h * H);
+
+  it('opens a scheduled room at the lead before its time, not before, and DMs the rosters', async () => {
+    const f = await windowFixture();
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'default' WHERE id = ?").run(new Date(hours(2)).toISOString(), f.matchId);
+    const t = { t: hours(2) - 21 * 60_000 };
+    const { clock, send, push } = clockAt(f, t);
+    await clock.tick();
+    expect(match(f).status).toBe('waiting');
+    t.t = hours(2) - 20 * 60_000;
+    await clock.tick();
+    expect(match(f)).toMatchObject({ status: 'veto', room_seed: 5 });
+    expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], B[0]]), 'event_match_room', expect.anything());
+    expect(push).toHaveBeenCalledWith(f.matchId);
+    expect(dueWindowRooms(f.db, new Date(t.t), 20 * 60_000)).toEqual([]);
+  });
+
+  it('does not open a window match with no time, and respects the busy rule but not the earliest-match rule', async () => {
+    const f = await windowFixture();
+    expect(dueWindowRooms(f.db, new Date(hours(48)), 20 * 60_000)).toEqual([]);
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'default' WHERE id = ?").run(new Date(hours(1)).toISOString(), f.matchId);
+    // A second, later-round match of Rats already in a room makes Rats busy (test setup only).
+    const other = Number(f.db.prepare(
+      `INSERT INTO event_matches (event_id, stage_id, grp, round, slot, entry_a, entry_b, status, created_at) VALUES (?, ?, 1, 2, 1, ?, ?, 'veto', ?)`,
+    ).run(f.eventId, f.stageId, f.entryA, f.entryB, NOW.toISOString()).lastInsertRowid);
+    expect(dueWindowRooms(f.db, new Date(hours(1)), 20 * 60_000)).toEqual([]);
+    f.db.prepare("UPDATE event_matches SET status = 'done' WHERE id = ?").run(other);
+    expect(dueWindowRooms(f.db, new Date(hours(1)), 20 * 60_000).map((m) => m.id)).toEqual([f.matchId]);
+  });
+
+  it('auto-accepts a due proposal and opens the room at its time, reminding first when the lock is far off', async () => {
+    const f = await windowFixture();
+    f.db.prepare("UPDATE settings SET value = '48' WHERE key = 'reschedule_autoaccept_hours'").run();
+    const rules = S.scheduleRules(f.db);
+    expect(rules).toEqual({ autoAcceptHours: 48, leadMinutes: 20 });
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(hours(100)).toISOString(), rules, now: NOW });
+    expect(p.ok).toBe(true);
+    const t = { t: hours(24) };
+    const { clock, send, push } = clockAt(f, t);
+    await clock.tick();
+    expect(send).toHaveBeenCalledWith([B[0]], 'event_reschedule', expect.objectContaining({ content: expect.stringContaining('locks') }));
+    expect(send).not.toHaveBeenCalledWith(expect.arrayContaining([A[0]]), 'event_reschedule', expect.anything());
+    expect(S.openProposal(f.db, f.matchId)!.reminded_at).toBe(new Date(hours(24)).toISOString());
+    t.t = hours(48);
+    await clock.tick();
+    expect(match(f)).toMatchObject({ scheduled_at: new Date(hours(100)).toISOString(), schedule_source: 'agreed', status: 'waiting' });
+    expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], A[4], B[0], B[3]]), 'event_match_time', expect.anything());
+    expect(push).toHaveBeenCalledWith(f.matchId);
+    t.t = hours(100) - 20 * 60_000;
+    await clock.tick();
+    expect(match(f).status).toBe('veto');
+  });
+
+  it('expires a proposal whose time passed with no answer, and pushes', async () => {
+    const f = await windowFixture();
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(hours(30)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
+    expect(p.ok && p.value.auto_accept_at).toBeNull();
+    const t = { t: hours(30) };
+    const { clock, push } = clockAt(f, t);
+    await clock.tick();
+    expect(S.openProposal(f.db, f.matchId)).toBeUndefined();
+    expect(S.proposalsOf(f.db, f.matchId)[0]!.status).toBe('expired');
+    expect(push).toHaveBeenCalledWith(f.matchId);
+    expect(match(f).status).toBe('waiting');
+  });
+
+  it('at the window end forfeits the silent side, else holds the match for staff', async () => {
+    const f = await windowFixture({ to: new Date(hours(48)) });
+    S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: new Date(hours(30)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
+    const t = { t: hours(48) };
+    const { clock, send } = clockAt(f, t);
+    await clock.tick();
+    expect(match(f)).toMatchObject({ status: 'forfeit', winner_entry: f.entryB, result_source: 'forfeit' });
+    expect(S.proposalsOf(f.db, f.matchId)[0]!.status).toBe('expired');
+    expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], B[0]]), 'event_match_forfeit', expect.objectContaining({ content: expect.stringContaining('window') }));
+
+    const g = await windowFixture({ to: new Date(hours(48)) });
+    const alerts: string[] = [];
+    const { subscribeAdminEvents } = await import('../src/adminFeed.js');
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') alerts.push(e.text); });
+    try {
+      const { clock: c2 } = clockAt(g, { t: hours(48) });
+      await c2.tick();
+      expect(match(g)).toMatchObject({ status: 'admin_hold', hold_reason: 'window_expired', hold_from: 'waiting' });
+      expect(alerts.some((x) => /window/.test(x))).toBe(true);
+      await c2.tick();
+      expect(match(g).status).toBe('admin_hold');
+      expect(alerts.filter((x) => /window/.test(x))).toHaveLength(1);
+    } finally { off(); }
   });
 });

@@ -5,9 +5,11 @@ import * as E from './events.js';
 import * as N from './entries.js';
 import * as P from './play.js';
 import * as R from './room.js';
+import * as S from './schedule.js';
+import { publishAdminEvent } from '../adminFeed.js';
 import { forfeitMatch, stageTable } from './flow.js';
-import { tellReadyForfeit, tellRoomOpen } from './notices.js';
-import { autoAction, isHumanStep, type Side } from './veto.js';
+import { tellReadyForfeit, tellReschedule, tellRoomOpen, tellTimeLocked } from './notices.js';
+import { autoAction, isHumanStep, other, type Side } from './veto.js';
 
 export const ROOM_TICK_MS = 5_000;
 
@@ -65,6 +67,29 @@ export function dueRooms(db: DB, now: Date): P.MatchRow[] {
   return out;
 }
 
+/** Window-stage matches whose locked time minus the lead has come (plan T4
+ *  Ruling 9): both teams known and in, neither busy in another open room.
+ *  No earliest-match rule: a league week's matches are independent. */
+export function dueWindowRooms(db: DB, now: Date, leadMs: number): P.MatchRow[] {
+  const rows = db.prepare(
+    `SELECT m.* FROM event_matches m JOIN event_stages s ON s.id = m.stage_id
+     WHERE ${R.ROOM_LIVE_SQL} AND s.scheduling = 'window' AND m.status = 'waiting'
+       AND m.entry_a IS NOT NULL AND m.entry_b IS NOT NULL AND m.scheduled_at IS NOT NULL AND m.scheduled_at <= ?
+     ORDER BY m.scheduled_at, m.id`,
+  ).all(new Date(now.getTime() + leadMs).toISOString()) as P.MatchRow[];
+  const out: P.MatchRow[] = [];
+  const taken = new Map<number, Set<number>>();
+  for (const m of rows) {
+    if (!taken.has(m.event_id)) taken.set(m.event_id, R.busyEntries(db, m.event_id));
+    const busy = taken.get(m.event_id)!;
+    const ids = [m.entry_a!, m.entry_b!];
+    if (ids.some((id) => busy.has(id) || !N.isActive(N.getEntry(db, id)!))) continue;
+    ids.forEach((id) => busy.add(id));
+    out.push(m);
+  }
+  return out;
+}
+
 function earliestOf(db: DB, stageId: number, entryId: number): number | undefined {
   const row = db.prepare(
     `SELECT id FROM event_matches WHERE stage_id = ? AND (entry_a = ? OR entry_b = ?) AND status NOT IN ('done','forfeit','bye')
@@ -79,6 +104,10 @@ export class RoomClock {
   /** Matches whose overdue action was refused, keyed by kind and id: the
    *  clock retries every tick, so a refusal is logged once until it clears. */
   private readonly refused = new Set<string>();
+  /** Proposals whose due auto-accept was refused (plan T4): an entry out, a
+   *  stage no longer live, a window moved. Expected, so logged once each and
+   *  retried every tick until staleProposals or the window end closes them. */
+  private readonly refusedProposals = new Set<number>();
 
   constructor(private readonly deps: {
     db: DB; notifier?: Notifier; publicUrl?: string; push?: (matchId: number) => void; now?: () => number; seed?: () => number;
@@ -119,6 +148,7 @@ export class RoomClock {
     this.ticking = true;
     try {
       const now = new Date(this.now());
+      await this.schedule(now);
       this.openDue(now);
       // Tournaments plan T3b: bookings, the server wait alert, the presence fallback.
       try { this.deps.series?.tick(now); } catch (err) { console.error('[rooms] series tick failed:', err instanceof Error ? err.message : err); }
@@ -133,7 +163,10 @@ export class RoomClock {
   private openDue(now: Date): void {
     const { db } = this.deps;
     const timers = R.roomTimers(db);
-    for (const m of dueRooms(db, now)) {
+    // Rolling rooms first; a team they make busy is refused by openRoom
+    // (entry_busy) for a window room in the same pass (one room per team).
+    const due = [...dueRooms(db, now), ...dueWindowRooms(db, now, S.scheduleRules(db).leadMinutes * 60_000)];
+    for (const m of due) {
       try {
         const r = R.openRoom(db, { matchId: m.id, by: null, higher: higherSide(db, m), seed: this.deps.seed?.() ?? randomInt(2 ** 31), timers, now });
         if (!r.ok) continue;
@@ -143,6 +176,80 @@ export class RoomClock {
         console.error(`[rooms] open of match ${m.id} failed:`, err instanceof Error ? err.message : err);
       }
     }
+  }
+
+  /** Plan T4: the proposals (Rulings 6 and 8). Each is caught on its own.
+   *  The window ends are awaited so a tick finishes its forfeits before the
+   *  next one starts (the ticking guard then keeps them single). */
+  private async schedule(now: Date): Promise<void> {
+    const { db } = this.deps;
+    for (const p of S.remindersDue(db, now)) {
+      try {
+        const m = P.getMatch(db, p.event_match_id);
+        if (m && S.noteReminded(db, { proposalId: p.id, now }).ok) tellReschedule(this.deps, m.event_id, m.id, 'reminder', p.id);
+      } catch (err) { console.error(`[rooms] reminder for proposal ${p.id} failed:`, err instanceof Error ? err.message : err); }
+    }
+    const due = S.autoAcceptDue(db, now);
+    const dueIds = new Set(due.map((p) => p.id));
+    for (const id of this.refusedProposals) if (!dueIds.has(id)) this.refusedProposals.delete(id);
+    for (const p of due) {
+      try {
+        const r = S.autoAccept(db, { proposalId: p.id, now });
+        if (!r.ok) {
+          if (!this.refusedProposals.has(p.id)) {
+            this.refusedProposals.add(p.id);
+            console.warn(`[rooms] proposal ${p.id} (match ${p.event_match_id}) is due to lock but was refused (${r.error}); retrying until it expires`);
+          }
+          continue;
+        }
+        this.refusedProposals.delete(p.id);
+        tellTimeLocked(this.deps, r.value.event_id, r.value.id);
+        this.pushChange(r.value.id);
+      } catch (err) { console.error(`[rooms] auto-accept of proposal ${p.id} failed:`, err instanceof Error ? err.message : err); }
+    }
+    for (const p of S.staleProposals(db, now)) {
+      try {
+        if (S.expireProposal(db, { proposalId: p.id, reason: 'time_passed', now }).ok) this.pushChange(p.event_match_id);
+      } catch (err) { console.error(`[rooms] expiry of proposal ${p.id} failed:`, err instanceof Error ? err.message : err); }
+    }
+    for (const m of S.expiredWindows(db, now)) {
+      try {
+        await this.expireWindow(m.id, now);
+      } catch (err) { console.error(`[rooms] window end of match ${m.id} failed:`, err instanceof Error ? err.message : err); }
+    }
+  }
+
+  /** Ruling 8: the silent side forfeits; otherwise staff decide from the
+   *  proposal log. The match is re-read (an earlier forfeit in this loop
+   *  awaited), and the forfeit re-checks inside the event's chain that the
+   *  match still waits with the same silent side, so a time locked meanwhile
+   *  is never forfeited. */
+  private async expireWindow(matchId: number, now: Date): Promise<void> {
+    const { db } = this.deps;
+    const m = S.expiredWindows(db, now).find((x) => x.id === matchId);
+    if (!m) return;
+    const open = S.openProposal(db, m.id);
+    if (open) S.expireProposal(db, { proposalId: open.id, reason: 'window_ended', now });
+    const silent = S.silentSide(db, m);
+    if (silent !== null) {
+      const r = await forfeitMatch(db, {
+        eventId: m.event_id, matchId: m.id, winner: other(silent), now,
+        expect: (x) => x.status === 'waiting' && S.silentSide(db, x) === silent,
+      });
+      if (r.ok) tellReadyForfeit(this.deps, m.event_id, m.id, 'window');
+    } else {
+      const r = R.holdMatch(db, { matchId: m.id, by: null, reason: 'window_expired', now });
+      if (r.ok) {
+        const ev = E.getEvent(db, m.event_id)!;
+        const name = (id: number) => N.getEntry(db, id)?.name ?? 'a team';
+        publishAdminEvent({
+          kind: 'problem',
+          text: `Tournament match ${name(m.entry_a!)} vs ${name(m.entry_b!)} (${ev.name}) was not played by the end of its window and is on hold: decide from the proposal log on the match page.`,
+          link: { label: 'Open the match room', path: `/event/${ev.slug}/match/${m.id}` },
+        });
+      }
+    }
+    this.pushChange(m.id);
   }
 
   private async expire(now: Date): Promise<void> {

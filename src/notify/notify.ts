@@ -17,7 +17,7 @@ export type NotifyType =
   | 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined'
   | 'scrim_review'
   | 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
-  | 'event_match_connect' | 'event_match_result' | 'event_match_staff';
+  | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time';
 
 export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_invite', label: 'Someone invites me to a booked server' },
@@ -41,6 +41,8 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'event_match_connect', label: 'My tournament server is ready, with the connect line' },
   { type: 'event_match_result', label: 'A tournament match of mine finished and is in its confirm window' },
   { type: 'event_match_staff', label: 'Staff act on a tournament match of mine (a freeze, a reopened veto, a replayed chapter, a moved server, more time, a released hold)' },
+  { type: 'event_reschedule', label: 'A captain proposes, counters, declines or withdraws a time for a tournament match of mine, or a proposal is about to lock' },
+  { type: 'event_match_time', label: 'A tournament match of mine has its time set' },
 ];
 
 export function isNotifyType(v: unknown): v is NotifyType {
