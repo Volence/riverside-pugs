@@ -26,7 +26,7 @@ import { claimIdle, claimableServers } from '../src/serverPool.js';
 import { isHeld } from '../src/serverHolds.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 import { EVENT_ERRORS } from '../src/events/validate.js';
-import { adminPauseTook, parseSubReply } from '../src/events/series.js';
+import { adminPauseTook, parseSubReply, soonText } from '../src/events/series.js';
 import { recordPresenceLine } from '../src/presence.js';
 import { restoreSnapshot } from '../src/bookings/restore.js';
 
@@ -96,7 +96,11 @@ describe('SeriesEngine: booking, the game burst and connect', () => {
     expect(f.sent.indexOf(matchLine)).toBeLessThan(f.sent.indexOf('changelevel l4d_vs_hospital01_apartment'));
     // T3b final review: no PUG abandon and no end kick on a tournament box, set in the game burst itself.
     const burst = f.sent.slice(0, f.sent.indexOf(matchLine));
-    expect(burst.slice(-3)).toEqual(['sm_pug_tournament 1', 'sm_pug_leave_budget 0', 'sm_pug_end_kick 0']);
+    expect(burst.slice(-9)).toEqual([
+      'sm_pug_tournament 1', 'sm_pug_leave_budget 0', 'sm_pug_end_kick 0',
+      // Plan T5: the stage's snapshot (Standard Cup) as the box's match-rule cvars.
+      'sm_pug_tech_limit 2', 'sm_pug_tech_seconds 300', 'sm_pug_dc_team_seconds 600', 'sm_pug_sub_emergency 1', 'sm_pug_sub_charge 0', 'sm_pug_admin_cooldown 180',
+    ]);
     // Bats survive first: their four are pug team a.
     expect(f.sent.filter((c) => c.startsWith('sm_pug_roster '))).toEqual([...BATS.slice(0, 4).map((s) => `sm_pug_roster "${s}:a"`), ...A.slice(0, 4).map((s) => `sm_pug_roster "${s}:b"`)]);
     expect(f.sent.some((c) => c.startsWith('say [Match] Game 1: No Mercy. Bats start as survivors.'))).toBe(true);
@@ -466,6 +470,24 @@ describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'match_held'").pluck().get()).toBe(0);
     expect(f.db.prepare("SELECT state FROM matches WHERE booking_id = ?").pluck().get(b.id)).toBe('aborted');
   });
+
+  it('waits the stage\'s series.nextGameSeconds before a tiebreak and says so (plan T5 Ruling 16)', async () => {
+    f = await seriesFixture();
+    const s = f.db.prepare('SELECT s.id, s.rules_json, r.rules_json AS base FROM event_stages s JOIN rulesets r ON r.id = s.ruleset_id WHERE s.id = ?')
+      .get(f.match().stage_id) as { id: number; rules_json: string | null; base: string };
+    const rules = JSON.parse(s.rules_json ?? s.base) as Record<string, unknown>;
+    f.db.prepare('UPDATE event_stages SET rules_json = ? WHERE id = ?').run(JSON.stringify({ ...rules, series: { nextGameSeconds: 180 } }), s.id);
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.sent.length = 0;
+    f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital01_apartment', a: 100, b: 100, half1Surv: 'a' }, { map: 'l4d_vs_hospital02_subway', a: 200, b: 200, half1Surv: 'b' }]);
+    expect(Date.parse(f.booking().next_at!)).toBe(f.t.t + 180_000);
+    expect(f.sent.some((c) => c.startsWith('say [Match] Game 1 is tied 300 to 300') && c.includes('in about 3 minutes'))).toBe(true);
+    expect(soonText(60)).toBe('about a minute');
+    expect(soonText(45)).toBe('about a minute');
+    expect(soonText(180)).toBe('about 3 minutes');
+  });
 });
 
 describe('SeriesEngine: the end of a series and the box (T3b ledger rulings)', () => {
@@ -823,6 +845,7 @@ describe('BookingRunner on a tournament box (plan T3c)', () => {
     expect(await f.runner.send(999, ['say hi'], 'nothing')).toBeNull();
     await f.tick();
     expect(f.sent).toContain('sm_pug_tournament 1');
+    expect(f.sent).toContain('sm_pug_dc_team_seconds 600');
     const replies = await f.runner.send(f.booking().id, ['sm_pug_status'], 'a look');
     expect(replies).toHaveLength(1);
     expect(f.sent.at(-1)).toBe('sm_pug_status');

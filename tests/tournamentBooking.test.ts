@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
 import { appendTournamentGame, createTournamentBooking, getBooking, peopleOf, recordPresence, setNext, sidesOf, advancePlaylist, swapPlayer, beginMove, holdBox, markSetup, markReady } from '../src/bookings/bookings.js';
-import { addTournamentSub, boxNeedsGame, createTournamentGame, gameLinesOf, isPendingGame } from '../src/bookings/tournamentGames.js';
+import { addTournamentSub, boxNeedsGame, createTournamentGame, gameLinesOf, isPendingGame, tournamentRuleLines, TOURNAMENT_RULE_CLEAR } from '../src/bookings/tournamentGames.js';
+import { TEMPLATES } from '../src/rulesets.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const NOW = new Date('2026-10-07T20:00:00.000Z');
@@ -90,6 +91,22 @@ describe('createTournamentGame and gameLinesOf', () => {
     db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital01_apartment', datetime('now'))").run(g.matchId);
     expect(isPendingGame(db, g.matchId)).toBe(false);
     expect((db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE booking_id = ? AND event = 'game_started'").get(r.value.id) as { n: number }).n).toBe(1);
+  });
+
+  it('puts the ruleset\'s plan T5 cvars right after the tournament lines in the burst (Ruling 17)', () => {
+    const rules = { ...TEMPLATES['Standard Cup'], pause: { ...TEMPLATES['Standard Cup'].pause, techSeconds: 240 }, disconnect: { teamSeconds: 480 }, staffCall: { cooldownSeconds: 90 }, subs: { perMatch: 2, emergency: false, emergencyChargeSeconds: 30 } };
+    const r = createTournamentBooking(db, { region: 'na', campaign: 'no_mercy', rulesJson: JSON.stringify(rules), rulesetId: null, gameConfig: 'standard', createdBy: P[9]!, sides: [sides()[0], sides()[1]], now: NOW });
+    if (!r.ok) throw new Error(r.error);
+    const serverId = addServer(db, { name: 'box', host: '10.0.0.1', port: 27015, rconPort: 1, rconPassword: 'x' });
+    const g = createTournamentGame(db, { bookingId: r.value.id, serverId, campaign: 'no_mercy', teams: { a: P.slice(4, 8), b: P.slice(0, 4) }, bookingSideA: 'b', now: NOW });
+    const all = gameLinesOf(db, { matchId: g.matchId, stopAfterMap: null, notice: 'x' });
+    expect(all.slice(0, 9)).toEqual([
+      'sm_pug_tournament 1', 'sm_pug_leave_budget 0', 'sm_pug_end_kick 0',
+      'sm_pug_tech_limit 2', 'sm_pug_tech_seconds 240', 'sm_pug_dc_team_seconds 480', 'sm_pug_sub_emergency 0', 'sm_pug_sub_charge 30', 'sm_pug_admin_cooldown 90',
+    ]);
+    expect(all[9]).toBe(`sm_pug_match ${g.matchId} ${g.token} no_mercy`);
+    expect(tournamentRuleLines(null)).toEqual([]);
+    expect(TOURNAMENT_RULE_CLEAR).toEqual(['sm_pug_tech_limit 0', 'sm_pug_tech_seconds 300', 'sm_pug_dc_team_seconds 0', 'sm_pug_sub_emergency 0', 'sm_pug_sub_charge 0', 'sm_pug_admin_cooldown 180']);
   });
 });
 
