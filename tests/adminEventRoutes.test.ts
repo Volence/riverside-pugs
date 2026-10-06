@@ -55,6 +55,13 @@ describe('the Events desk routes', () => {
     expect(stages[1]).toMatchObject({ schedule: [], roundsKnown: null });
   });
 
+  it('knows a round-robin league has its config matches as its rounds (plan T4)', async () => {
+    const { id } = (await call('POST', '/api/admin/events', ADMIN, { name: 'Riverside RR League', startsAt: start(), entryKind: 'team' })).json();
+    expect((await call('POST', `/api/admin/events/${id}/stages`, ADMIN, { type: 'league', config: { matches: 5, matchesPerWeek: 1, pairing: 'round_robin', seasonStart: null }, rulesetId: cup() })).statusCode).toBe(200);
+    const stages = (await call('GET', `/api/admin/events/${id}`, ADMIN)).json().stages;
+    expect(stages[0]).toMatchObject({ settings: { config: { pairing: 'round_robin', matches: 5 } }, schedule: [], roundsKnown: 5 });
+  });
+
   it('a mod reads an event, its stages and its history, and every write answers 403', async () => {
     const { id } = (await call('POST', '/api/admin/events', ADMIN, { name: 'Riverside Cup', startsAt: start(), entryKind: 'team' })).json();
     await call('POST', `/api/admin/events/${id}/stages`, ADMIN, { type: 'single_elim', rulesetId: cup() });

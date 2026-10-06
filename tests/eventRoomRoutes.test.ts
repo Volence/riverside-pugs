@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
+import type { Notifier } from '../src/notify/notify.js';
+import { eventRoutes } from '../src/routes/events.js';
+import { adminEventRoutes } from '../src/routes/adminEvents.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +13,7 @@ import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
 import * as E from '../src/events/events.js';
+import * as S from '../src/events/schedule.js';
 import { RoomClock } from '../src/events/roomClock.js';
 import { SeriesEngine } from '../src/events/series.js';
 import { ADMIN, must, stageBody } from './eventFixture.js';
@@ -248,5 +253,159 @@ describe('the desk tools (plan T3c)', () => {
     for (const action of ['act', 'reopen-veto', 'replay-chapter', 'move-server', 'extend-grace', 'release-hold', 'freeze', 'unfreeze']) {
       expect((await post(`${base()}/${action}`, MOD, { kind: 'ready', side: 'a', ordinal: 0, minutes: 5 })).statusCode, action).toBe(403);
     }
+  });
+});
+
+describe('reschedules over HTTP (plan T4)', () => {
+  const MOD = '76561199000000711';
+  const toWindow = () => {
+    f.db.prepare("UPDATE event_stages SET scheduling = 'window' WHERE id = ?").run(f.stageId);
+    f.db.prepare('UPDATE event_matches SET window_start = ?, window_end = ? WHERE id = ?').run(days(0), days(7), f.matchId);
+  };
+  const scheduleLogs = () => (f.db.prepare("SELECT action FROM event_log WHERE action IN ('schedule_set', 'schedule_applied') ORDER BY id").all() as { action: string }[]).map((r) => r.action);
+
+  it('proposes, counters, withdraws and answers through the routes, with the sentences', async () => {
+    toWindow();
+    const time = days(3);
+    const t4 = days(4);
+    const t5 = days(5);
+    expect((await post(`${room()}/propose`, OUTSIDER, { time })).json()).toEqual({ error: EVENT_ERRORS.not_manager.text });
+    expect((await post(`${room()}/propose`, A[0], { time: 'soon' })).json()).toEqual({ error: EVENT_ERRORS.bad_time.text });
+    expect((await post(`${room()}/propose`, A[0], { time, note: 'after work' })).statusCode).toBe(200);
+    expect((await post(`${room()}/propose`, B[0], { time })).json()).toEqual({ error: EVENT_ERRORS.proposal_open.text });
+    expect((await get(room(), B[0])).json().schedule).toMatchObject({ proposal: { side: 'a', note: 'after work' }, canAnswer: true });
+    // The open proposal is public like the veto log; outsiders never get the buttons.
+    expect((await get(room())).json().schedule).toMatchObject({ proposal: { side: 'a' }, canPropose: false, canAnswer: false, canWithdraw: false });
+    expect((await post(`${room()}/respond`, A[0], { accept: true })).json()).toEqual({ error: EVENT_ERRORS.own_proposal.text });
+    expect((await post(`${room()}/withdraw`, B[0])).json()).toEqual({ error: EVENT_ERRORS.not_your_proposal.text });
+    expect((await post(`${room()}/counter`, B[0], { time: t4 })).statusCode).toBe(200);
+    expect(S.proposalsOf(f.db, f.matchId).map((p) => [p.side, p.status])).toEqual([['a', 'countered'], ['b', 'open']]);
+    expect((await post(`${room()}/withdraw`, B[0])).statusCode).toBe(200);
+    expect((await post(`${room()}/respond`, A[0], { accept: true })).json()).toEqual({ error: EVENT_ERRORS.no_proposal.text });
+    expect((await post(`${room()}/propose`, B[0], { time: t5 })).statusCode).toBe(200);
+    expect((await post(`${room()}/respond`, A[1], { accept: 'yes' })).statusCode).toBe(400);
+    expect((await post(`${room()}/respond`, A[1], { accept: true })).statusCode).toBe(200);
+    const v = (await get(room())).json();
+    expect(v.schedule).toMatchObject({ scheduledAt: t5, source: 'agreed', proposal: null });
+    expect(v.schedule.log).toHaveLength(3);
+  });
+
+  it('refuses every reschedule route on a rolling stage, signed out, and behind the closed switch', async () => {
+    for (const action of ['propose', 'respond', 'counter', 'withdraw']) {
+      expect((await post(`${room()}/${action}`, A[0], { time: days(3), accept: true })).json(), action).toEqual({ error: EVENT_ERRORS.not_schedulable.text });
+      // Signed out has no competitive access, so allowedActive answers the closed switch's 404 (as on every room write).
+      expect((await app.inject({ method: 'POST', url: `${room()}/${action}`, payload: { time: days(3) } })).statusCode, action).toBe(404);
+    }
+    toWindow();
+    f.db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
+    expect((await post(`${room()}/propose`, A[0], { time: days(3) })).statusCode).toBe(404);
+    expect(S.proposalsOf(f.db, f.matchId)).toEqual([]);
+  });
+
+  it('staff set a time and the round schedule from the desk, admin only, with audit rows', async () => {
+    toWindow();
+    cookies[MOD] = authedCookie(app, f.db, MOD);
+    f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+    const base = `/api/admin/events/${f.eventId}`;
+    const t2 = days(2);
+    const t3 = days(3);
+    const t7 = days(7);
+    const t0 = P.getMatch(f.db, f.matchId)!.window_start!;
+    expect((await post(`${base}/matches/${f.matchId}/set-time`, A[0], { time: t2 })).statusCode).toBe(403);
+    expect((await post(`${base}/matches/${f.matchId}/set-time`, MOD, { time: t2 })).statusCode).toBe(403);
+    expect((await post(`${base}/matches/${f.matchId}/set-time`, ADMIN, { time: 'x' })).json()).toEqual({ error: EVENT_ERRORS.bad_time.text });
+    expect((await post(`${base}/matches/${f.matchId}/set-time`, ADMIN, { time: t2 })).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ scheduled_at: t2, schedule_source: 'staff' });
+    const rounds = [{ round: 1, at: t3, from: t0, to: t7 }];
+    expect((await post(`${base}/stages/${f.stageId}/schedule`, A[0], { rounds })).statusCode).toBe(403);
+    expect((await post(`${base}/stages/${f.stageId}/schedule`, MOD, { rounds })).statusCode).toBe(403);
+    expect((await post(`${base}/stages/${f.stageId}/schedule`, ADMIN, { rounds: 'x' })).json()).toEqual({ error: EVENT_ERRORS.bad_schedule.text });
+    // A refused schedule never reaches applySchedule.
+    expect(scheduleLogs()).toEqual([]);
+    expect((await post(`${base}/stages/${f.stageId}/schedule`, ADMIN, { rounds })).json()).toEqual({ stamped: 1 });
+    expect(E.scheduleOf(E.getStage(f.db, f.stageId)!)).toEqual([{ round: 1, at: t3, from: t0, to: t7 }]);
+    expect(scheduleLogs()).toEqual(['schedule_set', 'schedule_applied']);
+    // Applied at once on a live stage: the window follows; the staff-set time is kept.
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ scheduled_at: t2, schedule_source: 'staff', window_end: t7 });
+    expect(f.db.prepare("SELECT action FROM admin_actions WHERE action IN ('event_match_time', 'event_schedule_set') ORDER BY id").all())
+      .toEqual([{ action: 'event_match_time' }, { action: 'event_schedule_set' }]);
+    expect((await post(`${base}/stages/999/schedule`, ADMIN, { rounds })).statusCode).toBe(404);
+    expect((await post(`${base}/matches/999999/set-time`, ADMIN, { time: t2 })).statusCode).toBe(404);
+  });
+
+  it('sets and applies a stage schedule in one transaction: a fault applying it keeps neither', async () => {
+    toWindow();
+    const t0 = P.getMatch(f.db, f.matchId)!.window_start!;
+    f.db.exec("CREATE TRIGGER fail_apply BEFORE INSERT ON event_log WHEN NEW.action = 'schedule_applied' BEGIN SELECT RAISE(ABORT, 'apply failed'); END");
+    const res = await post(`/api/admin/events/${f.eventId}/stages/${f.stageId}/schedule`, ADMIN, { rounds: [{ round: 1, at: days(3), from: t0, to: days(6) }] });
+    expect(res.statusCode).toBe(500);
+    expect(E.getStage(f.db, f.stageId)!.schedule_json).toBeNull();
+    expect(scheduleLogs()).toEqual([]);
+    expect(P.getMatch(f.db, f.matchId)!.window_end).not.toBe(null);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'event_schedule_set'").get()).toEqual({ n: 0 });
+  });
+});
+
+describe('reschedule DMs and pushes (plan T4 Ruling 11)', () => {
+  let bare: FastifyInstance;
+  let send: ReturnType<typeof vi.fn>;
+  let pushChange: ReturnType<typeof vi.fn>;
+  beforeEach(async () => {
+    f.db.prepare("UPDATE event_stages SET scheduling = 'window' WHERE id = ?").run(f.stageId);
+    f.db.prepare('UPDATE event_matches SET window_start = ?, window_end = ? WHERE id = ?').run(days(0), days(7), f.matchId);
+    send = vi.fn(() => 1);
+    pushChange = vi.fn();
+    bare = Fastify();
+    await bare.register(cookie, { secret: 'x'.repeat(32) });
+    const opts = { db: f.db, store: () => { throw new Error('no store'); }, notifier: { send } as unknown as Notifier, publicUrl: 'https://x', rooms: { pushChange } as unknown as RoomClock };
+    await bare.register(eventRoutes, opts);
+    await bare.register(adminEventRoutes, opts);
+    await bare.ready();
+  });
+  afterEach(async () => { await bare.close(); });
+  const bpost = (url: string, as: string, body: object = {}) => bare.inject({ method: 'POST', url, cookies: authedCookie(bare, f.db, as), payload: body });
+  const calls = () => send.mock.calls.map(([to, type, payload]) => ({ to: [...(to as string[])].sort(), type: type as string, content: (payload as { content: string }).content }));
+  const mgrsA = [A[0]!, A[1]!].sort();
+  const mgrsB = [B[0]!];
+  /** Both rosters as rosterA and rosterB build them (A[5] is not on Rats' roster). */
+  const rosters = [...A.slice(0, 5), ...B.slice(0, 4)].sort();
+
+  it('tells the side that must act next, both sides of a withdrawal, and both rosters of a locked time', async () => {
+    expect((await bpost(`${room()}/propose`, A[0], { time: days(3) })).statusCode).toBe(200);
+    expect((await bpost(`${room()}/counter`, B[0], { time: days(4) })).statusCode).toBe(200);
+    expect((await bpost(`${room()}/withdraw`, B[0])).statusCode).toBe(200);
+    expect((await bpost(`${room()}/propose`, A[0], { time: days(3) })).statusCode).toBe(200);
+    expect((await bpost(`${room()}/respond`, B[0], { accept: false })).statusCode).toBe(200);
+    expect((await bpost(`${room()}/propose`, B[0], { time: days(5) })).statusCode).toBe(200);
+    expect((await bpost(`${room()}/respond`, A[1], { accept: true })).statusCode).toBe(200);
+    const c = calls();
+    expect(c.map((x) => [x.type, x.to])).toEqual([
+      ['event_reschedule', mgrsB],
+      ['event_reschedule', mgrsA],
+      ['event_reschedule', [...mgrsB, ...mgrsA].sort()],
+      ['event_reschedule', mgrsB],
+      ['event_reschedule', mgrsA],
+      ['event_reschedule', mgrsA],
+      ['event_match_time', rosters],
+    ]);
+    expect(pushChange.mock.calls).toEqual(Array(7).fill([f.matchId]));
+    // A refusal sends nothing and pushes nothing.
+    expect((await bpost(`${room()}/withdraw`, A[0])).statusCode).toBe(409);
+    expect(send).toHaveBeenCalledTimes(7);
+    expect(pushChange).toHaveBeenCalledTimes(7);
+  });
+
+  it('a staff time tells both rosters as staff set, and a stage schedule pushes every waiting match', async () => {
+    expect((await bpost(`/api/admin/events/${f.eventId}/matches/${f.matchId}/set-time`, ADMIN, { time: days(2) })).statusCode).toBe(200);
+    const c = calls();
+    expect(c.map((x) => x.type)).toEqual(['event_match_time']);
+    expect(c[0]!.to).toEqual(rosters);
+    expect(c[0]!.content).toMatch(/staff set/i);
+    expect(pushChange.mock.calls).toEqual([[f.matchId]]);
+    const t0 = P.getMatch(f.db, f.matchId)!.window_start!;
+    expect((await bpost(`/api/admin/events/${f.eventId}/stages/${f.stageId}/schedule`, ADMIN, { rounds: [{ round: 1, at: days(3), from: t0, to: days(6) }] })).statusCode).toBe(200);
+    const waiting = P.matchesOf(f.db, f.stageId).filter((m) => m.status === 'waiting').map((m) => [m.id]);
+    expect(waiting.length).toBeGreaterThan(0);
+    expect(pushChange.mock.calls.slice(1)).toEqual(waiting);
   });
 });

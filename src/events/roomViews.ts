@@ -47,8 +47,11 @@ export interface RoomProposal {
   status: RescheduleStatus; respondedByName: string | null; respondedAt: string | null;
 }
 /** The schedule of a window-stage match (plan T4 Ruling 12); null on a
- *  rolling stage. Everyone sees the locked time and the window; the open
- *  proposal and the log of closed ones only both teams' rosters and staff. */
+ *  rolling stage. Everything is public like the veto log (Global
+ *  Constraint): the locked time, the window, the open proposal and the log
+ *  of closed ones, since the log decides a window-end forfeit. Only the
+ *  can* flags depend on the viewer. A proposal staff closed from the desk
+ *  names its responder as Staff to everyone but staff. */
 export interface RoomSchedule {
   scheduledAt: string | null; source: 'default' | 'agreed' | 'staff' | null; windowStart: string | null; windowEnd: string | null;
   /** scheduledAt minus the lead: when the room opens on its own. */
@@ -171,21 +174,25 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
   let schedule: RoomSchedule | null = null;
   if (settings.scheduling === 'window') {
     const lead = scheduleRules(db).leadMinutes;
+    // Desk actions are staff-collective: a proposal closed by a person (not
+    // the clock) as expired was closed by staffSetTime, so its responder is staff.
+    const responderName = (p: RescheduleRow): string | null => {
+      if (p.responded_by === null) return null;
+      if (p.status === 'expired' && !staff) return 'Staff';
+      return getPlayer(db, p.responded_by)?.name ?? (p.status === 'expired' ? 'Staff' : 'a captain');
+    };
     const toView = (p: RescheduleRow): RoomProposal => ({
       id: p.id, side: p.side, byName: getPlayer(db, p.proposed_by)?.name ?? 'a captain', time: p.proposed_time, note: p.note, createdAt: p.created_at,
-      autoAcceptAt: p.auto_accept_at, status: p.status,
-      respondedByName: p.responded_by === null ? null : getPlayer(db, p.responded_by)?.name ?? 'a captain', respondedAt: p.responded_at,
+      autoAcceptAt: p.auto_accept_at, status: p.status, respondedByName: responderName(p), respondedAt: p.responded_at,
     });
-    // Proposals are the two teams' business: their rosters and staff see them, outsiders only the locked time.
-    const insider = staff || mySide !== null;
     const open = openProposal(db, m.id);
     const managed = viewer !== null ? R.sideOf(db, m, viewer) : null;
     const can = managed !== null && schedulable(db, m.id, now.toISOString()).ok;
     schedule = {
       scheduledAt: m.scheduled_at, source: m.schedule_source, windowStart: m.window_start, windowEnd: m.window_end,
       opensAt: m.scheduled_at === null ? null : new Date(Date.parse(m.scheduled_at) - lead * 60_000).toISOString(), leadMinutes: lead,
-      proposal: insider && open ? toView(open) : null,
-      log: insider ? proposalsOf(db, m.id).filter((p) => p.status !== 'open').map(toView) : [],
+      proposal: open ? toView(open) : null,
+      log: proposalsOf(db, m.id).filter((p) => p.status !== 'open').map(toView),
       canPropose: can && !open,
       canAnswer: can && !!open && open.side !== managed,
       canWithdraw: can && !!open && open.side === managed,

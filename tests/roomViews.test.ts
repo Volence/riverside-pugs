@@ -86,16 +86,40 @@ describe('matchRoomView', () => {
     const after = view(f, A[3]).schedule!;
     expect(after).toMatchObject({ scheduledAt: time, source: 'agreed', opensAt: at(72 * 60 - 20).toISOString(), proposal: null });
     expect(after.log.map((l) => [l.status, l.respondedByName !== null])).toEqual([['accepted', true]]);
-    // Outsiders see the locked time and the window, never the proposals; staff see them all.
-    expect(view(f, null).schedule).toMatchObject({ scheduledAt: time, source: 'agreed', windowStart: NOW.toISOString(), proposal: null, log: [] });
-    expect(view(f, OUTSIDER).schedule!.log).toEqual([]);
+    // The proposals are public like the veto log (they decide a window-end forfeit); outsiders never get the buttons.
+    expect(view(f, null).schedule).toMatchObject({ scheduledAt: time, source: 'agreed', windowStart: NOW.toISOString(), proposal: null });
+    expect(view(f, OUTSIDER).schedule!.log.map((l) => l.status)).toEqual(['accepted']);
+    expect(view(f, null).schedule!.log).toHaveLength(1);
     expect(view(f, null, true).schedule!.log).toHaveLength(1);
     S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: at(96 * 60).toISOString(), rules: { autoAcceptHours: 24, leadMinutes: 20 }, now: at(2) });
-    expect(view(f, OUTSIDER).schedule!.proposal).toBeNull();
+    expect(view(f, OUTSIDER).schedule).toMatchObject({ proposal: { side: 'b' }, canPropose: false, canAnswer: false, canWithdraw: false });
+    expect(view(f, null).schedule!.proposal).toMatchObject({ side: 'b' });
     expect(view(f, A[3]).schedule!.proposal).toMatchObject({ side: 'b' });
     expect(view(f, null, true).schedule).toMatchObject({ proposal: { side: 'b' }, canPropose: false, canAnswer: false, canWithdraw: false });
     const g = await roomFixture();
     expect(view(g, A[0]).schedule).toBeNull();
+  });
+
+  it('names a staff responder as Staff to everyone but staff (plan T4)', async () => {
+    const f = await windowFixture();
+    const { getPlayer, upsertPlayer } = await import('../src/players.js');
+    const STAFF = '76561199000000720';
+    upsertPlayer(f.db, { steamid: STAFF, name: 'Desk Person', avatar: null }, []);
+    const rules = { autoAcceptHours: 24, leadMinutes: 20 };
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: at(72 * 60).toISOString(), rules, now: NOW });
+    if (!p.ok) throw new Error(p.error);
+    const s = S.staffSetTime(f.db, { matchId: f.matchId, by: STAFF, time: at(48 * 60).toISOString(), now: at(1) });
+    if (!s.ok) throw new Error(s.error);
+    const line = (viewer: string | null, staff = false) => view(f, viewer, staff).schedule!.log.map((l) => [l.status, l.respondedByName]);
+    expect(line(null)).toEqual([['expired', 'Staff']]);
+    expect(line(OUTSIDER)).toEqual([['expired', 'Staff']]);
+    expect(line(A[0])).toEqual([['expired', 'Staff']]);
+    expect(line(B[0])).toEqual([['expired', 'Staff']]);
+    expect(line(STAFF, true)).toEqual([['expired', 'Desk Person']]);
+    // A captain's own answer keeps the captain's name for everyone.
+    S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: at(96 * 60).toISOString(), rules, now: at(2) });
+    S.respondProposal(f.db, { matchId: f.matchId, by: A[1], accept: false, now: at(3) });
+    expect(view(f, null).schedule!.log[1]!.respondedByName).toBe(getPlayer(f.db, A[1])!.name);
   });
 
   it('maps every status to a phase', () => {
