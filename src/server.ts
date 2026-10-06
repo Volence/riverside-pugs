@@ -162,6 +162,9 @@ import { adminEventRoutes } from './routes/adminEvents.js';
 import { adminRulesetRoutes } from './routes/adminRulesets.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
 import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
+import { RoomClock, ROOM_TICK_MS } from './events/roomClock.js';
+import { getMatch as getEventMatch } from './events/play.js';
+import { isParticipant as isRoomParticipant } from './events/room.js';
 import { ScrimPoster } from './scrims/poster.js';
 import { scrimRoutes } from './routes/scrims.js';
 import { settingNumber } from './settings.js';
@@ -2039,8 +2042,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(bookingRoutes, { db: deps.db, runner: bookingRunner });
   await app.register(adminBookingRoutes, { db: deps.db, runner: bookingRunner });
 
+  // Tournaments plan T3a: the match room clock. Overdue deadlines from
+  // before this start get their full length again (Ruling 16), then every
+  // 5 s it opens rooms and acts on deadlines. Pushes go to the two rosters
+  // and staff only (Ruling 17). Built before the Events desk and the public
+  // event routes so both can push through it (rooms).
+  const roomClock = new RoomClock({
+    db: deps.db, notifier, publicUrl: deps.config.publicUrl,
+    push: (matchId) => {
+      const m = getEventMatch(deps.db, matchId);
+      if (m) hub.sendTo('event_room', (id) => isActiveStaff(deps.db, id) || isRoomParticipant(deps.db, m, id));
+    },
+  });
+  roomClock.resume();
+  const roomTick = setInterval(() => { void roomClock.tick(); }, ROOM_TICK_MS);
+  roomTick.unref();
+
   // The Events desk (tournaments plan T1a): staff read, admins write, not behind the switch.
-  await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl });
+  await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock });
 
   // Setup > Rulesets and Game configs (rulesets editor plan): admins only.
   await app.register(adminRulesetRoutes, { db: deps.db });
@@ -2071,7 +2090,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Events (tournaments plan T1a/T1b): the public pages and entry routes,
   // behind the competitive switch.
-  await app.register(eventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl });
+  await app.register(eventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock });
   // Caster studio: the producer panel and the OBS overlay feed.
   await app.register(castStudioRoutes, { db: deps.db, config: deps.config, store: getCommunityStore });
 
