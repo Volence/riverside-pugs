@@ -306,7 +306,19 @@ export async function adminEventRoutes(
       default: return refuse(reply, 'bad_request');
     }
     if (!r.ok) return refuseWith(reply, r);
-    if (p.action === 'disqualify' && E.getEvent(db, ev.id)?.status === 'live') await settleEvent(db, { eventId: ev.id });
+    if (p.action === 'disqualify' && E.getEvent(db, ev.id)?.status === 'live') {
+      try {
+        await settleEvent(db, { eventId: ev.id });
+      } catch (err) {
+        // The disqualification already committed; a settle failure after it
+        // (bad stage data, a library throw) must not turn a saved
+        // disqualification into a rejected call, which would answer with a
+        // 500, skip logAdmin and tellRosterAdded below, and have a retry
+        // read as entry_out (fix round 1, same pattern as
+        // recordResultFlow in src/events/flow.ts).
+        console.error(`[events] settle after a disqualification in event ${ev.id} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
     logAdmin(db, me, action, ev.id, { entryId: entry.id, name: entry.name, ...(p.action === 'disqualify' ? { reason: body.reason } : {}) });
     tellRosterAdded(opts, ev.id, entry.id, me, added);
     return {};
