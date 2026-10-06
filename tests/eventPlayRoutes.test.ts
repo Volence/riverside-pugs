@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,13 +8,15 @@ import { buildServer } from '../src/server.js';
 import { upsertPlayer } from '../src/players.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as E from '../src/events/events.js';
+import * as N from '../src/events/entries.js';
 import * as P from '../src/events/play.js';
 import { ADMIN } from './eventFixture.js';
 import { startEventFlow } from '../src/events/flow.js';
-import { stagePlayViews } from '../src/events/playViews.js';
+import { stagePlayViews, type PlayMatch } from '../src/events/playViews.js';
 import { LEAGUE, SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 
 const MOD = '76561199000000830';
+const PLAYER = '76561199000000831';
 let f: PlayFixture;
 let app: FastifyInstance;
 const cookies: Record<string, Record<string, string>> = {};
@@ -23,12 +25,14 @@ beforeEach(async () => {
   f = playFixture({ stages: [SWISS(2, 2), SE()], entries: 4 });
   upsertPlayer(f.db, { steamid: MOD, name: 'mod', avatar: null }, []);
   f.db.prepare("UPDATE players SET is_mod = 1, status = 'active' WHERE steamid = ?").run(MOD);
+  upsertPlayer(f.db, { steamid: PLAYER, name: 'player', avatar: null }, []);
+  f.db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(PLAYER);
   f.db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'competitive_enabled'").run();
   app = await buildServer({
     config: { ...loadConfig({}), communityDir: mkdtempSync(join(tmpdir(), 'event-play-')) },
     db: f.db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
   });
-  for (const s of [ADMIN, MOD]) cookies[s] = authedCookie(app, f.db, s);
+  for (const s of [ADMIN, MOD, PLAYER]) cookies[s] = authedCookie(app, f.db, s);
 });
 afterEach(async () => { await app.close(); });
 
@@ -44,6 +48,10 @@ describe('event play routes', () => {
     expect((await post(`/api/admin/events/${f.eventId}/start`, MOD)).statusCode).toBe(403);
   });
 
+  it('a signed-in player who is neither admin nor mod gets 403 on the desk play view', async () => {
+    expect((await get(`/api/admin/events/${f.eventId}/play`, PLAYER)).statusCode).toBe(403);
+  });
+
   it('an admin starts the event; the public page then shows Swiss standings and round 1', async () => {
     const r = await post(`/api/admin/events/${f.eventId}/start`, ADMIN);
     expect(r.statusCode).toBe(200);
@@ -55,7 +63,11 @@ describe('event play routes', () => {
     expect(page.play[0].rounds[0]).toMatchObject({ label: 'Round 1' });
     expect(page.play[0].rounds[0].matches).toHaveLength(2);
     expect(page.play[0].standings).toHaveLength(4);
-    expect(JSON.stringify(page)).not.toMatch(/"sr"/i);
+    // Never SR: the entry and match shapes carry exactly their declared
+    // fields, nothing extra (a positive check, not a leak-pattern guess).
+    expect(Object.keys(page.play[0].standings[0].entry).sort()).toEqual(['id', 'logoKey', 'name', 'out', 'seed', 'tag']);
+    const matchKeys: (keyof PlayMatch)[] = ['id', 'group', 'round', 'slot', 'a', 'b', 'status', 'winner', 'scoreA', 'scoreB', 'forfeit', 'bye'];
+    expect(Object.keys(page.play[0].rounds[0].matches[0]).sort()).toEqual([...matchKeys].sort());
     expect((await post(`/api/admin/events/${f.eventId}/start`, ADMIN)).statusCode).toBe(409);
   });
 
@@ -82,6 +94,25 @@ describe('event play routes', () => {
     expect(P.getMatch(f.db, m.id)).toMatchObject({ status: 'forfeit', winner_entry: m.entry_b });
   });
 
+  it('a throw from settle after a live disqualification still answers 200 and still audits it (fix round 1)', async () => {
+    await post(`/api/admin/events/${f.eventId}/start`, ADMIN);
+    const m = firstOpen();
+    const stage = E.stagesOf(f.db, f.eventId)[0]!;
+    // Round 1 has two matches; forfeiting this one leaves the other waiting,
+    // so settle's first pass resolves the forfeit and asks for another pass,
+    // whose totalRounds read of the stage's own (now corrupted) config_json
+    // throws for real, not a mock.
+    f.db.prepare("UPDATE event_stages SET config_json = 'not json' WHERE id = ?").run(stage.id);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const r = await post(`/api/admin/events/${f.eventId}/entries/${m.entry_a}/disqualify`, ADMIN, { reason: 'left' });
+    expect(r.statusCode).toBe(200);
+    expect(N.getEntry(f.db, m.entry_a!)).toMatchObject({ status: 'disqualified' });
+    const audit = f.db.prepare("SELECT action FROM admin_actions WHERE action = 'event_entry_disqualify'").all();
+    expect(audit).toEqual([{ action: 'event_entry_disqualify' }]);
+    expect(errSpy.mock.calls.some((args) => typeof args[0] === 'string' && args[0].includes('settle after a disqualification'))).toBe(true);
+    errSpy.mockRestore();
+  });
+
   it('a league round carries its week\'s dates from the season start', async () => {
     const g = playFixture({ stages: [LEAGUE(4, 2, 'round_robin', null, '2026-10-12')], entries: 4 });
     const r = await startEventFlow(g.db, { eventId: g.eventId, by: ADMIN });
@@ -91,6 +122,17 @@ describe('event play routes', () => {
       ['Week 1, match 1', { from: '2026-10-12', to: '2026-10-18' }], ['Week 1, match 2', { from: '2026-10-12', to: '2026-10-18' }],
       ['Week 2, match 1', { from: '2026-10-19', to: '2026-10-25' }], ['Week 2, match 2', { from: '2026-10-19', to: '2026-10-25' }],
     ]);
+  });
+
+  it('a league with no season start takes week 1 from the stage\'s own start day', async () => {
+    const g = playFixture({ stages: [LEAGUE(4, 2, 'round_robin', null, null)], entries: 4 });
+    const now = new Date('2026-10-20T15:00:00.000Z');
+    const r = await startEventFlow(g.db, { eventId: g.eventId, by: ADMIN, now });
+    expect(r.ok).toBe(true);
+    const day = E.stagesOf(g.db, g.eventId)[0]!.started_at!.slice(0, 10);
+    expect(day).toBe('2026-10-20');
+    const round1 = stagePlayViews(g.db, E.getEvent(g.db, g.eventId)!)[0]!.rounds[0]!;
+    expect(round1.dates).toEqual({ from: day, to: '2026-10-26' });
   });
 
   it('the public page is a 404 while the switch is closed to the viewer, as before', async () => {
