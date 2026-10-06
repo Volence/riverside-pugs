@@ -67,7 +67,7 @@ export function checkVeto(c: VetoConfig, poolSize: number): 'ok' | 'bad_veto' | 
     || !has(LATER_PICKS, c.laterPicks) || !has(SIDE_RULES, c.sides)) return 'bad_veto';
   if (!isInt(c.banTo) || !isInt(c.lateBans) || c.banTo < c.games || c.banTo > POOL_LIMIT || c.lateBans < 0) return 'bad_veto';
   if (c.games === 2 && c.laterPicks === 'loser') return 'bad_veto';
-  if (c.lateBans > 0 && (c.games === 1 || c.laterPicks === 'loser')) return 'bad_veto';
+  if (c.lateBans > 0 && (c.games === 1 || c.games === 2 || c.laterPicks === 'loser')) return 'bad_veto';
   // After the picks of every game but the last, at least one campaign must
   // be left for it once the late bans are made.
   if (c.lateBans > c.banTo - (c.games - 1) - 1) return 'bad_veto';

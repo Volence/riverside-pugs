@@ -17,7 +17,8 @@ export function VetoFields({ value, poolSize, onChange }: { value: VetoConfig; p
     : verdict === 'bad_pool_for_veto' ? `The pool needs at least ${value.banTo} campaigns for this.`
       : value.banTo < value.games ? 'Ban down to at least one campaign per game.'
         : value.games === 2 && value.laterPicks === 'loser' ? 'A total score Bo2 has no loser to pick next.'
-          : 'Too many extra bans: nothing would be left for the last game.';
+          : value.games === 2 && value.lateBans > 0 ? 'A total score Bo2 has no extra bans.'
+            : 'Too many extra bans: nothing would be left for the last game.';
   const bo1 = value.games === 1;
   return (
     <>
@@ -36,7 +37,7 @@ export function VetoFields({ value, poolSize, onChange }: { value: VetoConfig; p
       <FormRow label="Series" for={id('games')}>
         <select id={id('games')} aria-label="Series" value={String(value.games)} onChange={(e) => {
           const games = Number(pick(e)) as VetoConfig['games'];
-          set({ games, laterPicks: games === 2 ? 'alternate' : value.laterPicks, lateBans: games === 1 ? 0 : value.lateBans, banTo: Math.max(value.banTo, games) });
+          set({ games, laterPicks: games === 2 ? 'alternate' : value.laterPicks, lateBans: games === 1 || games === 2 ? 0 : value.lateBans, banTo: Math.max(value.banTo, games) });
         }}>
           <option value="1">Bo1</option>
           <option value="2">Bo2, total score</option>
