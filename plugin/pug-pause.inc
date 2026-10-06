@@ -43,6 +43,40 @@ void PauseAllowInternal()
 ConVar g_cvPauseSeconds;
 ConVar g_cvPauseLimit;
 
+// ---------- technical pauses (plan T5, tournament boxes only) ----------
+//
+// !tech <reason> (pug-tourney.inc) lets a pause through that this file then
+// treats as technical, the same "charge what happened" way as a tactical
+// pause: only once the game is seen paused. Technical time runs once a
+// second while the team's technical pause holds and nobody is away and the
+// staff freeze is off. Past the team's technical time the pause becomes one
+// of its tactical pauses, then another as each ceiling runs out, and with
+// none left the game unpauses (Rulings 5 and 6). A disconnect pause on a
+// tournament box with team reconnect time is recorded as technical too, but
+// its time is the team's reconnect time, which pug-leave.inc spends (Ruling 7).
+
+#define TECH_CAUSE_CALL 1
+#define TECH_CAUSE_DC   2
+
+ConVar g_cvTechLimit;
+ConVar g_cvTechSeconds;
+
+int g_iTechCount[3];          // technical pauses each pug team declared this game
+float g_fTechUsed[3];         // technical seconds each pug team spent this game
+int g_iTechOwner;             // pug team whose technical clock runs now; 0 = none
+int g_iTechOpen;              // pug team of the TECH record open now (kept through an overrun); 0 = none
+int g_iTechCause;             // TECH_CAUSE_CALL or TECH_CAUSE_DC of the open record
+int g_iTechId;                // the open record's id=: the unix second it began
+bool g_bTechFlagged;          // the other team flagged the open record
+int g_iTechWarned;            // last technical-time warning announced, in seconds left
+char g_sTechBy[24];           // who declared it, or who disconnected
+char g_sTechReason[160];
+int g_iTechPendingTeam;       // a !tech let through that has not been seen to pause yet
+float g_fTechPendingAt;
+char g_sTechPendingBy[24];
+char g_sTechPendingReason[160];
+bool g_bPauseConverted;       // technical time ran out: this pause is the owner's tactical pause(s) now
+
 int g_iPauseUsed[3];          // [1] pug team a, [2] pug team b
 int g_iPausePendingTeam;      // team whose sm_pause we allowed and have not yet seen take effect
 int g_iPauseOwner;            // team charged for the pause in progress; 0 = none or not chargeable
@@ -63,6 +97,12 @@ void PauseInit()
 	g_cvPauseLimit = CreateConVar("sm_pug_pause_limit", "3",
 		"Pauses each team may call per campaign. Disconnect pauses do not count. 0 disables the budget.",
 		FCVAR_NOTIFY, true, 0.0, true, 20.0);
+	g_cvTechLimit = CreateConVar("sm_pug_tech_limit", "0",
+		"Tournament box: technical pauses (!tech <reason>) each team may call per game. 0 turns !tech off.",
+		FCVAR_NOTIFY, true, 0.0, true, 10.0);
+	g_cvTechSeconds = CreateConVar("sm_pug_tech_seconds", "300",
+		"Tournament box: technical time each team has per game, in seconds. Past it the pause uses the team's tactical pauses.",
+		FCVAR_NOTIFY, true, 0.0, true, 3600.0);
 
 	// Rotoblin registers sm_pause with RegConsoleCmd, so a listener here runs
 	// before its callback and can refuse the pause without forking it.
@@ -90,6 +130,21 @@ void PauseReset()
 	g_fPauseStarted = 0.0;
 	g_fPauseHeld = 0.0;
 	g_iPauseWarned = 0;
+	for (int t = 0; t < 3; t++)
+	{
+		g_iTechCount[t] = 0;
+		g_fTechUsed[t] = 0.0;
+	}
+	g_iTechOwner = 0;
+	g_iTechOpen = 0;
+	g_iTechCause = 0;
+	g_iTechId = 0;
+	g_bTechFlagged = false;
+	g_iTechWarned = 0;
+	g_sTechBy[0] = '\0';
+	g_sTechReason[0] = '\0';
+	g_iTechPendingTeam = 0;
+	g_bPauseConverted = false;
 	g_sPhaseLast[0] = '\0';
 }
 
@@ -108,6 +163,143 @@ int PauseRemaining(int team)
 static void PauseTeamName(int team, char[] out, int len)
 {
 	strcopy(out, len, team == 1 ? "Team A" : "Team B");
+}
+
+int Tech_Left(int team)
+{
+	if (team != 1 && team != 2) return 0;
+	int left = g_cvTechSeconds.IntValue - RoundToFloor(g_fTechUsed[team]);
+	return left < 0 ? 0 : left;
+}
+
+/** One signed TECH line for the open record. tactical -2 = leave the key out. */
+void Tech_Emit(const char[] ev, int team, const char[] by, int used, int budget, int tactical, const char[] text)
+{
+	char tac[24];
+	if (tactical == -2) tac[0] = '\0';
+	else Format(tac, sizeof(tac), " tactical=%d", tactical);
+	EmitPug("TECH event=%s id=%d team=%s cause=%s by=%s used=%d budget=%d%s text=%s",
+		ev, g_iTechId, team == 1 ? "a" : "b", g_iTechCause == TECH_CAUSE_DC ? "disconnect" : "call",
+		by[0] != '\0' ? by : "none", used, budget, tac, text);
+}
+
+/** A !tech pug-tourney.inc let through became this pause: within the retry
+ *  gap (Rotoblin's pause delay plus a margin), on a tournament box, and not
+ *  a disconnect or freeze pause. A stale request is dropped. */
+static bool Tech_PendingLanded()
+{
+	if (g_iTechPendingTeam == 0) return false;
+	bool landed = TourneyOn() && !g_bLeavePaused && !TourneyFrozen() && GetEngineTime() - g_fTechPendingAt <= Tourney_RetryGap();
+	if (!landed) g_iTechPendingTeam = 0;
+	return landed;
+}
+
+static void Tech_Begin()
+{
+	int team = g_iTechPendingTeam;
+	g_iTechPendingTeam = 0;
+	g_iTechOwner = team;
+	g_iTechOpen = team;
+	g_iTechCause = TECH_CAUSE_CALL;
+	g_iTechId = GetTime();
+	g_iTechCount[team]++;
+	g_bTechFlagged = false;
+	g_iTechWarned = 0;
+	strcopy(g_sTechBy, sizeof(g_sTechBy), g_sTechPendingBy);
+	strcopy(g_sTechReason, sizeof(g_sTechReason), g_sTechPendingReason);
+	char name[16];
+	PauseTeamName(team, name, sizeof(name));
+	int left = Tech_Left(team);
+	PrintToChatAll("\x04[Match]\x01 %s technical pause: \x05%s\x01 (%d:%02d of technical time left; the other team can !flag it for staff).",
+		name, g_sTechReason, left / 60, left % 60);
+	Tech_Emit("start", team, g_sTechBy, RoundToFloor(g_fTechUsed[team]), g_cvTechSeconds.IntValue, -2, g_sTechReason);
+}
+
+/** The leave module's disconnect pause on a tournament box with team
+ *  reconnect time: a technical record of the dropped player's team whose
+ *  clock is the reconnect pool (Ruling 7). */
+static void Tech_BeginDisconnect()
+{
+	if (!LeaveTeamMode()) return;
+	int slot = LeaveFirstAbsent();
+	if (slot < 0) return;
+	int team = g_iRosterTeam[slot];
+	if (team != 1 && team != 2) return;
+	g_iTechOwner = 0;
+	g_iTechOpen = team;
+	g_iTechCause = TECH_CAUSE_DC;
+	g_iTechId = GetTime();
+	g_bTechFlagged = false;
+	strcopy(g_sTechBy, sizeof(g_sTechBy), g_sRosterId[slot]);
+	strcopy(g_sTechReason, sizeof(g_sTechReason), "disconnected");
+	Tech_Emit("start", team, g_sTechBy, LeaveTeamUsed(team), g_cvDcTeamSeconds.IntValue, -2, g_sTechReason);
+}
+
+/** The game unpaused: the open record ends. */
+static void Tech_End()
+{
+	if (g_iTechOpen == 0) return;
+	int team = g_iTechOpen;
+	bool dc = g_iTechCause == TECH_CAUSE_DC;
+	Tech_Emit("end", team, g_sTechBy, dc ? LeaveTeamUsed(team) : RoundToFloor(g_fTechUsed[team]),
+		dc ? g_cvDcTeamSeconds.IntValue : g_cvTechSeconds.IntValue, -2, "");
+	g_iTechOpen = 0;
+	g_iTechOwner = 0;
+	g_iTechCause = 0;
+	g_bTechFlagged = false;
+	g_sTechBy[0] = '\0';
+	g_sTechReason[0] = '\0';
+}
+
+/** Once a second while a !tech pause holds (Ruling 6). */
+static void Tech_Tick()
+{
+	if (LeaveAnyAbsent() || TourneyFrozen()) return;
+	int team = g_iTechOwner;
+	g_fTechUsed[team] += 1.0;
+	int left = Tech_Left(team);
+	if (left <= 0)
+	{
+		Tech_Overrun();
+		return;
+	}
+	int threshold = left <= 10 ? 10 : left <= 30 ? 30 : left <= 60 ? 60 : 0;
+	if (threshold != 0 && g_iTechWarned != threshold)
+	{
+		g_iTechWarned = threshold;
+		char name[16];
+		PauseTeamName(team, name, sizeof(name));
+		PrintToChatAll("\x04[Match]\x01 %s has \x05%d seconds\x01 of technical time left. Past it the pause uses a tactical pause.", name, left);
+	}
+}
+
+/** Technical time ran out: charge a tactical pause and run its ceiling, or
+ *  unpause when the team has none left (Ruling 6). */
+static void Tech_Overrun()
+{
+	int team = g_iTechOwner;
+	g_iTechOwner = 0;
+	char name[16];
+	PauseTeamName(team, name, sizeof(name));
+	int used = RoundToFloor(g_fTechUsed[team]);
+	if (PauseLimit() > 0 && PauseRemaining(team) <= 0)
+	{
+		PrintToChatAll("\x04[Match]\x01 %s is out of technical time and has no tactical pause left. Unpausing.", name);
+		Tech_Emit("over", team, g_sTechBy, used, g_cvTechSeconds.IntValue, -1, "");
+		LeaveUnpauseNow();
+		return;
+	}
+	if (PauseLimit() > 0) g_iPauseUsed[team]++;
+	g_iPauseOwner = team;
+	g_bPauseConverted = true;
+	g_fPauseStarted = GetEngineTime();
+	g_fPauseHeld = 0.0;
+	g_iPauseWarned = 0;
+	int left = PauseLimit() > 0 ? PauseRemaining(team) : -1;
+	if (left >= 0) PrintToChatAll("\x04[Match]\x01 %s is out of technical time: this pause now uses one of their tactical pauses (\x05%d\x01 left).", name, left);
+	else PrintToChatAll("\x04[Match]\x01 %s is out of technical time: this pause is now a tactical pause.", name);
+	Tech_Emit("over", team, g_sTechBy, used, g_cvTechSeconds.IntValue, left < 0 ? 0 : left, "");
+	EmitPug("PAUSE team=%d used=%d limit=%d", team, g_iPauseUsed[team], PauseLimit());
 }
 
 /**
@@ -202,19 +394,24 @@ static void PauseClockTick()
 		g_fPauseStarted = GetEngineTime();
 		g_fPauseHeld = 0.0;
 		g_iPauseWarned = 0;
+		g_bPauseConverted = false;
+		// Plan T5: a !tech pause is nobody's tactical pause; it has its own clock.
+		bool tech = Tech_PendingLanded();
 		// A pause the leave module caused is nobody's: not charged, and not
 		// subject to the ceiling either, because the player it is waiting for
 		// has a reconnect allowance that is allowed to outlast it.
 		// A pause the staff freeze caused is nobody's either (plan T3c);
 		// g_iPausePendingTeam may hold a stale request Rotoblin refused, which
 		// must not be charged for it.
-		g_iPauseOwner = (g_bLeavePaused || TourneyFrozen()) ? 0 : g_iPausePendingTeam;
+		g_iPauseOwner = (g_bLeavePaused || TourneyFrozen() || tech) ? 0 : g_iPausePendingTeam;
 		g_iPausePendingTeam = 0;
 		// Only a request from the last few seconds: one Rotoblin refused
 		// without pausing must not be pinned on a later, unrelated pause.
-		if (g_bLeavePaused || GetEngineTime() - g_fPausePendingAt > PAUSE_BY_WINDOW || TourneyFrozen()) g_sPauseBy[0] = '\0';
+		if (g_bLeavePaused || GetEngineTime() - g_fPausePendingAt > PAUSE_BY_WINDOW || TourneyFrozen() || tech) g_sPauseBy[0] = '\0';
 		else strcopy(g_sPauseBy, sizeof(g_sPauseBy), g_sPausePendingBy);
 		g_sPausePendingBy[0] = '\0';
+		if (tech) Tech_Begin();
+		else if (g_bLeavePaused) Tech_BeginDisconnect();
 		if (g_iPauseOwner == 1 || g_iPauseOwner == 2)
 		{
 			g_iPauseUsed[g_iPauseOwner]++;
@@ -241,11 +438,22 @@ static void PauseClockTick()
 	{
 		if (g_bPauseSeen)
 		{
+			// Plan T5: the open technical record ends with the pause.
+			Tech_End();
 			g_bPauseSeen = false;
 			g_iPauseOwner = 0;
 			g_iPausePendingTeam = 0;
 			g_sPauseBy[0] = '\0';
+			g_bPauseConverted = false;
 		}
+		return;
+	}
+
+	// Plan T5: a technical pause spends its team's technical time instead of
+	// running a ceiling.
+	if (g_iTechOwner != 0)
+	{
+		Tech_Tick();
 		return;
 	}
 
@@ -273,8 +481,24 @@ static void PauseClockTick()
 	{
 		char name[16];
 		PauseTeamName(g_iPauseOwner, name, sizeof(name));
+		// Plan T5 Ruling 6: technical time past its budget takes the team's
+		// tactical pauses one at a time while it has any.
+		if (g_bPauseConverted && PauseLimit() > 0 && PauseRemaining(g_iPauseOwner) > 0)
+		{
+			g_iPauseUsed[g_iPauseOwner]++;
+			g_fPauseStarted = GetEngineTime();
+			g_fPauseHeld = 0.0;
+			g_iPauseWarned = 0;
+			int more = PauseRemaining(g_iPauseOwner);
+			PrintToChatAll("\x04[Match]\x01 %s's pause runs on into another tactical pause (\x05%d\x01 left).", name, more);
+			EmitPug("PAUSE team=%d used=%d limit=%d", g_iPauseOwner, g_iPauseUsed[g_iPauseOwner], PauseLimit());
+			return;
+		}
 		PrintToChatAll("\x04[PUG]\x01 %s's pause has run out. Unpausing.", name);
 		EmitPug("PAUSE_EXPIRED team=%d seconds=%d", g_iPauseOwner, ceiling);
+		// Plan T5: g_bPauseSeen is cleared below, so the unpause transition
+		// will not end a converted pause's technical record: end it here.
+		Tech_End();
 		// The same both-teams-ready path a player unpause takes, so
 		// Rotoblin's own countdown and its frozen-smoker-victim fix apply.
 		LeaveUnpauseNow();
@@ -307,6 +531,9 @@ void PauseStatus()
 		PrintToServer("pause active owner=%d elapsed=%.0f held=%.0f",
 			g_iPauseOwner, GetEngineTime() - g_fPauseStarted, g_fPauseHeld);
 	}
+	PrintToServer("tech limit=%d seconds=%d count_a=%d count_b=%d used_a=%d used_b=%d open=%d",
+		g_cvTechLimit.IntValue, g_cvTechSeconds.IntValue, g_iTechCount[1], g_iTechCount[2],
+		RoundToFloor(g_fTechUsed[1]), RoundToFloor(g_fTechUsed[2]), g_iTechOpen);
 }
 
 // ---------- phase: what the game is doing, for the live page ----------
