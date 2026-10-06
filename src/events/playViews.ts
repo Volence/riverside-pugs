@@ -11,6 +11,7 @@ import { stageTable } from './flow.js';
 import { groupLabel, roundLabel } from './format.js';
 import { weekDates, weekOfRound } from './league.js';
 import { openProposal, proposalsOf } from './schedule.js';
+import { deskPauses, type DeskPause } from './pauseViews.js';
 import type * as V from './validate.js';
 
 /** Brackets, standings and rounds of the stages that have started (plan T2),
@@ -54,6 +55,8 @@ export interface PlayMatchDesk {
   subs: { a: number; b: number };
   /** Plan T4: a window stage's match only. */
   schedule: { windowStart: string | null; windowEnd: string | null; proposal: { side: 'a' | 'b'; byName: string; time: string; autoAcceptAt: string | null } | null; proposals: number } | null;
+  /** Plan T5: the technical pauses with names, and whether each one's game is being played. */
+  pauses: DeskPause[];
 }
 /** dates: a league round's week, first and last day (YYYY-MM-DD); null for
  *  every other stage type. defaultAt: a window round's default time or a
@@ -129,6 +132,7 @@ function deskOf(db: DB, m: P.MatchRow): PlayMatchDesk {
         proposals: proposalsOf(db, m.id).length,
       };
     })(),
+    pauses: deskPauses(db, m, live ? live.match_id! : null),
   };
 }
 

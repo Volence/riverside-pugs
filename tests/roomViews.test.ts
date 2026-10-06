@@ -129,6 +129,19 @@ describe('matchRoomView', () => {
     expect(['pending', 'waiting', 'lineup', 'booking', 'admin_hold', 'done', 'forfeit', 'bye'].map((s) => phaseOf(m(s as P.MatchStatus))))
       .toEqual(['pending', 'waiting', 'lineup', 'server', 'hold', 'done', 'done', 'done']);
   });
+
+  it('lists no technical pauses for a match that has none, and a live game\'s pause by series game (plan T5)', async () => {
+    const f = await roomFixture();
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW });
+    expect(view(f, null).pauses).toEqual([]);
+    const s = await seriesFixture();
+    await s.tick();
+    s.goLive(s.gameOf(1).match_id!);
+    R.noteTech(s.db, { matchId: s.matchId, gameMatchId: s.gameOf(1).match_id!, event: 'start', techId: 1_791_000_000, side: 'b', cause: 'disconnect', by: B[2]!, used: 15, budget: 600, tactical: null, text: 'disconnected', now: new Date(s.t.t) });
+    const v = matchRoomView(s.db, E.getEvent(s.db, s.eventId)!, s.match(), null, false, new Date(s.t.t));
+    expect(v.pauses).toEqual([expect.objectContaining({ game: 1, tiebreak: false, side: 'b', cause: 'disconnect', reason: null, usedS: 15, budgetS: 600, overrun: false, flagged: false, penalty: null })]);
+    s.close();
+  });
 });
 
 describe('prefsView', () => {

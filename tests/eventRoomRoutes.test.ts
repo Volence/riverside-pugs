@@ -254,6 +254,28 @@ describe('the desk tools (plan T3c)', () => {
       expect((await post(`${base()}/${action}`, MOD, { kind: 'ready', side: 'a', ordinal: 0, minutes: 5 })).statusCode, action).toBe(403);
     }
   });
+
+  it('rules on a technical pause from the desk, shows the ledger to the desk with names and to the public without reasons (plan T5)', async () => {
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS });
+    // A technical pause as R.noteTech writes it during a game (test setup only: noteTech itself needs a box phase).
+    E.logEvent(f.db, f.eventId, A[0]!, 'tech_pause', new Date().toISOString(),
+      { matchId: f.matchId, gameMatchId: 0, techId: 1_791_000_000, side: 'a', cause: 'call', by: A[0], reason: 'router', used: 0, budget: 300 });
+    const pauseId = R.techPausesOf(f.db, P.getMatch(f.db, f.matchId)!)[0]!.id;
+    expect((await post(`${base()}/tech-penalty`, MOD, { pauseId, penalty: 'warning' })).statusCode).toBe(403);
+    expect((await post(`${base()}/tech-penalty`, ADMIN, { pauseId: 999_999, penalty: 'warning' })).json()).toEqual({ error: EVENT_ERRORS.pause_not_found.text });
+    expect((await post(`${base()}/tech-penalty`, ADMIN, { pauseId, penalty: 'ban' })).json()).toEqual({ error: EVENT_ERRORS.bad_penalty.text });
+    expect((await post(`${base()}/tech-penalty`, ADMIN, { pauseId, penalty: 'forfeit' })).json()).toEqual({ error: EVENT_ERRORS.no_live_game.text });
+    expect((await post(`${base()}/tech-penalty`, ADMIN, { pauseId, penalty: 'warning', note: 'once' })).statusCode).toBe(200);
+    expect((await post(`${base()}/tech-penalty`, ADMIN, { pauseId, penalty: 'warning' })).json()).toEqual({ error: EVENT_ERRORS.already_penalized.text });
+    expect(audit().filter((a) => a === 'event_tech_penalty')).toHaveLength(1);
+    const play = (await get(`/api/admin/events/${f.eventId}/play`, MOD)).json();
+    const row = play.stages[0].rounds[0].matches.find((m: { id: number }) => m.id === f.matchId);
+    expect(row.desk.pauses).toEqual([expect.objectContaining({ id: pauseId, side: 'a', cause: 'call', reason: 'router', penalty: 'warning', penaltyNote: 'once', live: false, flagged: false })]);
+    expect((await get(room())).json().pauses).toEqual([expect.objectContaining({ id: pauseId, side: 'a', reason: null, penalty: 'warning', flagNote: null })]);
+    expect((await get(room(), A[1])).json().pauses[0].reason).toBe('router');
+    expect((await get(room(), B[1])).json().pauses[0].reason).toBe('router');
+    expect((await get(room(), OUTSIDER)).json().pauses[0].reason).toBeNull();
+  });
 });
 
 describe('reschedules over HTTP (plan T4)', () => {
