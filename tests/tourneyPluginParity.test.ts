@@ -222,6 +222,14 @@ describe('pug-pause.inc technical pause end (plan T5 fix rounds 1 and 2)', () =>
     expect(fn).toContain('Tech_OwnerReady(client, team)');
   });
 
+  it("a staff member's ready under a freeze lifts it instead of unpausing past it (in-game run 2026-10-06)", () => {
+    const fn = body(tourneySrc, 'public Action Listener_TourneyUnpause(int client, const char[] command, int argc)');
+    const staff = fn.indexOf('if (Tourney_IsStaff(client))');
+    expect(staff).toBeGreaterThan(-1);
+    expect(fn.slice(staff, staff + 120)).toContain('Tourney_LiftFromGame(client);');
+    expect(fn).not.toContain('if (Tourney_IsStaff(client)) return Plugin_Continue;');
+  });
+
   it('a released technical pause is not charged or run over during the countdown', () => {
     const fn = body(pauseSrc, 'static void Tech_Tick()');
     expect(fn.indexOf('if (g_bTechReleased) return;')).toBeGreaterThan(-1);

@@ -775,7 +775,14 @@ public Action Listener_TourneyUnpause(int client, const char[] command, int argc
 	if (!g_bTourneyFrozen) return Plugin_Continue;
 	if (client < 1 || client > MaxClients || !IsClientInGame(client)) return Plugin_Continue;
 	if (!LeaveRotoblinPaused()) return Plugin_Continue;
-	if (Tourney_IsStaff(client)) return Plugin_Continue;
+	// In-game run 2026-10-06: a staff member's plain !ready used to pass
+	// straight to Rotoblin and unpause the game while the freeze stayed set
+	// (box, site and desk all still frozen). Staff's ready is a lift instead.
+	if (Tourney_IsStaff(client))
+	{
+		Tourney_LiftFromGame(client);
+		return Plugin_Handled;
+	}
 	PrintToChat(client, "[Match] Staff froze the game. Only staff can lift it: !lift in game, or the Events desk.");
 	return Plugin_Handled;
 }
