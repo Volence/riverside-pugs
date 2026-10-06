@@ -6,6 +6,7 @@ import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { STATUS_LABEL, placementText, untilText, whenText } from '../eventFormat';
 import { EntryPanel } from './event/EntryPanel';
+import { PrepPanel } from './event/PrepPanel';
 import { StagePlay } from './event/StagePlay';
 
 const BEFORE_START = new Set(['draft', 'announced', 'registration', 'checkin']);
@@ -131,6 +132,9 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
         {ev.lockedAt && <p class="muted">The entry list is final.</p>}
       </Panel>
       {mine && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
+      {mine && ev.entryKind === 'team' && !['finished', 'cancelled'].includes(ev.status) && mine.entries
+        .filter((e) => e.manage && (e.status === 'registered' || e.status === 'checked_in'))
+        .map((e) => <PrepPanel key={e.id} slug={ev.slug} entryId={e.id} teamName={e.name} />)}
       <Panel>
         <h3>{ev.entryKind === 'team' ? 'Teams' : 'Entries'}</h3>
         {ev.entries.length === 0
