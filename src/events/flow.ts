@@ -1,8 +1,9 @@
 import type { DB } from '../db.js';
-import { BracketError, bracketComplete, bracketGroups, bracketRanks, createBracket, reportResult, type BracketType } from './bracket.js';
+import { BracketError, bracketComplete, bracketGroups, bracketMatches, bracketRanks, createBracket, reportResult, type BracketData, type BracketType } from './bracket.js';
 import * as E from './events.js';
 import * as N from './entries.js';
 import * as P from './play.js';
+import * as R from './room.js';
 import { repeatedRoundRobin } from './league.js';
 import { standings, type StandingRow, type TableResult } from './standings.js';
 import { pairSwiss } from './swiss.js';
@@ -139,7 +140,40 @@ async function report(db: DB, m: P.MatchRow, by: string | null, result: V.Result
     if (err instanceof BracketError) return V.fail(err.code === 'locked' ? 'result_locked' : 'match_not_open');
     throw err;
   }
-  return P.recordResult(db, { matchId: m.id, by, result, bracket: { data, baseRev: stage.bracket_rev }, now });
+  const moved = movedRooms(db, stage, m.id, data);
+  const record = () => P.recordResult(db, { matchId: m.id, by, result, bracket: { data, baseRev: stage.bracket_rev }, now });
+  if (moved.length === 0 || moved.some((row) => R.vetoActions(db, row.id).length > 0 || R.lineupsOf(db, row.id).length > 0)) return record();
+  // Every room the new bracket would change is still in its ready check:
+  // reset each (the clock reopens it with the corrected teams) and record,
+  // all in one transaction so a refused result leaves the rooms as they were
+  // (final review ruling, option a).
+  const refused = Symbol('refused');
+  try {
+    return db.transaction((): V.Checked<P.MatchRow> => {
+      for (const row of moved) {
+        const r = R.resetRoom(db, { matchId: row.id, by, now });
+        if (!r.ok) throw Object.assign(new Error(r.error), { [refused]: r });
+      }
+      const r = record();
+      if (!r.ok) throw Object.assign(new Error(r.error), { [refused]: r });
+      return r;
+    })();
+  } catch (err) {
+    const r = (err as Record<symbol, unknown> | null)?.[refused];
+    if (r) return r as V.Checked<P.MatchRow>;
+    throw err;
+  }
+}
+
+/** The other matches of the stage in a room state whose teams this bracket
+ *  data would change (P.recordResult refuses those as room_open_downstream). */
+function movedRooms(db: DB, stage: E.StageRow, matchId: number, data: BracketData): P.MatchRow[] {
+  const byBm = new Map(bracketMatches(data).map((b) => [b.bmId, b]));
+  return P.matchesOf(db, stage.id).filter((row) => {
+    if (row.id === matchId || !P.ROOM_OPEN.has(row.status) || row.bm_match_id === null) return false;
+    const b = byBm.get(row.bm_match_id);
+    return !b || b.a !== row.entry_a || b.b !== row.entry_b;
+  });
 }
 
 export function startEventFlow(db: DB, o: { eventId: number; by: string | null; now?: Date }): Promise<V.Checked<E.EventRow>> {

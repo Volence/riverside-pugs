@@ -143,6 +143,9 @@ export async function adminEventRoutes(
   });
 
   type Body = Record<string, unknown>;
+  /** The event's matches in a room state (open, held, booked and on). */
+  const roomMatches = (eventId: number): P.MatchRow[] =>
+    E.stagesOf(db, eventId).flatMap((s) => P.matchesOf(db, s.id)).filter((m) => P.ROOM_OPEN.has(m.status));
   /** One admin action on one event (and maybe one of its stages): call the
    *  store, refuse or audit, answer { ok: true }. */
   const action = (
@@ -150,6 +153,7 @@ export async function adminEventRoutes(
     name: string,
     call: (me: string, id: number, body: Body, stageId: number | null) => V.Checked<unknown>,
     detail: (body: Body, stageId: number | null) => object = () => ({}),
+    after?: (me: string, id: number) => void,
   ) => {
     app.post(path, async (req, reply) => {
       const me = requireAdmin(req, reply);
@@ -162,6 +166,7 @@ export async function adminEventRoutes(
       const body = (req.body ?? {}) as Body;
       const r = call(me, id, body, stageId);
       if (!r.ok) return refuse(reply, r.error);
+      after?.(me, id);
       logAdmin(db, me, name, id, detail(body, stageId));
       return { ok: true };
     });
@@ -188,7 +193,17 @@ export async function adminEventRoutes(
     (me, id) => E.openRegistration(db, { eventId: id, by: me }));
   action('/api/admin/events/:id/cancel', 'event_cancel',
     (me, id, body) => E.cancelEvent(db, { eventId: id, by: me, reason: body.reason }),
-    (body) => ({ reason: typeof body.reason === 'string' ? body.reason.slice(0, V.CANCEL_REASON_MAX) : null }));
+    (body) => ({ reason: typeof body.reason === 'string' ? body.reason.slice(0, V.CANCEL_REASON_MAX) : null }),
+    // cancelEvent writes only the event (room.ts owns the room columns), so
+    // every open room goes back to waiting here and is pushed: its clock
+    // stopped with the event (final review).
+    (me, id) => {
+      for (const m of roomMatches(id)) {
+        const r = R.resetRoom(db, { matchId: m.id, by: me });
+        if (r.ok) opts.rooms?.pushChange(m.id);
+        else console.error(`[events] room reset of match ${m.id} after cancelling event ${id} refused: ${r.error}`);
+      }
+    });
 
   /** Upload a banner (Ruling 4): base64 of the browser's 1600 x 400 PNG or
    *  WebP, checked, stored content addressed, then set on the event. */
@@ -310,6 +325,8 @@ export async function adminEventRoutes(
     }
     if (!r.ok) return refuseWith(reply, r);
     if (p.action === 'disqualify' && E.getEvent(db, ev.id)?.status === 'live') {
+      // The settle forfeits the team's open rooms; each one is pushed after.
+      const rooms = roomMatches(ev.id);
       try {
         await settleEvent(db, { eventId: ev.id });
       } catch (err) {
@@ -321,6 +338,7 @@ export async function adminEventRoutes(
         // recordResultFlow in src/events/flow.ts).
         console.error(`[events] settle after a disqualification in event ${ev.id} failed:`, err instanceof Error ? err.message : err);
       }
+      for (const m of rooms) opts.rooms?.pushChange(m.id);
     }
     logAdmin(db, me, action, ev.id, { entryId: entry.id, name: entry.name, ...(p.action === 'disqualify' ? { reason: body.reason } : {}) });
     tellRosterAdded(opts, ev.id, entry.id, me, added);
@@ -361,8 +379,12 @@ export async function adminEventRoutes(
     const ev = eventOf(p.id);
     const matchId = idOf(p.matchId);
     if (!ev || matchId === null) return refuse(reply, 'match_not_found');
+    // A result closes its room, and a correction may reset a downstream room
+    // still in its ready check (flow.ts report): push them all.
+    const rooms = new Set([matchId, ...roomMatches(ev.id).map((m) => m.id)]);
     const r = await recordResultFlow(db, { eventId: ev.id, matchId, by: me, result: req.body ?? {} });
     if (!r.ok) return refuse(reply, r.error);
+    for (const id of rooms) opts.rooms?.pushChange(id);
     logAdmin(db, me, 'event_result', ev.id, {
       matchId, winner: r.value.winner_entry, scoreA: r.value.score_a, scoreB: r.value.score_b, source: r.value.result_source,
     });

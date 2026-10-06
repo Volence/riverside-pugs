@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,9 @@ import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
-import { ADMIN } from './eventFixture.js';
+import * as E from '../src/events/events.js';
+import { RoomClock } from '../src/events/roomClock.js';
+import { ADMIN, must, stageBody } from './eventFixture.js';
 import { A, B, OUTSIDER } from './entryFixture.js';
 import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
 
@@ -25,7 +27,7 @@ beforeEach(async () => {
   });
   for (const s of [...A, ...B, OUTSIDER, ADMIN]) cookies[s] = authedCookie(app, f.db, s);
 });
-afterEach(async () => { await app.close(); });
+afterEach(async () => { vi.restoreAllMocks(); await app.close(); });
 
 const get = (url: string, as?: string) => app.inject({ method: 'GET', url, cookies: as ? cookies[as] : undefined });
 const post = (url: string, as: string, body: object = {}) => app.inject({ method: 'POST', url, cookies: cookies[as], payload: body });
@@ -79,5 +81,57 @@ describe('admin room tools', () => {
     expect(P.getMatch(f.db, f.matchId)!.status).toBe('waiting');
     const log = f.db.prepare("SELECT action FROM admin_actions WHERE action LIKE 'event_room%' OR action = 'event_hold' ORDER BY id").all();
     expect(log).toEqual([{ action: 'event_room_open' }, { action: 'event_hold' }, { action: 'event_room_reset' }]);
+  });
+});
+
+describe('final review: rooms follow results, disqualifications and cancels', () => {
+  const MOD = '76561199000000711';
+  const base = () => `/api/admin/events/${f.eventId}/matches/${f.matchId}`;
+  const open = () => R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS });
+
+  it('404s a match id asked for under another event', async () => {
+    open();
+    const other = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'Other Cup', startsAt: days(9), entryKind: 'team' } }));
+    must(E.addStage(f.db, { eventId: other.id, by: ADMIN, stage: stageBody(f.db, { advanceCount: null }) }));
+    must(E.publishEvent(f.db, { eventId: other.id, by: ADMIN }));
+    expect((await get(`/api/events/${other.slug}`)).statusCode).toBe(200);
+    expect((await get(`/api/events/${other.slug}/matches/${f.matchId}`)).statusCode).toBe(404);
+    expect((await get(room())).statusCode).toBe(200);
+  });
+
+  it('answers 403 to a mod on the admin room tools', async () => {
+    cookies[MOD] = authedCookie(app, f.db, MOD);
+    f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+    for (const action of ['open-room', 'reset-room', 'hold']) {
+      expect((await post(`${base()}/${action}`, MOD, { reason: 'Server trouble' })).statusCode, action).toBe(403);
+    }
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('waiting');
+  });
+
+  it('pushes the room when an admin result closes it', async () => {
+    open();
+    const push = vi.spyOn(RoomClock.prototype, 'pushChange');
+    expect((await post(`${base()}/result`, ADMIN, { winner: 'a', scoreA: 9, scoreB: 1 })).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('done');
+    expect(push).toHaveBeenCalledWith(f.matchId);
+  });
+
+  it('pushes every room a disqualification closed', async () => {
+    open();
+    const push = vi.spyOn(RoomClock.prototype, 'pushChange');
+    const res = await post(`/api/admin/events/${f.eventId}/entries/${f.entryB}/disqualify`, ADMIN, { reason: 'Broke the rules' });
+    expect(res.statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('forfeit');
+    expect(push).toHaveBeenCalledWith(f.matchId);
+  });
+
+  it('resets and pushes every open room when the event is cancelled', async () => {
+    open();
+    const push = vi.spyOn(RoomClock.prototype, 'pushChange');
+    expect((await post(`/api/admin/events/${f.eventId}/cancel`, ADMIN, { reason: 'Called off' })).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'waiting', deadline: null, room_opened_at: null });
+    const reset = f.db.prepare("SELECT actor FROM event_log WHERE action = 'room_reset'").all();
+    expect(reset).toEqual([{ actor: ADMIN }]);
+    expect(push).toHaveBeenCalledWith(f.matchId);
   });
 });

@@ -39,8 +39,8 @@ export function higherSide(db: DB, m: P.MatchRow): Side {
  *  stage, neither team busy, at most one room per team. */
 export function dueRooms(db: DB, now: Date): P.MatchRow[] {
   const rows = db.prepare(
-    `SELECT m.* FROM event_matches m JOIN event_stages s ON s.id = m.stage_id JOIN events e ON e.id = m.event_id
-     WHERE e.status = 'live' AND s.status = 'live' AND s.scheduling = 'rolling' AND m.status = 'waiting'
+    `SELECT m.* FROM event_matches m JOIN event_stages s ON s.id = m.stage_id
+     WHERE ${R.ROOM_LIVE_SQL} AND s.scheduling = 'rolling' AND m.status = 'waiting'
        AND m.entry_a IS NOT NULL AND m.entry_b IS NOT NULL AND (m.not_before IS NULL OR m.not_before <= ?)
      ORDER BY m.event_id, m.round, m.grp, m.slot`,
   ).all(now.toISOString()) as P.MatchRow[];
@@ -88,7 +88,7 @@ export class RoomClock {
     const now = new Date(this.now());
     const timers = R.roomTimers(db);
     const rows = db.prepare(
-      "SELECT id FROM event_matches WHERE status IN ('veto','lineup') AND deadline IS NOT NULL AND deadline <= ?",
+      `SELECT m.id FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('veto','lineup') AND m.deadline IS NOT NULL AND m.deadline <= ?`,
     ).all(now.toISOString()) as { id: number }[];
     for (const { id } of rows) {
       try { R.resumeDeadline(db, { matchId: id, timers, now }); } catch (err) { console.error(`[rooms] resume of match ${id} failed:`, err); }
@@ -127,7 +127,8 @@ export class RoomClock {
   private async expire(now: Date): Promise<void> {
     const { db } = this.deps;
     const rows = db.prepare(
-      "SELECT * FROM event_matches WHERE status IN ('veto','lineup') AND deadline IS NOT NULL AND deadline <= ? ORDER BY deadline, id",
+      `SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('veto','lineup') AND m.deadline IS NOT NULL AND m.deadline <= ?
+       ORDER BY m.deadline, m.id`,
     ).all(now.toISOString()) as P.MatchRow[];
     for (const m of rows) {
       try {

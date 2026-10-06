@@ -29,6 +29,12 @@ const plus = (now: Date, ms: number): string => new Date(now.getTime() + ms).toI
  *  from P.ROOM_OPEN so the two cannot drift apart. */
 const BUSY_SQL = `(${[...P.ROOM_OPEN].map((s) => `'${s}'`).join(',')})`;
 
+/** A WHERE fragment over event_matches aliased m: its event and its stage
+ *  are both live. Every query the room's clock runs over rooms uses it, so a
+ *  cancelled or finished event's rooms never tick. */
+export const ROOM_LIVE_SQL = `EXISTS (SELECT 1 FROM events le JOIN event_stages ls ON ls.event_id = le.id
+  WHERE le.id = m.event_id AND ls.id = m.stage_id AND le.status = 'live' AND ls.status = 'live')`;
+
 export function roomTimers(db: DB): RoomTimers {
   return {
     readyMinutes: settingNumber(db, 'event_ready_minutes', 10, { min: 2, max: 30, integer: true }),
@@ -170,6 +176,8 @@ export function holdMatch(db: DB, o: { matchId: number; by: string | null; reaso
   return db.transaction((): V.Checked<P.MatchRow> => {
     const m = P.getMatch(db, o.matchId);
     if (!m) return V.fail('match_not_found');
+    // Like liveMatch, but a team that is out may still be held over.
+    if (E.getEvent(db, m.event_id)!.status !== 'live' || E.getStage(db, m.stage_id)!.status !== 'live') return V.fail('not_live');
     if (!HOLDABLE.has(m.status)) return V.fail('wrong_status');
     const reason = o.reason.slice(0, 300);
     db.prepare("UPDATE event_matches SET status = 'admin_hold', hold_reason = ?, deadline = NULL WHERE id = ?").run(reason, m.id);
@@ -180,7 +188,8 @@ export function holdMatch(db: DB, o: { matchId: number; by: string | null; reaso
 
 const RESETTABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking', 'admin_hold']);
 
-export function resetRoom(db: DB, o: { matchId: number; by: string; now?: Date }): V.Checked<P.MatchRow> {
+/** by is null when the engine resets it (a bracket correction, flow.ts). */
+export function resetRoom(db: DB, o: { matchId: number; by: string | null; now?: Date }): V.Checked<P.MatchRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<P.MatchRow> => {
     const m = P.getMatch(db, o.matchId);

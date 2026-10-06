@@ -344,7 +344,7 @@ describe('event flow, final review fixes', () => {
     ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m2.id, by: ADMIN, now: NOW, result: { winner: 'b', forfeit: true } }));
   });
 
-  it('keeps a bracket match\'s room status through another match\'s result, and refuses a correction that would change its teams (plan T3a)', async () => {
+  it('keeps a bracket match\'s room status through another match\'s result, and a correction that changes its teams resets a room still in its ready check (plan T3a, final review)', async () => {
     const f = playFixture({ stages: [SE()], entries: 4 });
     ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
     const semis = P.matchesOf(f.db, f.stages[0]!).filter((m) => m.status === 'waiting');
@@ -352,13 +352,53 @@ describe('event flow, final review fixes', () => {
     ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[1]!.id, by: ADMIN, result: { winner: 'a', scoreA: 10, scoreB: 5 }, now: NOW }));
     const ready = P.matchesOf(f.db, f.stages[0]!).find((m) => m.round === 2 && m.status === 'waiting')!;
     ok(R.openRoom(f.db, { matchId: ready.id, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
-    const fix = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'b', scoreA: 5, scoreB: 10 }, now: NOW });
-    expect(fix).toEqual({ ok: false, error: 'room_open_downstream' });
-    expect(P.getMatch(f.db, ready.id)!.status).toBe('veto');
     const same = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'a', scoreA: 12, scoreB: 5 }, now: NOW });
     expect(same.ok).toBe(true);
     expect(P.getMatch(f.db, ready.id)!.status).toBe('veto');
+    ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'b', scoreA: 5, scoreB: 10 }, now: NOW }));
+    const after = P.getMatch(f.db, ready.id)!;
+    expect(after).toMatchObject({ status: 'waiting', room_opened_at: null, deadline: null });
+    expect([after.entry_a, after.entry_b]).toContain(semis[0]!.entry_b);
+    expect([after.entry_a, after.entry_b]).not.toContain(semis[0]!.entry_a);
+    const log = f.db.prepare("SELECT actor, action FROM event_log WHERE action IN ('room_reset','result_recorded') ORDER BY id DESC LIMIT 2").all();
+    expect(log).toEqual([{ actor: ADMIN, action: 'result_recorded' }, { actor: ADMIN, action: 'room_reset' }]);
   });
+
+  it('rolls the ready check resets back when the correction itself is refused (final review)', async () => {
+    const f = playFixture({ stages: [SE()], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const semis = P.matchesOf(f.db, f.stages[0]!).filter((m) => m.status === 'waiting');
+    for (const m of semis) ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m.id, by: ADMIN, result: { winner: 'a', scoreA: 10, scoreB: 5 }, now: NOW }));
+    const ready = P.matchesOf(f.db, f.stages[0]!).find((m) => m.round === 2 && m.status === 'waiting')!;
+    ok(R.openRoom(f.db, { matchId: ready.id, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    ok(N.disqualifyEntry(f.db, { entryId: semis[0]!.entry_b!, by: ADMIN, reason: 'left', now: NOW }));
+    const snap = JSON.stringify([f.db.prepare('SELECT * FROM event_matches ORDER BY id').all(), f.db.prepare('SELECT * FROM event_log ORDER BY id').all()]);
+    const fix = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'b', forfeit: true }, now: NOW });
+    expect(fix).toEqual({ ok: false, error: 'winner_out' });
+    expect(JSON.stringify([f.db.prepare('SELECT * FROM event_matches ORDER BY id').all(), f.db.prepare('SELECT * FROM event_log ORDER BY id').all()])).toBe(snap);
+    expect(P.getMatch(f.db, ready.id)!.status).toBe('veto');
+  });
+
+  it('still refuses a correction that would change the teams of a room whose veto has begun (plan T3a, final review)', async () => {
+    const f = playFixture({ stages: [SE()], entries: 4 });
+    ok(await F.startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const semis = P.matchesOf(f.db, f.stages[0]!).filter((m) => m.status === 'waiting');
+    for (const m of semis) ok(await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: m.id, by: ADMIN, result: { winner: 'a', scoreA: 10, scoreB: 5 }, now: NOW }));
+    const ready = P.matchesOf(f.db, f.stages[0]!).find((m) => m.round === 2 && m.status === 'waiting')!;
+    ok(R.openRoom(f.db, { matchId: ready.id, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    // Both ready (test setup by hand: the play fixture has no captains), then the clock takes step 0.
+    f.db.prepare('UPDATE event_matches SET ready_a_at = ?, ready_b_at = ? WHERE id = ?').run(NOW.toISOString(), NOW.toISOString(), ready.id);
+    const st = R.roomState(f.db, P.getMatch(f.db, ready.id)!);
+    expect(st.next.kind).toBe('order');
+    ok(R.actVeto(f.db, { matchId: ready.id, steamid: null, step: 0, action: 'first', campaign: null, timers: TIMERS, now: NOW }));
+    const snap = JSON.stringify([f.db.prepare('SELECT * FROM event_matches ORDER BY id').all(), f.db.prepare('SELECT * FROM event_log ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM event_vetoes ORDER BY id').all()]);
+    const fix = await F.recordResultFlow(f.db, { eventId: f.eventId, matchId: semis[0]!.id, by: ADMIN, result: { winner: 'b', scoreA: 5, scoreB: 10 }, now: NOW });
+    expect(fix).toEqual({ ok: false, error: 'room_open_downstream' });
+    expect(JSON.stringify([f.db.prepare('SELECT * FROM event_matches ORDER BY id').all(), f.db.prepare('SELECT * FROM event_log ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM event_vetoes ORDER BY id').all()])).toBe(snap);
+  });
+
   it('forfeitMatch refuses when the match moved on before its turn in the chain (plan T3a Ruling 12)', async () => {
     const f = await roomFixture();
     ok(R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
