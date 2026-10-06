@@ -121,6 +121,15 @@ describe('home and away (Bo2 total score)', () => {
     expect(st.games.map((g) => [g.campaign, g.pickedBy, g.firstSurvivors])).toEqual([['c2', 'b', 'a'], ['c4', 'a', 'a']]);
     expect(st.next).toEqual({ kind: 'done' });
   });
+  it('gives a decider\'s sides to the team that did not make the last pick when nobody banned (pool of 2)', () => {
+    const cfg = presetConfig('home_away', 2);
+    const inp = (actions: VetoAction[]) => ({ ...input(cfg, actions), pool: POOL.slice(0, 2) });
+    const actions = [act('a', 'first'), act('a', 'pick', 'c1'), act('b', 'survivors')];
+    const st = vetoState(inp(actions));
+    // game 2 is the decider: a picked game 1, so b chooses its sides.
+    expect(st.games[1]).toEqual({ game: 2, campaign: 'c2', pickedBy: null, sideBy: 'b', firstSurvivors: null });
+    expect(st.next).toEqual({ kind: 'side', by: 'b', game: 2 });
+  });
 });
 
 describe('coin sides and fixed pickers', () => {
@@ -132,6 +141,16 @@ describe('coin sides and fixed pickers', () => {
     // coin k = 2 + game = 3 reads bit 3.
     expect(st.games[0]!.firstSurvivors).toBe('b');
     expect(st.next).toEqual({ kind: 'done' });
+  });
+});
+
+describe('order step only when something uses it', () => {
+  it('asks no order question for a Bo1 ban to one on a pool of 1, even with firstPick first', () => {
+    const cfg = presetConfig('ban_to_one', 1);
+    expect(cfg.firstPick).toBe('first');
+    const st = vetoState({ ...input(cfg, []), pool: ['c1'] });
+    expect(st.first).toBeNull();
+    expect(st.next).toEqual({ kind: 'side', by: 'a', game: 1 });
   });
 });
 
