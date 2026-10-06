@@ -93,3 +93,23 @@ export function boxNeedsGame(statusBody: string, matchId: number): boolean {
   if (Number(m[2]) === matchId) return false;
   return m[1] !== 'live';
 }
+
+/** A sub's roster row on a tournament game (plan T3c Ruling 5): source web,
+ *  joined_map the maps finished so far, so the dump's STAT line finds a row
+ *  and the rating of a pug never applies anyway (kind tournament). A second
+ *  call for the same player changes nothing. */
+export function addTournamentSub(db: DB, o: { matchId: number; inId: string; team: 'a' | 'b'; now?: Date }): { joinedMap: number } {
+  const now = o.now ?? new Date();
+  return db.transaction(() => {
+    const row = db.prepare('SELECT booking_id FROM matches WHERE id = ?').get(o.matchId) as { booking_id: number | null } | undefined;
+    if (!row) throw new Error(`match ${o.matchId} does not exist`);
+    const joinedMap = (db.prepare(
+      'SELECT COUNT(DISTINCT ordinal) AS n FROM match_rounds WHERE match_id = ? AND half = 2 AND ended_at IS NOT NULL',
+    ).get(o.matchId) as { n: number }).n;
+    const existing = db.prepare('SELECT joined_map FROM match_players WHERE match_id = ? AND player_id = ?').get(o.matchId, o.inId) as { joined_map: number } | undefined;
+    if (existing) return { joinedMap: existing.joined_map };
+    db.prepare("INSERT INTO match_players (match_id, player_id, team, joined_map, source) VALUES (?, ?, ?, ?, 'web')").run(o.matchId, o.inId, o.team, joinedMap);
+    if (row.booking_id !== null) logBookingEvent(db, row.booking_id, null, 'sub_added', { matchId: o.matchId, steamid: o.inId, team: o.team, joinedMap }, now);
+    return { joinedMap };
+  })();
+}

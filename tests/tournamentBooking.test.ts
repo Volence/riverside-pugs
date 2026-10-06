@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { addServer } from '../src/serverPool.js';
-import { appendTournamentGame, createTournamentBooking, getBooking, peopleOf, recordPresence, setNext, sidesOf, advancePlaylist } from '../src/bookings/bookings.js';
-import { boxNeedsGame, createTournamentGame, gameLinesOf, isPendingGame } from '../src/bookings/tournamentGames.js';
+import { appendTournamentGame, createTournamentBooking, getBooking, peopleOf, recordPresence, setNext, sidesOf, advancePlaylist, swapPlayer, beginMove, holdBox, markSetup, markReady } from '../src/bookings/bookings.js';
+import { addTournamentSub, boxNeedsGame, createTournamentGame, gameLinesOf, isPendingGame } from '../src/bookings/tournamentGames.js';
 
 const P = Array.from({ length: 10 }, (_, i) => `765611990000009${String(i).padStart(2, '0')}`);
 const NOW = new Date('2026-10-07T20:00:00.000Z');
@@ -103,5 +103,49 @@ describe('boxNeedsGame (T3b final review)', () => {
     expect(boxNeedsGame(body('live', 4), 5)).toBe(false);
     expect(boxNeedsGame('', 5)).toBe(false);
     expect(boxNeedsGame('Unknown command "sm_pug_status"', 5)).toBe(false);
+  });
+});
+
+describe('swapPlayer and beginMove (plan T3c)', () => {
+  const booked = () => {
+    const r = createTournamentBooking(db, { region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: P[9]!, sides: [sides()[0], sides()[1]], now: NOW });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.id;
+  };
+  it('swaps a locked player and a spectator of the same side', () => {
+    const id = booked();
+    expect(swapPlayer(db, { bookingId: id, side: 'a', outId: P[8]!, inId: P[0]!, now: NOW })).toEqual({ ok: false, error: 'not_person' });
+    expect(swapPlayer(db, { bookingId: id, side: 'a', outId: P[0]!, inId: P[4]!, now: NOW })).toEqual({ ok: false, error: 'not_person' });
+    expect(swapPlayer(db, { bookingId: id, side: 'a', outId: P[0]!, inId: P[8]!, now: NOW })).toEqual({ ok: true, value: null });
+    expect(peopleOf(db, id).filter((p) => p.side === 'a').map((p) => `${p.steamid}:${p.role}`).sort())
+      .toEqual([`${P[0]}:spectator`, `${P[1]}:player`, `${P[2]}:player`, `${P[3]}:player`, `${P[8]}:player`].sort());
+    expect(db.prepare("SELECT detail FROM booking_events WHERE booking_id = ? AND event = 'player_swapped'").get(id)).toEqual({ detail: JSON.stringify({ side: 'a', out: P[0], in: P[8] }) });
+  });
+
+  it('lets a running booking go of its box without marking the box offline', () => {
+    const id = booked();
+    const serverId = addServer(db, { name: 'box', host: '10.0.0.1', port: 27015, rconPort: 1, rconPassword: 'x' });
+    db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(serverId);
+    expect(beginMove(db, id, NOW)).toBeNull();
+    expect(holdBox(db, id, serverId, NOW)).toBe(true);
+    markSetup(db, id, NOW);
+    markReady(db, id, NOW);
+    expect(beginMove(db, id, NOW)).toBe(serverId);
+    expect(getBooking(db, id)).toMatchObject({ server_id: null, recovering_at: NOW.toISOString(), recover_reason: 'gone', waiting_since: NOW.toISOString(), state: 'ready' });
+    expect(db.prepare('SELECT status, gone_since FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'idle', gone_since: null });
+    expect(beginMove(db, id, NOW)).toBeNull();
+  });
+
+  it('adds a sub to a tournament game with the maps finished so far', () => {
+    const id = booked();
+    const serverId = addServer(db, { name: 'box', host: '10.0.0.1', port: 27015, rconPort: 1, rconPassword: 'x' });
+    const g = createTournamentGame(db, { bookingId: id, serverId, campaign: 'no_mercy', teams: { a: P.slice(0, 4), b: P.slice(4, 8) }, bookingSideA: 'a', now: NOW });
+    const round = db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, ?, ?, 'a', 100, '2026-10-07 20:30:00')");
+    round.run(g.matchId, 0, 1); round.run(g.matchId, 0, 2); round.run(g.matchId, 1, 1);
+    expect(addTournamentSub(db, { matchId: g.matchId, inId: P[8]!, team: 'a', now: NOW })).toEqual({ joinedMap: 1 });
+    expect(db.prepare('SELECT team, joined_map, source FROM match_players WHERE match_id = ? AND player_id = ?').get(g.matchId, P[8]!)).toEqual({ team: 'a', joined_map: 1, source: 'web' });
+    // Again: the row stays as it was.
+    expect(addTournamentSub(db, { matchId: g.matchId, inId: P[8]!, team: 'b', now: NOW })).toEqual({ joinedMap: 1 });
+    expect(db.prepare('SELECT team FROM match_players WHERE match_id = ? AND player_id = ?').get(g.matchId, P[8]!)).toEqual({ team: 'a' });
   });
 });
