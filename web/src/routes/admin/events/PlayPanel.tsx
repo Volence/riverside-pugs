@@ -3,7 +3,7 @@ import { adminApi, type PlayMatch, type RoomPhase, type StagePlayView } from '..
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
 import { useAction, type Run } from '../useAction';
-import { groupPrefix } from '../../../eventFormat';
+import { fromLocalInput, groupPrefix, playByText, whenText } from '../../../eventFormat';
 import { PHASE_TEXT } from '../../event/room/roomText';
 
 /** The real match.status values (src/events/play.ts MatchStatus) where a
@@ -118,6 +118,9 @@ function DeskLine({ m }: { m: PlayMatch }) {
   if (d.frozen) parts.push('Frozen by staff');
   if (d.booking) parts.push(`Server: ${d.booking.serverName ?? 'none yet'}${d.booking.recovering ? ' (recovering)' : ''}`);
   if (d.subs.a + d.subs.b > 0) parts.push(`Subs: ${a} ${d.subs.a}, ${b} ${d.subs.b}`);
+  if (m.scheduledAt) parts.push(`Time: ${whenText(m.scheduledAt)}${m.scheduleSource === 'agreed' ? ' (agreed)' : m.scheduleSource === 'staff' ? ' (staff)' : ''}`);
+  if (d.schedule?.windowEnd) parts.push(playByText(d.schedule.windowEnd));
+  if (d.schedule?.proposal) parts.push(`Proposal open: ${d.schedule.proposal.byName} (${d.schedule.proposal.side === 'a' ? a : b}) ${whenText(d.schedule.proposal.time)}${d.schedule.proposal.autoAcceptAt ? `, locks ${whenText(d.schedule.proposal.autoAcceptAt)}` : ''} · ${d.schedule.proposals} proposals`);
   if (parts.length === 0) return null;
   return <p class="muted desk-line">{parts.join(' · ')}</p>;
 }
@@ -138,6 +141,7 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
   const [chapter, setChapter] = useState('');
   // The replay route answers before the box does (plan T3c final review): its outcome reaches the staff feed.
   const [replayNote, setReplayNote] = useState('');
+  const [time, setTime] = useState('');
   const d = m.desk!;
   const names = `${m.a?.name ?? 'TBD'} vs ${m.b?.name ?? 'TBD'}`;
   const teamName = side === 'a' ? m.a?.name ?? 'team A' : m.b?.name ?? 'team B';
@@ -145,6 +149,8 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
   const canAct = phase === 'ready' || phase === 'veto' || phase === 'lineup' || phase === 'live';
   const canReopen = phase === 'ready' || phase === 'veto' || phase === 'lineup' || phase === 'server' || phase === 'hold';
   const canBox = phase === 'connect' || phase === 'live';
+  /** Plan T4: a window-stage match still waiting for its room may have its time set outright. */
+  const canTime = phase === 'waiting' && d.schedule !== null;
   const chapters = d.liveGame?.chapters ?? [];
   const fourIds = four.split(/[\s,]+/).filter(Boolean);
   const chapterLabel = (c: { ordinal: number; map: string }) => `Chapter ${c.ordinal + 1}: ${c.map}`;
@@ -167,7 +173,7 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
     });
   };
   // A phase with no tool (confirming, for one) shows no empty disclosure.
-  if (!canAct && !canReopen && !canBox) return null;
+  if (!canAct && !canReopen && !canBox && !canTime) return null;
   return (
     <details class="desktools" ref={detailsRef} open={open} onToggle={onToggle}>
       <summary>{`Staff tools: ${names}`}</summary>
@@ -250,6 +256,13 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
         )}
         {replayNote && <p class="muted" role="status">{replayNote}</p>}
       </div>}
+      {open && canTime && (
+        <div class="desktools__group">
+          <label>Match time <input type="datetime-local" aria-label="Match time" value={time} onInput={(e) => setTime((e.target as HTMLInputElement).value)} /></label>
+          <button class="btn btn--ghost btn--sm" disabled={busy || !fromLocalInput(time)} onClick={() => void run(() => adminApi.setEventMatchTime(eventId, m.id, fromLocalInput(time)!),
+            { title: `Set ${names} for ${whenText(fromLocalInput(time)!)}?`, body: 'Both rosters are told. An open proposal expires. The room opens before the time on its own.' })}>Set time</button>
+        </div>
+      )}
     </details>
   );
 }
@@ -291,7 +304,7 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
           )}
         </>
       )}
-      {editable && m.desk && ROOM_LIVE.has(m.phase) && <DeskTools eventId={eventId} m={m} run={run} busy={busy} />}
+      {editable && m.desk && (ROOM_LIVE.has(m.phase) || m.phase === 'waiting') && <DeskTools eventId={eventId} m={m} run={run} busy={busy} />}
     </li>
   );
 }

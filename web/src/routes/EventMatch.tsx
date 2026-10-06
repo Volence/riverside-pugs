@@ -4,12 +4,14 @@ import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { useHubEvent } from '../hooks/useHubEvent';
 import type { Session } from '../hooks/useLiveState';
+import { whenText } from '../eventFormat';
 import { PHASE_TEXT, clockText, logText, resultLine } from './event/room/roomText';
 import { VetoBoard } from './event/room/VetoBoard';
 import { LineupPanel } from './event/room/LineupPanel';
 import { ServerPanel } from './event/room/ServerPanel';
 import { SeriesPanel } from './event/room/SeriesPanel';
 import { ConfirmPanel } from './event/room/ConfirmPanel';
+import { SchedulePanel } from './event/room/SchedulePanel';
 
 /** Phases the page refetches in every 10 s. A result can close a room
  *  (server, hold) and a reset can reopen one (waiting) with no push. */
@@ -85,10 +87,23 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
       >
         <p class="room__sub">
           <a href={`/event/${v.eventSlug}`}>{v.eventName}</a> · {v.roundLabel}
+          {v.schedule?.scheduledAt && <span> · {whenText(v.schedule.scheduledAt)}</span>}
           {left !== null && <span class="room__clock"> · {clockText(left)} left</span>}
         </p>
       </PageHeader>
       {problem && <p class="error" role="alert">{problem}</p>}
+      {v.schedule && (v.phase === 'waiting' || v.phase === 'hold' || v.schedule.log.length > 0) && (
+        <Panel>
+          <h3>Schedule</h3>
+          <SchedulePanel
+            v={v} busy={busy}
+            onPropose={(time, note) => { void run(() => eventsApi.propose(slug, matchId, time, note)); }}
+            onRespond={(accept) => { void run(() => eventsApi.respond(slug, matchId, accept)); }}
+            onCounter={(time, note) => { void run(() => eventsApi.counter(slug, matchId, time, note)); }}
+            onWithdraw={() => { void run(() => eventsApi.withdrawProposal(slug, matchId)); }}
+          />
+        </Panel>
+      )}
       {(v.phase === 'server' || v.phase === 'connect' || v.phase === 'live' || v.phase === 'confirming') && (
         <Panel>
           <h3>Server</h3>

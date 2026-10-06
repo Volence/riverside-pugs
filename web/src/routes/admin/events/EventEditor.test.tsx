@@ -9,6 +9,7 @@ const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
     event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
     reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
     setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(), eventEntries: vi.fn(), eventPlay: vi.fn(), startEvent: vi.fn(),
+    setRoundSchedule: vi.fn(),
   },
   mockConfirm: vi.fn(),
 }));
@@ -44,6 +45,7 @@ const stage = (id: number, ordinal: number, swiss: boolean): AdminEventStage => 
     type: swiss ? 'swiss' : 'single_elim', config: swiss ? { rounds: 4 } : { thirdPlace: false }, rulesetId: 2, gameConfig: 'standard',
     campaignPool: ['no_mercy', 'dead_air'], vetoType: 'ban_to_one', veto: BAN_TO_ONE, chapters: null, scheduling: 'rolling', advanceCount: swiss ? 8 : null,
   },
+  schedule: [], roundsKnown: null,
 });
 const detail = (over: Partial<AdminEventDetail> = {}): AdminEventDetail => ({
   id: 3, slug: 'riverside-cup', status: 'draft', fields: FIELDS, bannerKey: null, cancelReason: null,
@@ -308,5 +310,15 @@ describe('EventEditor', () => {
     fireEvent.input(screen.getByLabelText('Advance count'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
     await waitFor(() => expect(mockAdmin.updateStage).toHaveBeenCalledWith(3, 10, expect.objectContaining({ config: { rounds: 5 }, advanceCount: null })));
+  });
+
+  it('opens the round schedule editor for a stage at any status and saves it (plan T4)', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'live', stages: [{ ...stage(3, 1, true), rulesSnapshotted: true, schedule: [], roundsKnown: 4 }] }));
+    mockAdmin.setRoundSchedule.mockResolvedValue({ stamped: 2 });
+    render(<EventEditor id={1} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule stage 1' }));
+    fireEvent.input(screen.getByLabelText('Round 1 default time'), { target: { value: '2026-10-24T21:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
+    await waitFor(() => expect(mockAdmin.setRoundSchedule).toHaveBeenCalledWith(1, 3, [{ round: 1, at: new Date('2026-10-24T21:00').toISOString(), from: null, to: null }]));
   });
 });

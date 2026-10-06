@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STATUS_LABEL, fromLocalInput, groupPrefix, toLocalInput, untilText } from './eventFormat';
+import { STATUS_LABEL, fromLocalInput, groupPrefix, playByText, toLocalInput, untilText, whenText } from './eventFormat';
 
 const now = Date.parse('2026-10-01T12:00:00.000Z');
 const at = (mins: number) => new Date(now + mins * 60_000).toISOString();
@@ -38,6 +38,18 @@ describe('datetime-local conversion', () => {
   it('names every status', () => {
     expect(STATUS_LABEL.registration).toBe('Registration open');
     expect(Object.keys(STATUS_LABEL)).toHaveLength(7);
+  });
+});
+
+describe('playByText', () => {
+  it('reads a window end in the viewer\'s zone, prefixed "play by" (plan T4)', () => {
+    const iso = '2026-10-18T23:59:59.000Z';
+    expect(playByText(iso)).toBe(`play by ${new Date(Date.parse(iso)).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`);
+    expect(playByText(iso)).not.toBe(whenText(iso));
+  });
+
+  it('falls back to the raw string for something unreadable', () => {
+    expect(playByText('nonsense')).toBe('play by nonsense');
   });
 });
 

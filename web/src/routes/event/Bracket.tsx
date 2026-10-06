@@ -1,4 +1,5 @@
 import type { PlayEntry, PlayMatch, StagePlayView } from '../../api';
+import { whenText } from '../../eventFormat';
 import { PHASE_TEXT } from './room/roomText';
 
 /** One side of a match card: the team (or TBD / Bye) and its score. */
@@ -14,11 +15,12 @@ function Side({ e, score, won, forfeitLoss, bye }: { e: PlayEntry | null; score:
 /** A match card. Linked to its room once both teams are known and it is
  *  not a bye (plan T3a); the phase chip only shows once the room has moved
  *  past waiting, since pending/waiting/done already read from the card. */
-export function MatchCard({ m, slug }: { m: PlayMatch; slug: string }) {
+export function MatchCard({ m, slug, roundDefault = null }: { m: PlayMatch; slug: string; roundDefault?: string | null }) {
   const body = (
     <>
       <Side e={m.a} score={m.scoreA} won={m.winner === 'a'} forfeitLoss={m.forfeit && m.winner === 'b'} bye={false} />
       <Side e={m.b} score={m.scoreB} won={m.winner === 'b'} forfeitLoss={m.forfeit && m.winner === 'a'} bye={m.bye} />
+      {m.scheduledAt && m.scheduledAt !== roundDefault && <span class="matchcard__when">{whenText(m.scheduledAt)}</span>}
       {m.phase !== 'done' && m.phase !== 'pending' && m.phase !== 'waiting' && <span class="matchcard__phase">{PHASE_TEXT[m.phase]}</span>}
     </>
   );
@@ -38,8 +40,8 @@ export function Bracket({ stage, slug }: { stage: StagePlayView; slug: string })
           <div class="bracket">
             {stage.rounds.filter((r) => r.group === g.number).map((r) => (
               <div key={r.round} class="bracket__round">
-                <span class="eyebrow">{r.label}</span>
-                {r.matches.map((m) => <MatchCard key={m.id} m={m} slug={slug} />)}
+                <span class="eyebrow">{`${r.label}${r.defaultAt ? ` · ${whenText(r.defaultAt)}` : ''}`}</span>
+                {r.matches.map((m) => <MatchCard key={m.id} m={m} slug={slug} roundDefault={r.defaultAt} />)}
               </div>
             ))}
           </div>

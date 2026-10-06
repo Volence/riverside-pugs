@@ -49,6 +49,12 @@ export function weekRangeText(from: string, to: string): string {
   return `${f(from)} to ${f(to)}`;
 }
 
+/** "play by Sun, Oct 18, 23:59" for a window's end, in the viewer's zone. */
+export function playByText(iso: string): string {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? `play by ${iso}` : `play by ${new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+}
+
 /** 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th, 21st. */
 export function placementText(n: number): string {
   const teen = n % 100 >= 11 && n % 100 <= 13;

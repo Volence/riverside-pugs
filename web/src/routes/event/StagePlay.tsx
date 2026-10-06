@@ -1,6 +1,6 @@
 import type { PlayStanding, StagePlayView } from '../../api';
 import { Panel } from '../../components/bits';
-import { groupPrefix, weekRangeText } from '../../eventFormat';
+import { groupPrefix, playByText, weekRangeText, whenText } from '../../eventFormat';
 import { Bracket, MatchCard } from './Bracket';
 
 const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
@@ -53,9 +53,9 @@ export function StagePlay({ stage, slug }: { stage: StagePlayView; slug: string 
           {stage.rounds.slice().reverse().map((r) => (
             <section key={`${r.group}-${r.round}`} class="playround">
               <span class="eyebrow">
-                {`${groupPrefix(stage, r)}${r.label}${r.dates ? ` · ${weekRangeText(r.dates.from, r.dates.to)}` : ''}`}
+                {`${groupPrefix(stage, r)}${r.label}${r.dates ? ` · ${weekRangeText(r.dates.from, r.dates.to)}` : ''}${r.defaultAt ? ` · ${whenText(r.defaultAt)}` : ''}${r.window ? ` · ${playByText(r.window.to)}` : ''}`}
               </span>
-              <div class="playround__matches">{r.matches.map((m) => <MatchCard key={m.id} m={m} slug={slug} />)}</div>
+              <div class="playround__matches">{r.matches.map((m) => <MatchCard key={m.id} m={m} slug={slug} roundDefault={r.defaultAt} />)}</div>
             </section>
           ))}
         </>

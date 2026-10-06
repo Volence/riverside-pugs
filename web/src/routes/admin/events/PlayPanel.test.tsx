@@ -10,6 +10,7 @@ const { mockAdmin } = vi.hoisted(() => ({
     openEventRoom: vi.fn(), resetEventRoom: vi.fn(), holdEventMatch: vi.fn(),
     actForTeam: vi.fn(), reopenEventVeto: vi.fn(), replayEventChapter: vi.fn(), moveEventServer: vi.fn(),
     extendEventGrace: vi.fn(), releaseEventHold: vi.fn(), freezeEventMatch: vi.fn(), unfreezeEventMatch: vi.fn(),
+    setEventMatchTime: vi.fn(),
   },
 }));
 vi.mock('../../../api', async (importOriginal) => {
@@ -25,17 +26,17 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const team = (id: number, name: string) => ({ id, name, tag: '', logoKey: null, seed: id, out: false });
 const m = (over: Partial<PlayMatch> = {}): PlayMatch => ({
   id: 7, group: 1, round: 1, slot: 1, a: team(1, 'Rats'), b: team(2, 'Bats'), status: 'waiting', winner: null,
-  scoreA: null, scoreB: null, forfeit: false, bye: false, phase: 'waiting', ...over,
+  scoreA: null, scoreB: null, forfeit: false, bye: false, phase: 'waiting', scheduledAt: null, scheduleSource: null, ...over,
 });
 const play = (over: Partial<AdminEventPlay> = {}): AdminEventPlay => ({
   status: 'live', lockedAt: 'x', startsAt: '2026-10-10T20:00:00.000Z', seeded: 2, ...over,
   stages: over.stages ?? [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-    rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m()] }] }],
+    rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m()] }] }],
 });
 
 const twoMatches = () => play({
   stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-    rounds: [{ group: 1, round: 1, label: 'Semifinals', dates: null, matches: [
+    rounds: [{ group: 1, round: 1, label: 'Semifinals', dates: null, defaultAt: null, window: null, matches: [
       m(),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'lineup', phase: 'lineup' }),
       m({ id: 9, slot: 3, a: team(5, 'Emus'), b: team(6, 'Foxes'), status: 'live', phase: 'live' }),
@@ -85,7 +86,7 @@ describe('PlayPanel', () => {
 
   it('records a forfeit without scores, and offers Correct on a finished match', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'swiss', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: true,
-      rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, matches: [m(), m({ id: 8, slot: 2, status: 'done', winner: 'b', scoreA: 1, scoreB: 2 })] }] }] }));
+      rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, defaultAt: null, window: null, matches: [m(), m({ id: 8, slot: 2, status: 'done', winner: 'b', scoreA: 1, scoreB: 2 })] }] }] }));
     mockAdmin.recordEventResult.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit />);
     const forfeit = (await screen.findAllByLabelText('Forfeit'))[0]!;
@@ -99,7 +100,7 @@ describe('PlayPanel', () => {
 
   it('closes the correction form and brings Correct back once a correction succeeds, with its own confirm', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
+      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
     mockAdmin.recordEventResult.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Correct' }));
@@ -116,7 +117,7 @@ describe('PlayPanel', () => {
 
   it('keeps the correction form open with what was typed when the save fails', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
+      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
     mockAdmin.recordEventResult.mockRejectedValue(new ApiError(409, 'A result that later matches already depend on is refused.'));
     render(<PlayPanel eventId={9} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Correct' }));
@@ -147,10 +148,10 @@ describe('PlayPanel', () => {
 
   it('hides Correct where the server would refuse it: a paired-as-it-goes round with a later round, and a forfeit against an out team', async () => {
     const done = m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 });
-    const later = { group: 1, round: 2, label: 'Round 2', dates: null, matches: [m({ id: 9, round: 2 })] };
+    const later = { group: 1, round: 2, label: 'Round 2', dates: null, defaultAt: null, window: null, matches: [m({ id: 9, round: 2 })] };
     const table = (pairsAsItGoes: boolean) => play({ stages: [{ ordinal: 1, type: pairsAsItGoes ? 'swiss' : 'league', status: 'live', layout: 'table',
       groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes,
-      rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, matches: [done] }, later] }] });
+      rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, defaultAt: null, window: null, matches: [done] }, later] }] });
     mockAdmin.eventPlay.mockResolvedValue(table(true));
     render(<PlayPanel eventId={9} canEdit />);
     await screen.findAllByLabelText('Winner');
@@ -164,7 +165,7 @@ describe('PlayPanel', () => {
 
     const out = { ...team(2, 'Bats'), out: true };
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [m({ b: out, status: 'forfeit', winner: 'a', forfeit: true })] }] }] }));
+      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m({ b: out, status: 'forfeit', winner: 'a', forfeit: true })] }] }] }));
     render(<PlayPanel eventId={9} canEdit />);
     expect(await screen.findByText(/forfeit, Rats wins/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Correct' })).toBeNull();
@@ -173,7 +174,7 @@ describe('PlayPanel', () => {
   it('labels a third place match once, not "Third place, Third place"', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket',
       groups: [{ number: 1, label: 'Bracket' }, { number: 2, label: 'Third place' }], standings: [], advanceCount: null, pairsAsItGoes: false,
-      rounds: [{ group: 1, round: 2, label: 'Final', dates: null, matches: [m()] }, { group: 2, round: 1, label: 'Third place', dates: null, matches: [m({ id: 8, group: 2 })] }] }] }));
+      rounds: [{ group: 1, round: 2, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m()] }, { group: 2, round: 1, label: 'Third place', dates: null, defaultAt: null, window: null, matches: [m({ id: 8, group: 2 })] }] }] }));
     render(<PlayPanel eventId={9} canEdit={false} />);
     expect(await screen.findByText('Third place')).toBeTruthy();
     expect(screen.getByText('Bracket, Final')).toBeTruthy();
@@ -239,11 +240,11 @@ describe('PlayPanel', () => {
   });
 
   const desk = (over: Partial<NonNullable<PlayMatch['desk']>> = {}): NonNullable<PlayMatch['desk']> => ({
-    holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, ...over,
+    holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, schedule: null, ...over,
   });
 
   it('shows the hold reason, the dispute and the freeze on the desk (plan T3c)', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'dispute', holdFrom: 'confirming', dispute: { side: 'b', byName: 'Bob', reason: 'They had five', at: '2026-10-10T21:00:00.000Z' } }) }),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'live', phase: 'live', desk: desk({ frozen: true, subs: { a: 1, b: 0 } }) }),
     ] }] }] }));
@@ -256,7 +257,7 @@ describe('PlayPanel', () => {
   });
 
   it('offers the tools an admin may use in each phase and calls the right routes (plan T3c)', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'live', phase: 'live', desk: desk({ liveGame: { matchId: 44, campaign: 'no_mercy', chapters: [{ ordinal: 0, map: 'l4d_vs_hospital01_apartment' }, { ordinal: 1, map: 'l4d_vs_hospital02_subway' }] } }) }),
     ] }] }] }));
     for (const fn of Object.values(mockAdmin)) if (fn !== mockAdmin.eventPlay) (fn as Mock).mockResolvedValue({});
@@ -283,7 +284,7 @@ describe('PlayPanel', () => {
   });
 
   it('offers Extend grace in connect, Release hold on a hold, and Reopen veto before a game (plan T3c)', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'connect', phase: 'connect', desk: desk({ graceEndsAt: '2026-10-10T21:00:00.000Z' }) }),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'no_show_both', holdFrom: 'connect' }) }),
       m({ id: 9, slot: 3, a: team(5, 'Emus'), b: team(6, 'Foxes'), status: 'lineup', phase: 'lineup', desk: desk() }),
@@ -305,7 +306,7 @@ describe('PlayPanel', () => {
     await waitFor(() => expect(mockAdmin.actForTeam).toHaveBeenCalledWith(9, 9, { kind: 'lineup', side: 'a', steamids: ['76561199000000821', '76561199000000822', '76561199000000823', '76561199000000824'] }));
   });
   it('points a hold over an aborted or lost game at the result or a reset, with no Release hold (plan T3c final review)', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'game_aborted', holdFrom: 'live' }) }),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'game_lost', holdFrom: 'live' }) }),
     ] }] }] }));
@@ -318,7 +319,7 @@ describe('PlayPanel', () => {
   });
 
   it('says a freeze in ready-up lands when the next half goes live (plan T3c final review)', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'connect', phase: 'connect', desk: desk() }),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'live', phase: 'live', desk: desk() }),
     ] }] }] }));
@@ -333,7 +334,7 @@ describe('PlayPanel', () => {
   });
 
   it('shows no staff tools on a match where none applies, as one being confirmed (plan T3c Task 9 review)', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'confirming', phase: 'confirming', desk: desk() }),
     ] }] }] }));
     render(<PlayPanel eventId={9} canEdit />);
@@ -342,7 +343,7 @@ describe('PlayPanel', () => {
   });
 
   it('keeps one match\'s tools open per panel, leaving another panel\'s open tools alone (plan T3c Task 9 review)', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'live', phase: 'live', desk: desk() }),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'connect', phase: 'connect', desk: desk() }),
     ] }] }] }));
@@ -362,5 +363,22 @@ describe('PlayPanel', () => {
     await waitFor(() => expect(details(oneRats).open).toBe(false));
     expect(details(oneCats).open).toBe(true);
     expect(details(twoRats).open).toBe(true);
+  });
+
+  it('shows a window match\'s time, window and open proposal, and sets a time (plan T4)', async () => {
+    const desk2 = {
+      holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 },
+      schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: { side: 'b' as const, byName: 'bob', time: '2026-10-16T20:00:00.000Z', autoAcceptAt: null }, proposals: 2 },
+    };
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ scheduledAt: '2026-10-14T21:00:00.000Z', scheduleSource: 'default', desk: desk2 })] }] }] }));
+    mockAdmin.setEventMatchTime.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit slug="cup" />);
+    expect((await screen.findByText(/Proposal open: bob \(Bats\)/)).textContent).toContain('2 proposals');
+    fireEvent.click(await screen.findByText('Staff tools: Rats vs Bats'));
+    fireEvent.input(screen.getByLabelText('Match time'), { target: { value: '2026-10-17T21:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set time' }));
+    await waitFor(() => expect(mockAdmin.setEventMatchTime).toHaveBeenCalledWith(9, 7, new Date('2026-10-17T21:00').toISOString()));
+    expect(confirm).toHaveBeenCalled();
   });
 });
