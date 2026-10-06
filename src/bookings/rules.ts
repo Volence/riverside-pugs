@@ -215,10 +215,15 @@ export function addCampaignMinutes(db: DB, campaign: string | null): number {
 export const EVENT_SLOT_MINUTES = 120;
 
 /** The match statuses a scheduled tournament match can hold before its
- *  booking exists: waiting, and the room phases ahead of the booking. Never
- *  pending (teams not known), a resolved status (done, forfeit, bye), a held
- *  match, or a phase that already has its booking (ledger CARRY to Task 5). */
-const UNBOOKED_MATCH_SQL = "('waiting','veto','lineup','booking')";
+ *  booking exists: pending (a later round whose teams are not known yet still
+ *  needs its box at its time), waiting, and the room phases ahead of the
+ *  booking. Never a resolved status (done, forfeit, bye) or a phase that
+ *  already has its booking (ledger CARRY to Task 5). admin_hold is left out
+ *  on purpose: a held match waits on staff, who set a new time on release.
+ *  A bracket's pending row never waits on a permanent bye: syncBracket
+ *  writes only matches with both opponent slots, and deletes a row once the
+ *  library turns a slot into a bye (see the Task 5 report). */
+const UNBOOKED_MATCH_SQL = "('pending','waiting','veto','lineup','booking')";
 
 /**
  * Scheduled tournament matches not yet booked, as slots (plan T4 Ruling 5):
