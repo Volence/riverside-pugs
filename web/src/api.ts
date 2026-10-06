@@ -1948,6 +1948,8 @@ export interface PlayStanding {
 export interface StagePlayView {
   ordinal: number; type: string; status: 'live' | 'finished'; layout: 'bracket' | 'table';
   groups: { number: number; label: string }[]; rounds: PlayRound[]; standings: PlayStanding[]; advanceCount: number | null;
+  /** Swiss, or a league paired Swiss (mirrors src/events/playViews.ts). */
+  pairsAsItGoes: boolean;
 }
 /** The Play section of the desk (plan T2 Ruling 17). Mirrors
  *  src/routes/adminEvents.ts AdminEventPlay. */

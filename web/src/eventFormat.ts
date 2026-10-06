@@ -1,4 +1,4 @@
-import type { EventStatus } from './api';
+import type { EventStatus, StagePlayView } from './api';
 
 /** Event statuses as people read them. */
 export const STATUS_LABEL: Record<EventStatus, string> = {
@@ -54,4 +54,12 @@ export function placementText(n: number): string {
   const teen = n % 100 >= 11 && n % 100 <= 13;
   const suffix = teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
   return `${n}${suffix}`;
+}
+
+/** "Upper bracket, " before a round's label when the stage has groups, but
+ *  never "Third place, Third place". */
+export function groupPrefix(s: Pick<StagePlayView, 'groups'>, r: { group: number; label: string }): string {
+  if (s.groups.length <= 1) return '';
+  const g = s.groups.find((x) => x.number === r.group)?.label;
+  return g && g !== r.label ? `${g}, ` : '';
 }

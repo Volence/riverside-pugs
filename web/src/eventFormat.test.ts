@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STATUS_LABEL, fromLocalInput, toLocalInput, untilText } from './eventFormat';
+import { STATUS_LABEL, fromLocalInput, groupPrefix, toLocalInput, untilText } from './eventFormat';
 
 const now = Date.parse('2026-10-01T12:00:00.000Z');
 const at = (mins: number) => new Date(now + mins * 60_000).toISOString();
@@ -38,5 +38,14 @@ describe('datetime-local conversion', () => {
   it('names every status', () => {
     expect(STATUS_LABEL.registration).toBe('Registration open');
     expect(Object.keys(STATUS_LABEL)).toHaveLength(7);
+  });
+});
+
+describe('groupPrefix', () => {
+  const groups = [{ number: 1, label: 'Bracket' }, { number: 2, label: 'Third place' }];
+  it('names the group before the round, never twice, and not at all with one group', () => {
+    expect(groupPrefix({ groups }, { group: 1, label: 'Final' })).toBe('Bracket, ');
+    expect(groupPrefix({ groups }, { group: 2, label: 'Third place' })).toBe('');
+    expect(groupPrefix({ groups: groups.slice(0, 1) }, { group: 1, label: 'Final' })).toBe('');
   });
 });

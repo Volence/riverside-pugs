@@ -13,7 +13,7 @@ import * as P from '../src/events/play.js';
 import { ADMIN } from './eventFixture.js';
 import { startEventFlow } from '../src/events/flow.js';
 import { stagePlayViews, type PlayMatch } from '../src/events/playViews.js';
-import { LEAGUE, SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
+import { DE, LEAGUE, SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 
 const MOD = '76561199000000830';
 const PLAYER = '76561199000000831';
@@ -133,6 +133,25 @@ describe('event play routes', () => {
     expect(day).toBe('2026-10-20');
     const round1 = stagePlayViews(g.db, E.getEvent(g.db, g.eventId)!)[0]!.rounds[0]!;
     expect(round1.dates).toEqual({ from: day, to: '2026-10-26' });
+  });
+
+  it('pairsAsItGoes is true for Swiss and a Swiss-paired league only', async () => {
+    const cases: [Record<string, unknown>, boolean][] = [
+      [SWISS(2, null), true], [LEAGUE(3, 1, 'swiss', null), true], [LEAGUE(3, 1, 'round_robin', null), false], [SE(), false],
+    ];
+    for (const [stage, want] of cases) {
+      const g = playFixture({ stages: [stage], entries: 4 });
+      expect((await startEventFlow(g.db, { eventId: g.eventId, by: ADMIN })).ok).toBe(true);
+      expect(stagePlayViews(g.db, E.getEvent(g.db, g.eventId)!)[0]!.pairsAsItGoes).toBe(want);
+    }
+  });
+
+  it('a double elimination of 2 reads as a single final, not an upper bracket', async () => {
+    const g = playFixture({ stages: [DE(true)], entries: 2 });
+    expect((await startEventFlow(g.db, { eventId: g.eventId, by: ADMIN })).ok).toBe(true);
+    const v = stagePlayViews(g.db, E.getEvent(g.db, g.eventId)!)[0]!;
+    expect(v.groups).toEqual([{ number: 1, label: 'Bracket' }]);
+    expect(v.rounds.map((r) => r.label)).toEqual(['Final']);
   });
 
   it('the public page is a 404 while the switch is closed to the viewer, as before', async () => {
