@@ -227,3 +227,30 @@ describe('pug-pause.inc technical pause end (plan T5 fix rounds 1 and 2)', () =>
     expect(fn.indexOf('if (g_bTechReleased) return;')).toBeLessThan(fn.indexOf('g_fTechUsed[team] += 1.0;'));
   });
 });
+
+describe('a forfeit closes the technical pause (final review I-1)', () => {
+  const ggSrc = readFileSync(join(__dirname, '../plugin/pug-gg.inc'), 'utf8');
+  const body = (src: string, sig: string): string => {
+    const start = src.indexOf(sig);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const end = src.indexOf('\n}\n', start);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end);
+  };
+
+  it('Gg_ForfeitAs calls Tech_CloseForForfeit before EndMatchNow', () => {
+    const fn = body(ggSrc, 'void Gg_ForfeitAs(int team, const char[] why)');
+    const close = fn.indexOf('Tech_CloseForForfeit();');
+    expect(close).toBeGreaterThan(-1);
+    expect(close).toBeLessThan(fn.indexOf('EndMatchNow("forfeit");'));
+  });
+
+  it('Tech_CloseForForfeit ends the record and clears the converted pause, the pending !tech and the release', () => {
+    const fn = body(pauseSrc, 'void Tech_CloseForForfeit()');
+    expect(pauseSrc).not.toContain('static void Tech_CloseForForfeit');
+    expect(fn).toContain('Tech_End();');
+    expect(fn).toMatch(/if \(g_bPauseConverted\)\s*\{\s*g_bPauseConverted = false;\s*g_iPauseOwner = 0;\s*\}/);
+    expect(fn).toContain('g_iTechPendingTeam = 0;');
+    expect(fn).toContain('g_bTechReleased = false;');
+  });
+});

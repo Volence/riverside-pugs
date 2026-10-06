@@ -265,6 +265,26 @@ static void Tech_End()
 	g_sTechReason[0] = '\0';
 }
 
+/** Final review I-1: a forfeit ends the game while a technical pause may still
+ *  hold the box. Called from Gg_ForfeitAs before EndMatchNow, so the TECH
+ *  end line goes out while the match token stands and nothing keeps ticking
+ *  for a game that is over: Tech_End clears the technical owner (Tech_Tick,
+ *  Tech_Overrun and Tech_OwnerReady then have nothing to act on), a pause
+ *  converted to tactical loses its owner (the ceiling neither rolls on nor
+ *  force-unpauses), and a !tech still waiting to land is dropped. A PUG has
+ *  no open record and no converted pause, so this changes nothing there. */
+void Tech_CloseForForfeit()
+{
+	Tech_End();
+	if (g_bPauseConverted)
+	{
+		g_bPauseConverted = false;
+		g_iPauseOwner = 0;
+	}
+	g_iTechPendingTeam = 0;
+	g_bTechReleased = false;
+}
+
 /** Fix round 1 ruling: the team that called a technical pause owns its end.
  *  `client` of pug team `team` readied while its technical pause still runs
  *  (not a disconnect record, not yet converted to tactical): both sides are
