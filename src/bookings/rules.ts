@@ -80,12 +80,16 @@ function enabledServers(db: DB, region: string): number {
 export function capacityProblem(db: DB, o: { region: string; startMs: number; endMs: number; exceptId?: number }): number | null {
   const room = enabledServers(db, o.region) - bookingLimits(db).reserve;
   if (room < 1) return o.startMs;
-  const rows = (db.prepare(
-    `SELECT starts_at, ends_at FROM bookings
-      WHERE region = ? AND state IN ${OPEN_STATES_SQL} AND ending_at IS NULL AND id != ?
-        AND starts_at < ? AND ends_at > ?`,
-  ).all(o.region, o.exceptId ?? 0, iso(o.endMs), iso(o.startMs)) as { starts_at: string; ends_at: string }[])
-    .map((r) => ({ s: Date.parse(r.starts_at), e: Date.parse(r.ends_at) }));
+  const rows = [
+    ...(db.prepare(
+      `SELECT starts_at, ends_at FROM bookings
+        WHERE region = ? AND state IN ${OPEN_STATES_SQL} AND ending_at IS NULL AND id != ?
+          AND starts_at < ? AND ends_at > ?`,
+    ).all(o.region, o.exceptId ?? 0, iso(o.endMs), iso(o.startMs)) as { starts_at: string; ends_at: string }[])
+      .map((r) => ({ s: Date.parse(r.starts_at), e: Date.parse(r.ends_at) })),
+    // Plan T4 Ruling 5: a scheduled tournament match holds a box before it is booked.
+    ...scheduledMatchSlots(db, o.region, o.startMs, o.endMs),
+  ];
   const points = [o.startMs, ...rows.map((r) => r.s).filter((s) => s > o.startMs)].sort((x, y) => x - y);
   for (const t of points) {
     const running = rows.filter((r) => r.s <= t && r.e > t).length;
@@ -205,16 +209,49 @@ export function addCampaignMinutes(db: DB, campaign: string | null): number {
   return upToStep((campaign ? typicalCampaignMinutes(db, campaign) : DEFAULT_CAMPAIGN_MINUTES) + ESTIMATE_SLACK_MINUTES);
 }
 
-/** Idle boxes claimIdle keeps back: one per confirmed booking without a box
- *  that starts within the window, and one per running booking whose box was
- *  given up and is waiting for another (plan 5: the only time a booking is
- *  ahead of the PUG queue). */
-export function bookingsDue(db: DB, nowMs: number, withinMinutes: number): number {
+/** A scheduled tournament match holds a box this long from its time
+ *  (tournaments plan T4 Ruling 5): a Bo1 with setup, the grace to connect
+ *  and a possible tiebreak. */
+export const EVENT_SLOT_MINUTES = 120;
+
+/** The match statuses a scheduled tournament match can hold before its
+ *  booking exists: waiting, and the room phases ahead of the booking. Never
+ *  pending (teams not known), a resolved status (done, forfeit, bye), a held
+ *  match, or a phase that already has its booking (ledger CARRY to Task 5). */
+const UNBOOKED_MATCH_SQL = "('waiting','veto','lineup','booking')";
+
+/**
+ * Scheduled tournament matches not yet booked, as slots (plan T4 Ruling 5):
+ * each waits in a live window stage of a live event with a time, no booking
+ * and no winner, and holds EVENT_SLOT_MINUTES from its time. Once the series
+ * engine books it, the booking row counts instead. With a region, that
+ * region's events only. Only slots overlapping [fromMs, toMs) come back.
+ */
+export function scheduledMatchSlots(db: DB, region: string | null, fromMs: number, toMs: number): { s: number; e: number }[] {
+  const slot = EVENT_SLOT_MINUTES * 60_000;
   return (db.prepare(
+    `SELECT m.scheduled_at FROM event_matches m
+       JOIN event_stages s ON s.id = m.stage_id JOIN events e ON e.id = m.event_id
+      WHERE e.status = 'live' AND s.status = 'live' AND s.scheduling = 'window'
+        AND m.status IN ${UNBOOKED_MATCH_SQL} AND m.booking_id IS NULL AND m.winner_entry IS NULL
+        AND m.scheduled_at IS NOT NULL AND (? IS NULL OR e.region = ?) AND m.scheduled_at < ? AND m.scheduled_at > ?
+      ORDER BY m.scheduled_at, m.id`,
+  ).all(region, region, iso(toMs), iso(fromMs - slot)) as { scheduled_at: string }[])
+    .map((r) => { const s = Date.parse(r.scheduled_at); return { s, e: s + slot }; });
+}
+
+/** Idle boxes claimIdle keeps back: one per confirmed booking without a box
+ *  that starts within the window, one per running booking whose box was
+ *  given up and is waiting for another (plan 5: the only time a booking is
+ *  ahead of the PUG queue), and one per scheduled tournament match not yet
+ *  booked whose slot overlaps the window (plan T4 Ruling 5). */
+export function bookingsDue(db: DB, nowMs: number, withinMinutes: number): number {
+  const bookings = (db.prepare(
     `SELECT COUNT(*) AS n FROM bookings b
       WHERE b.server_id IS NULL AND b.ending_at IS NULL AND (
         (b.state = 'scheduled' AND b.starts_at <= ? AND b.ends_at > ?
           AND NOT EXISTS (SELECT 1 FROM booking_sides s WHERE s.booking_id = b.id AND s.confirmed_at IS NULL))
         OR (b.state IN ('ready','active') AND b.waiting_since IS NOT NULL))`,
   ).get(iso(nowMs + withinMinutes * 60_000), iso(nowMs)) as { n: number }).n;
+  return bookings + scheduledMatchSlots(db, null, nowMs, nowMs + withinMinutes * 60_000).length;
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
   addCampaignMinutes, allowance, bookingLimits, bookingsDue, capacityProblem, estimateMinutes, playlistMinutes, recentNoShows,
-  typicalCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES,
+  typicalCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES, scheduledMatchSlots, EVENT_SLOT_MINUTES,
 } from '../src/bookings/rules.js';
 
 const A = '76561199000000501';
@@ -74,6 +74,80 @@ describe('capacity', () => {
     expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBe(T0);
     setReserve(1);
     expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBeNull();
+  });
+
+  it('keeps a box back for a scheduled tournament match until it is booked, in its region only (plan T4 Ruling 5)', () => {
+    servers(3); // room for 1 at a time
+    let n = 0;
+    const seed = (region: string, scheduledAt: string, over: Record<string, unknown> = {}) => {
+      n++;
+      const cup = (db.prepare("SELECT id FROM rulesets WHERE name = 'Standard Cup'").get() as { id: number }).id;
+      const ev = Number(db.prepare(
+        `INSERT INTO events (slug, name, region, organizer_steamid, entry_kind, status, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+         VALUES (?, 'Cup', ?, ?, 'team', 'live', ?, '{}', '{}', '{}', 'x', 'x')`,
+      ).run(`cup-${n}`, region, A, scheduledAt).lastInsertRowid);
+      const stage = Number(db.prepare(
+        `INSERT INTO event_stages (event_id, ordinal, type, config_json, ruleset_id, campaign_pool_json, veto_type, scheduling, status, created_at, updated_at)
+         VALUES (?, 1, 'league', '{}', ?, '[]', 'ban_to_one', 'window', 'live', 'x', 'x')`,
+      ).run(ev, cup).lastInsertRowid);
+      const row = { event_id: ev, stage_id: stage, round: 1, slot: 1, status: 'waiting', scheduled_at: scheduledAt, created_at: 'x', ...over };
+      const cols = Object.keys(row);
+      return Number(db.prepare(`INSERT INTO event_matches (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...Object.values(row)).lastInsertRowid);
+    };
+    const matchId = seed('na', new Date(T0).toISOString());
+    expect(scheduledMatchSlots(db, 'na', T0 - H, T0 + 3 * H)).toEqual([{ s: T0, e: T0 + EVENT_SLOT_MINUTES * 60_000 }]);
+    expect(scheduledMatchSlots(db, 'eu', T0 - H, T0 + 3 * H)).toEqual([]);
+    expect(scheduledMatchSlots(db, null, T0 + 2 * H, T0 + 3 * H)).toEqual([]);
+    expect(capacityProblem(db, { region: 'na', startMs: T0, endMs: T0 + H })).toBe(T0);
+    expect(capacityProblem(db, { region: 'na', startMs: T0 + 2 * H, endMs: T0 + 3 * H })).toBeNull();
+    expect(capacityProblem(db, { region: 'na', startMs: T0 - H, endMs: T0 + H })).toBe(T0);
+    expect(bookingsDue(db, T0 - 74 * 60_000, 75)).toBe(1);
+    expect(bookingsDue(db, T0 - 76 * 60_000, 75)).toBe(0);
+    expect(bookingsDue(db, T0 + H, 75)).toBe(1);
+    expect(bookingsDue(db, T0 + 2 * H, 75)).toBe(0);
+    // Booked: the booking row counts, the match no longer does.
+    const bookingId = book(T0, T0 + H);
+    db.prepare('UPDATE event_matches SET booking_id = ? WHERE id = ?').run(bookingId, matchId);
+    expect(scheduledMatchSlots(db, 'na', T0 - H, T0 + 3 * H)).toEqual([]);
+    // The booking (no box yet, both sides confirmed, starting within 75 minutes) is the one count now, not booking plus match.
+    expect(bookingsDue(db, T0 - H, 75)).toBe(1);
+    expect(bookingsDue(db, T0 - 76 * 60_000, 75)).toBe(0);
+    // Finished, or in a rolling stage, or of a stage not live: never counted.
+    seed('na', new Date(T0 + 4 * H).toISOString(), { status: 'done' });
+    expect(scheduledMatchSlots(db, 'na', T0 + 3 * H, T0 + 6 * H)).toEqual([]);
+    const rolling = seed('na', new Date(T0 + 4 * H).toISOString());
+    db.prepare("UPDATE event_stages SET scheduling = 'rolling' WHERE id = (SELECT stage_id FROM event_matches WHERE id = ?)").run(rolling);
+    expect(scheduledMatchSlots(db, 'na', T0 + 3 * H, T0 + 6 * H)).toEqual([]);
+    const notLive = seed('na', new Date(T0 + 4 * H).toISOString());
+    db.prepare("UPDATE event_stages SET status = 'finished' WHERE id = (SELECT stage_id FROM event_matches WHERE id = ?)").run(notLive);
+    expect(scheduledMatchSlots(db, 'na', T0 + 3 * H, T0 + 6 * H)).toEqual([]);
+  });
+
+  it('counts only unresolved, non-bye matches waiting or in a room phase before the booking (ledger CARRY to Task 5)', () => {
+    servers(3);
+    let n = 0;
+    const seed = (status: string, over: Record<string, unknown> = {}) => {
+      n++;
+      const cup = (db.prepare("SELECT id FROM rulesets WHERE name = 'Standard Cup'").get() as { id: number }).id;
+      const ev = Number(db.prepare(
+        `INSERT INTO events (slug, name, region, organizer_steamid, entry_kind, status, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+         VALUES (?, 'Cup', 'na', ?, 'team', 'live', 'x', '{}', '{}', '{}', 'x', 'x')`,
+      ).run(`cup-${n}`, A).lastInsertRowid);
+      const stage = Number(db.prepare(
+        `INSERT INTO event_stages (event_id, ordinal, type, config_json, ruleset_id, campaign_pool_json, veto_type, scheduling, status, created_at, updated_at)
+         VALUES (?, 1, 'league', '{}', ?, '[]', 'ban_to_one', 'window', 'live', 'x', 'x')`,
+      ).run(ev, cup).lastInsertRowid);
+      const row = { event_id: ev, stage_id: stage, round: 1, slot: 1, status, scheduled_at: new Date(T0).toISOString(), created_at: 'x', ...over };
+      const cols = Object.keys(row);
+      db.prepare(`INSERT INTO event_matches (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...Object.values(row));
+    };
+    const count = () => scheduledMatchSlots(db, 'na', T0 - H, T0 + H).length;
+    for (const s of ['pending', 'bye', 'forfeit', 'connect', 'live', 'confirming', 'admin_hold']) seed(s);
+    seed('waiting', { scheduled_at: null });
+    expect(count()).toBe(0);
+    for (const s of ['waiting', 'veto', 'lineup', 'booking']) seed(s);
+    expect(count()).toBe(4);
+    expect(bookingsDue(db, T0 - H, 75)).toBe(4);
   });
 });
 
