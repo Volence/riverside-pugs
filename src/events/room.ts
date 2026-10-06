@@ -567,6 +567,16 @@ export function revertSub(db: DB, o: { matchId: number; outId: string; inId: str
   })();
 }
 
+/** A linked game that has not ended in the series but whose matches row is
+ *  no longer live: aborted by staff, the reaper or an abandon, or lost with
+ *  its server (the rows series.ts sweepAborted and gameLost hold for). */
+export function hasDeadGame(db: DB, matchId: number): boolean {
+  return !!db.prepare(
+    `SELECT 1 FROM event_games g JOIN matches x ON x.id = g.match_id
+      WHERE g.event_match_id = ? AND g.match_id IS NOT NULL AND g.ended_at IS NULL AND x.state != 'live'`,
+  ).get(matchId);
+}
+
 /** Ruling 9: the staff freeze as the box reports it (or as the desk sent it). Idempotent each way. */
 export function setAdminPause(
   db: DB, o: { matchId: number; on: boolean; by: string | null; cause: AdminPauseCause; now?: Date },
@@ -656,6 +666,10 @@ export function releaseHold(
       const b = m.booking_id === null ? undefined
         : db.prepare('SELECT state, ending_at FROM bookings WHERE id = ?').get(m.booking_id) as { state: string; ending_at: string | null } | undefined;
       if (!b || b.ending_at !== null || (b.state !== 'ready' && b.state !== 'active')) return V.fail('hold_not_releasable');
+      // Plan T3c final review: a game this match is on that is no longer live
+      // on its box (aborted, lost) would be swept and held again seconds after
+      // a release (series.ts sweepAborted). Only a result or a reset moves it.
+      if (hasDeadGame(db, m.id)) return V.fail('hold_not_releasable');
     }
     let deadline: string | null = null;
     // Both ready and no step left for a person: advance() moves on as the veto would (lineups and their deadline).

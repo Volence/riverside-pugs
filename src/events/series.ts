@@ -66,6 +66,8 @@ export function lateHooks(get: () => SeriesEngine | null): TournamentHooks {
     gameEnded: (id, matchId) => get()?.gameEnded(id, matchId),
     ended: (id, reason) => get()?.ended(id, reason),
     gameLost: (id, matchId) => get()?.gameLost(id, matchId),
+    idleEndAllowed: (id) => get()?.idleEndAllowed(id) ?? true,
+    frozen: (id) => get()?.frozen(id) ?? false,
   };
 }
 
@@ -411,6 +413,20 @@ export class SeriesEngine {
     const m = R.matchOfBooking(this.db, row.booking_id);
     if (!m || m.status !== 'connect') return;
     if (R.startLive(this.db, { matchId: m.id, now: new Date(this.now()) }).ok) this.push(m.id);
+  }
+
+  /** Plan T3c final review: the runner's idle end waits while the room's
+   *  connect deadline is ahead (staff may have extended the grace past it).
+   *  At the deadline the no-show rule decides, then the idle end may run. */
+  idleEndAllowed(bookingId: number): boolean {
+    const m = R.matchOfBooking(this.db, bookingId);
+    return !(m && m.status === 'connect' && m.deadline !== null && Date.parse(m.deadline) > this.now());
+  }
+
+  /** Plan T3c final review: the site's staff freeze, for a crash recovery to put back. */
+  frozen(bookingId: number): boolean {
+    const m = R.matchOfBooking(this.db, bookingId);
+    return !!m && m.admin_pause_at !== null;
   }
 
   /** The booking is winding down (Ruling 11). */
@@ -760,7 +776,11 @@ export class SeriesEngine {
     }
     if (!standing) {
       const swapped = B.swapPlayer(this.db, { bookingId: b.id, side, outId, inId, now });
-      if (!swapped.ok) console.error(`[series] match ${m.id}: booking ${b.id} did not swap ${outId} for ${inId} (${swapped.error})`);
+      if (!swapped.ok) {
+        console.error(`[series] match ${m.id}: booking ${b.id} did not swap ${outId} for ${inId} (${swapped.error})`);
+        // Plan T3c final review: the presence count and the connect notice read the booking's players.
+        this.alert(m, `the booking did not swap ${this.playerName(inId)} in for ${this.playerName(outId)} (${swapped.error}). The lineup and the server have the sub; the booking's players do not, so the "N of 4" count may be off. Check it on the Events desk.`);
+      }
       const team = (this.db.prepare('SELECT team FROM match_players WHERE match_id = ? AND player_id = ?').get(gameMatchId, outId) as { team: 'a' | 'b' } | undefined)?.team;
       const added = team ? addTournamentSub(this.db, { matchId: gameMatchId, inId, team, now }) : null;
       if (!added) console.error(`[series] match ${m.id}: game match ${gameMatchId} got no roster row for ${inId} (${team ? 'not a tournament game' : `${outId} is not on its roster`})`);
@@ -921,7 +941,9 @@ export class SeriesEngine {
    *  dropped its match and any freeze with it; the runner hands the booking
    *  to crash recovery, which restores the game at its current chapter, for
    *  staff to replay again once it is back (replay_dropped). */
-  async replayChapter(matchId: number, by: string, ordinal: unknown): Promise<V.Checked<{ map: string }>> {
+  /** The refusals a replay meets before it touches the box: synchronous, so
+   *  the desk's route can answer them at once (plan T3c final review). */
+  replayCheck(matchId: number, ordinal: unknown): V.Checked<{ m: P.MatchRow; live: { game: R.GameRow; token: string }; b: B.BookingRow; snap: RestoreSnapshot }> {
     const m = P.getMatch(this.db, matchId);
     if (!m) return V.fail('match_not_found');
     if (m.status !== 'live') return V.fail('not_live_phase');
@@ -930,9 +952,36 @@ export class SeriesEngine {
     const b = this.runningBooking(m);
     if (!b) return V.fail('no_box');
     if (!Number.isInteger(ordinal) || (ordinal as number) < 0) return V.fail('chapter_not_replayable');
-    const gameMatchId = live.game.match_id!;
-    const snap = restoreSnapshot(this.db, gameMatchId, { replayFrom: ordinal as number });
+    const snap = restoreSnapshot(this.db, live.game.match_id!, { replayFrom: ordinal as number });
     if (!snap) return V.fail('chapter_not_replayable');
+    return V.ok({ m, live, b, snap });
+  }
+
+  /** The desk's replay (plan T3c final review): the route has answered and
+   *  audited it; the replay runs here and staff hear its outcome on the
+   *  admin feed. Never rejects. */
+  replayInBackground(matchId: number, by: string, ordinal: unknown): Promise<void> {
+    const label = Number.isInteger(ordinal) ? `chapter ${(ordinal as number) + 1}` : 'the chapter';
+    const tell = (text: string) => {
+      const m = P.getMatch(this.db, matchId);
+      if (m) this.alert(m, text);
+    };
+    return this.replayChapter(matchId, by, ordinal).then((r) => {
+      if (r.ok) tell(`staff replayed ${label} (${r.value.map}) from its start; the game is live again.`);
+      else if (r.error === 'replay_dropped') tell(`the replay of ${label} was dropped by the server; the game is being restored at its current chapter through crash recovery and the freeze was lifted. Replay it again once it is back.`);
+      else if (r.error === 'replay_failed') tell(`the server refused the replay of ${label}. ${V.EVENT_ERRORS.replay_failed.text}`);
+      else tell(`the replay of ${label} did not run: ${V.EVENT_ERRORS[r.error].text}`);
+    }).catch((err: unknown) => {
+      console.error(`[series] match ${matchId}: the replay of ${label} failed:`, err instanceof Error ? err.message : err);
+      tell(`the replay of ${label} failed with an error (${err instanceof Error ? err.message : String(err)}). Check the server and the match on the Events desk.`);
+    });
+  }
+
+  async replayChapter(matchId: number, by: string, ordinal: unknown): Promise<V.Checked<{ map: string }>> {
+    const c = this.replayCheck(matchId, ordinal);
+    if (!c.ok) return c;
+    const { m, live, b, snap } = c.value;
+    const gameMatchId = live.game.match_id!;
     const exp = this.expectReset(m, gameMatchId);
     const r = await this.deps.runner.replayGame(b.id, gameMatchId, snap);
     this.afterReset(m.id, exp, r === 'busy' ? 'none' : r === 'error' ? 'unknown' : 'lifted');
@@ -963,6 +1012,10 @@ export class SeriesEngine {
     const b = this.runningBooking(m);
     if (!b) return V.fail('no_box');
     const live = this.liveGameOf(m);
+    // Plan T3c final review: the new box restores the live game from the
+    // site's record; a game that cannot be restored (its finale) would be
+    // aborted by the move. Refused before anything is cancelled or released.
+    if (live && restoreSnapshot(this.db, live.game.match_id!) === null) return V.fail('cannot_move_finale');
     const frozen = m.admin_pause_at !== null;
     const exp = live ? this.expectReset(m, live.game.match_id!) : null;
     let old: number | null;

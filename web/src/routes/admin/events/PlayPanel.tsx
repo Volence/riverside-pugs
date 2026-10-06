@@ -124,6 +124,8 @@ function DeskLine({ m }: { m: PlayMatch }) {
 
 const STEP_ACTIONS = ['first', 'second', 'ban', 'pick', 'survivors', 'infected'] as const;
 const FOUR_RE = /^\d{17}$/;
+/** Holds over a game the box no longer runs: a release would be held again at once (plan T3c final review). */
+const GAME_GONE = new Set(['game_aborted', 'game_lost']);
 
 /** The staff tools (plan T3c Rulings 10 to 15 and 9), each behind a confirm. */
 function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; run: Run; busy: boolean }) {
@@ -134,6 +136,8 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
   const [four, setFour] = useState('');
   const [minutes, setMinutes] = useState('5');
   const [chapter, setChapter] = useState('');
+  // The replay route answers before the box does (plan T3c final review): its outcome reaches the staff feed.
+  const [replayNote, setReplayNote] = useState('');
   const d = m.desk!;
   const names = `${m.a?.name ?? 'TBD'} vs ${m.b?.name ?? 'TBD'}`;
   const teamName = side === 'a' ? m.a?.name ?? 'team A' : m.b?.name ?? 'team B';
@@ -214,13 +218,18 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
               { title: `Give both teams ${minutes} more minutes to connect?` })}>Extend grace</button>
           </>
         )}
-        {phase === 'hold' && (
+        {phase === 'hold' && GAME_GONE.has(d.holdReason ?? '') && (
+          <p class="muted">The game on the server was aborted or lost: enter the result, or reset the room. Releasing the hold would only hold it again.</p>
+        )}
+        {phase === 'hold' && !GAME_GONE.has(d.holdReason ?? '') && (
           <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.releaseEventHold(eventId, m.id),
             { title: 'Release the hold?', body: `The match goes back to ${d.holdFrom ?? 'where it was'} with a fresh deadline. A dispute is cleared.` })}>Release hold</button>
         )}
         {canBox && (d.frozen
           ? <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.unfreezeEventMatch(eventId, m.id), { title: 'Unfreeze the game?' })}>Unfreeze</button>
-          : <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.freezeEventMatch(eventId, m.id), { title: 'Freeze the game?', body: 'The game pauses and only staff can unpause it (here, or !lift in game).' })}>Freeze</button>)}
+          : <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.freezeEventMatch(eventId, m.id), { title: 'Freeze the game?', body: phase === 'connect'
+            ? 'The teams are still in ready-up, so the pause lands when the next half goes live. Only staff can unpause it (here, or !lift in game).'
+            : 'The game pauses and only staff can unpause it (here, or !lift in game).' })}>Freeze</button>)}
         {canBox && (
           <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.moveEventServer(eventId, m.id),
             { title: 'Move the match to another server?', body: 'The current server goes back to the pool. The match takes the first idle server in its region, is set up again and the live game is restored from the site\'s record; with no server free it waits, then is held.' })}>Move server</button>
@@ -231,10 +240,15 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
               <option value="">Pick a chapter</option>
               {chapters.map((c) => <option key={c.ordinal} value={String(c.ordinal)}>{chapterLabel(c)}</option>)}
             </select>
-            <button class="btn btn--ghost btn--sm" disabled={busy || chapter === ''} onClick={() => void run(() => adminApi.replayEventChapter(eventId, m.id, Number(chapter)),
+            <button class="btn btn--ghost btn--sm" disabled={busy || chapter === ''} onClick={() => void run(async () => {
+              setReplayNote('');
+              await adminApi.replayEventChapter(eventId, m.id, Number(chapter));
+              setReplayNote('Replay started; the result will appear in the staff feed.');
+            },
               { title: `Replay ${chapterLabel(chapters.find((c) => String(c.ordinal) === chapter)!)} from its start?`, body: 'That chapter and anything after it are played again; earlier chapters keep their scores. The finale cannot be replayed.' })}>Replay chapter</button>
           </div>
         )}
+        {replayNote && <p class="muted" role="status">{replayNote}</p>}
       </div>}
     </details>
   );

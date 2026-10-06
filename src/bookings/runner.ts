@@ -120,6 +120,14 @@ export interface TournamentHooks {
   /** Crash recovery aborted this tournament game (server_lost): it could not
    *  be restored, or the booking was given up. Optional. */
   gameLost?(bookingId: number, matchId: number): void;
+  /** Plan T3c final review: may an empty tournament booking be ended as
+   *  idle now? False while staff gave the teams longer to connect than the
+   *  idle end would wait. Optional; absent or throwing, yes. */
+  idleEndAllowed?(bookingId: number): boolean;
+  /** Plan T3c final review: is the staff freeze on for this booking's match
+   *  on the site? A restarted box forgot it, so a resumed game is frozen
+   *  again. Optional; absent or throwing, no. */
+  frozen?(bookingId: number): boolean;
 }
 
 export interface BookingRunnerDeps {
@@ -763,7 +771,7 @@ export class BookingRunner {
     const limits = bookingLimits(this.db);
     const grace = (bookingRules(fresh)?.noShowGraceMinutes ?? DEFAULT_GRACE_MINUTES) * 60_000;
     const idleFrom = Math.max(fresh.last_human_at ? Date.parse(fresh.last_human_at) : 0, Date.parse(fresh.starts_at) + grace);
-    if (humans.length === 0 && nowMs - idleFrom >= limits.idleEndMinutes * 60_000) { this.endNow(b.id, 'idle', now); return; }
+    if (humans.length === 0 && nowMs - idleFrom >= limits.idleEndMinutes * 60_000 && this.idleEndAllowed(fresh)) { this.endNow(b.id, 'idle', now); return; }
     const empties = humans.length === 0 ? (this.emptyWatches.get(b.id) ?? 0) + 1 : 0;
     this.emptyWatches.set(b.id, empties);
     if (b.purpose !== 'tournament' && empties >= EMPTY_WATCHES_TO_END && this.everyoneLeftAfterGame(b.id, nowMs)) { this.endNow(b.id, 'done', now); return; }
@@ -1060,6 +1068,7 @@ export class BookingRunner {
       adminTail = ` (game #${s.matchId} back on ${s.map}, ${teamName('a')} ${totA} - ${teamName('b')} ${totB})`;
       await this.push(b.id, server, () => [`say [Booking] ${consoleText(
         `Restored after a server restart: ${score}. ${teamName(s.firstSurv)} survive first. Ready up when everyone is back.`, 220)}`], 'the restore line');
+      if (b.purpose === 'tournament') await this.refreeze(b.id, server, s);
     }
     console.log(`[booking] ${b.id} restored on ${server.name}`);
     // The notice carries the password: accepted people only, as booking_ready.
@@ -1229,6 +1238,35 @@ export class BookingRunner {
   }
 
   /** A guarded hook call: the engine's failure is logged and never stops the runner. */
+  /** Plan T3c final review: the site still has the match frozen but the
+   *  restarted box forgot it, so the resumed game is frozen again (the
+   *  plugin's sm_pug_adminpause, Cmd_AdminPause). Staff are told when the box
+   *  does not take it. */
+  private async refreeze(id: number, server: ServerRow, s: RestoreSnapshot): Promise<void> {
+    let frozen = false;
+    this.hook(id, 'frozen', () => { frozen = this.deps.tournament?.frozen?.(id) ?? false; });
+    if (!frozen) return;
+    let reply = '';
+    try {
+      [reply = ''] = await this.deps.rcon(server, [`sm_pug_adminpause ${s.token} on "Staff"`]);
+    } catch (err) {
+      console.warn(`[booking] ${id}: the staff freeze on ${server.name} failed:`, err instanceof Error ? err.message : err);
+    }
+    if (/PUGOK adminpause=on frozen=1/.test(reply)) return;
+    publishAdminEvent({
+      kind: 'problem', matchId: s.matchId,
+      text: `Booking ${id}: game #${s.matchId} was restored on ${server.name} but the staff freeze could not be put back. Freeze it again from the Events desk.`,
+    });
+  }
+
+  /** A tournament booking asks the series engine first (an extended connect grace). */
+  private idleEndAllowed(b: BookingRow): boolean {
+    if (b.purpose !== 'tournament') return true;
+    let allowed = true;
+    this.hook(b.id, 'idleEndAllowed', () => { allowed = this.deps.tournament?.idleEndAllowed?.(b.id) ?? true; });
+    return allowed;
+  }
+
   private hook(id: number, what: string, fn: () => void): void {
     try {
       fn();
