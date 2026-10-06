@@ -26,7 +26,7 @@ import { classifyBox } from './recovery.js';
 import { prepareRestore, restoreSnapshot, resumeLines, type RestoreSnapshot } from './restore.js';
 import type { A2sFn } from '../a2s.js';
 import { abortBookingGame, bookingGames, bookingOnServer, gamesPlayed, liveBookingGame } from './games.js';
-import { TOURNAMENT_LINES, boxNeedsGame } from './tournamentGames.js';
+import { TOURNAMENT_LINES, TOURNAMENT_RULE_CLEAR, boxNeedsGame, tournamentRuleLines } from './tournamentGames.js';
 import type { BookingVoice } from './voice.js';
 import type { BookingCmd } from '../logParse.js';
 import { EVENT_ERRORS } from '../events/validate.js';
@@ -117,6 +117,8 @@ export const CLEAR_LINES: readonly string[] = [
   'sm_pug_end_kick 1',
   // A tournament box turned on !sub, !admin and the staff freeze (TOURNAMENT_LINES, plan T3c); 0 is the plugin default.
   'sm_pug_tournament 0',
+  // Plan T5: a tournament box's match-rule cvars back to pug-match's defaults.
+  ...TOURNAMENT_RULE_CLEAR,
 ];
 
 /** The series engine's hand on a tournament booking (tournaments plan T3b). */
@@ -225,7 +227,7 @@ export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?:
     `sm_pug_pause_limit ${Math.max(0, Math.trunc(pause?.limit ?? 0))}`,
     `sm_pug_pause_seconds ${Math.max(0, Math.trunc(pause?.seconds ?? 0))}`,
     `l4d_booking_captains ${quoted(captains.join(','))}`,
-    ...(b.purpose === 'tournament' ? TOURNAMENT_LINES : []),
+    ...(b.purpose === 'tournament' ? [...TOURNAMENT_LINES, ...tournamentRuleLines(bookingRules(b))] : []),
   ];
   if (logAddress && /^[A-Za-z0-9.-]+:\d{1,5}$/.test(logAddress)) {
     lines.push(`logaddress_add ${logAddress}`);

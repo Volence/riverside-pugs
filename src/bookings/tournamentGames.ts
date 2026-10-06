@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { isMapName } from '../campaigns.js';
 import { newToken } from '../matchToken.js';
 import { currentSeasonId } from '../players.js';
+import { parseRules, type MatchRules } from '../rulesets.js';
 import { consoleText, quoted } from '../serverSetup.js';
 import { getBooking, logBookingEvent, type Side } from './bookings.js';
 
@@ -53,9 +54,34 @@ export const TOURNAMENT_LINES: readonly string[] = [
   'sm_pug_leave_budget 0', 'sm_pug_end_kick 0',
 ];
 
+/** Plan T5 Ruling 17: a tournament box's match rules as pug-match 0.3.26
+ *  cvars. Pushed with the booking lines and every game burst, after
+ *  TOURNAMENT_LINES; an older plugin ignores the unknown cvars. Rules the
+ *  site cannot read push nothing: the box then keeps !tech and team
+ *  reconnect tracking off, which is 0.3.25's behaviour. */
+export function tournamentRuleLines(rules: MatchRules | null): string[] {
+  if (!rules) return [];
+  return [
+    `sm_pug_tech_limit ${rules.pause.techPauses}`,
+    `sm_pug_tech_seconds ${rules.pause.techSeconds}`,
+    `sm_pug_dc_team_seconds ${rules.disconnect.teamSeconds}`,
+    `sm_pug_sub_emergency ${rules.subs.emergency ? 1 : 0}`,
+    `sm_pug_sub_charge ${rules.subs.emergencyChargeSeconds}`,
+    `sm_pug_admin_cooldown ${rules.staffCall.cooldownSeconds}`,
+  ];
+}
+/** The same six at pug-match's defaults, for CLEAR_LINES. */
+export const TOURNAMENT_RULE_CLEAR: readonly string[] = [
+  'sm_pug_tech_limit 0', 'sm_pug_tech_seconds 300', 'sm_pug_dc_team_seconds 0', 'sm_pug_sub_emergency 0', 'sm_pug_sub_charge 0', 'sm_pug_admin_cooldown 180',
+];
+const rulesOfJson = (json: string | null): MatchRules | null => {
+  if (json === null) return null;
+  try { return parseRules(json); } catch { return null; }
+};
+
 /** The burst for a game whose rows exist (so a lost burst can be sent again). */
 export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string | null; notice: string }): string[] {
-  const m = db.prepare('SELECT token, campaign FROM matches WHERE id = ?').get(o.matchId) as { token: string | null; campaign: string } | undefined;
+  const m = db.prepare('SELECT token, campaign, rules_json FROM matches WHERE id = ?').get(o.matchId) as { token: string | null; campaign: string; rules_json: string | null } | undefined;
   if (!m || !m.token) throw new Error(`match ${o.matchId} has no token`);
   if (!/^[A-Za-z0-9]+$/.test(m.token)) throw new Error('match token has unexpected characters');
   if (!/^[a-z0-9_]+$/.test(m.campaign)) throw new Error(`campaign ${JSON.stringify(m.campaign)} has unexpected characters`);
@@ -64,6 +90,7 @@ export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string |
   return [
     // Before the match line, so the plugin has them when the game goes live (TOURNAMENT_LINES).
     ...TOURNAMENT_LINES,
+    ...tournamentRuleLines(rulesOfJson(m.rules_json)),
     `sm_pug_match ${o.matchId} ${m.token} ${m.campaign}${o.stopAfterMap ? ` "${o.stopAfterMap}"` : ''}`,
     // Quoted: the console splits an unquoted argument on ':' (orchestrator.ts).
     ...roster.filter((r) => /^\d{17}$/.test(r.player_id)).map((r) => `sm_pug_roster "${r.player_id}:${r.team}"`),

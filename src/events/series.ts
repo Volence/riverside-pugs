@@ -9,7 +9,7 @@ import { getPlayer } from '../players.js';
 import * as B from '../bookings/bookings.js';
 import { gamesPlayed } from '../bookings/games.js';
 import { DEFAULT_GRACE_MINUTES, SHOWN_MIN, bookingLimits } from '../bookings/rules.js';
-import { NEXT_DELAY_MS, type TournamentHooks } from '../bookings/runner.js';
+import type { TournamentHooks } from '../bookings/runner.js';
 import { settingNumber } from '../settings.js';
 import { addTournamentSub, createTournamentGame, gameLinesOf, isPendingGame, isUnstartedGame } from '../bookings/tournamentGames.js';
 import { replayableChapters, restoreSnapshot, type RestoreSnapshot } from '../bookings/restore.js';
@@ -50,6 +50,13 @@ export function seriesTimings(db: DB): { serverAlertMs: number; presenceFallback
     presenceFallbackMs: settingNumber(db, 'event_presence_fallback_minutes', PRESENCE_FALLBACK_MS / 60_000, { integer: true, min: 1, max: 15 }) * 60_000,
     closeGraceMs: bookingLimits(db).closeGraceMinutes * 60_000,
   };
+}
+
+/** "about a minute" or "about N minutes" (plan T5 Ruling 16): the runner
+ *  loads a scheduled game on its minute pass, so a wait up to a minute reads
+ *  as a minute. */
+export function soonText(seconds: number): string {
+  return seconds <= 60 ? 'about a minute' : `about ${Math.ceil(seconds / 60)} minutes`;
 }
 
 export interface SeriesRunner {
@@ -575,7 +582,7 @@ export class SeriesEngine {
       if (waiting) {
         // Its load failed before it was linked (loadNext cleared next_campaign): schedule it again.
         if (waiting.match_id === null && waiting.map !== null && b.next_campaign === null && this.schedule(m, b, rows, parent.campaign, waiting.map, now)) {
-          this.deps.runner.announce(b.id, `The tiebreak of game ${parent.ordinal} is loaded again in about a minute.`);
+          this.deps.runner.announce(b.id, `The tiebreak of game ${parent.ordinal} is loaded again in ${soonText(this.nextGameSeconds(m))}.`);
           this.push(m.id);
         }
         return;
@@ -600,7 +607,7 @@ export class SeriesEngine {
         return;
       }
       this.schedule(m, b, R.gamesOf(this.db, m.id), parent.campaign, chapter.map, now);
-      this.deps.runner.announce(b.id, `Game ${parent.ordinal} is tied ${played.score_a} to ${played.score_b}: its last chapter is replayed as a tiebreaker in about a minute. ${this.name(m, chapter.firstSurvivors)} start as survivors.`);
+      this.deps.runner.announce(b.id, `Game ${parent.ordinal} is tied ${played.score_a} to ${played.score_b}: its last chapter is replayed as a tiebreaker in ${soonText(this.nextGameSeconds(m))}. ${this.name(m, chapter.firstSurvivors)} start as survivors.`);
       this.push(m.id);
       return;
     }
@@ -620,11 +627,11 @@ export class SeriesEngine {
     if (!next || next.first_survivors === null || b.next_campaign !== null) return;
     this.schedule(m, b, rows, next.campaign, null, now);
     const first = this.sideOfEntry(m, next.first_survivors)!;
-    this.deps.runner.announce(b.id, `Next: game ${next.ordinal}, ${campaignDisplayName(this.db, next.campaign)}, in about a minute. ${this.name(m, first)} start as survivors.`);
+    this.deps.runner.announce(b.id, `Next: game ${next.ordinal}, ${campaignDisplayName(this.db, next.campaign)}, in ${soonText(this.nextGameSeconds(m))}. ${this.name(m, first)} start as survivors.`);
     this.push(m.id);
   }
 
-  /** The next game on the box in a minute: appended to the booking unless
+  /** The next game on the box after the stage's next-game delay: appended to the booking unless
    *  an earlier try already appended it and its load then failed (loadNext
    *  clears next_campaign when the burst cannot be built), which shows as
    *  more games allowed than games linked; appending it again would leave
@@ -635,7 +642,12 @@ export class SeriesEngine {
       const r = B.appendTournamentGame(this.db, { bookingId: b.id, campaign, map, now });
       if (!r.ok) console.error(`[series] match ${m.id}: appending ${campaign} to booking ${b.id} failed (${r.error})`);
     }
-    return B.setNext(this.db, b.id, campaign, new Date(now.getTime() + NEXT_DELAY_MS).toISOString(), now, null, map);
+    // Plan T5 Ruling 16: the stage's snapshot says how long between games.
+    const delayMs = this.nextGameSeconds(m) * 1000;
+    return B.setNext(this.db, b.id, campaign, new Date(now.getTime() + delayMs).toISOString(), now, null, map);
+  }
+  private nextGameSeconds(m: P.MatchRow): number {
+    return stageRules(this.db, E.getStage(this.db, m.stage_id)!).series.nextGameSeconds;
   }
 
   /** A pick or side choice landed on a live match (a route or the clock). */

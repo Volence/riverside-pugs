@@ -525,6 +525,8 @@ describe('fix wave (final review)', () => {
       'sm_pug_end_kick 1',
       // A tournament box turned on !sub, !admin and the staff freeze (plan T3c).
       'sm_pug_tournament 0',
+      // Plan T5: the tournament box's match-rule cvars back to the plugin's defaults.
+      'sm_pug_tech_limit 0', 'sm_pug_tech_seconds 300', 'sm_pug_dc_team_seconds 0', 'sm_pug_sub_emergency 0', 'sm_pug_sub_charge 0', 'sm_pug_admin_cooldown 180',
     ]);
     expect(cmds.indexOf('l4d_booking_password ""')).toBeGreaterThan(cmds.indexOf('sm_kick @humans "The booking is over. Thanks for playing."'));
 
