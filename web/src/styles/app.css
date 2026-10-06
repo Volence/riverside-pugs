@@ -3449,6 +3449,10 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 /* A toxic flag: red text on the People desk, a red-bordered chip on the
    admin bookings panel (plan 2 Ruling 6). */
 .teamchip--toxic { border-color: var(--loss); color: var(--loss); }
+/* Match vs scrim on the admin bookings panel (server priority Ruling 9):
+   a tournament match reuses the accent chip, a scrim stays the default muted chip. */
+.teamchip--tournament { border-color: var(--rule); color: var(--accent); }
+.teamchip--scrim { color: var(--text-muted); }
 
 /* Events (tournaments plan T1a): the list, the status chip, the event page,
    the banner (also on the desk) and the description preview. */

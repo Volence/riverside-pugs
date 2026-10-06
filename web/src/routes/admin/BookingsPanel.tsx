@@ -9,6 +9,12 @@ const STATE_LABEL: Record<AdminBookingRow['state'], string> = {
   ended: 'over', cancelled: 'cancelled', no_show: 'no-show',
 };
 
+const PURPOSE_LABEL: Record<AdminBookingRow['purpose'], string> = { tournament: 'Match', scrim: 'Scrim' };
+
+/** The state cell: a bumped scrim says what bumped it (server priority Ruling 9). */
+const stateText = (b: AdminBookingRow): string =>
+  `${STATE_LABEL[b.state]}${b.endReason === 'bumped' ? ' (bumped by a match)' : b.endReason ? ` (${b.endReason})` : ''}`;
+
 /**
  * Booked servers on the live board (plan 4a; the spec's "calendar of bookings
  * on the admin Live desk"): every open booking and those that ended in the
@@ -20,10 +26,16 @@ export function BookingsPanel({ nudge }: { nudge: number }) {
   const list = useFetch((s) => adminApi.bookings(s), [nudge]);
   const { busy, error, run } = useAction(() => list.reload());
   const rows = list.data?.bookings ?? [];
+  const priority = list.data?.priority ?? null;
   if (rows.length === 0) return null;
   return (
     <Panel class="panel--table">
       <h3>Booked servers</h3>
+      {priority && (
+        <p class="muted" data-testid="booking-priority">
+          Priority: Match, then Scrim, then PUG, then practice and side games. Scrims hold {priority.scrimsHolding} of {priority.scrimMax} server{priority.scrimMax === 1 ? '' : 's'} they may hold at once; {priority.pugReserve} always left for PUGs. A match with no free server bumps a scrim that has not started.
+        </p>
+      )}
       {error && <p class="error" role="alert">{error}</p>}
       <div class="table-wrap">
         <table class="admin-table">
@@ -35,12 +47,13 @@ export function BookingsPanel({ nudge }: { nudge: number }) {
               return (
                 <tr key={b.id}>
                   <td>
+                    <span class={`teamchip teamchip--${b.purpose}`}>{PURPOSE_LABEL[b.purpose]}</span>{' '}
                     <a href={`/booking/${b.id}`}>{b.aName} vs {b.bName}</a>
                     {b.toxic.a && <span class="teamchip teamchip--toxic" title={`${b.aName}: repeated toxic tags`}>Toxic tags</span>}
                     {b.toxic.b && <span class="teamchip teamchip--toxic" title={`${b.bName}: repeated toxic tags`}>Toxic tags</span>}
                   </td>
                   <td>{localLabel(b.startsAt)} to {localLabel(b.endsAt)}</td>
-                  <td>{STATE_LABEL[b.state]}{b.endReason ? ` (${b.endReason})` : ''}</td>
+                  <td>{stateText(b)}</td>
                   <td>{b.server ?? ''}</td>
                   <td>{b.peak.a} / {b.peak.b}</td>
                   <td>

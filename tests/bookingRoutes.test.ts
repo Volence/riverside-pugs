@@ -149,6 +149,17 @@ describe('staff', () => {
     expect(db.prepare('SELECT state, cancel_side FROM bookings WHERE id = ?').get(id)).toEqual({ state: 'cancelled', cancel_side: null });
     expect(db.prepare("SELECT action FROM admin_actions WHERE action = 'booking_cancel'").all()).toHaveLength(1);
   });
+
+  it('the staff list names each booking\'s purpose and the scrim cap beside the PUG reserve (server priority Ruling 9)', async () => {
+    const id = await create();
+    const list = (await call('GET', '/api/admin/bookings', MOD)).json();
+    expect(list.bookings.find((b: { id: number }) => b.id === id).purpose).toBe('scrim');
+    const reserve = Number((db.prepare("SELECT value FROM settings WHERE key = 'pug_reserve_servers'").get() as { value: string }).value);
+    expect(list.priority).toEqual({ scrimMax: 2, scrimsHolding: 0, pugReserve: reserve });
+    db.prepare("UPDATE settings SET value = '3' WHERE key = 'scrim_max_servers'").run();
+    db.prepare("UPDATE bookings SET server_id = (SELECT id FROM servers WHERE name = 'a'), state = 'held' WHERE id = ?").run(id);
+    expect((await call('GET', '/api/admin/bookings', MOD)).json().priority).toEqual({ scrimMax: 3, scrimsHolding: 1, pugReserve: reserve });
+  });
 });
 
 describe('next and stay (plan 4b, Task 7)', () => {
