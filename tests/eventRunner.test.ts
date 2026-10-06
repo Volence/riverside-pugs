@@ -11,6 +11,7 @@ import { upsertPlayer } from '../src/players.js';
 import { NOW, START, ADMIN } from './eventFixture.js';
 import { A, B, entryFixture, rosterA, rosterB } from './entryFixture.js';
 import { playFixture, SWISS, SE } from './playFixture.js';
+import { windowFixture } from './roomFixture.js';
 
 const must = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -99,6 +100,30 @@ describe('eventMessage', () => {
       .toBe('Rats is out of Riverside Cup: it did not check in in time.');
     expect(eventMessage(f.db, 'https://x', f.eventId, 'event_roster_added', { entryId: entry.id, by: A[0], role: 'sub' })!.content)
       .toContain("put you on Rats's roster for Riverside Cup as a sub");
+  });
+
+  it('words the reschedule and locked-time DMs with Discord timestamps, and the window forfeit (plan T4)', async () => {
+    const f = await windowFixture();
+    const S = await import('../src/events/schedule.js');
+    const time = new Date(NOW.getTime() + 72 * 3_600_000).toISOString();
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time, note: 'after work', rules: { autoAcceptHours: 24, leadMinutes: 20 }, now: NOW });
+    if (!p.ok) throw new Error(p.error);
+    const unix = Math.floor(Date.parse(time) / 1000);
+    const proposed = eventMessage(f.db, 'https://x', f.eventId, 'event_reschedule', { matchId: f.matchId, what: 'proposed', proposalId: p.value.id })!;
+    expect(proposed.content).toContain(`<t:${unix}:F>`);
+    expect(proposed.content).toContain('Rats');
+    expect(proposed.content).toContain('after work');
+    expect(proposed.content).toContain(`locks on <t:${Math.floor(Date.parse(p.value.auto_accept_at!) / 1000)}:F>`);
+    expect(proposed.components[0]![0]).toMatchObject({ kind: 'link', url: `https://x/event/${f.slug}/match/${f.matchId}` });
+    expect(eventMessage(f.db, 'https://x', f.eventId, 'event_reschedule', { matchId: f.matchId, what: 'reminder', proposalId: p.value.id })!.content).toMatch(/locks on <t:\d+:F> unless/);
+    expect(eventMessage(f.db, 'https://x', f.eventId, 'event_reschedule', { matchId: f.matchId, what: 'declined', proposalId: p.value.id })!.content).toMatch(/declined/);
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'agreed' WHERE id = ?").run(time, f.matchId);
+    const locked = eventMessage(f.db, 'https://x', f.eventId, 'event_match_time', { matchId: f.matchId })!;
+    expect(locked.content).toContain(`<t:${unix}:F>`);
+    expect(locked.content).toMatch(/20 minutes before/);
+    expect(eventMessage(f.db, 'https://x', f.eventId, 'event_match_time', { matchId: f.matchId, what: 'staff' })!.content).toMatch(/staff set/i);
+    f.db.prepare("UPDATE event_matches SET status = 'forfeit', winner_entry = ? WHERE id = ?").run(f.entryB, f.matchId);
+    expect(eventMessage(f.db, 'https://x', f.eventId, 'event_match_forfeit', { matchId: f.matchId, why: 'window' })!.content).toMatch(/never answered .* before the window closed/);
   });
 });
 

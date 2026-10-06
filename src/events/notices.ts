@@ -2,7 +2,8 @@ import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
 import * as N from './entries.js';
 import * as P from './play.js';
-import { eventMessage, type EventNotifyType, type StaffAction } from './messages.js';
+import { eventMessage, type EventNotifyType, type RescheduleNotice, type StaffAction } from './messages.js';
+import { getProposal } from './schedule.js';
 
 /**
  * The event DMs (plan T1b Ruling 11), shared by the minute tick
@@ -59,9 +60,10 @@ function rostersOf(d: NoticeDeps, matchId: number): string[] {
 export function tellRoomOpen(d: NoticeDeps, eventId: number, matchId: number): void {
   tell(d, rostersOf(d, matchId), eventId, 'event_match_room', { matchId });
 }
-/** A match ended as a forfeit at the ready deadline, or at the end of the
- *  grace to connect (why 'server', plan T3b): both rosters. */
-export function tellReadyForfeit(d: NoticeDeps, eventId: number, matchId: number, why: 'ready' | 'server' = 'ready'): void {
+/** A match ended as a forfeit at the ready deadline, at the end of the
+ *  grace to connect (why 'server', plan T3b), or at a window's end (why
+ *  'window', plan T4): both rosters. */
+export function tellReadyForfeit(d: NoticeDeps, eventId: number, matchId: number, why: 'ready' | 'server' | 'window' = 'ready'): void {
   tell(d, rostersOf(d, matchId), eventId, 'event_match_forfeit', { matchId, why });
 }
 /** The connect line: only the booking's accepted people (the eight and the roster spectators), never a whole roster (T3b Global Constraints). */
@@ -75,4 +77,20 @@ export function tellSeriesResult(d: NoticeDeps, eventId: number, matchId: number
 /** A desk action (plan T3c Ruling 17): both rosters, one sentence. */
 export function tellStaffAction(d: NoticeDeps, eventId: number, matchId: number, what: StaffAction, detail?: string): void {
   tell(d, rostersOf(d, matchId), eventId, 'event_match_staff', { matchId, what, detail });
+}
+/** A proposal moved (plan T4 Ruling 11): the managers of the side that
+ *  must act. A proposal, a counter and the reminder go to the other side;
+ *  a decline or a withdrawal to the side that proposed. */
+export function tellReschedule(d: NoticeDeps, eventId: number, matchId: number, what: RescheduleNotice, proposalId: number): void {
+  const m = P.getMatch(d.db, matchId);
+  const p = getProposal(d.db, proposalId);
+  if (!m || !p || m.entry_a === null || m.entry_b === null) return;
+  const toSide = what === 'declined' || what === 'withdrawn' ? p.side : p.side === 'a' ? 'b' : 'a';
+  const entry = N.getEntry(d.db, toSide === 'a' ? m.entry_a : m.entry_b);
+  if (!entry) return;
+  tell(d, N.managersOf(d.db, entry.team_id), eventId, 'event_reschedule', { matchId, what, proposalId });
+}
+/** A time locked (accepted, auto-accepted or set by staff): both rosters. */
+export function tellTimeLocked(d: NoticeDeps, eventId: number, matchId: number, staff = false): void {
+  tell(d, rostersOf(d, matchId), eventId, 'event_match_time', { matchId, ...(staff ? { what: 'staff' as const } : {}) });
 }

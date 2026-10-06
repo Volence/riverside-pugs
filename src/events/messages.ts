@@ -12,12 +12,18 @@ import { seriesVerdict, winsLine } from './seriesRules.js';
 import { bookingRules, getBooking } from '../bookings/bookings.js';
 import { getServer } from '../serverPool.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
+import { getProposal, scheduleRules } from './schedule.js';
 
 /** The event DMs (plan T1b Ruling 11, and the two match room DMs of plan
  *  T3a Ruling 2). Every player-chosen name goes through escapeName, as in
  *  src/bookings/messages.ts. */
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
-  | 'event_match_connect' | 'event_match_result' | 'event_match_staff';
+  | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time';
+
+/** A reschedule DM's occasion (plan T4 Ruling 11). */
+export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
+/** Discord renders this in each reader's own time zone (Global Constraints). */
+export const discordTime = (iso: string): string => `<t:${Math.floor(Date.parse(iso) / 1000)}:F>`;
 
 /** What staff did on the desk (plan T3c Ruling 17), one sentence each. */
 export type StaffAction = 'ready' | 'veto' | 'lineup' | 'veto_reopened' | 'chapter_replayed' | 'server_moved' | 'grace_extended' | 'hold_released' | 'frozen' | 'unfrozen';
@@ -33,7 +39,7 @@ const ROLE_TEXT: Record<R.Role, string> = { starter: 'a starter', sub: 'a sub', 
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server'; what?: StaffAction; detail?: string } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -57,14 +63,36 @@ export function eventMessage(
     }
     case 'event_match_connect':
     case 'event_match_result':
-    case 'event_match_staff': {
+    case 'event_match_staff':
+    case 'event_reschedule':
+    case 'event_match_time': {
       const m = extra.matchId !== undefined ? P.getMatch(db, extra.matchId) : undefined;
       if (!m || m.entry_a === null || m.entry_b === null) return null;
       const a = escapeName(getEntry(db, m.entry_a)?.name ?? 'Team A');
       const b = escapeName(getEntry(db, m.entry_b)?.name ?? 'Team B');
-      if (type === 'event_match_staff') {
+      if (type === 'event_reschedule') {
+        const p = extra.proposalId !== undefined ? getProposal(db, extra.proposalId) : undefined;
+        if (!p || p.event_match_id !== m.id) return null;
+        const who = p.side === 'a' ? a : b;
+        const otherTeam = p.side === 'a' ? b : a;
+        const by = escapeName(getPlayer(db, p.proposed_by)?.name ?? 'A captain');
+        const note = p.note ? ` ("${escapeName(p.note)}")` : '';
+        const lock = p.auto_accept_at ? ` Unanswered, it locks on ${discordTime(p.auto_accept_at)}.` : '';
+        const what = extra.what ?? 'proposed';
+        content = what === 'proposed' || what === 'countered'
+          ? `${by} of ${who} ${what === 'countered' ? 'counters with' : 'proposes'} ${discordTime(p.proposed_time)} for ${a} vs ${b} in ${event}${note}. A captain or co-captain accepts, declines or counters on the match page.${lock}`
+          : what === 'reminder'
+            ? `${who}'s proposed time for ${a} vs ${b} in ${event}, ${discordTime(p.proposed_time)}, locks on ${discordTime(p.auto_accept_at ?? p.proposed_time)} unless a captain or co-captain of your team answers on the match page.`
+            : what === 'declined'
+              ? `${otherTeam} declined ${who}'s proposed time ${discordTime(p.proposed_time)} for ${a} vs ${b} in ${event}. Propose another on the match page.`
+              : `${who} withdrew its proposed time ${discordTime(p.proposed_time)} for ${a} vs ${b} in ${event}.`;
+      } else if (type === 'event_match_time') {
+        if (m.scheduled_at === null) return null;
+        const lead = scheduleRules(db).leadMinutes;
+        content = `${a} vs ${b} in ${event} is set for ${discordTime(m.scheduled_at)}${extra.what === 'staff' ? ' (staff set it)' : ''}. The match room opens ${lead} minutes before; a captain or co-captain of each team presses Ready there, then the veto and lineups follow and the server is booked.`;
+      } else if (type === 'event_match_staff') {
         const detail = extra.detail ? ` (${escapeName(extra.detail)})` : '';
-        content = `${a} vs ${b} in ${event}: staff ${STAFF_TEXT[extra.what ?? 'hold_released']}${detail}.`;
+        content = `${a} vs ${b} in ${event}: staff ${STAFF_TEXT[(extra.what as StaffAction | undefined) ?? 'hold_released']}${detail}.`;
       } else if (type === 'event_match_connect') {
         const bk = m.booking_id !== null ? getBooking(db, m.booking_id) : undefined;
         const s = bk && bk.server_id !== null ? getServer(db, bk.server_id) : undefined;
@@ -103,7 +131,10 @@ export function eventMessage(
       } else {
         const winner = m.winner_entry === m.entry_a ? a : b;
         const loser = m.winner_entry === m.entry_a ? b : a;
-        content = `${a} vs ${b} in ${event} is a forfeit win for ${winner}: ${loser} ${extra.why === 'server' ? 'did not have four players on the server when the grace to connect ended' : 'did not press Ready in the match room in time'}.`;
+        const why = extra.why === 'server' ? 'did not have four players on the server when the grace to connect ended'
+          : extra.why === 'window' ? 'never answered the other team\'s proposed time and never played before the window closed'
+            : 'did not press Ready in the match room in time';
+        content = `${a} vs ${b} in ${event} is a forfeit win for ${winner}: ${loser} ${why}.`;
       }
       return {
         content, embeds: [],
