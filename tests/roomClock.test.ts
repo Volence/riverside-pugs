@@ -3,10 +3,13 @@ import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
 import { RoomClock, dueRooms, higherSide } from '../src/events/roomClock.js';
 import type { Notifier } from '../src/notify/notify.js';
-import { NOW } from './eventFixture.js';
+import { ADMIN, NOW } from './eventFixture.js';
 import { A, B } from './entryFixture.js';
 import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
-import { SE, playFixture } from './playFixture.js';
+import { RR, SE, SWISS, playFixture } from './playFixture.js';
+import { autoAction } from '../src/events/veto.js';
+import * as E from '../src/events/events.js';
+import { recordResultFlow, stageTable } from '../src/events/flow.js';
 
 const at = (min: number) => NOW.getTime() + min * 60_000;
 const clockAt = (f: RoomFixture, ms: { t: number }) => {
@@ -56,6 +59,27 @@ describe('RoomClock: opening rooms', () => {
     const seedA = f.entries.indexOf(first.entry_a!);
     const seedB = f.entries.indexOf(first.entry_b!);
     expect(higherSide(f.db, first)).toBe(seedA < seedB ? 'a' : 'b');
+  });
+
+  it('picks the better standing over the stage seed in a round robin once results are in', async () => {
+    const f = playFixture({ stages: [RR(1, null)], entries: 4 });
+    const { startEventFlow } = await import('../src/events/flow.js');
+    await startEventFlow(f.db, { eventId: f.eventId, by: null, now: new Date(at(0)) });
+    const seed = (id: number) => f.entries.indexOf(id);
+    // The worse seed of a round 1 match wins it.
+    const r1 = P.matchesOf(f.db, f.stages[0]!).find((m) => m.round === 1)!;
+    const winner = seed(r1.entry_a!) > seed(r1.entry_b!) ? 'a' : 'b';
+    const w = winner === 'a' ? r1.entry_a! : r1.entry_b!;
+    const l = winner === 'a' ? r1.entry_b! : r1.entry_a!;
+    const done = await recordResultFlow(f.db, { eventId: f.eventId, matchId: r1.id, by: ADMIN, result: { winner, scoreA: winner === 'a' ? 9 : 1, scoreB: winner === 'a' ? 1 : 9 }, now: new Date(at(0)) });
+    expect(done.ok).toBe(true);
+    // A later match of the winner against a better seed that has not lost.
+    const later = P.matchesOf(f.db, f.stages[0]!).find((m) => m.round > 1 && [m.entry_a, m.entry_b].includes(w)
+      && [m.entry_a, m.entry_b].every((id) => id !== l) && seed(m.entry_a === w ? m.entry_b! : m.entry_a!) < seed(w))!;
+    expect(later).toBeDefined();
+    const rank = new Map(stageTable(f.db, E.getStage(f.db, f.stages[0]!)!).map((r) => [r.entryId, r.rank]));
+    expect(rank.get(w)!).toBeLessThan(rank.get(later.entry_a === w ? later.entry_b! : later.entry_a!)!);
+    expect(higherSide(f.db, later)).toBe(later.entry_a === w ? 'a' : 'b');
   });
 });
 
@@ -114,6 +138,41 @@ describe('RoomClock: deadlines', () => {
     await clock.tick();
     expect(R.lineupsOf(f.db, f.matchId).map((l) => JSON.parse(l.steamids))).toEqual([[A[1], A[2], A[3], A[4]]]);
     expect(match(f)).toMatchObject({ status: 'admin_hold', hold_reason: 'lineup_short' });
+  });
+
+  it('re-reads each overdue match before acting, so a step a captain took meanwhile is not followed by a second clock action (fix round 1)', async () => {
+    // Two rooms in one event: X is overdue on its ready check (a forfeit,
+    // which awaits the event chain), Y is overdue on a veto step. While X is
+    // being forfeited, Y's team takes the overdue step itself, which resets
+    // Y's deadline into the future: the clock must not then act Y's next step
+    // from its stale snapshot.
+    const f = playFixture({ stages: [SWISS(3, null)], entries: 4 });
+    const { startEventFlow } = await import('../src/events/flow.js');
+    await startEventFlow(f.db, { eventId: f.eventId, by: null, now: new Date(at(0)) });
+    const holder = { y: 0 };
+    const t = { t: at(0) };
+    const clock = new RoomClock({
+      db: f.db, now: () => t.t, seed: () => 5,
+      push: (id) => {
+        if (id === holder.y || P.getMatch(f.db, id)!.status !== 'forfeit') return;
+        const y = P.getMatch(f.db, holder.y)!;
+        const st = R.roomState(f.db, y);
+        const a = autoAction(st, E.stageSettingsOf(E.getStage(f.db, y.stage_id)!).campaignPool, { campaigns: [], side: null });
+        const r = R.actVeto(f.db, { matchId: y.id, steamid: null, step: st.used, action: a.action, campaign: a.campaign, timers: TIMERS, now: new Date(t.t) });
+        expect(r.ok).toBe(true);
+      },
+    });
+    await clock.tick();
+    const [x, y] = P.matchesOf(f.db, f.stages[0]!).filter((m) => m.status === 'veto');
+    expect(x && y).toBeTruthy();
+    holder.y = y!.id;
+    f.db.prepare('UPDATE event_matches SET ready_a_at = ?, ready_b_at = NULL, deadline = ? WHERE id = ?').run(new Date(at(1)).toISOString(), new Date(at(5)).toISOString(), x!.id);
+    f.db.prepare('UPDATE event_matches SET ready_a_at = ?, ready_b_at = ?, deadline = ? WHERE id = ?').run(new Date(at(1)).toISOString(), new Date(at(1)).toISOString(), new Date(at(6)).toISOString(), y!.id);
+    t.t = at(7);
+    await clock.tick();
+    expect(P.getMatch(f.db, x!.id)!.status).toBe('forfeit');
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM event_vetoes WHERE event_match_id = ?').get(y!.id)).toEqual({ n: 1 });
+    expect(P.getMatch(f.db, y!.id)!.deadline).toBe(new Date(at(8)).toISOString());
   });
 
   it('gives overdue deadlines their full length on resume, so downtime acts for nobody', async () => {
