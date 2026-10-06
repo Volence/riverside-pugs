@@ -186,4 +186,23 @@ describe('RoomClock: deadlines', () => {
     await clock.tick();
     expect(match(f).status).toBe('veto');
   });
+
+  it('leaves an open room of a cancelled event alone: no action, no hold, no push, no resume (final review)', async () => {
+    const f = await roomFixture();
+    const t = { t: at(0) };
+    const { clock, push } = clockAt(f, t);
+    await clock.tick();
+    expect(match(f).status).toBe('veto');
+    const c = E.cancelEvent(f.db, { eventId: f.eventId, by: ADMIN, reason: 'Called off', now: new Date(at(1)) });
+    expect(c.ok).toBe(true);
+    push.mockClear();
+    const before = match(f);
+    t.t = at(60);
+    clock.resume();
+    await clock.tick();
+    expect(match(f)).toEqual(before);
+    expect(push).not.toHaveBeenCalled();
+    expect(dueRooms(f.db, new Date(at(60)))).toEqual([]);
+    expect(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'x', now: new Date(at(60)) })).toEqual({ ok: false, error: 'not_live' });
+  });
 });

@@ -459,5 +459,26 @@ describe('event_log guard', () => {
       expect(() => R.readyUp(f.db, { matchId: f.matchId, steamid: A[0]!, timers: TIMERS, now: at(1) })).toThrow(/audit down/);
       expect(rows(f)).toBe(before);
     });
+
+    // The veto step that finishes the veto: advance() updates event_games and
+    // moves the match to lineup before the audit row (final review).
+    it('actVeto (the last step, which moves the match to lineup) writes nothing when its event_log row cannot be written', async () => {
+      const f = await roomFixture();
+      bothReady(f);
+      for (const [step, action, campaign] of [[0, 'first', null], [1, 'ban', 'dead_air']] as const) {
+        const r = R.actVeto(f.db, { matchId: f.matchId, steamid: A[0]!, step, action, campaign, timers: TIMERS, now: at(2) });
+        if (!r.ok) throw new Error(r.error);
+      }
+      expect(R.gamesOf(f.db, f.matchId)).toHaveLength(1);
+      const before = rows(f);
+      f.db.exec("CREATE TRIGGER room_log_down_lastVeto BEFORE INSERT ON event_log WHEN NEW.action = 'veto_action' BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+      const last = () => R.actVeto(f.db, { matchId: f.matchId, steamid: B[0]!, step: 2, action: 'survivors', campaign: null, timers: TIMERS, now: at(3) });
+      expect(last).toThrow(/audit down/);
+      expect(rows(f)).toBe(before);
+      f.db.exec('DROP TRIGGER room_log_down_lastVeto');
+      expect(last().ok).toBe(true);
+      expect(P.getMatch(f.db, f.matchId)!.status).toBe('lineup');
+      expect(rows(f)).not.toBe(before);
+    });
   });
 });
