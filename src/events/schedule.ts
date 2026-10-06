@@ -5,7 +5,7 @@ import * as N from './entries.js';
 import * as P from './play.js';
 import * as V from './validate.js';
 import { ROOM_LIVE_SQL, sideOf } from './room.js';
-import type { Side } from './veto.js';
+import { other, type Side } from './veto.js';
 
 /**
  * Reschedule proposals (tournaments plan T4, spec section 5): the only
@@ -29,6 +29,11 @@ export interface ScheduleRules { autoAcceptHours: number; leadMinutes: number }
 export const AUTO_ACCEPT_MIN_AHEAD_MS = 48 * 3_600_000;
 /** A proposed time is at least this far ahead (the room opens 20 minutes before it). */
 export const PROPOSE_MIN_AHEAD_MS = 60 * 60_000;
+/** A proposal never locks later than this before its own time, so a large
+ *  reschedule_autoaccept_hours setting shortens the wait instead of letting
+ *  the lock fall after the time (review fix). With AUTO_ACCEPT_MIN_AHEAD_MS
+ *  at 48 h the lock is always at least 24 h after the proposal. */
+export const AUTO_ACCEPT_LOCK_BEFORE_MS = 24 * 3_600_000;
 /** The reminder goes out this long before the lock ... */
 export const REMINDER_BEFORE_MS = 24 * 3_600_000;
 /** ... but only when that is at least this long after the proposal (else the arrival DM says it all). */
@@ -53,9 +58,12 @@ export function getProposal(db: DB, id: number): RescheduleRow | undefined {
   return db.prepare('SELECT * FROM event_reschedules WHERE id = ?').get(id) as RescheduleRow | undefined;
 }
 
-/** When an unanswered proposal locks (Ruling 6), or null when it needs an answer. */
+/** When an unanswered proposal locks (Ruling 6): the setting's hours after
+ *  it was made, but no later than AUTO_ACCEPT_LOCK_BEFORE_MS before its
+ *  time; null when it needs an answer. */
 export function autoAcceptAt(createdMs: number, proposedMs: number, hours: number): string | null {
-  return proposedMs - createdMs >= AUTO_ACCEPT_MIN_AHEAD_MS ? new Date(createdMs + hours * 3_600_000).toISOString() : null;
+  if (proposedMs - createdMs < AUTO_ACCEPT_MIN_AHEAD_MS) return null;
+  return new Date(Math.min(createdMs + hours * 3_600_000, proposedMs - AUTO_ACCEPT_LOCK_BEFORE_MS)).toISOString();
 }
 /** When the 24-hour reminder goes out, or null when the arrival DM carries the lock time already. */
 export function reminderAt(createdMs: number, autoAcceptIso: string | null): string | null {
@@ -78,6 +86,9 @@ function schedulable(db: DB, matchId: number, at: string): V.Checked<{ m: P.Matc
   }
   return V.ok({ m, ev });
 }
+
+/** The window still holds this time (staff may have moved it since the proposal). */
+const inWindow = (m: P.MatchRow, t: string): boolean => m.window_start !== null && m.window_end !== null && t >= m.window_start && t <= m.window_end;
 
 /** A proposed time: inside the window, at least an hour ahead, not the time already set (Ruling 7). */
 function timeIn(m: P.MatchRow, raw: unknown, at: string): string | null {
@@ -134,7 +145,7 @@ export function respondProposal(db: DB, o: { matchId: number; by: string; accept
     if (!p) return V.fail('no_proposal');
     if (p.side === side) return V.fail('own_proposal');
     // A time that passed while nobody answered cannot be accepted; the clock expires it.
-    if (o.accept && p.proposed_time <= at) return V.fail('bad_time');
+    if (o.accept && (p.proposed_time <= at || !inWindow(m, p.proposed_time))) return V.fail('bad_time');
     closeProposal(db, p.id, o.accept ? 'accepted' : 'declined', o.by, at);
     if (o.accept) lockTime(db, m.id, p.proposed_time, 'agreed');
     E.logEvent(db, ev.id, o.by, o.accept ? 'reschedule_accepted' : 'reschedule_declined', at, { matchId: m.id, proposalId: p.id, side, time: p.proposed_time });
@@ -216,14 +227,18 @@ export function autoAcceptDue(db: DB, now: Date): RescheduleRow[] {
   return db.prepare(`${OPEN_SQL} AND r.auto_accept_at IS NOT NULL AND r.auto_accept_at <= ? AND r.proposed_time > ? ORDER BY r.id`).all(at, at) as RescheduleRow[];
 }
 
-/** Ruling 6: still open, due, and the match still waiting with a future time; else 'changed'. */
+/** Ruling 6: still open, due, and the match still schedulable (event and
+ *  stage live, both entries in, waiting in its window) with the proposed
+ *  time ahead and inside the window; else 'changed' or schedulable's key. */
 export function autoAccept(db: DB, o: { proposalId: number; now?: Date }): V.Checked<P.MatchRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<P.MatchRow> => {
     const p = getProposal(db, o.proposalId);
     if (!p || p.status !== 'open' || p.auto_accept_at === null || p.auto_accept_at > at || p.proposed_time <= at) return V.fail('changed');
-    const m = P.getMatch(db, p.event_match_id);
-    if (!m || m.status !== 'waiting') return V.fail('changed');
+    const c = schedulable(db, p.event_match_id, at);
+    if (!c.ok) return c;
+    const { m } = c.value;
+    if (!inWindow(m, p.proposed_time)) return V.fail('changed');
     closeProposal(db, p.id, 'auto_accepted', null, at);
     lockTime(db, m.id, p.proposed_time, 'agreed');
     E.logEvent(db, m.event_id, null, 'reschedule_auto_accepted', at, { matchId: m.id, proposalId: p.id, side: p.side, time: p.proposed_time });
@@ -266,31 +281,37 @@ export function expireProposal(db: DB, o: { proposalId: number; reason: 'time_pa
   })();
 }
 
-/** Window-stage matches still waiting past their window's end (Ruling 8), both teams known. */
+/** Window-stage matches still waiting past their window's end (Ruling 8),
+ *  both teams known. A staff time, or any time set past the window end, is
+ *  a time the match keeps: the clock opens its room then, never forfeits it. */
 export function expiredWindows(db: DB, now: Date): P.MatchRow[] {
   return db.prepare(
     `SELECT m.* FROM event_matches m JOIN event_stages s ON s.id = m.stage_id
      WHERE ${ROOM_LIVE_SQL} AND s.scheduling = 'window' AND m.status = 'waiting' AND m.entry_a IS NOT NULL AND m.entry_b IS NOT NULL
-       AND m.window_end IS NOT NULL AND m.window_end <= ? ORDER BY m.id`,
+       AND m.window_end IS NOT NULL AND m.window_end <= ?
+       AND (m.schedule_source IS NULL OR m.schedule_source <> 'staff') AND (m.scheduled_at IS NULL OR m.scheduled_at <= m.window_end)
+     ORDER BY m.id`,
   ).all(now.toISOString()) as P.MatchRow[];
 }
 
 /** Ruling 8: the side that made no proposal and answered none while the
- *  other side made at least one; null when both acted or neither did. A
- *  counter, a decline, a withdrawal and a staff expiry all count as an
- *  answer by the side whose manager gave it. */
+ *  other side made at least one; null when both acted or neither did, and
+ *  null once a time was locked (a proposal accepted or auto-accepted, or the
+ *  match carries an agreed or staff time): a locked time is never forfeited.
+ *  An accept, a decline or a counter is an answer by the side opposite the
+ *  proposal (taken from the proposal, not from who manages the team now); a
+ *  withdrawal is the proposer's own act; a staff expiry marks nobody. */
 export function silentSide(db: DB, m: P.MatchRow): Side | null {
+  if (m.schedule_source === 'agreed' || m.schedule_source === 'staff') return null;
   const acted = { a: false, b: false };
   const proposed = { a: false, b: false };
   for (const p of proposalsOf(db, m.id)) {
+    if (p.status === 'accepted' || p.status === 'auto_accepted') return null;
     proposed[p.side] = true;
     acted[p.side] = true;
-    if (p.responded_by !== null) {
-      const s = sideOf(db, m, p.responded_by);
-      if (s) acted[s] = true;
-    }
+    if (p.status === 'declined' || p.status === 'countered') acted[other(p.side)] = true;
   }
   if (acted.a === acted.b) return null;
   const silent: Side = acted.a ? 'b' : 'a';
-  return proposed[silent === 'a' ? 'b' : 'a'] ? silent : null;
+  return proposed[other(silent)] ? silent : null;
 }

@@ -24,6 +24,12 @@ describe('autoAcceptAt and reminderAt', () => {
     expect(S.reminderAt(NOW.getTime(), at(72).toISOString())).toBe(at(48).toISOString());
     expect(S.reminderAt(NOW.getTime(), null)).toBeNull();
   });
+
+  it('never locks later than 24 h before the proposed time, however large the setting (review fix)', () => {
+    expect(S.autoAcceptAt(NOW.getTime(), at(50).getTime(), 72)).toBe(at(26).toISOString());
+    expect(S.autoAcceptAt(NOW.getTime(), at(48).getTime(), 72)).toBe(at(24).toISOString());
+    expect(S.autoAcceptAt(NOW.getTime(), at(200).getTime(), 72)).toBe(at(72).toISOString());
+  });
 });
 
 describe('proposeTime', () => {
@@ -178,5 +184,61 @@ describe('staffSetTime and the hold from waiting', () => {
     expect(h).toMatchObject({ status: 'admin_hold', hold_from: 'waiting', hold_reason: 'window_expired' });
     const r = ok(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: NOW }));
     expect(r).toMatchObject({ status: 'waiting', deadline: null, hold_from: null, hold_reason: null });
+  });
+});
+
+describe('review fixes: a locked time is never forfeited, and the clock re-checks', () => {
+  it('a staff time set past the window end is not an expired window', async () => {
+    const f = await windowFixture({ to: at(48) });
+    ok(propose(f, A[0]!, 30));
+    ok(S.staffSetTime(f.db, { matchId: f.matchId, by: ADMIN, time: at(24 * 5).toISOString(), now: at(1) }));
+    expect(S.expiredWindows(f.db, at(48))).toEqual([]);
+    expect(S.silentSide(f.db, match(f))).toBeNull();
+  });
+
+  it('an auto-accepted time still waiting at the window end names no silent side', async () => {
+    const f = await windowFixture({ to: at(100) });
+    const p = ok(propose(f, A[0]!, 72));
+    ok(S.autoAccept(f.db, { proposalId: p.id, now: at(24) }));
+    expect(S.expiredWindows(f.db, at(100)).map((m) => m.id)).toEqual([f.matchId]);
+    expect(S.silentSide(f.db, match(f))).toBeNull();
+    const g = await windowFixture({ to: at(100) });
+    ok(propose(g, A[0]!, 72));
+    ok(S.respondProposal(g.db, { matchId: g.matchId, by: B[0]!, accept: true, now: at(1) }));
+    g.db.prepare("UPDATE event_matches SET schedule_source = NULL WHERE id = ?").run(g.matchId); // test setup: only the accepted row says so
+    expect(S.silentSide(g.db, match(g))).toBeNull();
+  });
+
+  it('silentSide takes the answering side from the proposal, not from who manages the team now', async () => {
+    const f = await windowFixture();
+    const p = ok(propose(f, A[0]!, 72));
+    ok(S.respondProposal(f.db, { matchId: f.matchId, by: B[0]!, accept: false, now: at(1) }));
+    // test setup: the captain who declined has since left the team
+    f.db.prepare('UPDATE event_reschedules SET responded_by = ? WHERE id = ?').run(OUTSIDER, p.id);
+    expect(S.silentSide(f.db, match(f))).toBeNull();
+  });
+
+  it('autoAccept refuses when the event stopped, an entry is out, or the window moved off the proposed time', async () => {
+    const f = await windowFixture();
+    const p = ok(propose(f, A[0]!, 72));
+    f.db.prepare('UPDATE event_matches SET window_end = ? WHERE id = ?').run(at(60).toISOString(), f.matchId);
+    expect(S.autoAccept(f.db, { proposalId: p.id, now: at(24) })).toEqual({ ok: false, error: 'changed' });
+    const g = await windowFixture();
+    const q = ok(propose(g, A[0]!, 72));
+    g.db.prepare("UPDATE event_entries SET status = 'dropped' WHERE id = ?").run(g.entryB);
+    expect(S.autoAccept(g.db, { proposalId: q.id, now: at(24) })).toEqual({ ok: false, error: 'entry_out' });
+    const h = await windowFixture();
+    const r = ok(propose(h, A[0]!, 72));
+    h.db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(h.eventId);
+    expect(S.autoAccept(h.db, { proposalId: r.id, now: at(24) })).toEqual({ ok: false, error: 'not_live' });
+    expect(match(f).scheduled_at).toBeNull();
+  });
+
+  it('respondProposal will not accept a time the window no longer holds, though a decline still goes through', async () => {
+    const f = await windowFixture();
+    ok(propose(f, A[0]!, 72));
+    f.db.prepare('UPDATE event_matches SET window_end = ? WHERE id = ?').run(at(60).toISOString(), f.matchId);
+    expect(S.respondProposal(f.db, { matchId: f.matchId, by: B[0]!, accept: true, now: at(1) })).toEqual({ ok: false, error: 'bad_time' });
+    expect(ok(S.respondProposal(f.db, { matchId: f.matchId, by: B[0]!, accept: false, now: at(1) })).proposal.status).toBe('declined');
   });
 });
