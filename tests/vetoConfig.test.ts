@@ -44,6 +44,10 @@ describe('checkVeto', () => {
     expect(checkVeto({ ...base, games: 3, banTo: 3, laterPicks: 'loser', lateBans: 1 }, 7)).toBe('bad_veto');
   });
 
+  it('refuses late bans in a total score Bo2, which has no last game to save one for', () => {
+    expect(checkVeto({ ...base, games: 2, banTo: 4, lateBans: 1 }, 7)).toBe('bad_veto');
+  });
+
   it('refuses unknown values', () => {
     expect(checkVeto({ ...base, games: 4 as 1 }, 7)).toBe('bad_veto');
     expect(checkVeto({ ...base, sides: 'nobody' as 'coin' }, 7)).toBe('bad_veto');

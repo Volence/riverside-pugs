@@ -34,4 +34,12 @@ describe('VetoFields', () => {
     render(<VetoFields value={presetConfig('ban_to_one', 2)} poolSize={2} onChange={() => {}} />);
     expect((screen.getByRole('option', { name: /Pick and ban \(Bo3\) \(needs 5 campaigns\)/ }) as HTMLOptionElement).disabled).toBe(true);
   });
+
+  it('drops a stale late-ban count when Series switches a custom Bo3 down to Bo2', () => {
+    const change = vi.fn();
+    const customBo3 = { games: 3 as const, banTo: 5, firstBan: 'higher_chooses' as const, firstPick: 'first' as const, laterPicks: 'alternate' as const, lateBans: 2, sides: 'non_picker' as const };
+    render(<VetoFields value={customBo3} poolSize={7} onChange={change} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Series' }), { target: { value: '2' } });
+    expect(change).toHaveBeenCalledWith({ ...customBo3, games: 2, lateBans: 0 });
+  });
 });
