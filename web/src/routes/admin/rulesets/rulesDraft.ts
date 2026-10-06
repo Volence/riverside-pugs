@@ -7,7 +7,8 @@ import { readWhole } from '../events/wholeNumber';
  * sent as null, never 0; a blank technical pauses or no-show grace is an
  * error the form shows without sending anything. The server
  * (src/rulesetStore.ts readEditableRules) judges every range. The
- * Tournament play numbers (plan T5) are read the same way; blank is an error.
+ * Tournament play numbers (plan T5) are read the same way; blank is an error,
+ * except the Emergency sub cost while emergency subs are off (it is hidden).
  */
 export interface RulesTyped {
   limit: string; seconds: string; techPauses: string; grace: string;
@@ -49,6 +50,9 @@ export function readRules(base: EditableRules, typed: RulesTyped): { ok: true; v
     ['subCharge', 'Emergency sub cost'], ['cooldown', '!admin cooldown'], ['nextGame', 'Next game after']];
   const got: Partial<Record<keyof RulesTyped, number>> = {};
   for (const [k, label] of nums) {
+    // The cost field is hidden while emergency subs are off: what it holds
+    // then must not block Save, and the saved cost is kept as it was.
+    if (k === 'subCharge' && !base.subs.emergency) continue;
     const r = readWhole(typed[k], label, false);
     if (!r.ok) return r;
     got[k] = r.value as number;
@@ -59,7 +63,7 @@ export function readRules(base: EditableRules, typed: RulesTyped): { ok: true; v
       ...base,
       pause: { ...base.pause, limit: limit.value, seconds: seconds.value, techPauses: tech.value as number, techSeconds: got.techSeconds! },
       noShowGraceMinutes: grace.value as number,
-      subs: { ...base.subs, perMatch: got.subs!, emergencyChargeSeconds: got.subCharge! },
+      subs: { ...base.subs, perMatch: got.subs!, emergencyChargeSeconds: got.subCharge ?? base.subs.emergencyChargeSeconds },
       disconnect: { teamSeconds: got.reconnect! },
       staffCall: { cooldownSeconds: got.cooldown! },
       series: { nextGameSeconds: got.nextGame! },

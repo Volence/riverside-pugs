@@ -46,4 +46,14 @@ describe('rules draft', () => {
     expect(readRules(e, { ...t, reconnect: '' })).toEqual({ ok: false, error: 'Reconnect time needs a whole number.' });
     expect(readRules(e, { ...t, nextGame: '1.5' })).toEqual({ ok: false, error: 'Next game after needs a whole number.' });
   });
+
+  it('ignores the hidden Emergency sub cost while emergency subs are off, keeping the saved value (final review)', () => {
+    const off = editableFrom({ ...CUP, subs: { perMatch: 2, emergency: false, emergencyChargeSeconds: 45 } });
+    for (const subCharge of ['', 'x', '1.5']) {
+      expect(readRules(off, { ...typedFrom(off), subCharge })).toEqual({ ok: true, value: off });
+    }
+    // With emergency subs on, a blank cost is still refused.
+    const on = editableFrom(CUP);
+    expect(readRules(on, { ...typedFrom(on), subCharge: '' })).toEqual({ ok: false, error: 'Emergency sub cost needs a whole number.' });
+  });
 });
