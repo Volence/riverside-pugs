@@ -991,21 +991,28 @@ export function noteTech(db: DB, o: {
 
 /** Staff rule on a technical pause (Ruling 12): one penalty per pause, before
  *  the match is resolved. A forfeit is recorded here once the box took it
- *  (the series engine sends sm_pug_forfeit first). */
+ *  (the series engine sends sm_pug_forfeit first). That forfeit can end the
+ *  game, and with it the match (or its stage), before the box's answer is
+ *  read: a forfeit ruling is still taken then, when the pause's own game
+ *  carries the pausing side's staff forfeit (plan T5 Task 8). */
 export function techPenalty(db: DB, o: { matchId: number; pauseId: unknown; by: string; penalty: unknown; note: unknown; now?: Date }): V.Checked<{ m: P.MatchRow; pause: TechPause }> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<{ m: P.MatchRow; pause: TechPause }> => {
     const c = liveMatch(db, o.matchId);
-    if (!c.ok) return c;
-    const { m, ev } = c.value;
-    if (P.RESOLVED.has(m.status)) return V.fail('wrong_status');
+    const gate: V.Checked<null> = !c.ok ? c : P.RESOLVED.has(c.value.m.status) ? V.fail('wrong_status') : V.ok(null);
+    const m = c.ok ? c.value.m : P.getMatch(db, o.matchId);
+    if (!m || (!gate.ok && o.penalty !== 'forfeit')) return gate.ok ? V.fail('match_not_found') : gate;
     if (o.penalty !== 'warning' && o.penalty !== 'forfeit') return V.fail('bad_penalty');
     const note = V.normalizeReason(o.note);
     if (!note.ok) return note;
     const pause = Number.isInteger(o.pauseId) ? techPausesOf(db, m).find((p) => p.id === o.pauseId) : undefined;
+    if (!gate.ok) {
+      const g = pause ? gamesOf(db, m.id).find((x) => x.match_id === pause.gameMatchId) : undefined;
+      if (!pause || !g || g.forfeit_side !== pause.side || g.forfeit_why !== 'staff') return gate;
+    }
     if (!pause) return V.fail('pause_not_found');
     if (pause.penalty !== null) return V.fail('already_penalized');
-    E.logEvent(db, ev.id, o.by, 'tech_penalty', at, {
+    E.logEvent(db, m.event_id, o.by, 'tech_penalty', at, {
       matchId: m.id, pauseId: pause.id, gameMatchId: pause.gameMatchId, side: pause.side, penalty: o.penalty, note: note.value,
     });
     return V.ok({ m: P.getMatch(db, m.id)!, pause: techPausesOf(db, m).find((p) => p.id === pause.id)! });

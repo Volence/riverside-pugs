@@ -26,13 +26,15 @@ export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdraw
 export const discordTime = (iso: string): string => `<t:${Math.floor(Date.parse(iso) / 1000)}:F>`;
 
 /** What staff did on the desk (plan T3c Ruling 17), one sentence each. */
-export type StaffAction = 'ready' | 'veto' | 'lineup' | 'veto_reopened' | 'chapter_replayed' | 'server_moved' | 'grace_extended' | 'hold_released' | 'frozen' | 'unfrozen';
+export type StaffAction = 'ready' | 'veto' | 'lineup' | 'veto_reopened' | 'chapter_replayed' | 'server_moved' | 'grace_extended' | 'hold_released' | 'frozen' | 'unfrozen' | 'tech_warning' | 'tech_forfeit';
 const STAFF_TEXT: Record<StaffAction, string> = {
   ready: 'pressed Ready for a team', veto: 'took a veto step for a team', lineup: 'locked a lineup for a team',
   veto_reopened: 'reopened the veto; the room starts again from the first step',
   chapter_replayed: 'had a chapter replayed from its start', server_moved: 'moved the match to another server; a new connect line follows',
   grace_extended: 'extended the time to connect', hold_released: 'released the hold on the match',
   frozen: 'froze the game; only staff can unfreeze it', unfrozen: 'unfroze the game',
+  tech_warning: 'gave a warning for a technical pause',
+  tech_forfeit: 'ruled that a team forfeits the game over a technical pause',
 };
 
 const ROLE_TEXT: Record<R.Role, string> = { starter: 'a starter', sub: 'a sub', coach: 'the coach' };

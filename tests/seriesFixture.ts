@@ -26,12 +26,12 @@ export const MIN = 60_000;
 export interface SeriesFixture extends RoomFixture {
   t: { t: number }; runner: BookingRunner; series: SeriesEngine; clock: RoomClock;
   sent: string[];
-  /** subOk / freezeOk: pug-match takes sm_pug_sub / sm_pug_adminpause (else it answers PUGERR subErr / PUGERR no match configured).
+  /** subOk / freezeOk / forfeitOk: pug-match takes sm_pug_sub / sm_pug_adminpause / sm_pug_forfeit (else it answers PUGERR subErr / PUGERR no match configured / PUGERR no live match).
    *  failOn: an rcon burst with a command starting with this throws (the connection dropped on it), as `down` does for every burst.
    *  failLeft: when set, failOn throws only this many more times, then clears itself.
    *  onFailsDone: called once failLeft runs out.
    *  gate: when set, every rcon burst waits on it before answering (holds tracked work mid-flight). */
-  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; failOn: string | null; failLeft: number | null; onFailsDone: (() => void) | null; gate: Promise<void> | null; marker: string; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
+  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; forfeitOk: boolean; failOn: string | null; failLeft: number | null; onFailsDone: (() => void) | null; gate: Promise<void> | null; marker: string; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
   /** The room clock (which ticks the series engine), then the runner's
    *  minute pass, then any tracked work. */
   tick(): Promise<void>;
@@ -67,7 +67,7 @@ export async function seriesFixture(o: {
   f.db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(serverId);
   const t = { t: NOW.getTime() + 10 * MIN };
   const sent: string[] = [];
-  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, failOn: null as string | null, failLeft: null as number | null, onFailsDone: null as (() => void) | null, gate: null as Promise<void> | null, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
+  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, forfeitOk: true, failOn: null as string | null, failLeft: null as number | null, onFailsDone: null as (() => void) | null, gate: null as Promise<void> | null, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
   const status = () => [
     'hostname: test', `map     : ${box.map} at: 0 x, 0 y, 0 z`, `players : ${box.humans.length} humans, 0 bots (31 max)`,
     '# userid name uniqueid connected ping loss state rate adr',
@@ -95,6 +95,9 @@ export async function seriesFixture(o: {
       if (sub) return box.subOk ? `PUGOK sub out=${sub[1]} in=${sub[2]} slot=8` : `PUGERR ${box.subErr}`;
       const ap = /^sm_pug_adminpause \S+ (on|off)\b/.exec(c);
       if (ap) return box.freezeOk ? `PUGOK adminpause=${ap[1]} frozen=${ap[1] === 'on' ? 1 : 0}` : 'PUGERR no match configured';
+      // pug-match 0.3.26's answer (plugin/pug-tourney.inc Cmd_PugForfeit).
+      const ff = /^sm_pug_forfeit \S+ (a|b)$/.exec(c);
+      if (ff) return box.forfeitOk ? `PUGOK forfeit team=${ff[1]}` : 'PUGERR no live match';
       if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${box.type}" ( def. "" )`;
       if (c === 'l4d_booking_version') return '"l4d_booking_version" = "1.4.0" ( def. "1.0.0" )';
       if (c === 'l4d_booking_id') return `"l4d_booking_id" = "${box.marker}" ( def. "" )`;
@@ -178,8 +181,9 @@ export async function seriesFixture(o: {
       const head = Buffer.from([0xff, 0xff, 0xff, 0xff, 0x52]);
       const ev = parseLogDatagram(Buffer.concat([head, Buffer.from(`L 10/07/2026 - 20:00:00: ${body}\n`, 'utf8')]));
       if (!ev) throw new Error(`fixture line did not parse: ${body}`);
-      if (ev.kind === 'sub_request') await series!.subRequested(ev.token, ev.by, ev.out, ev.in);
+      if (ev.kind === 'sub_request') await series!.subRequested(ev.token, ev.by, ev.out, ev.in, ev.emergency === true);
       else if (ev.kind === 'admin_pause') series!.adminPauseLine(ev.token, ev.on, ev.by, ev.cause);
+      else if (ev.kind === 'tech') series!.techLine(ev.token, ev);
       else if (ev.kind === 'call') handleModCall(db, ev, serverId, { adminSteamIds: [], now: new Date(t.t) });
       // As server.ts: a PLAYER disconnect reaches nothing (only connect is recorded), LEAVE and RETURN the presence table.
       else if ((ev.kind === 'player' && ev.event === 'connect') || ev.kind === 'leave' || ev.kind === 'return') recordPresenceLine(db, ev, new Date(t.t));

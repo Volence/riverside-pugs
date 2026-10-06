@@ -526,6 +526,7 @@ describe('SeriesEngine: the end of a series and the box (T3b ledger rulings)', (
     f.db.prepare("UPDATE matches SET forfeit_team = 'a' WHERE id = ?").run(g1.match_id!);
     f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital01_apartment', a: 400, b: 100 }]);
     expect(f.gameOf(1)).toMatchObject({ score_a: 100, score_b: 400, forfeit_side: 'b', winner: f.entryA });
+    expect(f.gameOf(1).forfeit_why).toBe('gg');
     const log = JSON.parse(f.db.prepare("SELECT detail FROM event_log WHERE action = 'game_recorded'").pluck().get() as string);
     expect(log).toMatchObject({ scoreA: 100, scoreB: 400, forfeit: 'b', winner: 'a' });
     expect(f.match().status).toBe('confirming');
@@ -761,6 +762,25 @@ describe('SeriesEngine: a Bo2 home and away (T3b final review)', () => {
     ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: A[0]!, steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
     ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: BATS[0]!, steamids: BATS.slice(0, 4), timers: TIMERS, now: at(4) }));
   };
+
+  it('says why a forfeit ended the series: a !gg, the reconnect time, or a staff ruling (plan T5 Ruling 9)', async () => {
+    const how = { gg: 'typed !gg', disconnect: 'ran out of reconnect time', staff: 'forfeited by staff ruling' } as const;
+    for (const why of ['gg', 'disconnect', 'staff'] as const) {
+      f?.close();
+      f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+      await f.tick();
+      const g1 = f.gameOf(1).match_id!;
+      f.goLive(g1);
+      // Rats (entry a) forfeit: the pug team is oriented through the game's booking_side_a.
+      const sideA = (f.db.prepare('SELECT booking_side_a FROM matches WHERE id = ?').pluck().get(g1) as string | null) ?? 'a';
+      f.db.prepare('UPDATE matches SET forfeit_team = ?, forfeit_why = ? WHERE id = ?').run(sideA === 'a' ? 'a' : 'b', why === 'gg' ? null : why, g1);
+      f.sent.length = 0;
+      f.endGame(g1, [{ map: 'l4d_vs_smalltown01_caves', a: 500, b: 400 }]);
+      expect(f.gameOf(1)).toMatchObject({ forfeit_side: 'a', forfeit_why: why, winner: f.entryB });
+      expect(f.match().status).toBe('confirming');
+      expect(f.sent.some((c) => c.startsWith(`say [Match] Series over: Bats beat Rats by forfeit (Rats ${how[why]}).`))).toBe(true);
+    }
+  });
 
   it('plays both games, and tied totals replay game 2\'s last chapter as the tiebreak', async () => {
     f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
