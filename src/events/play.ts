@@ -76,17 +76,18 @@ export function totalRounds(stage: E.StageRow): number | null {
 
 /** What a round's matches are stamped with (plan T4 Ruling 2): the stage's
  *  schedule row; else, for a league, its week as the window with no
- *  default time (Ruling 4); else nothing. fallbackStart is the day week 1
+ *  default time (Ruling 4); else nothing. A league row with a default time
+ *  but no window takes its week as the window (final review). fallbackStart is the day week 1
  *  starts when the league has no season start and the stage no started_at
  *  yet (openStage writes started_at before it inserts rounds). */
 export function roundTimes(stage: E.StageRow, round: number, fallbackStart: string): { at: string | null; from: string | null; to: string | null } {
   const row = E.scheduleOf(stage).find((r) => r.round === round);
-  if (row) return { at: row.at, from: row.from, to: row.to };
+  if (row && row.from !== null) return { at: row.at, from: row.from, to: row.to };
   const s = E.stageSettingsOf(stage);
-  if (s.type !== 'league') return { at: null, from: null, to: null };
+  if (s.type !== 'league') return row ? { at: row.at, from: row.from, to: row.to } : { at: null, from: null, to: null };
   const c = s.config as V.StageConfigs['league'];
   const w = weekWindow(c.seasonStart ?? (stage.started_at ?? fallbackStart).slice(0, 10), round, c.matchesPerWeek);
-  return { at: null, from: w.from, to: w.to };
+  return { at: row?.at ?? null, from: w.from, to: w.to };
 }
 
 interface Stamp { not_before: string | null; scheduled_at: string | null; source: 'default' | null; from: string | null; to: string | null }

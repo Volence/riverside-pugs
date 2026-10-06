@@ -42,12 +42,12 @@ export function SchedulePanel({ v, busy, onPropose, onRespond, onCounter, onWith
     <div class="roomschedule">
       {s.scheduledAt
         ? <p><strong>{whenText(s.scheduledAt)}</strong> <span class="muted">({source}; the room opens {s.leadMinutes} minutes before)</span></p>
-        : <p>No time is set yet.{s.windowEnd ? (s.canPropose ? ' A captain or co-captain proposes one below.' : '') : " Staff set the round's window first."}</p>}
+        : <p>No time is set yet.{s.windowEnd ? (s.canPropose ? ' A captain or co-captain proposes one below.' : '') : s.windowStart ? ' Its window has ended: staff set a time.' : " Staff set the round's window first."}</p>}
       {s.windowStart && s.windowEnd && <p class="muted">{`Window: ${whenText(s.windowStart)} to ${whenText(s.windowEnd)}`}</p>}
       {p && (
         <div class="roomschedule__proposal">
           <p>{`${p.byName} (${team(p.side)}) proposes ${whenText(p.time)}${p.note ? ` ("${p.note}")` : ''}.`}
-            {p.autoAcceptAt && <span class="muted">{` Unanswered, it locks on ${whenText(p.autoAcceptAt)}.`}</span>}
+            <span class="muted">{p.autoAcceptAt ? ` Unanswered, it locks on ${whenText(p.autoAcceptAt)}.` : ' It needs an answer: it does not lock on its own.'}</span>
           </p>
           {s.canAnswer && !countering && (
             <div class="inlinerow">

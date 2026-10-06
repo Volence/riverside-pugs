@@ -43,14 +43,17 @@ export interface RoomServer {
 export interface RoomPlayer { steamid: string; name: string }
 /** One reschedule proposal as the room page lists it (plan T4). */
 export interface RoomProposal {
-  id: number; side: 'a' | 'b'; byName: string; time: string; note: string; createdAt: string; autoAcceptAt: string | null;
+  id: number; side: 'a' | 'b'; byName: string; time: string; createdAt: string; autoAcceptAt: string | null;
+  /** The proposer's note: present only for the two rosters and staff (final review); times and the log are public. */
+  note?: string;
   status: RescheduleStatus; respondedByName: string | null; respondedAt: string | null;
 }
 /** The schedule of a window-stage match (plan T4 Ruling 12); null on a
  *  rolling stage. Everything is public like the veto log (Global
  *  Constraint): the locked time, the window, the open proposal and the log
  *  of closed ones, since the log decides a window-end forfeit. Only the
- *  can* flags depend on the viewer. A proposal staff closed from the desk
+ *  can* flags and the proposal notes (the two rosters and staff) depend on
+ *  the viewer. A proposal staff closed from the desk
  *  names its responder as Staff to everyone but staff. */
 export interface RoomSchedule {
   scheduledAt: string | null; source: 'default' | 'agreed' | 'staff' | null; windowStart: string | null; windowEnd: string | null;
@@ -182,8 +185,9 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
       return getPlayer(db, p.responded_by)?.name ?? (p.status === 'expired' ? 'Staff' : 'a captain');
     };
     const toView = (p: RescheduleRow): RoomProposal => ({
-      id: p.id, side: p.side, byName: getPlayer(db, p.proposed_by)?.name ?? 'a captain', time: p.proposed_time, note: p.note, createdAt: p.created_at,
+      id: p.id, side: p.side, byName: getPlayer(db, p.proposed_by)?.name ?? 'a captain', time: p.proposed_time, createdAt: p.created_at,
       autoAcceptAt: p.auto_accept_at, status: p.status, respondedByName: responderName(p), respondedAt: p.responded_at,
+      ...(staff || mySide !== null ? { note: p.note } : {}),
     });
     const open = openProposal(db, m.id);
     const managed = viewer !== null ? R.sideOf(db, m, viewer) : null;

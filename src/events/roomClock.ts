@@ -90,6 +90,23 @@ export function dueWindowRooms(db: DB, now: Date, leadMs: number): P.MatchRow[] 
   return out;
 }
 
+/** Opens a match's room (R.openRoom) and, in the same transaction, closes
+ *  any proposal still open on it as expired with reason room_opened: once
+ *  the room opens at the time set, nothing is left to answer (plan T4 final
+ *  review). The clock and the desk's Open room both come through here. */
+export function openMatchRoom(db: DB, o: Parameters<typeof R.openRoom>[1]): ReturnType<typeof R.openRoom> {
+  return db.transaction((): ReturnType<typeof R.openRoom> => {
+    const r = R.openRoom(db, o);
+    if (!r.ok) return r;
+    const p = S.openProposal(db, r.value.id);
+    if (p) {
+      const e = S.expireProposal(db, { proposalId: p.id, reason: 'room_opened', now: o.now });
+      if (!e.ok) throw new Error(`proposal ${p.id} could not be closed as the room opened (${e.error})`);
+    }
+    return r;
+  })();
+}
+
 function earliestOf(db: DB, stageId: number, entryId: number): number | undefined {
   const row = db.prepare(
     `SELECT id FROM event_matches WHERE stage_id = ? AND (entry_a = ? OR entry_b = ?) AND status NOT IN ('done','forfeit','bye')
@@ -172,7 +189,7 @@ export class RoomClock {
     const due = [...dueRooms(db, now), ...dueWindowRooms(db, now, S.scheduleRules(db).leadMinutes * 60_000)];
     for (const m of due) {
       try {
-        const r = R.openRoom(db, { matchId: m.id, by: null, higher: higherSide(db, m), seed: this.deps.seed?.() ?? randomInt(2 ** 31), timers, now });
+        const r = openMatchRoom(db, { matchId: m.id, by: null, higher: higherSide(db, m), seed: this.deps.seed?.() ?? randomInt(2 ** 31), timers, now });
         if (!r.ok) continue;
         tellRoomOpen(this.deps, m.event_id, m.id);
         this.pushChange(m.id);

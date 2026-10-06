@@ -57,6 +57,23 @@ describe('SchedulePanel', () => {
     expect(h.onCounter).toHaveBeenCalledWith(new Date('2026-10-15T21:00').toISOString(), '');
   });
 
+  it('shows a note only when the view carries one, and says a proposal with no lock needs an answer (final review)', () => {
+    const h = handlers();
+    const p = { id: 5, side: 'a' as const, byName: 'alice', time: TIME, createdAt: '2026-10-10T10:00:00.000Z', autoAcceptAt: null, status: 'open' as const, respondedByName: null, respondedAt: null };
+    render(<SchedulePanel v={view(schedule({ proposal: p }))} busy={false} {...h} />);
+    const line = screen.getByText(/alice \(Rats\) proposes/);
+    expect(line.textContent).not.toContain('"');
+    expect(line.textContent).toContain('It needs an answer: it does not lock on its own.');
+    cleanup();
+    render(<SchedulePanel v={view(schedule({ proposal: { ...p, note: 'late shift' } }))} busy={false} {...h} />);
+    expect(screen.getByText(/alice \(Rats\) proposes/).textContent).toContain('("late shift")');
+  });
+
+  it('a match whose ended window was cleared on a hold release asks staff for a time (final review)', () => {
+    render(<SchedulePanel v={view(schedule({ windowEnd: null }))} busy={false} {...handlers()} />);
+    expect(screen.getByText(/Its window has ended: staff set a time/)).toBeTruthy();
+  });
+
   it('offers Withdraw to the proposing side and lists the log', () => {
     const h = handlers();
     const p = { id: 5, side: 'b' as const, byName: 'bob', time: TIME, note: '', createdAt: '2026-10-10T10:00:00.000Z', autoAcceptAt: null, status: 'open' as const, respondedByName: null, respondedAt: null };

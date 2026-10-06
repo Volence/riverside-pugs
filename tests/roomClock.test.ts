@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
-import { RoomClock, dueRooms, dueWindowRooms, higherSide } from '../src/events/roomClock.js';
+import { RoomClock, dueRooms, dueWindowRooms, higherSide, openMatchRoom } from '../src/events/roomClock.js';
 import * as S from '../src/events/schedule.js';
 import type { Notifier } from '../src/notify/notify.js';
 import { ADMIN, NOW } from './eventFixture.js';
@@ -568,5 +568,71 @@ describe('RoomClock: window stages, review follow-ups (plan T4 Task 4 ruling)', 
     tellReschedule({ db: f.db, notifier: { send } as unknown as Notifier, publicUrl: 'https://x' }, f.eventId, f.matchId, 'withdrawn', p.ok ? p.value.id : 0);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(expect.arrayContaining([A[0], B[0]]), 'event_reschedule', expect.objectContaining({ content: expect.stringContaining('withdrew') }));
+  });
+});
+
+describe('RoomClock: window stages, final review (plan T4)', () => {
+  const hours = (h: number) => at(h * 60);
+  const reasons = (f: RoomFixture) => (f.db.prepare("SELECT detail FROM event_log WHERE action = 'reschedule_expired' ORDER BY id").all() as { detail: string }[])
+    .map((r) => (JSON.parse(r.detail) as { reason: string }).reason);
+
+  it('a released window-end hold stays waiting: no second hold and no second alert', async () => {
+    const f = await windowFixture({ to: new Date(hours(48)) });
+    const alerts: string[] = [];
+    const { subscribeAdminEvents } = await import('../src/adminFeed.js');
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') alerts.push(e.text); });
+    try {
+      const t = { t: hours(48) };
+      const { clock } = clockAt(f, t);
+      await clock.tick();
+      expect(match(f)).toMatchObject({ status: 'admin_hold', hold_reason: 'window_expired', hold_from: 'waiting' });
+      expect(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: new Date(hours(49)) }).ok).toBe(true);
+      for (const h of [49, 50, 72]) {
+        t.t = hours(h);
+        await clock.tick();
+      }
+      expect(match(f)).toMatchObject({ status: 'waiting', window_end: null });
+      expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'match_held'").get()).toEqual({ n: 1 });
+      expect(alerts.filter((x) => /window/.test(x))).toHaveLength(1);
+    } finally { off(); }
+  });
+
+  it('staff Set time on a window-end hold puts the match back to waiting with the staff time, and the room opens then', async () => {
+    const f = await windowFixture({ to: new Date(hours(48)) });
+    const t = { t: hours(48) };
+    const { clock } = clockAt(f, t);
+    await clock.tick();
+    expect(match(f).status).toBe('admin_hold');
+    const set = S.staffSetTime(f.db, { matchId: f.matchId, by: ADMIN, time: new Date(hours(60)).toISOString(), now: new Date(hours(49)) });
+    expect(set.ok).toBe(true);
+    expect(match(f)).toMatchObject({ status: 'waiting', scheduled_at: new Date(hours(60)).toISOString(), schedule_source: 'staff', hold_from: null });
+    t.t = hours(50);
+    await clock.tick();
+    expect(match(f).status).toBe('waiting');
+    t.t = hours(60) - 20 * 60_000;
+    await clock.tick();
+    expect(match(f).status).toBe('veto');
+  });
+
+  it('a proposal still open when the room opens at the time set is closed as room_opened, in the same transaction', async () => {
+    const f = await windowFixture();
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'default' WHERE id = ?").run(new Date(hours(20)).toISOString(), f.matchId);
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(hours(72)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
+    expect(p.ok && p.value.auto_accept_at).toBeNull();
+    const { clock, push } = clockAt(f, { t: hours(20) - 20 * 60_000 });
+    await clock.tick();
+    expect(match(f).status).toBe('veto');
+    expect(S.openProposal(f.db, f.matchId)).toBeUndefined();
+    expect(reasons(f)).toEqual(['room_opened']);
+    expect(push).toHaveBeenCalledWith(f.matchId);
+  });
+
+  it('openMatchRoom writes nothing when the proposal cannot be closed', async () => {
+    const f = await windowFixture();
+    expect(S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(hours(72)).toISOString(), rules: S.scheduleRules(f.db), now: NOW }).ok).toBe(true);
+    f.db.exec("CREATE TRIGGER expire_down BEFORE INSERT ON event_log WHEN NEW.action = 'reschedule_expired' BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+    expect(() => openMatchRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 1, timers: TIMERS, now: NOW })).toThrow(/audit down/);
+    expect(match(f).status).toBe('waiting');
+    expect(S.openProposal(f.db, f.matchId)).toBeDefined();
   });
 });

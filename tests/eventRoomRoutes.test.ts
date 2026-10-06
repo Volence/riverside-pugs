@@ -290,6 +290,35 @@ describe('reschedules over HTTP (plan T4)', () => {
     expect(v.schedule.log).toHaveLength(3);
   });
 
+  it('shows a proposal note only to the two rosters and staff; times and the log stay public (final review)', async () => {
+    toWindow();
+    const [t3, t4] = [days(3), days(4)];
+    expect((await post(`${room()}/propose`, A[0], { time: t3, note: 'after work' })).statusCode).toBe(200);
+    expect((await post(`${room()}/counter`, B[0], { time: t4, note: 'late shift' })).statusCode).toBe(200);
+    for (const who of [A[2], B[2], ADMIN]) {
+      const s = (await get(room(), who)).json().schedule;
+      expect(s.proposal, who).toMatchObject({ time: t4, note: 'late shift' });
+      expect(s.log[0], who).toMatchObject({ time: t3, note: 'after work' });
+    }
+    for (const who of [OUTSIDER, undefined]) {
+      const s = (await get(room(), who)).json().schedule;
+      expect(s.proposal).toMatchObject({ side: 'b', time: t4 });
+      expect(s.proposal).not.toHaveProperty('note');
+      expect(s.log[0]).toMatchObject({ side: 'a', time: t3, status: 'countered' });
+      expect(s.log[0]).not.toHaveProperty('note');
+    }
+  });
+
+  it('the desk\'s Open room closes an open proposal as room_opened (final review)', async () => {
+    toWindow();
+    expect((await post(`${room()}/propose`, A[0], { time: days(3) })).statusCode).toBe(200);
+    expect((await post(`/api/admin/events/${f.eventId}/matches/${f.matchId}/open-room`, ADMIN)).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('veto');
+    expect(S.proposalsOf(f.db, f.matchId).map((p) => p.status)).toEqual(['expired']);
+    const row = f.db.prepare("SELECT detail FROM event_log WHERE action = 'reschedule_expired'").get() as { detail: string };
+    expect(JSON.parse(row.detail)).toMatchObject({ reason: 'room_opened' });
+  });
+
   it('refuses every reschedule route on a rolling stage, signed out, and behind the closed switch', async () => {
     for (const action of ['propose', 'respond', 'counter', 'withdraw']) {
       expect((await post(`${room()}/${action}`, A[0], { time: days(3), accept: true })).json(), action).toEqual({ error: EVENT_ERRORS.not_schedulable.text });

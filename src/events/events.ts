@@ -324,7 +324,7 @@ export function setRoundSchedule(db: DB, o: { eventId: number; stageId: number; 
     const s = ownStage(db, ev.id, o.stageId);
     if (!s) return V.fail('stage_not_found');
     if (s.status === 'finished') return V.fail('schedule_locked');
-    const p = V.parseRoundSchedule(o.rounds, s.scheduling);
+    const p = V.parseRoundSchedule(o.rounds, s.scheduling, { league: s.type === 'league' });
     if (!p.ok) return p;
     db.prepare('UPDATE event_stages SET schedule_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(p.value), at, s.id);
     touch(db, ev.id, at);

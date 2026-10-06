@@ -60,10 +60,15 @@ export function getProposal(db: DB, id: number): RescheduleRow | undefined {
 
 /** When an unanswered proposal locks (Ruling 6): the setting's hours after
  *  it was made, but no later than AUTO_ACCEPT_LOCK_BEFORE_MS before its
- *  time; null when it needs an answer. */
-export function autoAcceptAt(createdMs: number, proposedMs: number, hours: number): string | null {
+ *  time; null when it needs an answer. roomOpensMs is when the room opens
+ *  at the time the match carries now (its scheduled_at minus the lead), or
+ *  null with no time set: a lock that would fall after it needs an answer
+ *  instead, since the room opens at the old time first (final review). */
+export function autoAcceptAt(createdMs: number, proposedMs: number, hours: number, roomOpensMs: number | null = null): string | null {
   if (proposedMs - createdMs < AUTO_ACCEPT_MIN_AHEAD_MS) return null;
-  return new Date(Math.min(createdMs + hours * 3_600_000, proposedMs - AUTO_ACCEPT_LOCK_BEFORE_MS)).toISOString();
+  const lock = Math.min(createdMs + hours * 3_600_000, proposedMs - AUTO_ACCEPT_LOCK_BEFORE_MS);
+  if (roomOpensMs !== null && lock > roomOpensMs) return null;
+  return new Date(lock).toISOString();
 }
 /** When the 24-hour reminder goes out, or null when the arrival DM carries the lock time already. */
 export function reminderAt(createdMs: number, autoAcceptIso: string | null): string | null {
@@ -99,7 +104,8 @@ function timeIn(m: P.MatchRow, raw: unknown, at: string): string | null {
 }
 
 function insertProposal(db: DB, m: P.MatchRow, side: Side, by: string, time: string, note: string, at: string, rules: ScheduleRules): number {
-  const auto = autoAcceptAt(Date.parse(at), Date.parse(time), rules.autoAcceptHours);
+  const opens = m.scheduled_at === null ? null : Date.parse(m.scheduled_at) - rules.leadMinutes * 60_000;
+  const auto = autoAcceptAt(Date.parse(at), Date.parse(time), rules.autoAcceptHours, opens);
   return Number(db.prepare(
     'INSERT INTO event_reschedules (event_match_id, side, proposed_by, proposed_time, note, created_at, auto_accept_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(m.id, side, by, time, note, at, auto).lastInsertRowid);
@@ -169,7 +175,8 @@ export function counterProposal(
     if (!p) return V.fail('no_proposal');
     if (p.side === side) return V.fail('own_proposal');
     const time = timeIn(m, o.time, at);
-    if (!time) return V.fail('bad_time');
+    // A counter at the open proposal's own time is an accept, not a counter (final review).
+    if (!time || time === p.proposed_time) return V.fail('bad_time');
     const nr = V.normalizeReason(o.note);
     if (!nr.ok) return nr;
     closeProposal(db, p.id, 'countered', o.by, at);
@@ -197,7 +204,10 @@ export function withdrawProposal(db: DB, o: { matchId: number; by: string; now?:
   })();
 }
 
-/** Ruling 10: staff set any future time on a waiting window-stage match; an open proposal expires with it. */
+/** Ruling 10: staff set any future time on a waiting window-stage match; an
+ *  open proposal expires with it. A match held from waiting (the window
+ *  end's hold) takes a time too, and the same row releases the hold back to
+ *  waiting (final review: staff's natural action on that hold). */
 export function staffSetTime(db: DB, o: { matchId: number; by: string; time: unknown; now?: Date }): V.Checked<P.MatchRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<P.MatchRow> => {
@@ -206,13 +216,20 @@ export function staffSetTime(db: DB, o: { matchId: number; by: string; time: unk
     const ev = E.getEvent(db, m.event_id)!;
     const stage = E.getStage(db, m.stage_id)!;
     if (ev.status !== 'live' || stage.status !== 'live') return V.fail('not_live');
-    if (stage.scheduling !== 'window' || m.status !== 'waiting' || m.entry_a === null || m.entry_b === null) return V.fail('not_schedulable');
+    const heldFromWaiting = m.status === 'admin_hold' && m.hold_from === 'waiting';
+    if (stage.scheduling !== 'window' || (m.status !== 'waiting' && !heldFromWaiting) || m.entry_a === null || m.entry_b === null) return V.fail('not_schedulable');
+    if (![m.entry_a, m.entry_b].every((id) => N.isActive(N.getEntry(db, id)!))) return V.fail('entry_out');
     const time = V.parseTime(o.time);
     if (!time || time <= at) return V.fail('bad_time');
     const p = openProposal(db, m.id);
     if (p) closeProposal(db, p.id, 'expired', o.by, at);
+    if (heldFromWaiting) {
+      db.prepare("UPDATE event_matches SET status = 'waiting', hold_reason = NULL, hold_from = NULL, deadline = NULL WHERE id = ?").run(m.id);
+    }
     lockTime(db, m.id, time, 'staff');
-    E.logEvent(db, ev.id, o.by, 'match_time_set', at, { matchId: m.id, time, was: m.scheduled_at, expired: p?.id ?? null });
+    E.logEvent(db, ev.id, o.by, 'match_time_set', at, {
+      matchId: m.id, time, was: m.scheduled_at, expired: p?.id ?? null, ...(heldFromWaiting ? { released: m.hold_reason } : {}),
+    });
     return V.ok(P.getMatch(db, m.id)!);
   })();
 }
@@ -248,8 +265,9 @@ export function autoAccept(db: DB, o: { proposalId: number; now?: Date }): V.Che
 }
 
 export function remindersDue(db: DB, now: Date): RescheduleRow[] {
-  const rows = db.prepare(`${OPEN_SQL} AND r.reminded_at IS NULL AND r.auto_accept_at IS NOT NULL ORDER BY r.id`).all() as RescheduleRow[];
+  // A lock already due goes out on its own: no reminder after downtime (final review).
   const at = now.toISOString();
+  const rows = db.prepare(`${OPEN_SQL} AND r.reminded_at IS NULL AND r.auto_accept_at IS NOT NULL AND r.auto_accept_at > ? ORDER BY r.id`).all(at) as RescheduleRow[];
   return rows.filter((r) => { const t = reminderAt(Date.parse(r.created_at), r.auto_accept_at); return t !== null && t <= at; });
 }
 
@@ -270,7 +288,7 @@ export function staleProposals(db: DB, now: Date): RescheduleRow[] {
   return db.prepare(`${OPEN_SQL} AND r.proposed_time <= ? ORDER BY r.id`).all(now.toISOString()) as RescheduleRow[];
 }
 
-export function expireProposal(db: DB, o: { proposalId: number; reason: 'time_passed' | 'window_ended'; now?: Date }): V.Checked<RescheduleRow> {
+export function expireProposal(db: DB, o: { proposalId: number; reason: 'time_passed' | 'window_ended' | 'room_opened'; now?: Date }): V.Checked<RescheduleRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<RescheduleRow> => {
     const p = getProposal(db, o.proposalId);

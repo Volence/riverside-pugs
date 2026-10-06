@@ -125,6 +125,18 @@ describe('eventMessage', () => {
     f.db.prepare("UPDATE event_matches SET status = 'forfeit', winner_entry = ? WHERE id = ?").run(f.entryB, f.matchId);
     expect(eventMessage(f.db, 'https://x', f.eventId, 'event_match_forfeit', { matchId: f.matchId, why: 'window' })!.content).toMatch(/never answered .* before the window closed/);
   });
+
+  it('a proposal that needs an answer says so: it does not lock on its own (final review)', async () => {
+    const f = await windowFixture();
+    const S = await import('../src/events/schedule.js');
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'default' WHERE id = ?").run(new Date(NOW.getTime() + 20 * 3_600_000).toISOString(), f.matchId);
+    const p = S.proposeTime(f.db, { matchId: f.matchId, by: A[0], time: new Date(NOW.getTime() + 72 * 3_600_000).toISOString(), rules: { autoAcceptHours: 24, leadMinutes: 20 }, now: NOW });
+    if (!p.ok) throw new Error(p.error);
+    expect(p.value.auto_accept_at).toBeNull();
+    const content = eventMessage(f.db, 'https://x', f.eventId, 'event_reschedule', { matchId: f.matchId, what: 'proposed', proposalId: p.value.id })!.content;
+    expect(content).toContain('It needs an answer: it does not lock on its own.');
+    expect(content).not.toMatch(/locks on/);
+  });
 });
 
 describe('EventRunner.play (plan T2)', () => {

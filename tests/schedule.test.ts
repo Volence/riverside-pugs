@@ -242,3 +242,74 @@ describe('review fixes: a locked time is never forfeited, and the clock re-check
     expect(ok(S.respondProposal(f.db, { matchId: f.matchId, by: B[0]!, accept: false, now: at(1) })).proposal.status).toBe('declined');
   });
 });
+
+describe('final review fixes (plan T4)', () => {
+  it('staff Set time on a hold from waiting releases it in the same row, with the staff time', async () => {
+    const f = await windowFixture({ to: at(48) });
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'window_expired', now: at(48) }));
+    const logs = (f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n;
+    const m = ok(S.staffSetTime(f.db, { matchId: f.matchId, by: ADMIN, time: at(24 * 5).toISOString(), now: at(49) }));
+    expect(m).toMatchObject({ status: 'waiting', hold_from: null, hold_reason: null, deadline: null, scheduled_at: at(24 * 5).toISOString(), schedule_source: 'staff' });
+    expect((f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n).toBe(logs + 1);
+    const row = f.db.prepare('SELECT action, actor, detail FROM event_log ORDER BY id DESC LIMIT 1').get() as { action: string; actor: string; detail: string };
+    expect(row).toMatchObject({ action: 'match_time_set', actor: ADMIN });
+    expect(JSON.parse(row.detail)).toMatchObject({ released: 'window_expired' });
+    // A hold from another phase is not a Set time.
+    const g = await windowFixture();
+    R.openRoom(g.db, { matchId: g.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW });
+    ok(R.holdMatch(g.db, { matchId: g.matchId, by: ADMIN, reason: 'staff look', now: NOW }));
+    expect(S.staffSetTime(g.db, { matchId: g.matchId, by: ADMIN, time: at(50).toISOString(), now: NOW })).toEqual({ ok: false, error: 'not_schedulable' });
+  });
+
+  it('releasing a hold from waiting whose window ended clears the window end, so the match is never an expired window again', async () => {
+    const f = await windowFixture({ to: at(48) });
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'window_expired', now: at(48) }));
+    const r = ok(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(49) }));
+    expect(r).toMatchObject({ status: 'waiting', window_end: null });
+    expect(S.expiredWindows(f.db, at(100))).toEqual([]);
+    // A window still open keeps its end.
+    const g = await windowFixture();
+    ok(R.holdMatch(g.db, { matchId: g.matchId, by: ADMIN, reason: 'staff look', now: NOW }));
+    expect(ok(R.releaseHold(g.db, { matchId: g.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(1) })).window_end).not.toBeNull();
+  });
+
+  it('a proposal needs an answer when its lock would fall after the room opens at the time already set', async () => {
+    const opens = at(40).getTime() - 20 * 60_000;
+    expect(S.autoAcceptAt(NOW.getTime(), at(72).getTime(), 24, opens)).toBe(at(24).toISOString());
+    expect(S.autoAcceptAt(NOW.getTime(), at(72).getTime(), 24, at(20).getTime())).toBeNull();
+    expect(S.autoAcceptAt(NOW.getTime(), at(72).getTime(), 24, null)).toBe(at(24).toISOString());
+    const f = await windowFixture();
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'default' WHERE id = ?").run(at(20).toISOString(), f.matchId);
+    expect(ok(propose(f, A[0]!, 72)).auto_accept_at).toBeNull();
+    const g = await windowFixture();
+    g.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'default' WHERE id = ?").run(at(40).toISOString(), g.matchId);
+    expect(ok(propose(g, A[0]!, 72)).auto_accept_at).toBe(at(24).toISOString());
+  });
+
+  it('a lock already due gets no reminder (after downtime the lock goes out alone)', async () => {
+    const f = await windowFixture();
+    const p = ok(S.proposeTime(f.db, { matchId: f.matchId, by: A[0]!, time: at(100).toISOString(), rules: { autoAcceptHours: 48, leadMinutes: 20 }, now: NOW }));
+    expect(S.remindersDue(f.db, at(47)).map((x) => x.id)).toEqual([p.id]);
+    expect(S.remindersDue(f.db, at(48))).toEqual([]);
+    expect(S.remindersDue(f.db, at(60))).toEqual([]);
+  });
+
+  it('a counter at the open proposal\'s own time is refused', async () => {
+    const f = await windowFixture();
+    ok(propose(f, A[0]!, 72));
+    expect(S.counterProposal(f.db, { matchId: f.matchId, by: B[0]!, time: at(72).toISOString(), rules: RULES, now: at(1) })).toEqual({ ok: false, error: 'bad_time' });
+  });
+
+  it('staff Set time refuses a match with a team out', async () => {
+    const f = await windowFixture();
+    f.db.prepare("UPDATE event_entries SET status = 'dropped' WHERE id = ?").run(f.entryB);
+    expect(S.staffSetTime(f.db, { matchId: f.matchId, by: ADMIN, time: at(50).toISOString(), now: NOW })).toEqual({ ok: false, error: 'entry_out' });
+  });
+
+  it('expireProposal takes the reason room_opened', async () => {
+    const f = await windowFixture();
+    const p = ok(propose(f, A[0]!, 72));
+    ok(S.expireProposal(f.db, { proposalId: p.id, reason: 'room_opened', now: at(1) }));
+    expect(JSON.parse((f.db.prepare('SELECT detail FROM event_log ORDER BY id DESC LIMIT 1').get() as { detail: string }).detail)).toMatchObject({ reason: 'room_opened' });
+  });
+});
