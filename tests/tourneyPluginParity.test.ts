@@ -55,7 +55,7 @@ describe('pug-tourney.inc log lines', () => {
   it('sends exactly the SUB and ADMINPAUSE lines through EmitPug, and the call through PugLog', () => {
     expect(emitFormats(tourneySrc).sort()).toEqual([
       'ADMINPAUSE state=%s by=%s cause=%s',
-      'SUB by=%s out=%s in=%s map=%d',
+      'SUB by=%s out=%s in=%s map=%d%s',
     ]);
     // The call is a PUGCALL (no token prefix), built into `line` and signed by PugLog.
     expect(tourneySrc).toContain('PugLog("%s", line);');
@@ -66,9 +66,14 @@ describe('pug-tourney.inc log lines', () => {
   it('SUB, as Tourney_Sub emits it, parses as a sub request', () => {
     const fmt = emitFormats(tourneySrc).find((f) => f.startsWith('SUB '))!;
     expect(fmt).toBeDefined();
-    expect(tourneySrc).toContain(`EmitPug("${fmt}", by, outId, inId, g_iMapCount);`);
+    // The tail is "" between chapters and " emergency=1" for a mid-chapter
+    // sub of a disconnected player (0.3.26, plan T5).
+    expect(tourneySrc).toContain(`EmitPug("${fmt}", by, outId, inId, g_iMapCount, emergency ? " emergency=1" : "");`);
     for (const map of [0, 2]) {
-      expect(parseLogDatagram(emitPug(fmt, CAPTAIN, OUT, IN, map))).toEqual({
+      expect(parseLogDatagram(emitPug(fmt, CAPTAIN, OUT, IN, map, ''))).toEqual({
+        kind: 'sub_request', token: TOKEN, by: CAPTAIN, out: OUT, in: IN, map,
+      });
+      expect(parseLogDatagram(emitPug(fmt, CAPTAIN, OUT, IN, map, ' emergency=1'))).toMatchObject({
         kind: 'sub_request', token: TOKEN, by: CAPTAIN, out: OUT, in: IN, map,
       });
     }

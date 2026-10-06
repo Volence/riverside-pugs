@@ -46,6 +46,7 @@ bool g_bGgYes[MAXPLAYERS + 1];
 Handle g_hGgTimer;
 int g_iGgFailedAt[3];            // GetTime() a team's last vote failed
 int g_iForfeitTeam;              // pug team that forfeited; 0 = none
+char g_sForfeitWhy[16];          // plan T5: "gg", "disconnect" or "staff"; empty = none
 
 void Gg_Init()
 {
@@ -88,6 +89,7 @@ void Gg_Reset()
 	g_iGgFailedAt[1] = 0;
 	g_iGgFailedAt[2] = 0;
 	g_iForfeitTeam = 0;
+	g_sForfeitWhy[0] = '\0';
 }
 
 void Gg_OnMapStart()
@@ -480,21 +482,45 @@ void Gg_CancelVote()
  *  recorded as a (partial) map first, so the points it earned are kept. */
 void Gg_Forfeit(int team)
 {
+	Gg_ForfeitAs(team, "gg");
+}
+
+/** Plan T5: the same end for a tournament box's reconnect pool running out
+ *  ("disconnect") and a staff ruling ("staff"); those say so themselves. */
+void Gg_ForfeitAs(int team, const char[] why)
+{
 	int a, b;
 	Gg_Totals(a, b);
-	LogMessage("[pug] match %d: team %s forfeits at a=%d b=%d on %s", g_iMatchId, team == 1 ? "a" : "b", a, b, g_sCurrentMap);
-	PrintToChatAll("[PUG] Team %s forfeits. GG.", team == 1 ? "A" : "B");
+	LogMessage("[pug] match %d: team %s forfeits (%s) at a=%d b=%d on %s", g_iMatchId, team == 1 ? "a" : "b", why, a, b, g_sCurrentMap);
+	if (StrEqual(why, "gg")) PrintToChatAll("[PUG] Team %s forfeits. GG.", team == 1 ? "A" : "B");
 	if (!g_bPendingFinalize && !Gg_CurrentMapFinalized() && g_iRound1SurvPug != 0) FinalizeMap();
+	strcopy(g_sForfeitWhy, sizeof(g_sForfeitWhy), why);
 	g_iForfeitTeam = team;
 	EndMatchNow("forfeit");
 }
 
 /** " forfeit=a" / " forfeit=b" for MATCH_END and the dump's END line; empty
- *  when nobody forfeited, so older backends see the line they always did. */
+ *  when nobody forfeited, so older backends see the line they always did. A
+ *  forfeit that is not a !gg adds " forfeit_why=<why>" (plan T5); a !gg's
+ *  line is exactly what it always was. */
 void Gg_ForfeitTail(char[] out, int maxlen)
 {
-	if (g_iForfeitTeam == 0) out[0] = '\0';
-	else Format(out, maxlen, " forfeit=%s", g_iForfeitTeam == 1 ? "a" : "b");
+	if (g_iForfeitTeam == 0)
+	{
+		out[0] = '\0';
+		return;
+	}
+	Format(out, maxlen, " forfeit=%s", g_iForfeitTeam == 1 ? "a" : "b");
+	if (g_sForfeitWhy[0] != '\0' && !StrEqual(g_sForfeitWhy, "gg")) Format(out, maxlen, "%s forfeit_why=%s", out, g_sForfeitWhy);
+}
+
+/** Plan T5 Ruling 9: a forfeit that is not a !gg loses whatever the score,
+ *  so the winner is the other team (the site believes a forfeit only when it
+ *  names the loser). A !gg team is always behind, and is left alone. */
+void Gg_ForfeitWinner(char[] winner, int maxlen)
+{
+	if (g_iForfeitTeam == 0 || g_sForfeitWhy[0] == '\0' || StrEqual(g_sForfeitWhy, "gg")) return;
+	strcopy(winner, maxlen, g_iForfeitTeam == 1 ? "b" : "a");
 }
 
 /** The pug team that forfeited (1 = a, 2 = b), 0 if none. */
