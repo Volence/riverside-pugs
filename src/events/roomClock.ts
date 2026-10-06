@@ -72,6 +72,8 @@ export class RoomClock {
 
   constructor(private readonly deps: {
     db: DB; notifier?: Notifier; publicUrl?: string; push?: (matchId: number) => void; now?: () => number; seed?: () => number;
+    /** The series engine (plan T3b); used from Task 7. */
+    series?: { tick(now: Date): void; afterPick(matchId: number): void; finalize(matchId: number, now: Date): Promise<void> };
   }) {
     this.now = deps.now ?? Date.now;
   }

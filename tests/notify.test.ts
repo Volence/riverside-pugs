@@ -38,6 +38,12 @@ describe('preferences', () => {
       { type: 'event_match_forfeit', label: 'A tournament match of mine is a forfeit because a team did not ready up' },
     ]);
   });
+  it('lists the two match server DMs (plan T3b)', () => {
+    expect(NOTIFY_TYPES.filter((t) => t.type === 'event_match_connect' || t.type === 'event_match_result')).toEqual([
+      { type: 'event_match_connect', label: 'My tournament server is ready, with the connect line' },
+      { type: 'event_match_result', label: 'A tournament match of mine finished and is in its confirm window' },
+    ]);
+  });
 });
 
 describe('Notifier', () => {
