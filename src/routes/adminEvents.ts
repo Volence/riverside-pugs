@@ -11,6 +11,7 @@ import * as E from '../events/events.js';
 import * as N from '../events/entries.js';
 import * as P from '../events/play.js';
 import * as R from '../events/room.js';
+import * as S from '../events/schedule.js';
 import * as V from '../events/validate.js';
 import { recordResultFlow, settleEvent, startEventFlow } from '../events/flow.js';
 import { stageSummary } from '../events/format.js';
@@ -18,7 +19,7 @@ import { adminEntryViews } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded, tellStaffAction } from '../events/notices.js';
+import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded, tellStaffAction, tellTimeLocked } from '../events/notices.js';
 import type { StaffAction } from '../events/messages.js';
 import { higherSide, type RoomClock } from '../events/roomClock.js';
 
@@ -464,6 +465,64 @@ export async function adminEventRoutes(
   roomAction('open-room', 'event_room_open');
   roomAction('reset-room', 'event_room_reset');
   roomAction('hold', 'event_hold');
+
+  /** Plan T4 Ruling 10: the stage's round schedule, applied at once on a
+   *  started stage. One outer transaction (the inner ones become
+   *  savepoints): the schedule, its stamping onto the matches and both
+   *  event_log rows commit together or not at all (a fault or a refusal
+   *  applying it rolls the schedule back too), and a refused schedule never
+   *  reaches applySchedule. logAdmin follows the commit, as on every route. */
+  app.post('/api/admin/events/:id/stages/:stageId/schedule', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; stageId: string };
+    const ev = eventOf(p.id);
+    const stageId = idOf(p.stageId);
+    if (!ev) return refuse(reply, 'not_found');
+    if (stageId === null) return refuse(reply, 'stage_not_found');
+    const rounds = ((req.body ?? {}) as { rounds?: unknown }).rounds;
+    /** Thrown to roll the outer transaction back when applySchedule refuses after the schedule was written. */
+    class ApplyRefused extends Error { constructor(readonly error: V.EventError) { super(error); } }
+    let r: V.Checked<{ rounds: number[]; started: boolean; stamped: number }>;
+    try {
+      r = db.transaction((): V.Checked<{ rounds: number[]; started: boolean; stamped: number }> => {
+        const set = E.setRoundSchedule(db, { eventId: ev.id, stageId, by: me, rounds });
+        if (!set.ok) return set;
+        const started = set.value.status !== 'pending';
+        let stamped = 0;
+        if (started) {
+          const a = P.applySchedule(db, { stageId, by: me });
+          if (!a.ok) throw new ApplyRefused(a.error);
+          stamped = a.value.stamped;
+        }
+        return V.ok({ rounds: E.scheduleOf(set.value).map((x) => x.round), started, stamped });
+      })();
+    } catch (err) {
+      if (!(err instanceof ApplyRefused)) throw err;
+      r = V.fail(err.error);
+    }
+    if (!r.ok) return refuse(reply, r.error);
+    if (r.value.started) for (const m of P.matchesOf(db, stageId)) if (m.status === 'waiting') opts.rooms?.pushChange(m.id);
+    logAdmin(db, me, 'event_schedule_set', ev.id, { stageId, rounds: r.value.rounds, stamped: r.value.stamped });
+    return { stamped: r.value.stamped };
+  });
+
+  /** Plan T4 Ruling 10: staff set a match time outright; an open proposal expires with it. */
+  app.post('/api/admin/events/:id/matches/:matchId/set-time', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; matchId: string };
+    const ev = eventOf(p.id);
+    const matchId = idOf(p.matchId);
+    const m = ev && matchId !== null ? P.getMatch(db, matchId) : undefined;
+    if (!ev || !m || m.event_id !== ev.id) return refuse(reply, 'match_not_found');
+    const r = S.staffSetTime(db, { matchId: m.id, by: me, time: ((req.body ?? {}) as { time?: unknown }).time });
+    if (!r.ok) return refuse(reply, r.error);
+    tellTimeLocked(opts, ev.id, m.id, true);
+    opts.rooms?.pushChange(m.id);
+    logAdmin(db, me, 'event_match_time', ev.id, { matchId: m.id, time: r.value.scheduled_at, was: m.scheduled_at });
+    return {};
+  });
 
   /** Plan T3c Ruling 10: staff act as a team. One route, three kinds. */
   app.post('/api/admin/events/:id/matches/:matchId/act', async (req, reply) => {

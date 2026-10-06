@@ -10,10 +10,11 @@ import { getEventBySlug } from '../events/events.js';
 import * as N from '../events/entries.js';
 import * as P from '../events/play.js';
 import * as R from '../events/room.js';
+import * as S from '../events/schedule.js';
 import { matchRoomView, prefsView } from '../events/roomViews.js';
 import * as V from '../events/validate.js';
 import { eventListItems, eventView, myEventView } from '../events/views.js';
-import { tellRosterAdded } from '../events/notices.js';
+import { tellReschedule, tellRosterAdded, tellTimeLocked } from '../events/notices.js';
 import type { Notifier } from '../notify/notify.js';
 import type { RoomClock } from '../events/roomClock.js';
 
@@ -209,6 +210,41 @@ export async function eventRoutes(
       // The pick is committed by now, so a throw here is logged, never a 500.
       if (action === 'veto' && P.getMatch(db, m.id)?.status === 'live') {
         try { opts.series?.afterPick(m.id); } catch (err) { console.error(`[events] scheduling match ${m.id} after the pick failed:`, err instanceof Error ? err.message : err); }
+      }
+      opts.rooms?.pushChange(m.id);
+      return {};
+    });
+  }
+
+  /** Reschedule proposals (plan T4 Ruling 7). The DM goes to the side that
+   *  must act next (a withdrawal to both sides, Task 4 ruling; an accept
+   *  tells both rosters the time locked); every change pushes the room. */
+  for (const action of ['propose', 'respond', 'counter', 'withdraw'] as const) {
+    app.post(`/api/events/:slug/matches/:id/${action}`, async (req, reply) => {
+      const me = allowedActive(req, reply);
+      if (!me) return;
+      const p = req.params as SlugId;
+      const ev = visibleEvent(p.slug, me);
+      const m = ev && matchIn(ev, p.id);
+      if (!ev || !m) return refuse(reply, { error: 'match_not_found' });
+      const body = (req.body ?? {}) as { time?: unknown; note?: unknown; accept?: unknown };
+      if (action === 'propose' || action === 'counter') {
+        const rules = S.scheduleRules(db);
+        const r = action === 'propose'
+          ? S.proposeTime(db, { matchId: m.id, by: me, time: body.time, note: body.note, rules })
+          : S.counterProposal(db, { matchId: m.id, by: me, time: body.time, note: body.note, rules });
+        if (!r.ok) return refuse(reply, r);
+        tellReschedule(opts, ev.id, m.id, action === 'propose' ? 'proposed' : 'countered', r.value.id);
+      } else if (action === 'respond') {
+        if (typeof body.accept !== 'boolean') return refuse(reply, { error: 'bad_request' });
+        const r = S.respondProposal(db, { matchId: m.id, by: me, accept: body.accept });
+        if (!r.ok) return refuse(reply, r);
+        if (body.accept) tellTimeLocked(opts, ev.id, m.id);
+        else tellReschedule(opts, ev.id, m.id, 'declined', r.value.proposal.id);
+      } else {
+        const r = S.withdrawProposal(db, { matchId: m.id, by: me });
+        if (!r.ok) return refuse(reply, r);
+        tellReschedule(opts, ev.id, m.id, 'withdrawn', r.value.id);
       }
       opts.rooms?.pushChange(m.id);
       return {};
