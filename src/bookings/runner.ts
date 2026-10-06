@@ -90,6 +90,14 @@ const ALL_PLAYED_SAY = 'every booked campaign is played';
  *  set by dropBox and beginMove). Either way it has no box and is not ending. */
 const WAITING_MATCH_SQL = "t.server_id IS NULL AND t.ending_at IS NULL AND (t.state = 'scheduled' OR t.waiting_since IS NOT NULL)";
 
+/** A tournament booking (aliased t) a scrim may give way to: waiting at its
+ *  start, or waiting because its box died (its latest box_dropped is newer
+ *  than its latest box_moved_by_staff). A match staff moved (beginMove) waits
+ *  without bumping anyone (controller ruling on the final review). */
+const OWED_MATCH_SQL = `t.server_id IS NULL AND t.ending_at IS NULL AND (t.state = 'scheduled' OR (t.waiting_since IS NOT NULL
+  AND (SELECT e.event FROM booking_events e WHERE e.booking_id = t.id AND e.event IN ('box_dropped', 'box_moved_by_staff')
+        ORDER BY e.id DESC LIMIT 1) = 'box_dropped'))`;
+
 const ordinal = (n: number): string => ({ 2: 'second', 3: 'third' } as Record<number, string>)[n] ?? `${n}th`;
 
 /** The refusal of `!nextmap` and `!stay` once the count is reached. */
@@ -441,13 +449,13 @@ export class BookingRunner {
   }
 
   /** Tournament bookings in the region waiting for a box (at their start,
-   *  or recovering from a box that died: WAITING_MATCH_SQL), less the boxes
+   *  or recovering from a box that died, never a staff move: OWED_MATCH_SQL), less the boxes
    *  already on their way back there (bumped scrims winding down, and boxes
    *  the releaser is restarting): how many more scrims may give way right
    *  now (Rulings 4 and 6, final review Importants 1 and 2). */
   private tournamentsOwed(region: string): number {
     const waiting = (this.db.prepare(
-      `SELECT COUNT(*) AS n FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${WAITING_MATCH_SQL}`,
+      `SELECT COUNT(*) AS n FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${OWED_MATCH_SQL}`,
     ).get(region) as { n: number }).n;
     const bumped = (this.db.prepare(
       "SELECT COUNT(*) AS n FROM bookings WHERE purpose = 'scrim' AND region = ? AND end_reason = 'bumped' AND server_id IS NOT NULL AND ended_at IS NULL",
@@ -479,7 +487,13 @@ export class BookingRunner {
     }).length;
   }
 
-  /** Whether any tournament booking in the region waits for a box. */
+  /** Whether this booking is a match a scrim may give way to (OWED_MATCH_SQL). */
+  private owed(id: number): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM bookings t WHERE id = ? AND purpose = 'tournament' AND ${OWED_MATCH_SQL}`).get(id);
+  }
+
+  /** Whether any tournament booking in the region waits for a box (staff
+   *  moved or not: a released box goes to it either way). */
   private tournamentsWaiting(region: string): boolean {
     return !!this.db.prepare(`SELECT 1 FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${WAITING_MATCH_SQL} LIMIT 1`).get(region);
   }
@@ -492,7 +506,7 @@ export class BookingRunner {
    *  already winding down for takes no second one. */
   private waitingTournament(region: string): BookingRow | null {
     const rows = this.db.prepare(
-      `SELECT * FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${WAITING_MATCH_SQL}
+      `SELECT * FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${OWED_MATCH_SQL}
          AND NOT EXISTS (SELECT 1 FROM booking_events e WHERE e.event = 'bumped' AND json_extract(e.detail, '$.byBookingId') = t.id)`,
     ).all(region) as BookingRow[];
     return rows.sort(byPriority)[0] ?? null;
@@ -1058,7 +1072,8 @@ export class BookingRunner {
         // whose box died bumps an unstarted scrim on the same terms as one
         // waiting at its start (allocate): no free box, nothing coming back,
         // nothing left to preempt, and one scrim per match still owed.
-        if (b.purpose === 'tournament' && this.freeBoxes(b.region) === 0 && !this.preemptable(b.region)) this.bumpFor(b, nowMs);
+        // A match staff moved waits without bumping (OWED_MATCH_SQL).
+        if (b.purpose === 'tournament' && this.freeBoxes(b.region) === 0 && !this.preemptable(b.region) && this.owed(b.id)) this.bumpFor(b, nowMs);
         continue;
       }
       console.log(`[booking] ${b.id} moves to ${s.name}`);
