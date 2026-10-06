@@ -505,7 +505,7 @@ describe('RoomClock: window stages, review follow-ups (plan T4 Task 4 ruling)', 
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     const held = serialize(f.eventId, () => gate);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { clock, send } = clockAt(f, { t: hours(48) });
     const ticking = clock.tick();
     await new Promise((r) => setTimeout(r, 10));
@@ -516,13 +516,13 @@ describe('RoomClock: window stages, review follow-ups (plan T4 Task 4 ruling)', 
     await ticking;
     expect(match(f)).toMatchObject({ status: 'waiting', winner_entry: null });
     expect(send).not.toHaveBeenCalledWith(expect.anything(), 'event_match_forfeit', expect.anything());
-    expect(err.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
   });
 
   it('refuses the window-end forfeit when the window moved past now inside the chain, logs the refusal once, and forfeits once the window has really ended', async () => {
     const f = await windowFixture({ to: new Date(hours(48)) });
     S.proposeTime(f.db, { matchId: f.matchId, by: B[0], time: new Date(hours(30)).toISOString(), rules: S.scheduleRules(f.db), now: NOW });
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const t = { t: hours(48) };
     const { clock } = clockAt(f, t);
     const moveInsideChain = async () => {
@@ -541,7 +541,7 @@ describe('RoomClock: window stages, review follow-ups (plan T4 Task 4 ruling)', 
     await moveInsideChain();
     t.t = hours(49);
     await moveInsideChain();
-    expect(err.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
     t.t = hours(50);
     await clock.tick();
     expect(match(f)).toMatchObject({ status: 'forfeit', winner_entry: f.entryB });
@@ -550,13 +550,13 @@ describe('RoomClock: window stages, review follow-ups (plan T4 Task 4 ruling)', 
   it('logs a refused window-end hold once', async () => {
     const f = await windowFixture({ to: new Date(hours(48)) });
     vi.spyOn(R, 'holdMatch').mockReturnValue({ ok: false, error: 'not_live' });
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const t = { t: hours(48) };
     const { clock } = clockAt(f, t);
     await clock.tick();
     t.t = hours(49);
     await clock.tick();
-    expect(err.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('window end')).length).toBe(1);
   });
 
   it('a withdrawn proposal DMs the managers of both teams', async () => {

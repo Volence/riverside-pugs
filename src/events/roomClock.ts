@@ -231,7 +231,7 @@ export class RoomClock {
   private refusedWindow(matchId: number, what: 'forfeit' | 'hold', error: string): void {
     if (this.refusedWindows.has(matchId)) return;
     this.refusedWindows.add(matchId);
-    console.error(`[rooms] match ${matchId}: the window end ${what} was refused (${error}); retrying while the window stays ended`);
+    console.warn(`[rooms] match ${matchId}: the window end ${what} was refused (${error}); retrying while the window stays ended`);
   }
 
   /** Ruling 8: the silent side forfeits; otherwise staff decide from the

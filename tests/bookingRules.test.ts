@@ -123,7 +123,7 @@ describe('capacity', () => {
     expect(scheduledMatchSlots(db, 'na', T0 + 3 * H, T0 + 6 * H)).toEqual([]);
   });
 
-  it('counts only unresolved, non-bye matches waiting or in a room phase before the booking (ledger CARRY to Task 5)', () => {
+  it('counts only unresolved, non-bye matches pending, waiting or in a room phase before the booking (ledger CARRY to Task 5)', () => {
     servers(3);
     let n = 0;
     const seed = (status: string, over: Record<string, unknown> = {}) => {
@@ -142,12 +142,16 @@ describe('capacity', () => {
       db.prepare(`INSERT INTO event_matches (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...Object.values(row));
     };
     const count = () => scheduledMatchSlots(db, 'na', T0 - H, T0 + H).length;
-    for (const s of ['pending', 'bye', 'forfeit', 'connect', 'live', 'confirming', 'admin_hold']) seed(s);
+    for (const s of ['bye', 'done', 'forfeit', 'connect', 'live', 'confirming', 'admin_hold']) seed(s);
     seed('waiting', { scheduled_at: null });
+    seed('pending', { scheduled_at: null });
     expect(count()).toBe(0);
+    // A scheduled later-round match whose teams are not known yet still holds its box (fix round 1).
+    seed('pending');
+    expect(count()).toBe(1);
     for (const s of ['waiting', 'veto', 'lineup', 'booking']) seed(s);
-    expect(count()).toBe(4);
-    expect(bookingsDue(db, T0 - H, 75)).toBe(4);
+    expect(count()).toBe(5);
+    expect(bookingsDue(db, T0 - H, 75)).toBe(5);
   });
 });
 
