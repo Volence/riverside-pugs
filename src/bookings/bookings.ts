@@ -52,6 +52,9 @@ export interface BookingRow {
    *  Rulesets editor. rules_json is the snapshot the booking plays by. */
   ruleset_id: number | null;
   playlist_pos: number; next_campaign: string | null; next_at: string | null;
+  /** The map of next_campaign to load instead of its first (a tiebreak
+   *  chapter, tournaments plan T3b); null loads the campaign from map 1. */
+  next_map: string | null;
   /** The campaigns this booking may play (bookings by campaign): the
    *  playlist's length at creation, plus one per +1 campaign. */
   games_allowed: number;
@@ -65,6 +68,9 @@ export interface BookingRow {
 export interface SideRow {
   booking_id: number; side: Side; team_id: number | null; captain_steamid: string; confirmed_at: string | null;
   peak_present: number; no_show_at: string | null;
+  /** Who of the side was on the box at the last minute watch (T3b): the
+   *  locked four only (role player), shown as "N of 4". */
+  present_now: number;
   excused_at: string | null; excused_by: string | null; excuse_note: string | null;
 }
 export interface PersonRow {
@@ -328,6 +334,67 @@ export function createBooking(db: DB, o: {
     if (bInvitee) insertPerson(db, id, 'b', bInvitee, 'player', 'invited', o.by, now);
     logEvent(db, id, o.by, 'created', { minutes, playlist, opponent: opp }, now);
     return ok({ id });
+  })();
+}
+
+// ---------- tournament bookings (tournaments plan T3b) ----------
+
+export interface TournamentSide { teamId: number | null; captain: string; players: readonly string[]; spectators: readonly string[] }
+
+/** The series engine's booking (T3b Ruling 2): purpose tournament, starts
+ *  now, one campaign (later games and tiebreaks are appended), both sides
+ *  confirmed, the locked four as players and the rest of each roster as
+ *  spectators, all accepted. None of the scrim gates apply: the teams were
+ *  let into the event already, and an event night is planned by staff. The
+ *  campaign must be known (a stage pool is poolable, not necessarily in the
+ *  PUG map pool) and the game config on. */
+export function createTournamentBooking(db: DB, o: {
+  region: string; campaign: string; rulesJson: string; rulesetId: number | null; gameConfig: string; createdBy: string;
+  sides: readonly [TournamentSide, TournamentSide]; now?: Date;
+}): Result<{ id: number }> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<{ id: number }> => {
+    if (!campaignRegistry(db).get(o.campaign)) return fail('bad_campaign');
+    if (!db.prepare('SELECT 1 FROM game_configs WHERE key = ? AND enabled = 1').get(o.gameConfig)) return fail('bad_config');
+    const minutes = estimateMinutes(db, [o.campaign]);
+    const startMs = now.getTime();
+    const id = Number(db.prepare(
+      `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, ruleset_id, playlist_json, games_allowed, created_by, created_at)
+       VALUES ('tournament', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    ).run(o.region, iso(startMs), iso(startMs + minutes * 60_000), newLeasePassword(), newLeasePassword(), o.gameConfig, o.rulesJson, o.rulesetId,
+      JSON.stringify([o.campaign]), o.createdBy, now.toISOString()).lastInsertRowid);
+    const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?, ?)');
+    (['a', 'b'] as const).forEach((s, i) => {
+      const t = o.sides[i]!;
+      side.run(id, s, t.teamId, t.captain, now.toISOString());
+      for (const sid of t.players) insertPerson(db, id, s, sid, 'player', 'accepted', o.createdBy, now);
+      for (const sid of t.spectators) insertPerson(db, id, s, sid, 'spectator', 'accepted', o.createdBy, now);
+    });
+    logEvent(db, id, null, 'created', { purpose: 'tournament', campaign: o.campaign, minutes }, now);
+    return ok({ id });
+  })();
+}
+
+/** One more game of the series on the box (T3b Ruling 2): the campaign
+ *  joins the playlist, the count and the slot grow (a single chapter counts
+ *  as an unnamed campaign's length), and a pending close is cancelled. Only
+ *  on an open tournament booking. */
+export function appendTournamentGame(db: DB, o: { bookingId: number; campaign: string; map: string | null; now?: Date }): Result<{ gamesAllowed: number; endsAt: string }> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<{ gamesAllowed: number; endsAt: string }> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    if (b.purpose !== 'tournament' || !isOpen(b)) return fail('wrong_state');
+    if (!campaignRegistry(db).get(o.campaign)) return fail('bad_campaign');
+    const minutes = addCampaignMinutes(db, o.map === null ? o.campaign : null);
+    const endsAt = iso(Date.parse(b.ends_at) + minutes * 60_000);
+    const gamesAllowed = b.games_allowed + 1;
+    const playlist = [...(JSON.parse(b.playlist_json) as string[]), o.campaign];
+    db.prepare(
+      `UPDATE bookings SET ends_at = ?, games_allowed = ?, playlist_json = ?, extended_minutes = extended_minutes + ?, warned_minutes = NULL, close_at = NULL WHERE id = ?`,
+    ).run(endsAt, gamesAllowed, JSON.stringify(playlist), minutes, b.id);
+    logEvent(db, b.id, null, 'game_appended', { campaign: o.campaign, map: o.map, gamesAllowed, minutes, endsAt }, now);
+    return ok({ gamesAllowed, endsAt });
   })();
 }
 
@@ -772,13 +839,16 @@ export function markReleased(db: DB, id: number, now: Date): void {
 }
 
 /** The campaign the box loads next and when it is due (both null clears
- *  it). Only on a running booking: ready or active, no end started. */
-export function setNext(db: DB, id: number, campaign: string | null, atIso: string | null, now: Date = new Date(), actor: string | null = null): boolean {
+ *  it). `map` (plan T3b): load this map of the campaign instead of its
+ *  first, for a tiebreak chapter. Only on a running booking: ready or
+ *  active, no end started. */
+export function setNext(db: DB, id: number, campaign: string | null, atIso: string | null, now: Date = new Date(), actor: string | null = null, map: string | null = null): boolean {
   return db.transaction(() => {
+    const nextMap = campaign === null ? null : map;
     const changed = db.prepare(
-      "UPDATE bookings SET next_campaign = ?, next_at = ? WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL",
-    ).run(campaign, atIso, id).changes > 0;
-    if (changed) logEvent(db, id, actor, 'next_set', { campaign, at: atIso }, now);
+      "UPDATE bookings SET next_campaign = ?, next_at = ?, next_map = ? WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL",
+    ).run(campaign, atIso, nextMap, id).changes > 0;
+    if (changed) logEvent(db, id, actor, 'next_set', { campaign, at: atIso, map: nextMap }, now);
     return changed;
   })();
 }
@@ -789,7 +859,7 @@ export function advancePlaylist(db: DB, id: number, pos: number, now: Date = new
   return db.transaction(() => {
     const b = getBooking(db, id);
     const changed = db.prepare(
-      "UPDATE bookings SET playlist_pos = ?, next_campaign = NULL, next_at = NULL WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL",
+      "UPDATE bookings SET playlist_pos = ?, next_campaign = NULL, next_at = NULL, next_map = NULL WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL",
     ).run(pos, id).changes > 0;
     if (changed) logEvent(db, id, null, 'campaign_loaded', { campaign: b?.next_campaign ?? null, pos }, now);
     return changed;
@@ -797,12 +867,14 @@ export function advancePlaylist(db: DB, id: number, pos: number, now: Date = new
 }
 
 /** One look at who is on the box: each side's count of its people present,
- *  kept as a running peak, and when anyone was last there. */
-export function recordPresence(db: DB, id: number, present: Record<Side, number>, anyHuman: boolean, now: Date): void {
+ *  kept as a running peak, and when anyone was last there. `playersNow`
+ *  (plan T3b) is each side's count of its players (role player) present,
+ *  kept as present_now; it defaults to `present`. */
+export function recordPresence(db: DB, id: number, present: Record<Side, number>, anyHuman: boolean, now: Date, playersNow: Record<Side, number> = present): void {
   db.transaction(() => {
-    const peak = db.prepare('UPDATE booking_sides SET peak_present = MAX(peak_present, ?) WHERE booking_id = ? AND side = ?');
-    peak.run(present.a, id, 'a');
-    peak.run(present.b, id, 'b');
+    const peak = db.prepare('UPDATE booking_sides SET peak_present = MAX(peak_present, ?), present_now = ? WHERE booking_id = ? AND side = ?');
+    peak.run(present.a, playersNow.a, id, 'a');
+    peak.run(present.b, playersNow.b, id, 'b');
     if (anyHuman) db.prepare('UPDATE bookings SET last_human_at = ? WHERE id = ?').run(now.toISOString(), id);
   })();
 }

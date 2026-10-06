@@ -393,6 +393,21 @@ describe('the minute watch', () => {
     expect(sideRow(db, id, 'a')!.peak_present).toBe(2);
   });
 
+  it('counts only players, not spectators, in present_now (plan T3b)', async () => {
+    const id = await ready();
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[2], role: 'spectator', now: new Date(now) });
+    respondPerson(db, { bookingId: id, steamid: P[2], accept: true, now: new Date(now) });
+    box.ccc.humans = [P[0], P[2], P[1]];
+    now = START - 5 * MIN;
+    await runner.tick();
+    expect(sideRow(db, id, 'a')).toMatchObject({ peak_present: 2, present_now: 1 });
+    expect(sideRow(db, id, 'b')).toMatchObject({ peak_present: 1, present_now: 1 });
+    box.ccc.humans = [P[2]];
+    now += MIN;
+    await runner.tick();
+    expect(sideRow(db, id, 'a')).toMatchObject({ peak_present: 2, present_now: 0 });
+  });
+
   it('ends an empty booking after the grace plus the idle time, with a goodbye, kick and release', async () => {
     const id = await ready();
     // Casual Scrim grace is 15 minutes, idle end 10: nobody ever came, so 25 minutes after the start.

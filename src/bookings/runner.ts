@@ -692,7 +692,10 @@ export class BookingRunner {
       a: people.filter((p) => p.side === 'a' && on.has(p.steamid)).length,
       b: people.filter((p) => p.side === 'b' && on.has(p.steamid)).length,
     };
-    recordPresence(this.db, b.id, present, humans.length > 0, now);
+    // present_now (plan T3b, "N of 4") counts only each side's locked four.
+    const players = people.filter((p) => p.role === 'player' && on.has(p.steamid));
+    const playersNow = { a: players.filter((p) => p.side === 'a').length, b: players.filter((p) => p.side === 'b').length };
+    recordPresence(this.db, b.id, present, humans.length > 0, now, playersNow);
     if (b.state === 'ready' && present.a + present.b > 0 && markActive(this.db, b.id, now)) {
       // The first campaign was loaded by setup, before anyone was on: its
       // start lines are said once, when the booking goes active.
