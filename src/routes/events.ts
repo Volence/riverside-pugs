@@ -8,6 +8,9 @@ import { competitiveAccess, competitivePublic } from '../teams/access.js';
 import * as E from '../events/events.js';
 import { getEventBySlug } from '../events/events.js';
 import * as N from '../events/entries.js';
+import * as P from '../events/play.js';
+import * as R from '../events/room.js';
+import { matchRoomView, prefsView } from '../events/roomViews.js';
 import * as V from '../events/validate.js';
 import { eventListItems, eventView, myEventView } from '../events/views.js';
 import { tellRosterAdded } from '../events/notices.js';
@@ -150,6 +153,72 @@ export async function eventRoutes(
       return {};
     });
   }
+
+  /** The match room (plan T3a). A match of another event answers like one
+   *  that does not exist. Every write pushes the room to its two rosters. */
+  const matchIn = (ev: E.EventRow, raw: string): P.MatchRow | undefined => {
+    const id = Number(raw);
+    const m = Number.isInteger(id) ? P.getMatch(db, id) : undefined;
+    return m && m.event_id === ev.id ? m : undefined;
+  };
+
+  app.get('/api/events/:slug/matches/:id', async (req, reply) => {
+    const v = allowedViewer(req, reply);
+    if (!v) return;
+    const p = req.params as SlugId;
+    const ev = visibleEvent(p.slug, v.viewer);
+    const m = ev && matchIn(ev, p.id);
+    if (!ev || !m) return reply.code(404).send(NOT_FOUND);
+    return matchRoomView(db, ev, m, v.viewer, isStaff(v.viewer));
+  });
+
+  for (const action of ['ready', 'veto', 'lineup'] as const) {
+    app.post(`/api/events/:slug/matches/:id/${action}`, async (req, reply) => {
+      const me = allowedActive(req, reply);
+      if (!me) return;
+      const p = req.params as SlugId;
+      const ev = visibleEvent(p.slug, me);
+      const m = ev && matchIn(ev, p.id);
+      if (!ev || !m) return refuse(reply, { error: 'match_not_found' });
+      const body = (req.body ?? {}) as { step?: unknown; action?: unknown; campaign?: unknown; steamids?: unknown };
+      const timers = R.roomTimers(db);
+      let r: V.Checked<unknown>;
+      if (action === 'ready') r = R.readyUp(db, { matchId: m.id, steamid: me, timers });
+      else if (action === 'veto') {
+        if (typeof body.step !== 'number' || !Number.isInteger(body.step)) return refuse(reply, { error: 'bad_veto_action' });
+        r = R.actVeto(db, { matchId: m.id, steamid: me, step: body.step, action: body.action, campaign: body.campaign ?? null, timers });
+      } else r = R.lockLineup(db, { matchId: m.id, steamid: me, steamids: body.steamids, timers });
+      if (!r.ok) return refuse(reply, r);
+      opts.rooms?.pushChange(m.id);
+      return {};
+    });
+  }
+
+  /** A team's preferences for the timers: its managers and staff only. */
+  const prefsEntry = (req: FastifyRequest, reply: FastifyReply): { me: string; ev: E.EventRow; entry: N.EntryRow } | null => {
+    const me = allowedActive(req, reply);
+    if (!me) return null;
+    const p = req.params as SlugId;
+    const ev = visibleEvent(p.slug, me);
+    const entry = ev && entryIn(ev, p.id);
+    if (!ev || !entry) { refuse(reply, { error: 'entry_not_found' }); return null; }
+    if (!isStaff(me) && !N.managersOf(db, entry.team_id).includes(me)) { refuse(reply, { error: 'not_manager' }); return null; }
+    return { me, ev, entry };
+  };
+
+  app.get('/api/events/:slug/entries/:id/prefs', async (req, reply) => {
+    const c = prefsEntry(req, reply);
+    if (!c) return;
+    return prefsView(db, c.ev, c.entry.id);
+  });
+
+  app.post('/api/events/:slug/entries/:id/prefs', async (req, reply) => {
+    const c = prefsEntry(req, reply);
+    if (!c) return;
+    const r = R.savePrefs(db, { entryId: c.entry.id, by: c.me, staff: isStaff(c.me), prefs: req.body ?? null });
+    if (!r.ok) return refuse(reply, r);
+    return {};
+  });
 
   /** An entry's logo snapshot, only while an entry of an event this viewer
    *  may see holds the key (Review Focus). Same headers as a team logo. */
