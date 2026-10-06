@@ -107,6 +107,9 @@ export interface TournamentHooks {
   presence(bookingId: number, on: ReadonlySet<string>, now: Date): void;
   gameEnded(bookingId: number, matchId: number): void;
   ended(bookingId: number, reason: string | null): void;
+  /** Crash recovery aborted this tournament game (server_lost): it could not
+   *  be restored, or the booking was given up. Optional. */
+  gameLost?(bookingId: number, matchId: number): void;
 }
 
 export interface BookingRunnerDeps {
@@ -144,7 +147,9 @@ export interface BookingRunnerDeps {
   /** A2S_INFO, asked only once rcon has failed for booking_gone_minutes
    *  (plan 5). Absent, it is treated as never answering. */
   a2s?: A2sFn;
-  /** Tournaments plan T3b: the series engine's hooks on a tournament booking. Absent, tournament bookings behave as scrims. */
+  /** Tournaments plan T3b: the series engine's hooks on a tournament booking.
+   *  Absent, a tournament booking's box is still set up with auto-track off
+   *  and no captain commands, but it starts no game and nothing hears it. */
   tournament?: TournamentHooks;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -493,7 +498,8 @@ export class BookingRunner {
     if (server && sayGoodbye) {
       try {
         const why = b.end_reason === 'done' && gamesPlayed(this.db, id) >= b.games_allowed ? ALL_PLAYED_SAY : END_SAY[b.end_reason ?? 'time'] ?? 'the booking is over';
-        await this.deps.rcon(server, [`say [Booking] This booked server is closing: ${why}.`]);
+        const tag = b.purpose === 'tournament' ? 'Match' : 'Booking';
+        await this.deps.rcon(server, [`say [${tag}] This booked server is closing: ${why}.`]);
         await this.sleep(GOODBYE_MS);
         await this.deps.rcon(server, ['sm_kick @humans "The booking is over. Thanks for playing."']);
       } catch (err) {
@@ -987,6 +993,7 @@ export class BookingRunner {
       // Ruling 5: the game cannot come back; the booking carries on without it.
       const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
       if (token) this.forgetToken(b.id, token);
+      if (token && b.purpose === 'tournament') this.hook(b.id, 'gameLost', () => this.deps.tournament?.gameLost?.(b.id, live.id));
       publishAdminEvent({
         kind: 'problem', matchId: live.id,
         text: `Booking ${b.id}: game #${live.id} could not be restored on ${server.name} (${snap ? 'pug-match did not take sm_pug_resume; is 0.3.19 staged?' : 'it was on the finale, or the site has no record of where it was'}). It is aborted; the booking carries on.`,
@@ -1002,13 +1009,15 @@ export class BookingRunner {
     // loadNext does (next cleared, position advanced, campaign_loaded logged):
     // left due, the next watch would changelevel the box to it a second time.
     const loadedNext = !resumed && fresh.next_campaign !== null;
+    // T3b: the game burst for a game the crash caught before its load goes
+    // before the playlist moves on (as loadNext), so a throw here leaves the
+    // due load (next_campaign, next_map) for the retry.
+    const game = loadedNext ? this.gameLinesFor(fresh, campaign) : [];
+    if (game.length > 0) await this.deps.rcon(server, game);
     if (loadedNext) {
       const at = playlist.indexOf(campaign);
       advancePlaylist(this.db, b.id, at >= 0 ? at : fresh.playlist_pos, new Date(this.now()));
     }
-    // T3b: the game burst for a game the crash caught before its load.
-    const game = loadedNext ? this.gameLinesFor(fresh, campaign) : [];
-    if (game.length > 0) await this.deps.rcon(server, game);
     try {
       await this.deps.rcon(server, [`changelevel ${map}`]);
     } catch {
@@ -1054,6 +1063,7 @@ export class BookingRunner {
     if (live) {
       const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
       if (token) this.forgetToken(id, token);
+      if (token && getBooking(this.db, id)?.purpose === 'tournament') this.hook(id, 'gameLost', () => this.deps.tournament?.gameLost?.(id, live.id));
     }
     publishAdminEvent({ kind: 'problem', text: `Booking ${id} is cancelled: ${staffWhy}.` });
     if (closeBooking(this.db, id, 'cancelled', 'server_lost', new Date(this.now()))) {

@@ -2053,5 +2053,50 @@ describe('tournament bookings (plan T3b)', () => {
     runner.settle(id);
     await runner.idle();
     expect(h.ended).toHaveBeenCalledWith(id, 'staff');
+    expect(cmds().some((c) => c.startsWith('say [Match] This booked server is closing:'))).toBe(true);
+    expect(cmds().some((c) => c.startsWith('say [Booking] This booked server is closing:'))).toBe(false);
+  });
+
+  it('a gameLines throw between games alerts staff and loads nothing', async () => {
+    const h = hooks();
+    runner = build({ tournament: h });
+    now = START;
+    const id = bookTournament();
+    runner.allocate();
+    await runner.idle();
+    db.prepare("UPDATE bookings SET state = 'active' WHERE id = ?").run(id);
+    setNext(db, id, 'no_mercy', new Date(now).toISOString(), new Date(now), null, 'l4d_vs_hospital04_interior');
+    h.gameLines.mockImplementation(() => { throw new Error('no veto sides'); });
+    const events: AdminEvent[] = [];
+    const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    sent = [];
+    now += MIN;
+    try {
+      await runner.tick();
+      await runner.idle();
+    } finally {
+      unsubscribe();
+      err.mockRestore();
+    }
+    expect(cmds().some((c) => c.startsWith('changelevel'))).toBe(false);
+    expect(events.some((e) => e.kind === 'problem' && e.text.includes(`Booking ${id}: the tournament game on no_mercy could not be started (no veto sides)`))).toBe(true);
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_map: null, playlist_pos: 0 });
+  });
+
+  it('a tournament booking with no box gets no late alert and is never cancelled as no_server', async () => {
+    const events: AdminEvent[] = [];
+    const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+    runner = build({ tournament: hooks() });
+    now = START;
+    const id = bookTournament();
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    now = START + 30 * MIN;
+    runner.allocate();
+    await runner.tick();
+    unsubscribe();
+    expect(getBooking(db, id)).toMatchObject({ state: 'scheduled', server_id: null, ending_at: null });
+    expect(events.filter((e) => e.kind === 'problem' && e.text.includes(`Booking ${id} `))).toEqual([]);
+    expect(dms).toEqual([]);
   });
 });
