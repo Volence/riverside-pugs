@@ -398,6 +398,29 @@ export function appendTournamentGame(db: DB, o: { bookingId: number; campaign: s
   })();
 }
 
+/** A substitution on a tournament booking (plan T3c Ruling 5): the sub, an
+ *  accepted person of the side already, becomes a player and the replaced
+ *  player a spectator, so present_now counts the right four and the
+ *  replaced player may stay and watch. */
+export function swapPlayer(db: DB, o: { bookingId: number; side: Side; outId: string; inId: string; now?: Date }): Result<null> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<null> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    if (!isOpen(b)) return fail('wrong_state');
+    const person = (id: string) => db.prepare("SELECT role FROM booking_people WHERE booking_id = ? AND side = ? AND steamid = ? AND status = 'accepted'")
+      .get(b.id, o.side, id) as { role: PersonRole } | undefined;
+    const out = person(o.outId);
+    const inn = person(o.inId);
+    if (!out || out.role !== 'player' || !inn || inn.role === 'player') return fail('not_person');
+    const set = db.prepare('UPDATE booking_people SET role = ? WHERE booking_id = ? AND steamid = ?');
+    set.run('player', b.id, o.inId);
+    set.run('spectator', b.id, o.outId);
+    logEvent(db, b.id, null, 'player_swapped', { side: o.side, out: o.outId, in: o.inId }, now);
+    return ok(null);
+  })();
+}
+
 export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?: Date }): Result<null> {
   const now = o.now ?? new Date();
   return db.transaction((): Result<null> => {
@@ -990,6 +1013,24 @@ export function reholdBox(db: DB, id: number, serverId: number, now: Date): bool
     db.prepare("UPDATE matches SET server_id = ? WHERE booking_id = ? AND state = 'live'").run(serverId, id);
     logEvent(db, id, null, 'box_moved', { serverId }, now);
     return true;
+  })();
+}
+
+/** Staff move the booking to another box (plan T3c Ruling 13): the same
+ *  shape a gone box leaves behind (so relocate, recover and the give-up
+ *  apply unchanged), except the box itself is left alone: the runner gives
+ *  it back through the releaser. Returns the box let go of, or null when
+ *  the booking is not running on one or is already recovering. */
+export function beginMove(db: DB, id: number, now: Date): number | null {
+  return db.transaction(() => {
+    const b = db.prepare(
+      "SELECT server_id FROM bookings WHERE id = ? AND state IN ('ready','active') AND ending_at IS NULL AND recovering_at IS NULL AND server_id IS NOT NULL",
+    ).get(id) as { server_id: number } | undefined;
+    if (!b) return null;
+    db.prepare("UPDATE bookings SET server_id = NULL, waiting_since = ?, recovering_at = ?, recover_reason = 'gone' WHERE id = ?")
+      .run(now.toISOString(), now.toISOString(), id);
+    logEvent(db, id, null, 'box_moved_by_staff', { serverId: b.server_id }, now);
+    return b.server_id;
   })();
 }
 

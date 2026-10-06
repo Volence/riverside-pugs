@@ -28,9 +28,12 @@ export interface RestoreSnapshot {
   nextSeq: number;
 }
 
-/** opts.replayFrom (plan T3c Ruling 12): the ordinal of a chapter to replay
- *  from its start. Task 3 gives it the real cut; for now only the current
- *  chapter (done.length) is accepted. */
+/** opts.replayFrom (plan T3c Ruling 12): the desk's "replay a chapter", the
+ *  0-based ordinal of a chapter to replay from its start. The finished maps
+ *  before it stand; it and every map after it are dropped. At most the
+ *  count of finished maps (the chapter being played); the finale rule still
+ *  applies. Absent, this is crash recovery: every finished map stands and
+ *  the map the game was on is replayed. */
 export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: number } = {}): RestoreSnapshot | null {
   const m = db.prepare("SELECT id, campaign, token FROM matches WHERE id = ? AND state = 'live'").get(matchId) as
     { id: number; campaign: string; token: string | null } | undefined;
@@ -58,10 +61,18 @@ export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: nu
   const firstMap = inCampaign(liveMaps.get(0)) ? liveMaps.get(0)!
     : done.length === 0 && inCampaign(current) ? current : entry.maps[0];
   const start = entry.maps.indexOf(firstMap);
-  if (opts.replayFrom !== undefined && opts.replayFrom !== done.length) return null;
+  // Plan T3c: replay from an earlier chapter. The maps before it stand; it
+  // and anything after it are dropped (prepareRestore deletes their rows).
+  // After firstMap and start, which need the real count of finished maps.
+  if (opts.replayFrom !== undefined) {
+    if (!Number.isInteger(opts.replayFrom) || opts.replayFrom < 0 || opts.replayFrom > done.length) return null;
+    done.length = opts.replayFrom;
+  }
   const maps = done.map((d, i) => ({ map: inCampaign(liveMaps.get(i)) ? liveMaps.get(i)! : entry.maps[start + i], a: d.a, b: d.b }));
   const finished = new Set(maps.map((x) => x.map));
-  const map = inCampaign(current) && !finished.has(current) ? current : entry.maps[start + done.length];
+  const map = opts.replayFrom !== undefined
+    ? (inCampaign(liveMaps.get(opts.replayFrom)) ? liveMaps.get(opts.replayFrom)! : entry.maps[start + opts.replayFrom])
+    : inCampaign(current) && !finished.has(current) ? current : entry.maps[start + done.length];
   if (!map) return null;
   // Never the finale: replaying it from the start would run the game past the
   // plugin's finale backstop. A game lost on its finale is aborted instead.

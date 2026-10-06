@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openDb, type DB } from '../src/db.js';
 import { currentSeasonId } from '../src/players.js';
 import { setMissionsDirs, invalidateCampaignCache } from '../src/campaignRegistry.js';
-import { prepareRestore, restoreSnapshot, resumeLines } from '../src/bookings/restore.js';
+import { prepareRestore, replayableChapters, restoreSnapshot, resumeLines } from '../src/bookings/restore.js';
 
 // The stock No Mercy chapter list, in the same mission-file shape the real
 // game ships (see tests/campaignRegistry.test.ts's AIRPORT fixture). Without
@@ -98,6 +98,50 @@ describe('restoreSnapshot', () => {
     expect(restoreSnapshot(db, m)).toBeNull();
     db.prepare("UPDATE matches SET state = 'aborted' WHERE id = ?").run(m);
     expect(restoreSnapshot(db, m)).toBeNull();
+  });
+
+  it('replays an earlier chapter when asked: the maps before it stand, it and everything after it are dropped (plan T3c)', () => {
+    round(0, 1, 'a', 400); round(0, 2, 'b', 350);
+    round(1, 1, 'a', 200); round(1, 2, 'b', 500);
+    round(2, 1, 'b', 100);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital03_sewers', '2026-10-02 21:00:00')").run(m);
+    const s = restoreSnapshot(db, m, { replayFrom: 1 })!;
+    expect(s.maps).toEqual([{ map: 'l4d_vs_hospital01_apartment', a: 400, b: 350 }]);
+    expect(s).toMatchObject({ map: 'l4d_vs_hospital02_subway', firstSurv: 'a' });
+    expect(restoreSnapshot(db, m, { replayFrom: 2 })!.map).toBe('l4d_vs_hospital03_sewers');
+    expect(restoreSnapshot(db, m, { replayFrom: 0 })!.maps).toEqual([]);
+    expect(restoreSnapshot(db, m, { replayFrom: 3 })).toBeNull();
+    expect(restoreSnapshot(db, m, { replayFrom: 4 })).toBeNull();
+    prepareRestore(db, s);
+    expect(db.prepare('SELECT MAX(ordinal) AS o FROM match_rounds WHERE match_id = ?').get(m)).toEqual({ o: 0 });
+  });
+
+  it('lists the replayable chapters, never the finale (plan T3c)', () => {
+    round(0, 1, 'a', 400); round(0, 2, 'b', 350);
+    round(1, 1, 'a', 200); round(1, 2, 'b', 500);
+    round(2, 1, 'a', 200); round(2, 2, 'b', 500);
+    round(3, 1, 'a', 200); round(3, 2, 'b', 500);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital05_rooftop', '2026-10-02 21:00:00')").run(m);
+    expect(replayableChapters(db, m)).toEqual([
+      { ordinal: 0, map: 'l4d_vs_hospital01_apartment' }, { ordinal: 1, map: 'l4d_vs_hospital02_subway' },
+      { ordinal: 2, map: 'l4d_vs_hospital03_sewers' }, { ordinal: 3, map: 'l4d_vs_hospital04_interior' },
+    ]);
+  });
+
+  it('crash recovery is unchanged without replayFrom: every finished map stands and the map it was on is replayed (plan T3c)', () => {
+    round(0, 1, 'a', 400); round(0, 2, 'b', 350);
+    round(1, 1, 'a', 200); round(1, 2, 'b', 500);
+    round(2, 1, 'b', 100);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital03_sewers', '2026-10-02 21:00:00')").run(m);
+    const s = restoreSnapshot(db, m)!;
+    expect(restoreSnapshot(db, m, {})).toEqual(s);
+    expect(s).toMatchObject({ firstMap: 'l4d_vs_hospital01_apartment', map: 'l4d_vs_hospital03_sewers', firstSurv: 'b' });
+    expect(s.maps).toEqual([
+      { map: 'l4d_vs_hospital01_apartment', a: 400, b: 350 },
+      { map: 'l4d_vs_hospital02_subway', a: 200, b: 500 },
+    ]);
+    prepareRestore(db, s);
+    expect(db.prepare('SELECT MAX(ordinal) AS o FROM match_rounds WHERE match_id = ?').get(m)).toEqual({ o: 1 });
   });
 });
 
