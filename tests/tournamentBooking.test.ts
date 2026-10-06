@@ -79,13 +79,13 @@ describe('createTournamentGame and gameLinesOf', () => {
     expect(players).toEqual([...P.slice(4, 8).map((s) => ({ player_id: s, team: 'a', source: 'web' })), ...P.slice(0, 4).map((s) => ({ player_id: s, team: 'b', source: 'web' }))]);
     expect(isPendingGame(db, g.matchId)).toBe(true);
     const all = gameLinesOf(db, { matchId: g.matchId, stopAfterMap: 'l4d_vs_hospital04_interior', notice: 'Riverside Cup: Rats vs Bats, game 1' });
-    // T3b final review: no PUG abandon, no end kick, set before the match line.
-    expect(all.slice(0, 2)).toEqual(['sm_pug_leave_budget 0', 'sm_pug_end_kick 0']);
-    const lines = all.slice(2);
+    // T3b final review: no PUG abandon, no end kick, set before the match line; T3c: the box is told it is a tournament box first.
+    expect(all.slice(0, 3)).toEqual(['sm_pug_tournament 1', 'sm_pug_leave_budget 0', 'sm_pug_end_kick 0']);
+    const lines = all.slice(3);
     expect(lines[0]).toBe(`sm_pug_match ${g.matchId} ${g.token} no_mercy "l4d_vs_hospital04_interior"`);
     expect(lines.slice(1, 9)).toEqual([...P.slice(4, 8).map((s) => `sm_pug_roster "${s}:a"`), ...P.slice(0, 4).map((s) => `sm_pug_roster "${s}:b"`)]);
     expect(lines[9]).toBe('l4d_ready_league_notice "Riverside Cup: Rats vs Bats, game 1"');
-    expect(gameLinesOf(db, { matchId: g.matchId, stopAfterMap: null, notice: 'x' })[2]).toBe(`sm_pug_match ${g.matchId} ${g.token} no_mercy`);
+    expect(gameLinesOf(db, { matchId: g.matchId, stopAfterMap: null, notice: 'x' })[3]).toBe(`sm_pug_match ${g.matchId} ${g.token} no_mercy`);
     expect(() => gameLinesOf(db, { matchId: g.matchId, stopAfterMap: 'bad map;quit', notice: 'x' })).toThrow();
     db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital01_apartment', datetime('now'))").run(g.matchId);
     expect(isPendingGame(db, g.matchId)).toBe(false);
