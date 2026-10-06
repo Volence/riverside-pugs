@@ -523,6 +523,8 @@ describe('fix wave (final review)', () => {
       'sm_pug_pause_limit 3', 'sm_pug_pause_seconds 120', 'sm_pug_auto_min_players 8',
       // A tournament box turned the end kick off (T3b final review): a PUG after a skipped restart gets it back.
       'sm_pug_end_kick 1',
+      // A tournament box turned on !sub, !admin and the staff freeze (plan T3c).
+      'sm_pug_tournament 0',
     ]);
     expect(cmds.indexOf('l4d_booking_password ""')).toBeGreaterThan(cmds.indexOf('sm_kick @humans "The booking is over. Thanks for playing."'));
 
@@ -630,7 +632,7 @@ describe('booked games (plan 4b)', () => {
     expect(c.indexOf('sm_pug_auto_track 1')).toBeGreaterThan(c.indexOf(`l4d_booking_password "${getBooking(db, id)!.password}"`));
     expect(c.some((x) => x.startsWith('logaddress_add') || x.startsWith('sm_pug_log_secret'))).toBe(false);
     // Tournament-only lines (T3b final review): a scrim keeps the plugin's own leave rules and end kick.
-    expect(c.some((x) => x.startsWith('sm_pug_leave_budget') || x.startsWith('sm_pug_end_kick'))).toBe(false);
+    expect(c.some((x) => x.startsWith('sm_pug_leave_budget') || x.startsWith('sm_pug_end_kick') || x.startsWith('sm_pug_tournament'))).toBe(false);
   });
 
   it('setup follows the booking_game_min_players setting', async () => {

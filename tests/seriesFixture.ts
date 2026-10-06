@@ -9,6 +9,7 @@ import { Notifier } from '../src/notify/notify.js';
 import { SeriesEngine, lateHooks } from '../src/events/series.js';
 import { RoomClock } from '../src/events/roomClock.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
+import type { ServerReleaser } from '../src/serverRelease.js';
 import { NOW } from './eventFixture.js';
 import { A, B as BATS } from './entryFixture.js';
 import { POOL7, TIMERS, driveToBooking, roomFixture, type RoomFixture } from './roomFixture.js';
@@ -21,10 +22,13 @@ import { POOL7, TIMERS, driveToBooking, roomFixture, type RoomFixture } from './
 export const MIN = 60_000;
 export interface SeriesFixture extends RoomFixture {
   t: { t: number }; runner: BookingRunner; series: SeriesEngine; clock: RoomClock;
-  sent: string[]; box: { map: string; humans: string[]; down: boolean; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
+  sent: string[]; box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
   /** The room clock (which ticks the series engine), then the runner's
    *  minute pass, then any tracked work. */
   tick(): Promise<void>;
+  /** One more idle, enabled dlc4 box (a higher id than the first, so a
+   *  booking's pickBox takes it first). The rcon fake answers for every box. */
+  addServer(name: string): number;
   match(): P.MatchRow; booking(): B.BookingRow; gameOf(ordinal: number): R.GameRow;
   /** The plugin's MATCH_START for a pushed game: the heartbeat row, then the engine. */
   goLive(gameMatchId: number, map?: string): void;
@@ -35,7 +39,13 @@ export interface SeriesFixture extends RoomFixture {
 
 const steam2 = (sid: string) => { const n = BigInt(sid) - 76561197960265728n; return `STEAM_1:${n % 2n}:${n / 2n}`; };
 
-export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?: (f: RoomFixture) => void } = {}): Promise<SeriesFixture> {
+export async function seriesFixture(o: {
+  veto?: object; pool?: string[]; drive?: (f: RoomFixture) => void;
+  /** The real releaser instead of the fake that sets a box idle at once,
+   *  wired as src/server.ts wires it (forced restart, booking: true, and a
+   *  freed box wakes the runner's allocate). */
+  releaser?: (db: DB) => ServerReleaser;
+} = {}): Promise<SeriesFixture> {
   const f = await roomFixture({ veto: o.veto, pool: o.pool });
   (o.drive ?? driveToBooking)(f);
   const serverId = addServer(f.db, { name: 'box', host: '10.0.0.1', port: 27015, rconPort: 1, rconPassword: 'x' });
@@ -43,7 +53,7 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
   f.db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(serverId);
   const t = { t: NOW.getTime() + 10 * MIN };
   const sent: string[] = [];
-  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
+  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
   const status = () => [
     'hostname: test', `map     : ${box.map} at: 0 x, 0 y, 0 z`, `players : ${box.humans.length} humans, 0 bots (31 max)`,
     '# userid name uniqueid connected ping loss state rate adr',
@@ -58,6 +68,8 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
       if (c === 'sm_pug_status') return `STATUS state=${box.pug.state} match=${box.pug.match} token=(none) campaign=(none) map=${box.map} stopAfterMap=(none)\nSTATUS end`;
       const pm = /^sm_pug_match (\d+) /.exec(c);
       if (pm) box.pug = { state: 'pending', match: Number(pm[1]) };
+      // pug-match's answer to a restore (plan 5): taken, or refused.
+      if (c === 'sm_pug_resume_commit') return box.resumeOk ? 'PUGOK resumed maps=0 roster=8' : 'PUGERR resume incomplete';
       if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${box.type}" ( def. "" )`;
       if (c === 'l4d_booking_version') return '"l4d_booking_version" = "1.4.0" ( def. "1.0.0" )';
       if (c === 'l4d_booking_id') return `"l4d_booking_id" = "${box.marker}" ( def. "" )`;
@@ -75,12 +87,27 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
   const unsubscribe = subscribeAdminEvents((e) => alerts.push(e));
   const pushes: number[] = [];
   let series: SeriesEngine | null = null;
+  const releaser = o.releaser?.(f.db) ?? null;
+  let extra = 0;
   const runner = new BookingRunner({
     db: f.db, publicUrl: 'https://x', rcon,
-    release: async (id) => { f.db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return true; },
+    release: releaser
+      ? (id, opts) => new Promise<boolean>((resolve) => {
+        releaser.release(id, { restart: true, forceRestart: true, booking: true, gone: opts?.gone ?? false }, resolve);
+      })
+      // As the real releaser's forced restart: offline at once, before the
+      // first await, and idle again once the restart answers.
+      : async (id) => {
+        f.db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(id);
+        await Promise.resolve();
+        f.db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id);
+        return true;
+      },
+    ...(releaser ? { releasing: (id: number) => releaser.isRestarting(id) } : {}),
     restart: async () => { box.map = 'l4d_vs_hospital01_apartment'; box.marker = ''; box.type = 'Rotoblin Pub VS'; box.pug = { state: 'none', match: 0 }; return true; },
     notifier, preempt: () => {}, sleep: async () => {}, now: () => t.t, tournament: lateHooks(() => series),
   });
+  releaser?.onFreed(() => runner.allocate());
   series = new SeriesEngine({ db: f.db, runner, notifier, publicUrl: 'https://x', push: (id) => pushes.push(id), registerToken: () => {}, now: () => t.t });
   const clock = new RoomClock({ db: f.db, notifier, publicUrl: 'https://x', push: (id) => pushes.push(id), now: () => t.t, seed: () => 0, series });
   const db: DB = f.db;
@@ -92,6 +119,11 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
   return {
     ...f, t, runner, series, clock, sent, box, send, alerts, pushes,
     async tick() { await clock.tick(); await runner.tick(); await runner.idle(); await settle(); },
+    addServer(name) {
+      const id = addServer(db, { name, host: '10.0.0.2', port: 27100 + (extra += 1), rconPort: 1, rconPassword: 'x' });
+      db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(id);
+      return id;
+    },
     match: () => P.getMatch(db, f.matchId)!,
     booking: () => B.getBooking(db, P.getMatch(db, f.matchId)!.booking_id!)!,
     gameOf: (ordinal) => R.gamesOf(db, f.matchId).find((g) => g.ordinal === ordinal)!,

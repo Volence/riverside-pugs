@@ -1,4 +1,7 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import * as B from '../src/bookings/bookings.js';
@@ -16,6 +19,10 @@ import { ADMIN, NOW } from './eventFixture.js';
 import { A, B as BATS } from './entryFixture.js';
 import { POOL7, TIMERS, type RoomFixture } from './roomFixture.js';
 import { MIN, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
+import { ServerReleaser } from '../src/serverRelease.js';
+import { claimIdle, claimableServers } from '../src/serverPool.js';
+import { isHeld } from '../src/serverHolds.js';
+import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
 let f: SeriesFixture;
 afterEach(() => f?.close());
@@ -42,7 +49,7 @@ describe('SeriesEngine: booking, the game burst and connect', () => {
     expect(f.sent.indexOf(matchLine)).toBeLessThan(f.sent.indexOf('changelevel l4d_vs_hospital01_apartment'));
     // T3b final review: no PUG abandon and no end kick on a tournament box, set in the game burst itself.
     const burst = f.sent.slice(0, f.sent.indexOf(matchLine));
-    expect(burst.slice(-2)).toEqual(['sm_pug_leave_budget 0', 'sm_pug_end_kick 0']);
+    expect(burst.slice(-3)).toEqual(['sm_pug_tournament 1', 'sm_pug_leave_budget 0', 'sm_pug_end_kick 0']);
     // Bats survive first: their four are pug team a.
     expect(f.sent.filter((c) => c.startsWith('sm_pug_roster '))).toEqual([...BATS.slice(0, 4).map((s) => `sm_pug_roster "${s}:a"`), ...A.slice(0, 4).map((s) => `sm_pug_roster "${s}:b"`)]);
     expect(f.sent.some((c) => c.startsWith('say [Match] Game 1: No Mercy. Bats start as survivors.'))).toBe(true);
@@ -745,5 +752,146 @@ describe('SeriesEngine: the pick route on a live match (plan T3b Task 8)', () =>
     } finally {
       await app.close();
     }
+  });
+});
+
+describe('BookingRunner on a tournament box (plan T3c)', () => {
+  // A restore needs the campaign's chapter list (the base game's missions file).
+  const NO_MERCY = `"mission"
+{
+  "Name" "hospital"
+  "DisplayTitle" "No Mercy"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "l4d_vs_hospital01_apartment" "DisplayName" "The Apartments" }
+      "2" { "Map" "l4d_vs_hospital02_subway" "DisplayName" "The Subway" }
+      "3" { "Map" "l4d_vs_hospital03_sewers" "DisplayName" "The Sewers" }
+      "4" { "Map" "l4d_vs_hospital04_interior" "DisplayName" "The Hospital" }
+      "5" { "Map" "l4d_vs_hospital05_rooftop" "DisplayName" "Rooftop Finale" }
+    }
+  }
+}
+`;
+  let missionsDir = '';
+  beforeEach(() => {
+    missionsDir = mkdtempSync(join(tmpdir(), 'missions-'));
+    writeFileSync(join(missionsDir, 'hospital.txt'), NO_MERCY);
+    setMissionsDirs([missionsDir]);
+    invalidateCampaignCache();
+  });
+  afterEach(() => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    rmSync(missionsDir, { recursive: true, force: true });
+  });
+
+  it('pushes sm_pug_tournament 1 with the booking lines and sends a burst to the running box only', async () => {
+    f = await seriesFixture();
+    expect(await f.runner.send(999, ['say hi'], 'nothing')).toBeNull();
+    await f.tick();
+    expect(f.sent).toContain('sm_pug_tournament 1');
+    const replies = await f.runner.send(f.booking().id, ['sm_pug_status'], 'a look');
+    expect(replies).toHaveLength(1);
+    expect(f.sent.at(-1)).toBe('sm_pug_status');
+    f.box.down = true;
+    expect(await f.runner.send(f.booking().id, ['say hi'], 'a line')).toBeNull();
+  });
+
+  it('replays a chapter: abort, resume, prepare, changelevel, the lines again; aborts the game when the plugin refuses', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1).match_id!;
+    f.goLive(g1, 'l4d_vs_hospital02_subway');
+    const token = (f.db.prepare('SELECT token FROM matches WHERE id = ?').get(g1) as { token: string }).token;
+    const round = f.db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
+    round.run(g1, 0, 1, 'a', 300); round.run(g1, 0, 2, 'b', 200); round.run(g1, 1, 1, 'a', 50);
+    // match_live_maps keys on (match_id, map) and needs both scores (NOT NULL).
+    f.db.prepare("INSERT INTO match_live_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, 0, 'l4d_vs_hospital01_apartment', 300, 200), (?, 1, 'l4d_vs_hospital02_subway', 0, 0)").run(g1, g1);
+    const { restoreSnapshot } = await import('../src/bookings/restore.js');
+    const snap = restoreSnapshot(f.db, g1, { replayFrom: 1 })!;
+    expect(snap.map).toBe('l4d_vs_hospital02_subway');
+    f.box.resumeOk = true;
+    f.sent.length = 0;
+    expect(await f.runner.replayGame(f.booking().id, g1, snap)).toBe('ok');
+    const i = (p: string) => f.sent.findIndex((c) => c.startsWith(p));
+    expect(i(`sm_pug_abort ${token}`)).toBeGreaterThanOrEqual(0);
+    expect(i('sm_pug_resume ')).toBeGreaterThan(i(`sm_pug_abort ${token}`));
+    expect(i('sm_pug_resume_commit')).toBeLessThan(i('changelevel l4d_vs_hospital02_subway'));
+    expect(f.sent.filter((c) => c.startsWith('sm_pug_resume_map '))).toEqual(['sm_pug_resume_map l4d_vs_hospital01_apartment 300 200']);
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM match_rounds WHERE match_id = ? AND ordinal >= 1').get(g1)).toEqual({ n: 0 });
+    expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(g1)).toEqual({ state: 'live' });
+    expect(f.sent.some((c) => c.startsWith('say [Match] Staff replayed'))).toBe(true);
+    // The plugin refuses: the game is aborted, the match held.
+    round.run(g1, 1, 1, 'a', 50);
+    f.box.resumeOk = false;
+    const again = restoreSnapshot(f.db, g1, { replayFrom: 1 })!;
+    expect(await f.runner.replayGame(f.booking().id, g1, again)).toBe('refused');
+    expect(f.db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(g1)).toEqual({ state: 'aborted', abort_cause: 'server_lost' });
+    expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'game_lost' });
+  });
+
+  it('moves a booking: the old box goes back, a fresh one is taken and set up again with the game restored', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const old = f.booking().server_id!;
+    const second = f.addServer('box2');
+    const g1 = f.gameOf(1).match_id!;
+    f.goLive(g1, 'l4d_vs_hospital01_apartment');
+    f.box.resumeOk = true;
+    expect(await f.runner.moveBooking(f.booking().id)).toBe(old);
+    // Taken at once by the relocate pass: the old box went offline before it ran.
+    expect(f.booking().server_id).toBe(second);
+    await f.runner.idle();
+    expect(f.booking()).toMatchObject({ server_id: second, recovering_at: null, waiting_since: null });
+    expect(f.db.prepare('SELECT server_id FROM matches WHERE id = ?').get(g1)).toEqual({ server_id: second });
+    expect(f.db.prepare('SELECT status FROM servers WHERE id = ?').get(old)).toEqual({ status: 'idle' });
+    expect(f.sent.some((c) => c.startsWith('sm_pug_resume '))).toBe(true);
+    expect(f.send).toHaveBeenCalledWith(expect.arrayContaining([A[0]]), 'booking_recovered', expect.objectContaining({ content: expect.stringContaining('moved') }));
+    // No other box free: the booking waits as after a crash (the second box is
+    // offline while the releaser restarts it; the old one is taken out by hand).
+    f.db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(old);
+    expect(await f.runner.moveBooking(f.booking().id)).toBe(second);
+    expect(f.booking()).toMatchObject({ server_id: null, recovering_at: expect.any(String), waiting_since: expect.any(String) });
+    // A booking already moving (no box, recovering) is not moved again.
+    expect(await f.runner.moveBooking(f.booking().id)).toBeNull();
+  });
+
+  it('a move takes the old box out of the pool in the same tick it lets go of it, through the real releaser, so no holder can claim it', async () => {
+    let answer: ((back: boolean) => void) | null = null;
+    const restarted: number[] = [];
+    f = await seriesFixture({
+      releaser: (db) => new ServerReleaser(db, async () => {}, {
+        restart: (s) => { restarted.push(s.id); return new Promise<boolean>((r) => { answer = r; }); },
+      }),
+    });
+    await f.tick();
+    const id = f.booking().id;
+    const old = f.booking().server_id!;
+    const g1 = f.gameOf(1).match_id!;
+    f.goLive(g1, 'l4d_vs_hospital01_apartment');
+    f.box.resumeOk = true;
+    // Not awaited: everything below runs before any other task or microtask could.
+    const moved = f.runner.moveBooking(id);
+    expect(f.booking()).toMatchObject({ server_id: null, waiting_since: expect.any(String) });
+    // The booking no longer holds it, and still nothing can take it: it is offline, not idle.
+    expect(isHeld(f.db, old)).toBe(false);
+    expect(f.db.prepare('SELECT status FROM servers WHERE id = ?').get(old)).toEqual({ status: 'offline' });
+    expect(claimableServers(f.db).map((s) => s.id)).not.toContain(old);
+    expect(claimIdle(f.db, f.t.t)).toBeNull();
+    expect(f.runner.pickBox(f.booking())).toBeNull();
+    expect(await moved).toBe(old);
+    await new Promise((r) => setTimeout(r, 0));
+    // The releaser is restarting it, and the booking waits meanwhile.
+    expect(restarted).toEqual([old]);
+    expect(f.db.prepare('SELECT status FROM servers WHERE id = ?').get(old)).toEqual({ status: 'offline' });
+    expect(f.booking()).toMatchObject({ server_id: null });
+    // The restart answers: the box is idle again, the releaser wakes the runner and the waiting booking takes the clean box.
+    answer!(true);
+    await new Promise((r) => setTimeout(r, 0));
+    await f.runner.idle();
+    expect(f.booking()).toMatchObject({ server_id: old, recovering_at: null, waiting_since: null });
+    expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(g1)).toEqual({ state: 'live' });
   });
 });

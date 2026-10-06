@@ -47,7 +47,11 @@ export function createTournamentGame(db: DB, o: {
  *  the plugin's leave tracking off), and the plugin must not kick everyone
  *  eight seconds after each game of the series (sm_pug_end_kick, pug-match
  *  0.3.24; an older plugin answers "unknown command" and kicks anyway). */
-export const TOURNAMENT_LINES: readonly string[] = ['sm_pug_leave_budget 0', 'sm_pug_end_kick 0'];
+export const TOURNAMENT_LINES: readonly string[] = [
+  // sm_pug_tournament turns on !sub, !admin and the staff freeze (pug-match 0.3.25, plan T3c).
+  'sm_pug_tournament 1',
+  'sm_pug_leave_budget 0', 'sm_pug_end_kick 0',
+];
 
 /** The burst for a game whose rows exist (so a lost burst can be sent again). */
 export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string | null; notice: string }): string[] {

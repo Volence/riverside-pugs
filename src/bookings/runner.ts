@@ -19,11 +19,11 @@ import { bookingLimits, isLateCancel } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
-  beginRecovery, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
+  beginMove, beginRecovery, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { classifyBox } from './recovery.js';
-import { prepareRestore, restoreSnapshot, resumeLines } from './restore.js';
+import { prepareRestore, restoreSnapshot, resumeLines, type RestoreSnapshot } from './restore.js';
 import type { A2sFn } from '../a2s.js';
 import { abortBookingGame, bookingGames, bookingOnServer, gamesPlayed, liveBookingGame } from './games.js';
 import { TOURNAMENT_LINES, boxNeedsGame } from './tournamentGames.js';
@@ -94,6 +94,8 @@ export const CLEAR_LINES: readonly string[] = [
   'sm_pug_auto_min_players 8',
   // A tournament box sets it to 0 (TOURNAMENT_LINES); the plugin default is 1.
   'sm_pug_end_kick 1',
+  // A tournament box turned on !sub, !admin and the staff freeze (TOURNAMENT_LINES, plan T3c); 0 is the plugin default.
+  'sm_pug_tournament 0',
 ];
 
 /** The series engine's hand on a tournament booking (tournaments plan T3b). */
@@ -1239,6 +1241,121 @@ export class BookingRunner {
   /** One best-effort line on a tournament box (the series engine's). */
   announce(bookingId: number, text: string): void {
     this.say(bookingId, `say [Match] ${consoleText(text, 200)}`, 'the series line');
+  }
+
+  /** One burst from the series engine or the desk to a running tournament
+   *  box, with the replies (plan T3c: the freeze, a sub, a chat line). Null
+   *  when the booking has no running box or the burst failed; the failure is
+   *  logged with the secrets redacted, never thrown. */
+  async send(bookingId: number, lines: string[], what: string): Promise<string[] | null> {
+    const b = this.running(bookingId);
+    const server = b ? getServer(this.db, b.server_id!) : undefined;
+    if (!b || !server) return null;
+    try {
+      return await this.deps.rcon(server, lines);
+    } catch (err) {
+      const secrets = [server.log_secret, b.password, b.tv_password];
+      console.warn(`[booking] ${bookingId}: ${what} on ${server.name} failed:`, hideAllowIds(redactSecrets(err instanceof Error ? err.message : String(err), secrets)));
+      return null;
+    }
+  }
+
+  /** Staff replay a chapter of a live tournament game (plan T3c Ruling 12),
+   *  on the same box, through the plugin's restore: the match is dropped and
+   *  rebuilt from the snapshot, then the chapter loads from its start. The
+   *  site's rows for the dropped chapters go only once the plugin took the
+   *  resume. A refused resume aborts the game as server_lost (the engine
+   *  holds the match through gameLost), as a failed recovery does. 'busy'
+   *  touches nothing: the booking is busy, not running, or not running this game. */
+  async replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy'> {
+    const live = liveBookingGame(this.db, bookingId);
+    if (this.busy.has(bookingId) || !this.running(bookingId) || !live || live.id !== gameMatchId || live.token !== snap.token) return 'busy';
+    let result: 'ok' | 'refused' = 'refused';
+    this.track(bookingId, async () => { result = (await this.replayOnce(bookingId, gameMatchId, snap)) ? 'ok' : 'refused'; });
+    await this.busy.get(bookingId);
+    return result;
+  }
+
+  /** True once the plugin took the resume (the replay is on its way); false
+   *  when it refused, in which case the game has been aborted. */
+  private async replayOnce(id: number, gameMatchId: number, snap: RestoreSnapshot): Promise<boolean> {
+    const b = this.running(id);
+    const server = b ? getServer(this.db, b.server_id!) : undefined;
+    if (!b || !server) return false;
+    const live = liveBookingGame(this.db, id);
+    if (!live || live.id !== gameMatchId || live.token !== snap.token) return false;
+    const resume = resumeLines(snap);
+    let replies: string[];
+    try {
+      await this.deps.rcon(server, [`sm_pug_abort ${snap.token}`]);
+      replies = await this.deps.rcon(server, resume);
+    } catch (err) {
+      console.warn(`[booking] ${id}: the replay burst on ${server.name} failed:`, redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret, snap.token]));
+      replies = [];
+    }
+    if (!(replies[resume.length - 1] ?? '').trim().startsWith('PUGOK resumed')) {
+      const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
+      if (token) this.forgetToken(id, token);
+      if (token && b.purpose === 'tournament') this.hook(id, 'gameLost', () => this.deps.tournament?.gameLost?.(id, live.id));
+      publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: game #${live.id} could not be rebuilt on ${server.name} for a chapter replay (pug-match did not take sm_pug_resume). It is aborted.` });
+      return false;
+    }
+    prepareRestore(this.db, snap);
+    try {
+      await this.deps.rcon(server, [`changelevel ${snap.map}`]);
+    } catch {
+      // A changelevel can drop the connection it came in on; the map check decides.
+    }
+    await this.sleep(MAP_SETTLE_MS);
+    let onMap: string | null = null;
+    try {
+      const [st] = await this.deps.rcon(server, ['status']);
+      onMap = parseStatusMap(st);
+    } catch {
+      // No answer: reported below; the next minute watch re-pushes the lines.
+    }
+    if (onMap !== snap.map) {
+      publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} was sent ${snap.map} for a chapter replay but is on ${onMap ?? 'no map'}. The game is rebuilt on the box; load the map by hand or replay again.` });
+      return true;
+    }
+    const fresh = this.running(id);
+    if (fresh) {
+      const name = campaignRegistry(this.db).get(snap.campaign)?.name ?? snap.campaign;
+      await this.push(id, server, () => [
+        ...bookingLines(this.db, fresh), ...gameLines(this.db, fresh, server, this.deps.logPublicAddress),
+        `say [Match] ${consoleText(`Staff replayed chapter ${snap.maps.length + 1} of ${name} from its start. Ready up when everyone is back.`, 200)}`,
+      ], 'the replay lines');
+    }
+    console.log(`[booking] ${id}: game #${live.id} replays ${snap.map} on ${server.name}`);
+    return true;
+  }
+
+  /** Staff move a running booking to another box (plan T3c Ruling 13): the
+   *  booking lets go of its box, the box goes back through the releaser's
+   *  forced restart (not awaited: the move must not wait on it), and the
+   *  relocate pass takes the first idle box, after which recover() restarts
+   *  it, replays setup and restores the live game. The old box, or null when
+   *  the booking is not running, is busy, or is already recovering.
+   *
+   *  Deliberately no await anywhere in here. A booked box is idle in
+   *  servers.status and held only through the bookings view, so the moment
+   *  beginMove clears server_id the old box is a free idle box. The
+   *  releaser's release() (src/serverRelease.ts, called inside the deps
+   *  wrapper's Promise executor) marks it offline synchronously before its
+   *  first await, so it is out of the pool in this same tick: no pickBox,
+   *  practice lease, side game or PUG claimIdle can take it in between, and
+   *  the relocate below cannot hand the booking back the box it is leaving.
+   *  It comes back idle only once its restart answers. */
+  async moveBooking(bookingId: number): Promise<number | null> {
+    if (!this.running(bookingId) || this.busy.has(bookingId)) return null;
+    const old = beginMove(this.db, bookingId, new Date(this.now()));
+    if (old === null) return null;
+    this.deps.release(old).catch((err) => {
+      console.error(`[booking] ${bookingId}: giving back server ${old} after a move failed:`, err);
+    });
+    console.log(`[booking] ${bookingId}: staff moved it off ${getServer(this.db, old)?.name ?? old}`);
+    this.relocate();
+    return old;
   }
 
   /** A best-effort burst. A failure is logged with the log secret and the
