@@ -9,7 +9,7 @@ import { recordResultFlow } from '../src/events/flow.js';
 import * as R from '../src/events/room.js';
 import * as E from '../src/events/events.js';
 import { matchRoomView } from '../src/events/roomViews.js';
-import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS } from '../src/events/series.js';
+import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS, DEFAULT_GRACE_MINUTES } from '../src/events/series.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
 import { adminEventRoutes } from '../src/routes/adminEvents.js';
 import { eventRoutes } from '../src/routes/events.js';
@@ -1290,11 +1290,12 @@ describe('BookingRunner.replayGame answers (plan T3c Task 4 ledger)', () => {
     expect(f.sent.some((c) => c.startsWith('sm_pug_resume') || c.startsWith('changelevel'))).toBe(false);
   });
 
-  it('error: the resume burst dropped after the abort was answered: the game stays live on the site for staff to try again', async () => {
+  it('dropped: the resume burst failed after the abort was answered: the game stays live on the site for staff to try again', async () => {
     const { g1, rounds } = await liveOnSubway();
     f.box.resumeOk = true;
     f.box.failOn = 'sm_pug_resume_commit';
-    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('error');
+    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('dropped');
+    expect(f.alerts.some((a) => a.kind === 'problem' && a.text.includes('dropped the game') && a.text.includes('replay again now'))).toBe(true);
     expect(state(g1)).toEqual({ state: 'live', abort_cause: null });
     expect(f.match().status).toBe('live');
     expect(rounds()).toBe(3);
@@ -1399,6 +1400,66 @@ describe('SeriesEngine: the desk tools against the box (plan T3c Task 7 ledger)'
     await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
     await f.line(reset(token));
     expect(f.match().admin_pause_at).toBeNull();
+  });
+});
+
+describe('SeriesEngine: the desk tools, Task 7 review folded into Task 8', () => {
+  useNoMercy();
+  const reset = (token: string) => `PUG ${token} ADMINPAUSE state=off by=site cause=reset`;
+
+  it('a replay refused as busy while another runs leaves the running replay\'s expected reset alone', async () => {
+    const { token } = await liveOnSubway();
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    f.box.resumeOk = true;
+    const first = f.series.replayChapter(f.matchId, ADMIN, 1);
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 1)).toEqual({ ok: false, error: 'changed' });
+    expect(await f.series.moveServer(f.matchId, ADMIN)).toEqual({ ok: false, error: 'no_box' });
+    expect((await first).ok).toBe(true);
+    // The running replay still owned its expectation: the freeze is recorded lifted, and its late line is consumed.
+    expect(f.match().admin_pause_at).toBeNull();
+    expect((await f.series.freeze(f.matchId, ADMIN, true)).ok).toBe(true);
+    await f.line(reset(token));
+    expect(f.match().admin_pause_by).toBe(ADMIN);
+  });
+
+  it('a replay whose resume burst failed after the abort tells staff the server dropped the game and records the freeze lifted', async () => {
+    const { g1, token } = await liveOnSubway();
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    f.box.resumeOk = true;
+    f.box.failOn = 'sm_pug_resume_commit';
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 1)).toEqual({ ok: false, error: 'replay_dropped' });
+    expect(EVENT_ERRORS.replay_dropped.text).toBe('The server dropped the game while replaying; replay again now.');
+    expect(f.match()).toMatchObject({ status: 'live', admin_pause_at: null });
+    expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(g1)).toEqual({ state: 'live' });
+    // Replay again now: the box answers this time.
+    f.box.failOn = null;
+    expect((await f.series.replayChapter(f.matchId, ADMIN, 1)).ok).toBe(true);
+  });
+
+  it('a replay whose abort failed leaves the freeze standing on the site', async () => {
+    const { token } = await liveOnSubway();
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    f.box.resumeOk = true;
+    f.box.failOn = 'sm_pug_abort';
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 1)).toEqual({ ok: false, error: 'replay_no_answer' });
+    expect(f.match().admin_pause_at).not.toBeNull();
+  });
+
+  it('the move\'s staff alert says a freeze is lifted and to freeze again from the desk', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.goLive(f.gameOf(1).match_id!, 'l4d_vs_hospital01_apartment');
+    const token = f.liveGameToken();
+    f.addServer('box2');
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    expect((await f.series.moveServer(f.matchId, ADMIN)).ok).toBe(true);
+    await f.runner.idle();
+    expect(f.alerts.some((a) => a.kind === 'problem' && a.text.includes('staff moved it off') && a.text.includes('The staff freeze is lifted') && a.text.includes('freeze it again from the Events desk'))).toBe(true);
+  });
+
+  it('the sub phases are the room\'s, and the grace fallback is 15 minutes', () => {
+    expect([...R.SUB_PHASES]).toEqual(['connect', 'live']);
+    expect(DEFAULT_GRACE_MINUTES).toBe(15);
   });
 });
 

@@ -496,7 +496,7 @@ export function disputeMatch(db: DB, o: { matchId: number; steamid: string; reas
 
 // ---------- subs, the freeze and the desk tools (plan T3c) ----------
 
-const SUB_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect', 'live']);
+export const SUB_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect', 'live']);
 /** Phases that need a running box: a hold from them is released only while the booking runs (Ruling 15). */
 const BOX_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect', 'live', 'confirming']);
 const REOPENABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking']);

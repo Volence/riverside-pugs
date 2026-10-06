@@ -1267,15 +1267,17 @@ export class BookingRunner {
    *  resume. A resume the box answered and refused aborts the game as
    *  server_lost (the engine holds the match through gameLost), as a failed
    *  recovery does, and the dropped chapters' rows stay. 'error' is a box
-   *  that did not answer (the abort or the resume burst failed in rcon, or
-   *  the replay threw): nothing is aborted or dropped on the site and the
-   *  game stays live, for staff to try again or move the match (plan T3c
-   *  Task 4 ruling). 'busy' touches nothing: the booking is busy, not
+   *  that did not answer the abort (or the replay threw): the box still runs
+   *  the game. 'dropped' is a resume burst that failed in rcon after the
+   *  abort was answered: the box has dropped its match (and any freeze with
+   *  it). Either way nothing is aborted or dropped on the site and the game
+   *  stays live, for staff to try again or move the match (plan T3c Task 4
+   *  ruling, split in Task 8). 'busy' touches nothing: the booking is busy, not
    *  running, or not running this game. */
-  async replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error'> {
+  async replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error' | 'dropped'> {
     const live = liveBookingGame(this.db, bookingId);
     if (this.busy.has(bookingId) || !this.running(bookingId) || !live || live.id !== gameMatchId || live.token !== snap.token) return 'busy';
-    let result: 'ok' | 'refused' | 'busy' | 'error' = 'error';
+    let result: 'ok' | 'refused' | 'busy' | 'error' | 'dropped' = 'error';
     this.track(bookingId, async () => {
       try {
         result = await this.replayOnce(bookingId, gameMatchId, snap);
@@ -1290,8 +1292,9 @@ export class BookingRunner {
 
   /** 'ok' once the plugin took the resume (the replay is on its way);
    *  'refused' when it answered and refused, in which case the game has been
-   *  aborted; 'error' when the box did not answer the abort or the resume. */
-  private async replayOnce(id: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error'> {
+   *  aborted; 'error' when the box did not answer the abort, 'dropped' when
+   *  it answered the abort but not the resume. */
+  private async replayOnce(id: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error' | 'dropped'> {
     const b = this.running(id);
     const server = b ? getServer(this.db, b.server_id!) : undefined;
     if (!b || !server) return 'busy';
@@ -1307,8 +1310,12 @@ export class BookingRunner {
     } catch (err) {
       const why = redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret, snap.token]);
       console.warn(`[booking] ${id}: the replay's ${step} on ${server.name} failed:`, why);
-      publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} did not answer the ${step} of a chapter replay of game #${live.id}. Nothing was aborted on the site; replay again or move the match.` });
-      return 'error';
+      if (step === 'abort') {
+        publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} did not answer the abort of a chapter replay of game #${live.id}. Nothing was aborted on the site; replay again or move the match.` });
+        return 'error';
+      }
+      publishAdminEvent({ kind: 'problem', matchId: live.id, text: `Booking ${id}: ${server.name} dropped the game while replaying game #${live.id} (the resume got no answer after the abort); replay again now. Nothing was aborted on the site.` });
+      return 'dropped';
     }
     if (!(replies[resume.length - 1] ?? '').trim().startsWith('PUGOK resumed')) {
       const token = abortBookingGame(this.db, live.id, new Date(this.now()), 'server_lost');
