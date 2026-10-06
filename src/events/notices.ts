@@ -59,7 +59,16 @@ function rostersOf(d: NoticeDeps, matchId: number): string[] {
 export function tellRoomOpen(d: NoticeDeps, eventId: number, matchId: number): void {
   tell(d, rostersOf(d, matchId), eventId, 'event_match_room', { matchId });
 }
-/** A match ended as a forfeit at the ready deadline: both rosters. */
-export function tellReadyForfeit(d: NoticeDeps, eventId: number, matchId: number): void {
-  tell(d, rostersOf(d, matchId), eventId, 'event_match_forfeit', { matchId });
+/** A match ended as a forfeit at the ready deadline, or at the end of the
+ *  grace to connect (why 'server', plan T3b): both rosters. */
+export function tellReadyForfeit(d: NoticeDeps, eventId: number, matchId: number, why: 'ready' | 'server' = 'ready'): void {
+  tell(d, rostersOf(d, matchId), eventId, 'event_match_forfeit', { matchId, why });
+}
+/** The connect line: only the booking's accepted people (the eight and the roster spectators), never a whole roster (T3b Global Constraints). */
+export function tellConnect(d: NoticeDeps, eventId: number, matchId: number, to: string[]): void {
+  tell(d, to, eventId, 'event_match_connect', { matchId });
+}
+/** The series is over and its confirm window open: both rosters. */
+export function tellSeriesResult(d: NoticeDeps, eventId: number, matchId: number): void {
+  tell(d, rostersOf(d, matchId), eventId, 'event_match_result', { matchId });
 }
