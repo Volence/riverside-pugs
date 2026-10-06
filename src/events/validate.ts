@@ -132,6 +132,7 @@ export const EVENT_ERRORS = {
   no_box: { status: 409, text: 'This match has no running server to send that to.' },
   replay_failed: { status: 502, text: 'The server did not take the replay. The game was aborted and the match is on hold.' },
   replay_no_answer: { status: 502, text: 'The server did not answer the replay. Nothing was aborted and the game is still live on the site; try again, or move the match to another server.' },
+  replay_dropped: { status: 502, text: 'The server dropped the game while replaying; replay again now.' },
   not_frozen: { status: 409, text: 'The game is not frozen.' },
   already_frozen: { status: 409, text: 'The game is already frozen.' },
   bad_side: { status: 400, text: 'A side is a or b.' },

@@ -18,7 +18,8 @@ import { adminEntryViews } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded } from '../events/notices.js';
+import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded, tellStaffAction } from '../events/notices.js';
+import type { StaffAction } from '../events/messages.js';
 import { higherSide, type RoomClock } from '../events/roomClock.js';
 
 export interface AdminEventRow {
@@ -76,6 +77,13 @@ export async function adminEventRoutes(
       afterPick(matchId: number): void;
       reset(matchId: number, by: string): V.Checked<unknown>;
       staffResult(matchId: number, by: string): void;
+      /** Plan T3c: the desk tools. */
+      freeze(matchId: number, by: string, on: boolean): Promise<V.Checked<unknown>>;
+      replayChapter(matchId: number, by: string, ordinal: unknown): Promise<V.Checked<unknown>>;
+      moveServer(matchId: number, by: string): Promise<V.Checked<unknown>>;
+      extendGrace(matchId: number, by: string, minutes: unknown): V.Checked<unknown>;
+      releaseHold(matchId: number, by: string): V.Checked<unknown>;
+      reopenVeto(matchId: number, by: string): V.Checked<unknown>;
     };
   },
 ): Promise<void> {
@@ -444,4 +452,79 @@ export async function adminEventRoutes(
   roomAction('open-room', 'event_room_open');
   roomAction('reset-room', 'event_room_reset');
   roomAction('hold', 'event_hold');
+
+  /** Plan T3c Ruling 10: staff act as a team. One route, three kinds. */
+  app.post('/api/admin/events/:id/matches/:matchId/act', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; matchId: string };
+    const ev = eventOf(p.id);
+    const matchId = idOf(p.matchId);
+    const m = ev && matchId !== null ? P.getMatch(db, matchId) : undefined;
+    if (!ev || !m || m.event_id !== ev.id) return refuse(reply, 'match_not_found');
+    const body = (req.body ?? {}) as { kind?: unknown; side?: unknown; step?: unknown; action?: unknown; campaign?: unknown; steamids?: unknown };
+    const side = body.side;
+    if (side !== 'a' && side !== 'b') return refuse(reply, 'bad_side');
+    const staff: R.StaffAct = { by: me, side };
+    const timers = R.roomTimers(db);
+    let r: V.Checked<P.MatchRow>;
+    let what: StaffAction;
+    if (body.kind === 'ready') {
+      r = R.readyUp(db, { matchId: m.id, steamid: null, staff, timers });
+      what = 'ready';
+    } else if (body.kind === 'veto') {
+      if (typeof body.step !== 'number' || !Number.isInteger(body.step)) return refuse(reply, 'bad_veto_action');
+      r = R.actVeto(db, { matchId: m.id, steamid: null, staff, step: body.step, action: body.action, campaign: body.campaign ?? null, timers });
+      what = 'veto';
+    } else if (body.kind === 'lineup') {
+      r = R.lockLineup(db, { matchId: m.id, steamid: null, staff, steamids: body.steamids, timers });
+      what = 'lineup';
+    } else return refuse(reply, 'bad_request');
+    if (!r.ok) return refuse(reply, r.error);
+    // A pick on a live match hands on to the series, as the captain's route does (T3b).
+    if (what === 'veto' && r.value.status === 'live') {
+      try { opts.series?.afterPick(m.id); } catch (err) { console.error(`[events] scheduling match ${m.id} after the desk's pick failed:`, err instanceof Error ? err.message : err); }
+    }
+    opts.rooms?.pushChange(m.id);
+    const teamName = N.getEntry(db, R.entryOn(m, side))?.name ?? (side === 'a' ? 'team A' : 'team B');
+    tellStaffAction(opts, ev.id, m.id, what, `for ${teamName}`);
+    logAdmin(db, me, 'event_act_for_team', ev.id, {
+      matchId: m.id, kind: body.kind, side,
+      ...(what === 'veto' ? { step: body.step, action: body.action, campaign: body.campaign ?? null } : {}),
+      ...(what === 'lineup' ? { steamids: body.steamids } : {}),
+    });
+    return {};
+  });
+
+  /** Plan T3c Rulings 11 to 15 and 9: one route per desk tool, each through
+   *  the series engine, which tells both rosters itself. Without the engine
+   *  the routes answer 404, as confirm and dispute do. */
+  const deskTool = (
+    action: 'reopen-veto' | 'replay-chapter' | 'move-server' | 'extend-grace' | 'release-hold' | 'freeze' | 'unfreeze', audit: string,
+    call: (s: NonNullable<typeof opts.series>, matchId: number, me: string, body: Record<string, unknown>) => Promise<V.Checked<unknown>> | V.Checked<unknown>,
+    detail: (body: Record<string, unknown>) => object = () => ({}),
+  ) =>
+    app.post(`/api/admin/events/:id/matches/:matchId/${action}`, async (req, reply) => {
+      const me = requireAdmin(req, reply);
+      if (!me) return;
+      const p = req.params as { id: string; matchId: string };
+      const ev = eventOf(p.id);
+      const matchId = idOf(p.matchId);
+      const m = ev && matchId !== null ? P.getMatch(db, matchId) : undefined;
+      if (!ev || !m || m.event_id !== ev.id) return refuse(reply, 'match_not_found');
+      if (!opts.series) return reply.code(404).send({ error: 'not found' });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const r = await call(opts.series, m.id, me, body);
+      if (!r.ok) return refuse(reply, r.error);
+      opts.rooms?.pushChange(m.id);
+      logAdmin(db, me, audit, ev.id, { matchId: m.id, ...detail(body) });
+      return {};
+    });
+  deskTool('reopen-veto', 'event_veto_reopen', (s, id, me) => s.reopenVeto(id, me));
+  deskTool('replay-chapter', 'event_chapter_replay', (s, id, me, body) => s.replayChapter(id, me, body.ordinal), (body) => ({ ordinal: body.ordinal }));
+  deskTool('move-server', 'event_server_move', (s, id, me) => s.moveServer(id, me));
+  deskTool('extend-grace', 'event_grace_extend', (s, id, me, body) => s.extendGrace(id, me, body.minutes), (body) => ({ minutes: body.minutes }));
+  deskTool('release-hold', 'event_hold_release', (s, id, me) => s.releaseHold(id, me));
+  deskTool('freeze', 'event_freeze', (s, id, me) => s.freeze(id, me, true));
+  deskTool('unfreeze', 'event_unfreeze', (s, id, me) => s.freeze(id, me, false));
 }

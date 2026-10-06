@@ -15,6 +15,7 @@ import { ADMIN, must, stageBody } from './eventFixture.js';
 import { A, B, OUTSIDER } from './entryFixture.js';
 import { TIMERS, driveToBooking, roomFixture, type RoomFixture } from './roomFixture.js';
 import { createTournamentBooking, getBooking } from '../src/bookings/bookings.js';
+import { EVENT_ERRORS } from '../src/events/validate.js';
 
 let f: RoomFixture;
 let app: FastifyInstance;
@@ -195,5 +196,57 @@ describe('confirm, dispute and reset over HTTP (plan T3b)', () => {
     expect(act).toHaveBeenCalled();
     expect(after).toHaveBeenCalledWith(f.matchId);
     expect(err.mock.calls.some((c) => String(c[0]).includes('after the pick'))).toBe(true);
+  });
+});
+
+describe('the desk tools (plan T3c)', () => {
+  const MOD = '76561199000000711';
+  const base = () => `/api/admin/events/${f.eventId}/matches/${f.matchId}`;
+  const audit = () => (f.db.prepare("SELECT action FROM admin_actions WHERE action LIKE 'event_%' ORDER BY id").all() as { action: string }[]).map((a) => a.action);
+  beforeEach(() => {
+    cookies[MOD] = authedCookie(app, f.db, MOD);
+    f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+  });
+
+  it('acts for a team: ready, a veto step and a lineup, each audited and logged as the admin', async () => {
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS });
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'ready', side: 'c' })).statusCode).toBe(400);
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'ready', side: 'a' })).statusCode).toBe(200);
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'ready', side: 'b' })).statusCode).toBe(200);
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'veto', side: 'b', step: 0, action: 'first' })).json()).toEqual({ error: EVENT_ERRORS.not_your_turn.text });
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'veto', side: 'a', step: 0, action: 'first' })).statusCode).toBe(200);
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'veto', side: 'a', step: 1, action: 'ban', campaign: 'dead_air' })).statusCode).toBe(200);
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'veto', side: 'b', step: 2, action: 'survivors' })).statusCode).toBe(200);
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'lineup', side: 'a', steamids: A.slice(0, 4) })).statusCode).toBe(200);
+    expect((await post(`${base()}/act`, ADMIN, { kind: 'lineup', side: 'b', steamids: B.slice(0, 4) })).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('booking');
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE actor = ? AND action IN ('room_ready','veto_action','lineup_locked')").get(ADMIN)).toEqual({ n: 7 });
+    expect(audit().filter((a) => a === 'event_act_for_team')).toHaveLength(7);
+    expect((await post(`${base()}/act`, MOD, { kind: 'ready', side: 'a' })).statusCode).toBe(403);
+  });
+
+  it('shows the hold reason, the dispute and the freeze to the desk only, and reopens, extends, releases and freezes through the routes', async () => {
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS });
+    for (const s of [A[0], B[0]]) await post(`${room()}/ready`, s);
+    expect((await post(`${base()}/hold`, ADMIN, { reason: 'Checking something' })).statusCode).toBe(200);
+    const play = (await get(`/api/admin/events/${f.eventId}/play`, MOD)).json();
+    const row = play.stages[0].rounds[0].matches.find((m: { id: number }) => m.id === f.matchId);
+    expect(row.desk).toMatchObject({ holdReason: 'Checking something', holdFrom: 'veto', dispute: null, frozen: false, liveGame: null, subs: { a: 0, b: 0 } });
+    const pub = (await get(`/api/events/${f.slug}`)).json();
+    expect(pub.play[0].rounds[0].matches[0].desk).toBeUndefined();
+    expect((await post(`${base()}/release-hold`, ADMIN)).statusCode).toBe(200);
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('veto');
+    expect((await post(`${base()}/release-hold`, ADMIN)).json()).toEqual({ error: EVENT_ERRORS.not_held.text });
+    await post(`${room()}/veto`, A[0], { step: 0, action: 'first' });
+    expect((await post(`${base()}/reopen-veto`, ADMIN)).statusCode).toBe(200);
+    expect(R.vetoActions(f.db, f.matchId)).toEqual([]);
+    expect((await post(`${base()}/extend-grace`, ADMIN, { minutes: 5 })).json()).toEqual({ error: EVENT_ERRORS.not_connect_phase.text });
+    expect((await post(`${base()}/freeze`, ADMIN)).json()).toEqual({ error: EVENT_ERRORS.not_live_phase.text });
+    expect((await post(`${base()}/move-server`, ADMIN)).json()).toEqual({ error: EVENT_ERRORS.not_live_phase.text });
+    expect((await post(`${base()}/replay-chapter`, ADMIN, { ordinal: 0 })).json()).toEqual({ error: EVENT_ERRORS.not_live_phase.text });
+    expect(audit()).toEqual(['event_hold', 'event_hold_release', 'event_veto_reopen']);
+    for (const action of ['act', 'reopen-veto', 'replay-chapter', 'move-server', 'extend-grace', 'release-hold', 'freeze', 'unfreeze']) {
+      expect((await post(`${base()}/${action}`, MOD, { kind: 'ready', side: 'a', ordinal: 0, minutes: 5 })).statusCode, action).toBe(403);
+    }
   });
 });

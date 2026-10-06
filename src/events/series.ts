@@ -48,7 +48,7 @@ export interface SeriesRunner {
   onCancelled(bookingId: number, by: string | null, reason: string | null): void;
   /** Plan T3c: one burst with the replies, a chapter replay, a move. */
   send(bookingId: number, lines: string[], what: string): Promise<string[] | null>;
-  replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error'>;
+  replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error' | 'dropped'>;
   moveBooking(bookingId: number): Promise<number | null>;
 }
 export interface SeriesDeps {
@@ -110,6 +110,10 @@ export const SUB_NOT_BETWEEN = 'not between chapters';
 /** How long after a replay or a move the box's reset line for it is still
  *  expected (UDP log lines arrive within moments or never). */
 export const RESET_EXPECT_MS = 2 * 60_000;
+/** The grace to connect when a booking's rules carry none (Ruling 7). */
+export const DEFAULT_GRACE_MINUTES = 15;
+
+interface ExpectedReset { gameMatchId: number; frozenId: number; until: number | null }
 
 const LIVE_OR_BEFORE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['booking', 'connect', 'live']);
 
@@ -134,7 +138,7 @@ export class SeriesEngine {
    *  the freeze only while the freeze it was sent for still stands (the same
    *  match_frozen row, `frozenId`), never one set after. Until `until`; null
    *  while the work runs. */
-  private readonly expectedResets = new Map<number, { gameMatchId: number; frozenId: number; until: number | null }>();
+  private readonly expectedResets = new Map<number, ExpectedReset>();
 
   constructor(private readonly deps: SeriesDeps) {
     this.db = deps.db;
@@ -362,7 +366,7 @@ export class SeriesEngine {
     if (!m || m.status !== 'booking') return;
     const b = B.getBooking(this.db, bookingId);
     if (!b) return;
-    const grace = B.bookingRules(b)?.noShowGraceMinutes ?? 15;
+    const grace = B.bookingRules(b)?.noShowGraceMinutes ?? DEFAULT_GRACE_MINUTES;
     const r = R.startConnect(this.db, { matchId: m.id, graceMinutes: grace, now: new Date(this.now()) });
     if (!r.ok) return;
     tellConnect(this.deps, m.event_id, m.id, B.acceptedPeople(this.db, bookingId).map((p) => p.steamid));
@@ -721,7 +725,7 @@ export class SeriesEngine {
       used = recorded!.used;
       // A re-send is still the room's decision (Task 6 ledger): the match in a
       // sub phase and the asker a manager of that side, as subPlayer checks.
-      const refusal: V.EventError | null = m.status !== 'connect' && m.status !== 'live' ? 'not_live_phase'
+      const refusal: V.EventError | null = !R.SUB_PHASES.has(m.status) ? 'not_live_phase'
         : !N.managersOf(this.db, N.getEntry(this.db, R.entryOn(m, side))?.team_id ?? null).includes(by) ? 'not_manager' : null;
       if (refusal) {
         say(`Sub refused: ${V.EVENT_ERRORS[refusal].text}`);
@@ -853,11 +857,21 @@ export class SeriesEngine {
   // ---------- the desk tools (plan T3c Task 7) ----------
 
   /** Before a replay or a move: a frozen game's box lifts the freeze as it
-   *  drops its match, and its reset line is expected (Task 7 ledger). */
-  private expectReset(m: P.MatchRow, gameMatchId: number): void {
+   *  drops its match, and its reset line is expected (Task 7 ledger). The
+   *  entry this call set, for afterReset, or null. An expectation still in
+   *  flight belongs to a replay or move already running, which this call's
+   *  runner refuses as busy: it is left alone (Task 8 ledger). */
+  private expectReset(m: P.MatchRow, gameMatchId: number): ExpectedReset | null {
+    const running = this.expectedResets.get(m.id);
+    if (running && running.until === null) return null;
     const frozenId = this.standingFreeze(m);
-    if (frozenId === null) this.expectedResets.delete(m.id);
-    else this.expectedResets.set(m.id, { gameMatchId, frozenId, until: null });
+    if (frozenId === null) {
+      this.expectedResets.delete(m.id);
+      return null;
+    }
+    const exp: ExpectedReset = { gameMatchId, frozenId, until: null };
+    this.expectedResets.set(m.id, exp);
+    return exp;
   }
 
   /** The match_frozen row of the freeze standing now, or null when not frozen
@@ -874,10 +888,11 @@ export class SeriesEngine {
    *  a move: the new box starts unfrozen), so the freeze is recorded as lifted
    *  now if its line has not come yet, and a late line is still matched for a
    *  while. 'unknown': the box may or may not have dropped it; only the
-   *  expectation is kept a while. 'none': nothing was sent. */
-  private afterReset(matchId: number, what: 'lifted' | 'unknown' | 'none'): void {
-    const exp = this.expectedResets.get(matchId);
-    if (!exp) return;
+   *  expectation is kept a while. 'none': nothing was sent. Only the entry
+   *  this call's expectReset set is touched: one the box's line already
+   *  consumed, or another call's, is left alone. */
+  private afterReset(matchId: number, exp: ExpectedReset | null, what: 'lifted' | 'unknown' | 'none'): void {
+    if (!exp || this.expectedResets.get(matchId) !== exp) return;
     if (what === 'none') {
       this.expectedResets.delete(matchId);
       return;
@@ -900,8 +915,11 @@ export class SeriesEngine {
   /** Ruling 12: the live game is rebuilt on its box from the chapters before
    *  `ordinal` and that chapter loads from its start. A resume the box
    *  refused has aborted the game and the gameLost hook has held the match
-   *  by the time this answers replay_failed; a box that did not answer
-   *  leaves the game live and the match as it was (replay_no_answer). */
+   *  by the time this answers replay_failed; a box that did not answer the
+   *  abort leaves the game live and the match as it was (replay_no_answer);
+   *  one that answered the abort but not the resume has dropped its match
+   *  and any freeze with it, while the site keeps the game live for staff
+   *  to replay again (replay_dropped). */
   async replayChapter(matchId: number, by: string, ordinal: unknown): Promise<V.Checked<{ map: string }>> {
     const m = P.getMatch(this.db, matchId);
     if (!m) return V.fail('match_not_found');
@@ -914,11 +932,15 @@ export class SeriesEngine {
     const gameMatchId = live.game.match_id!;
     const snap = restoreSnapshot(this.db, gameMatchId, { replayFrom: ordinal as number });
     if (!snap) return V.fail('chapter_not_replayable');
-    this.expectReset(m, gameMatchId);
+    const exp = this.expectReset(m, gameMatchId);
     const r = await this.deps.runner.replayGame(b.id, gameMatchId, snap);
-    this.afterReset(m.id, r === 'busy' ? 'none' : r === 'error' ? 'unknown' : 'lifted');
+    this.afterReset(m.id, exp, r === 'busy' ? 'none' : r === 'error' ? 'unknown' : 'lifted');
     if (r === 'busy') return V.fail('changed');
     if (r === 'error') return V.fail('replay_no_answer');
+    if (r === 'dropped') {
+      this.push(m.id);
+      return V.fail('replay_dropped');
+    }
     if (r === 'refused') {
       this.push(m.id);
       return V.fail('replay_failed');
@@ -940,13 +962,21 @@ export class SeriesEngine {
     const b = this.runningBooking(m);
     if (!b) return V.fail('no_box');
     const live = this.liveGameOf(m);
-    if (live) this.expectReset(m, live.game.match_id!);
-    const old = await this.deps.runner.moveBooking(b.id);
-    if (live) this.afterReset(m.id, old === null ? 'none' : 'lifted');
+    const frozen = m.admin_pause_at !== null;
+    const exp = live ? this.expectReset(m, live.game.match_id!) : null;
+    let old: number | null;
+    try {
+      old = await this.deps.runner.moveBooking(b.id);
+    } catch (err) {
+      this.afterReset(m.id, exp, 'none');
+      throw err;
+    }
+    this.afterReset(m.id, exp, old === null ? 'none' : 'lifted');
     if (old === null) return V.fail('no_box');
     const r = R.noteMove(this.db, { matchId: m.id, by, fromServerId: old, now: new Date(this.now()) });
     if (!r.ok) return r;
-    this.alert(m, `staff moved it off ${getServer(this.db, old)?.name ?? `server ${old}`}. It takes the first idle box in its region and the game is restored there; with none free it waits, then is held.`);
+    const lifted = frozen ? ' The staff freeze is lifted (the new box starts unfrozen); freeze it again from the Events desk if needed.' : '';
+    this.alert(m, `staff moved it off ${getServer(this.db, old)?.name ?? `server ${old}`}. It takes the first idle box in its region and the game is restored there; with none free it waits, then is held.${lifted}`);
     tellStaffAction(this.deps, m.event_id, m.id, 'server_moved');
     this.push(m.id);
     return V.ok(P.getMatch(this.db, m.id)!);
@@ -968,7 +998,7 @@ export class SeriesEngine {
     const m = P.getMatch(this.db, matchId);
     if (!m) return V.fail('match_not_found');
     const b = m.booking_id !== null ? B.getBooking(this.db, m.booking_id) : undefined;
-    const grace = b ? B.bookingRules(b)?.noShowGraceMinutes ?? 15 : 15;
+    const grace = b ? B.bookingRules(b)?.noShowGraceMinutes ?? DEFAULT_GRACE_MINUTES : DEFAULT_GRACE_MINUTES;
     const r = R.releaseHold(this.db, { matchId, by, timers: R.roomTimers(this.db), graceMinutes: grace, now: new Date(this.now()) });
     if (!r.ok) return r;
     if (b && B.isOpen(b) && (r.value.status === 'connect' || r.value.status === 'live')) this.deps.runner.announce(b.id, 'Staff released the hold on this match. Play on.');
