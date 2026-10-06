@@ -26,8 +26,9 @@ export const MIN = 60_000;
 export interface SeriesFixture extends RoomFixture {
   t: { t: number }; runner: BookingRunner; series: SeriesEngine; clock: RoomClock;
   sent: string[];
-  /** subOk / freezeOk: pug-match takes sm_pug_sub / sm_pug_adminpause (else it answers PUGERR subErr / PUGERR no match configured). */
-  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
+  /** subOk / freezeOk: pug-match takes sm_pug_sub / sm_pug_adminpause (else it answers PUGERR subErr / PUGERR no match configured).
+   *  failOn: an rcon burst with a command starting with this throws (the connection dropped on it), as `down` does for every burst. */
+  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; failOn: string | null; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
   /** The room clock (which ticks the series engine), then the runner's
    *  minute pass, then any tracked work. */
   tick(): Promise<void>;
@@ -63,7 +64,7 @@ export async function seriesFixture(o: {
   f.db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(serverId);
   const t = { t: NOW.getTime() + 10 * MIN };
   const sent: string[] = [];
-  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
+  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, failOn: null as string | null, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
   const status = () => [
     'hostname: test', `map     : ${box.map} at: 0 x, 0 y, 0 z`, `players : ${box.humans.length} humans, 0 bots (31 max)`,
     '# userid name uniqueid connected ping loss state rate adr',
@@ -71,6 +72,8 @@ export async function seriesFixture(o: {
   ].join('\n');
   const rcon = async (_s: ServerRow, cmds: string[]): Promise<string[]> => {
     if (box.down) throw new Error('rcon connect timeout');
+    const failOn = box.failOn;
+    if (failOn !== null && cmds.some((c) => c.startsWith(failOn))) throw new Error('rcon read timeout');
     return cmds.map((c) => {
       sent.push(c);
       if (c === 'status') return status();

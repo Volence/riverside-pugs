@@ -26,6 +26,7 @@ import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistr
 import { EVENT_ERRORS } from '../src/events/validate.js';
 import { adminPauseTook, parseSubReply } from '../src/events/series.js';
 import { recordPresenceLine } from '../src/presence.js';
+import { restoreSnapshot } from '../src/bookings/restore.js';
 
 // addTournamentSub returns null for a game that is not a tournament one; the
 // engine's token lookup cannot reach that, so a test forces it (plan T3c ledger).
@@ -34,6 +35,39 @@ vi.mock('../src/bookings/tournamentGames.js', async (importOriginal) => {
   const orig = await importOriginal<typeof import('../src/bookings/tournamentGames.js')>();
   return { ...orig, addTournamentSub: (...a: Parameters<typeof orig.addTournamentSub>) => (subHook.nullNext ? null : orig.addTournamentSub(...a)) };
 });
+
+/** A restore needs the campaign's chapter list (the base game's missions file). */
+function useNoMercy(): void {
+  const NO_MERCY = `"mission"
+{
+  "Name" "hospital"
+  "DisplayTitle" "No Mercy"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "l4d_vs_hospital01_apartment" "DisplayName" "The Apartments" }
+      "2" { "Map" "l4d_vs_hospital02_subway" "DisplayName" "The Subway" }
+      "3" { "Map" "l4d_vs_hospital03_sewers" "DisplayName" "The Sewers" }
+      "4" { "Map" "l4d_vs_hospital04_interior" "DisplayName" "The Hospital" }
+      "5" { "Map" "l4d_vs_hospital05_rooftop" "DisplayName" "Rooftop Finale" }
+    }
+  }
+}
+`;
+  let missionsDir = '';
+  beforeEach(() => {
+    missionsDir = mkdtempSync(join(tmpdir(), 'missions-'));
+    writeFileSync(join(missionsDir, 'hospital.txt'), NO_MERCY);
+    setMissionsDirs([missionsDir]);
+    invalidateCampaignCache();
+  });
+  afterEach(() => {
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    rmSync(missionsDir, { recursive: true, force: true });
+  });
+}
 
 let f: SeriesFixture;
 afterEach(() => f?.close());
@@ -767,36 +801,7 @@ describe('SeriesEngine: the pick route on a live match (plan T3b Task 8)', () =>
 });
 
 describe('BookingRunner on a tournament box (plan T3c)', () => {
-  // A restore needs the campaign's chapter list (the base game's missions file).
-  const NO_MERCY = `"mission"
-{
-  "Name" "hospital"
-  "DisplayTitle" "No Mercy"
-  "modes"
-  {
-    "versus"
-    {
-      "1" { "Map" "l4d_vs_hospital01_apartment" "DisplayName" "The Apartments" }
-      "2" { "Map" "l4d_vs_hospital02_subway" "DisplayName" "The Subway" }
-      "3" { "Map" "l4d_vs_hospital03_sewers" "DisplayName" "The Sewers" }
-      "4" { "Map" "l4d_vs_hospital04_interior" "DisplayName" "The Hospital" }
-      "5" { "Map" "l4d_vs_hospital05_rooftop" "DisplayName" "Rooftop Finale" }
-    }
-  }
-}
-`;
-  let missionsDir = '';
-  beforeEach(() => {
-    missionsDir = mkdtempSync(join(tmpdir(), 'missions-'));
-    writeFileSync(join(missionsDir, 'hospital.txt'), NO_MERCY);
-    setMissionsDirs([missionsDir]);
-    invalidateCampaignCache();
-  });
-  afterEach(() => {
-    setMissionsDirs([]);
-    invalidateCampaignCache();
-    rmSync(missionsDir, { recursive: true, force: true });
-  });
+  useNoMercy();
 
   it('pushes sm_pug_tournament 1 with the booking lines and sends a burst to the running box only', async () => {
     f = await seriesFixture();
@@ -1158,5 +1163,313 @@ describe('pug-match 0.3.25 rcon answers (plugin/pug-tourney.inc)', () => {
     expect(adminPauseTook('PUGOK adminpause=off frozen=0', true)).toBe(false);
     expect(adminPauseTook('PUGERR bad token', true)).toBe(false);
     expect(adminPauseTook(null, false)).toBe(false);
+  });
+});
+
+describe('SeriesEngine: the desk tools (plan T3c)', () => {
+  useNoMercy();
+
+  it('replays a chapter of the live game through the box and tells both rosters; refuses the finale and a chapter not reached', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1).match_id!;
+    f.goLive(g1, 'l4d_vs_hospital03_sewers');
+    const round = f.db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
+    round.run(g1, 0, 1, 'a', 300); round.run(g1, 0, 2, 'b', 200); round.run(g1, 1, 1, 'a', 100); round.run(g1, 1, 2, 'b', 150); round.run(g1, 2, 1, 'a', 10);
+    f.db.prepare("INSERT INTO match_live_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, 0, 'l4d_vs_hospital01_apartment', 300, 200), (?, 1, 'l4d_vs_hospital02_subway', 100, 150), (?, 2, 'l4d_vs_hospital03_sewers', 0, 0)").run(g1, g1, g1);
+    expect(f.series.replayable(f.matchId)).toEqual([
+      { ordinal: 0, map: 'l4d_vs_hospital01_apartment' }, { ordinal: 1, map: 'l4d_vs_hospital02_subway' }, { ordinal: 2, map: 'l4d_vs_hospital03_sewers' },
+    ]);
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 3)).toEqual({ ok: false, error: 'chapter_not_replayable' });
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 'x')).toEqual({ ok: false, error: 'chapter_not_replayable' });
+    f.box.resumeOk = true;
+    f.sent.length = 0;
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 1)).toEqual({ ok: true, value: { map: 'l4d_vs_hospital02_subway' } });
+    expect(f.sent).toContain('changelevel l4d_vs_hospital02_subway');
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM match_rounds WHERE match_id = ?').get(g1)).toEqual({ n: 2 });
+    expect(f.db.prepare("SELECT detail FROM event_log WHERE action = 'chapter_replayed'").get()).toEqual({ detail: JSON.stringify({ matchId: f.matchId, gameId: f.gameOf(1).id, ordinal: 1, map: 'l4d_vs_hospital02_subway' }) });
+    expect(f.send).toHaveBeenCalledWith(expect.arrayContaining([A[0], BATS[0]]), 'event_match_staff', expect.objectContaining({ content: expect.stringContaining('replayed from its start (chapter 2 of No Mercy)') }));
+    expect(f.match().status).toBe('live');
+    // The plugin refuses: aborted, held, the route hears replay_failed.
+    f.box.resumeOk = false;
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 0)).toEqual({ ok: false, error: 'replay_failed' });
+    expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'game_lost', hold_from: 'live' });
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 0)).toEqual({ ok: false, error: 'not_live_phase' });
+  });
+
+  it('moves the match to another server and notes it; refuses with no spare box only once the wait runs out', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.goLive(f.gameOf(1).match_id!, 'l4d_vs_hospital01_apartment');
+    f.box.resumeOk = true;
+    const old = f.booking().server_id!;
+    f.addServer('box2');
+    const r = await f.series.moveServer(f.matchId, ADMIN);
+    expect(r.ok).toBe(true);
+    await f.runner.idle();
+    expect(f.booking().server_id).not.toBe(old);
+    expect(f.db.prepare("SELECT detail FROM event_log WHERE action = 'server_moved'").get()).toEqual({ detail: JSON.stringify({ matchId: f.matchId, fromServerId: old }) });
+    expect(f.send).toHaveBeenCalledWith(expect.arrayContaining([A[0], BATS[0]]), 'event_match_staff', expect.objectContaining({ content: expect.stringContaining('moved the match to another server') }));
+    expect(f.match().status).toBe('live');
+    // Recovering: a second move is refused.
+    f.db.prepare("UPDATE bookings SET recovering_at = ? WHERE id = ?").run(new Date(f.t.t).toISOString(), f.booking().id);
+    expect(await f.series.moveServer(f.matchId, ADMIN)).toEqual({ ok: false, error: 'no_box' });
+  });
+
+  it('extends the grace and says so on the box; releases a hold back where it came from; reopens the veto and cancels the booking', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    expect(f.series.extendGrace(f.matchId, ADMIN, 61)).toEqual({ ok: false, error: 'bad_minutes' });
+    const before = f.match().deadline!;
+    const r = f.series.extendGrace(f.matchId, ADMIN, 10);
+    expect(r.ok && r.value.deadline).toBe(new Date(Date.parse(before) + 10 * MIN).toISOString());
+    expect(f.sent.some((c) => c.startsWith('say [Match] Staff gave both teams 10 more minutes to connect'))).toBe(true);
+    expect(f.send).toHaveBeenCalledWith(expect.anything(), 'event_match_staff', expect.objectContaining({ content: expect.stringContaining('extended the time to connect (10 minutes)') }));
+    // A hold from connect releases to a fresh grace from the booking's rules.
+    R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: new Date(f.t.t) });
+    f.t.t += 3 * MIN;
+    const released = f.series.releaseHold(f.matchId, ADMIN);
+    const grace = B.bookingRules(f.booking())!.noShowGraceMinutes;
+    expect(released.ok && released.value).toMatchObject({ status: 'connect', deadline: new Date(f.t.t + grace * MIN).toISOString() });
+    expect(f.send).toHaveBeenCalledWith(expect.anything(), 'event_match_staff', expect.objectContaining({ content: expect.stringContaining('released the hold') }));
+    expect(f.series.releaseHold(f.matchId, ADMIN)).toEqual({ ok: false, error: 'not_held' });
+    // Reopen: a booked room with no game pushed yet (the game row exists, so it is refused) and a room before booking.
+    expect(f.series.reopenVeto(f.matchId, ADMIN)).toEqual({ ok: false, error: 'game_started' });
+    expect(f.booking().ending_at).toBeNull();
+    f.close();
+    f = await seriesFixture();
+    f.db.prepare("UPDATE servers SET status = 'live'").run();
+    await f.tick();
+    expect(f.match().status).toBe('booking');
+    expect(f.booking().state).toBe('scheduled');
+    const reopened = f.series.reopenVeto(f.matchId, ADMIN);
+    expect(reopened.ok && reopened.value.status).toBe('veto');
+    expect(f.db.prepare('SELECT state FROM bookings').get()).toEqual({ state: 'cancelled' });
+    expect(f.match().booking_id).toBeNull();
+    expect(f.send).toHaveBeenCalledWith(expect.anything(), 'event_match_staff', expect.objectContaining({ content: expect.stringContaining('reopened the veto') }));
+  });
+});
+
+/** A live game 1 on the subway with chapter 1 finished (Task 4 and Task 7 ledger tests). */
+async function liveOnSubway(): Promise<{ g1: number; token: string; rounds: () => number }> {
+  f = await seriesFixture();
+  await f.tick();
+  const g1 = f.gameOf(1).match_id!;
+  f.goLive(g1, 'l4d_vs_hospital02_subway');
+  const round = f.db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
+  round.run(g1, 0, 1, 'a', 300); round.run(g1, 0, 2, 'b', 200); round.run(g1, 1, 1, 'a', 50);
+  f.db.prepare("INSERT INTO match_live_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, 0, 'l4d_vs_hospital01_apartment', 300, 200), (?, 1, 'l4d_vs_hospital02_subway', 0, 0)").run(g1, g1);
+  return {
+    g1, token: f.liveGameToken(),
+    rounds: () => (f.db.prepare('SELECT COUNT(*) AS n FROM match_rounds WHERE match_id = ?').get(g1) as { n: number }).n,
+  };
+}
+
+describe('BookingRunner.replayGame answers (plan T3c Task 4 ledger)', () => {
+  useNoMercy();
+  const state = (id: number) => f.db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(id);
+
+  it('refused: the game is aborted but the rows of the chapters the replay would have dropped stay', async () => {
+    const { g1, rounds } = await liveOnSubway();
+    f.box.resumeOk = false;
+    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 0 })!)).toBe('refused');
+    expect(state(g1)).toEqual({ state: 'aborted', abort_cause: 'server_lost' });
+    expect(rounds()).toBe(3);
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM match_live_maps WHERE match_id = ?').get(g1)).toEqual({ n: 2 });
+  });
+
+  it('error: the abort line never got an answer, so nothing is aborted, held or dropped', async () => {
+    const { g1, rounds } = await liveOnSubway();
+    f.box.resumeOk = true;
+    f.box.failOn = 'sm_pug_abort';
+    f.sent.length = 0;
+    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('error');
+    expect(state(g1)).toEqual({ state: 'live', abort_cause: null });
+    expect(f.match().status).toBe('live');
+    expect(rounds()).toBe(3);
+    expect(f.sent.some((c) => c.startsWith('sm_pug_resume') || c.startsWith('changelevel'))).toBe(false);
+  });
+
+  it('error: the resume burst dropped after the abort was answered: the game stays live on the site for staff to try again', async () => {
+    const { g1, rounds } = await liveOnSubway();
+    f.box.resumeOk = true;
+    f.box.failOn = 'sm_pug_resume_commit';
+    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('error');
+    expect(state(g1)).toEqual({ state: 'live', abort_cause: null });
+    expect(f.match().status).toBe('live');
+    expect(rounds()).toBe(3);
+    // Staff try again once the box answers.
+    f.box.failOn = null;
+    expect(await f.runner.replayGame(f.booking().id, g1, restoreSnapshot(f.db, g1, { replayFrom: 1 })!)).toBe('ok');
+    expect(rounds()).toBe(2);
+  });
+
+  it('busy: a booking not running, another game, another token or a replay already running touch nothing', async () => {
+    const { g1, rounds } = await liveOnSubway();
+    f.box.resumeOk = true;
+    const snap = restoreSnapshot(f.db, g1, { replayFrom: 1 })!;
+    const id = f.booking().id;
+    f.sent.length = 0;
+    expect(await f.runner.replayGame(id + 1000, g1, snap)).toBe('busy');
+    expect(await f.runner.replayGame(id, g1 + 1000, snap)).toBe('busy');
+    expect(await f.runner.replayGame(id, g1, { ...snap, token: 'f'.repeat(32) })).toBe('busy');
+    expect(f.sent).toEqual([]);
+    const first = f.runner.replayGame(id, g1, snap);
+    expect(await f.runner.replayGame(id, g1, snap)).toBe('busy');
+    expect(await first).toBe('ok');
+    expect(f.sent.filter((c) => c.startsWith('sm_pug_abort '))).toHaveLength(1);
+    expect(rounds()).toBe(2);
+  });
+});
+
+describe('SeriesEngine: the desk tools against the box (plan T3c Task 7 ledger)', () => {
+  useNoMercy();
+  const reset = (token: string) => `PUG ${token} ADMINPAUSE state=off by=site cause=reset`;
+
+  it('a replay the box never answered is refused for staff without holding the match', async () => {
+    const { g1, rounds } = await liveOnSubway();
+    f.box.resumeOk = true;
+    f.box.failOn = 'sm_pug_abort';
+    expect(await f.series.replayChapter(f.matchId, ADMIN, 1)).toEqual({ ok: false, error: 'replay_no_answer' });
+    expect(f.match()).toMatchObject({ status: 'live', hold_reason: null });
+    expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(g1)).toEqual({ state: 'live' });
+    expect(rounds()).toBe(3);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'chapter_replayed'").get()).toEqual({ n: 0 });
+    expect(f.send).not.toHaveBeenCalledWith(expect.anything(), 'event_match_staff', expect.anything());
+    expect(EVENT_ERRORS.replay_no_answer.status).toBe(502);
+  });
+
+  it('a late reset from a replay\'s abort never lifts a freeze set after the replay; a later reset of the game still does', async () => {
+    const { token } = await liveOnSubway();
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    f.box.resumeOk = true;
+    expect((await f.series.replayChapter(f.matchId, ADMIN, 1)).ok).toBe(true);
+    // The abort lifted the box's freeze: the site says so before the box's line arrives.
+    expect(f.match().admin_pause_at).toBeNull();
+    expect(f.db.prepare("SELECT actor, json_extract(detail, '$.cause') AS cause FROM event_log WHERE action = 'match_unfrozen'").all()).toEqual([{ actor: null, cause: 'reset' }]);
+    expect((await f.series.freeze(f.matchId, ADMIN, true)).ok).toBe(true);
+    await f.line(reset(token));
+    expect(f.match().admin_pause_by).toBe(ADMIN);
+    // Consumed once: the game's own next reset is the truth again.
+    await f.line(reset(token));
+    expect(f.match().admin_pause_at).toBeNull();
+  });
+
+  it('the abort\'s reset arriving during the replay lifts the freeze once and leaves later lines alone', async () => {
+    const { token } = await liveOnSubway();
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    f.box.resumeOk = true;
+    const orig = f.runner.replayGame.bind(f.runner);
+    vi.spyOn(f.runner, 'replayGame').mockImplementationOnce(async (...a) => { await f.line(reset(token)); return orig(...a); });
+    expect((await f.series.replayChapter(f.matchId, ADMIN, 1)).ok).toBe(true);
+    expect(f.match().admin_pause_at).toBeNull();
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'match_unfrozen'").get()).toEqual({ n: 1 });
+    expect((await f.series.freeze(f.matchId, ADMIN, true)).ok).toBe(true);
+    await f.line(reset(token));
+    expect(f.match().admin_pause_at).toBeNull();
+  });
+
+  it('a late reset after a move leaves the freeze set on the new box alone, and the move records the old box\'s freeze as lifted', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.goLive(f.gameOf(1).match_id!, 'l4d_vs_hospital01_apartment');
+    const token = f.liveGameToken();
+    f.box.resumeOk = true;
+    f.addServer('box2');
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    expect((await f.series.moveServer(f.matchId, ADMIN)).ok).toBe(true);
+    await f.runner.idle();
+    expect(f.match().admin_pause_at).toBeNull();
+    expect(f.liveGameToken()).toBe(token);
+    expect((await f.series.freeze(f.matchId, ADMIN, true)).ok).toBe(true);
+    await f.line(reset(token));
+    expect(f.match().admin_pause_by).toBe(ADMIN);
+  });
+
+  it('a move of an unfrozen match expects no reset: a later freeze and its reset behave as before', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.goLive(f.gameOf(1).match_id!, 'l4d_vs_hospital01_apartment');
+    const token = f.liveGameToken();
+    f.box.resumeOk = true;
+    f.addServer('box2');
+    expect((await f.series.moveServer(f.matchId, ADMIN)).ok).toBe(true);
+    await f.runner.idle();
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'match_unfrozen'").get()).toEqual({ n: 0 });
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=${A[2]} cause=call`);
+    await f.line(reset(token));
+    expect(f.match().admin_pause_at).toBeNull();
+  });
+});
+
+describe('SeriesEngine: subs and the freeze, Task 6 ledger', () => {
+  const live = async () => {
+    f = await seriesFixture();
+    await f.tick();
+    f.box.humans = [...A.slice(0, 4), ...BATS.slice(0, 4), A[4]!];
+    f.goLive(f.gameOf(1).match_id!);
+    return f.liveGameToken();
+  };
+
+  it('re-sends a recorded sub only for a manager of its side and only while the match is in a sub phase', async () => {
+    const token = await live();
+    f.box.subOk = false;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+    f.box.subOk = true;
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${BATS[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(f.sent.some((c) => c.startsWith(`say [Match] Sub refused: ${EVENT_ERRORS.not_manager.text}`))).toBe(true);
+    expect(f.sent.some((c) => c.startsWith('sm_pug_sub '))).toBe(false);
+    R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: new Date(f.t.t) });
+    f.sent.length = 0;
+    await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    expect(f.sent.some((c) => c.startsWith(`say [Match] Sub refused: ${EVENT_ERRORS.not_live_phase.text}`))).toBe(true);
+    expect(f.sent.some((c) => c.startsWith('sm_pug_sub '))).toBe(false);
+    expect(R.subsUsed(f.db, f.match(), 'a')).toBe(1);
+  });
+
+  it('alerts staff when a sub the box refused cannot be undone, and tells the captain the site still has it', async () => {
+    const token = await live();
+    f.box.subOk = false;
+    f.box.subErr = 'not between chapters';
+    const orig = f.runner.send.bind(f.runner);
+    // Staff hold the match while the box is asked: the undo is refused.
+    vi.spyOn(f.runner, 'send').mockImplementationOnce(async (...a) => {
+      R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: new Date(f.t.t) });
+      return orig(...a);
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    f.sent.length = 0;
+    try {
+      await f.line(`PUG ${token} SUB by=${A[0]} out=${A[3]} in=${A[4]} map=0`);
+    } finally {
+      err.mockRestore();
+    }
+    expect(f.sent.some((c) => c.startsWith('say [Match] Sub refused'))).toBe(false);
+    expect(f.sent.some((c) => c.includes('but a chapter is being played') && c.includes('Staff were told'))).toBe(true);
+    expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('could not be undone'))).toHaveLength(1);
+    expect(R.lineupFour(f.db, f.matchId, f.entryA)).toEqual([A[0], A[1], A[2], A[4]]);
+  });
+
+  it('the box\'s own staff line during a desk freeze or unfreeze records the staff member, not a null actor', async () => {
+    const token = await live();
+    const orig = f.runner.send.bind(f.runner);
+    const echo = (state: 'on' | 'off') => async (...a: Parameters<typeof orig>) => {
+      const r = await orig(...a);
+      await f.line(`PUG ${token} ADMINPAUSE state=${state} by=site cause=staff`);
+      return r;
+    };
+    const spy = vi.spyOn(f.runner, 'send').mockImplementationOnce(echo('on'));
+    expect((await f.series.freeze(f.matchId, ADMIN, true)).ok).toBe(true);
+    expect(f.match().admin_pause_by).toBe(ADMIN);
+    spy.mockImplementationOnce(echo('off'));
+    expect((await f.series.freeze(f.matchId, ADMIN, false)).ok).toBe(true);
+    expect(f.db.prepare("SELECT action, actor FROM event_log WHERE action IN ('match_frozen', 'match_unfrozen') ORDER BY id").all())
+      .toEqual([{ action: 'match_frozen', actor: ADMIN }, { action: 'match_unfrozen', actor: ADMIN }]);
+    // Outside a desk call the box's staff line is recorded as it says.
+    await f.line(`PUG ${token} ADMINPAUSE state=on by=site cause=staff`);
+    expect(f.match()).toMatchObject({ admin_pause_by: null });
+    expect(f.match().admin_pause_at).not.toBeNull();
   });
 });
