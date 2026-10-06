@@ -25,7 +25,9 @@ describe('rules lines', () => {
     expect(rulesLines(TEMPLATES['Standard Cup'])).toEqual([
       'Pauses: 3 per team, up to 120 s each',
       'Unpausing needs both teams',
-      'Technical pauses: 2 per team',
+      'Technical pauses: 2 per team per game, 5:00 of technical time in all; past it a pause uses tactical pauses',
+      'Reconnect time: 10:00 per team per game; at zero the team forfeits the game',
+      'Subs: 2 per match, one may come in mid-chapter for a disconnected player',
       'No-show grace: 15 minutes',
       'Higher seed picks sides',
       'Boss spawns: random, shown in game',
@@ -38,12 +40,23 @@ describe('rules lines', () => {
     expect(rulesLines(TEMPLATES['Casual Scrim'])).toEqual([
       'Pauses: no limit',
       'Unpausing needs both teams',
+      'Reconnect time: 10:00 per team per game; at zero the team forfeits the game',
+      'Subs: 2 per match, one may come in mid-chapter for a disconnected player',
       'No-show grace: 15 minutes',
       'The team that did not pick the campaign picks sides',
       'Boss spawns: random, shown in game',
       'Teams are locked once the match is live',
       'A half can be restarted',
     ]);
+  });
+
+  it('says the technical time, the reconnect time and the subs (plan T5)', () => {
+    const lines = rulesLines(TEMPLATES['Standard Cup']);
+    expect(lines).toContain('Technical pauses: 2 per team per game, 5:00 of technical time in all; past it a pause uses tactical pauses');
+    expect(lines).toContain('Reconnect time: 10:00 per team per game; at zero the team forfeits the game');
+    expect(lines).toContain('Subs: 2 per match, one may come in mid-chapter for a disconnected player');
+    expect(rulesLines({ ...TEMPLATES['Standard Cup'], pause: { ...TEMPLATES['Standard Cup'].pause, techPauses: 0 } }).some((l) => l.startsWith('Technical pauses'))).toBe(false);
+    expect(rulesLines({ ...TEMPLATES['Standard Cup'], subs: { perMatch: 1, emergency: false, emergencyChargeSeconds: 0 } })).toContain('Subs: 1 per match, between chapters');
   });
 });
 

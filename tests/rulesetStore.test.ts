@@ -28,10 +28,25 @@ beforeEach(() => {
 
 describe('reading the editable rules', () => {
   it('takes every field and turns blank pause limits into no limit', () => {
-    expect(okOf(readEditableRules(edit({ pause: { limit: null, seconds: null, mutualUnpause: false, techPauses: 0 } }))).pause)
-      .toEqual({ limit: null, seconds: null, mutualUnpause: false, techPauses: 0 });
-    expect(okOf(readEditableRules(edit({ pause: { limit: 0, seconds: 30, mutualUnpause: true, techPauses: 5 } }))).pause)
-      .toEqual({ limit: 0, seconds: 30, mutualUnpause: true, techPauses: 5 });
+    expect(okOf(readEditableRules(edit({ pause: { limit: null, seconds: null, mutualUnpause: false, techPauses: 0, techSeconds: 300 } }))).pause)
+      .toEqual({ limit: null, seconds: null, mutualUnpause: false, techPauses: 0, techSeconds: 300 });
+    expect(okOf(readEditableRules(edit({ pause: { limit: 0, seconds: 30, mutualUnpause: true, techPauses: 5, techSeconds: 300 } }))).pause)
+      .toEqual({ limit: 0, seconds: 30, mutualUnpause: true, techPauses: 5, techSeconds: 300 });
+  });
+
+  it('reads the plan T5 fields when sent and refuses each out of range with its own reason', () => {
+    const body = (over: Record<string, unknown>) => ({ ...cupEditable, ...over });
+    expect(okOf(readEditableRules(body({ disconnect: { teamSeconds: 900 }, staffCall: { cooldownSeconds: 60 }, series: { nextGameSeconds: 120 }, subs: { perMatch: 3, emergency: false, emergencyChargeSeconds: 30 } }))))
+      .toMatchObject({ disconnect: { teamSeconds: 900 }, staffCall: { cooldownSeconds: 60 }, series: { nextGameSeconds: 120 }, subs: { perMatch: 3, emergency: false, emergencyChargeSeconds: 30 } });
+    const { disconnect: _d, staffCall: _c, series: _s, subs: _u, ...bare } = cupEditable;
+    expect(okOf(readEditableRules({ ...bare, pause: { ...cupEditable.pause, techSeconds: undefined } })))
+      .toMatchObject({ pause: { techSeconds: 300 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 }, subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 } });
+    expect(errOf(readEditableRules(body({ pause: { ...cupEditable.pause, techSeconds: 59 } })))).toBe('bad_tech_seconds');
+    expect(errOf(readEditableRules(body({ disconnect: { teamSeconds: 3601 } })))).toBe('bad_reconnect');
+    expect(errOf(readEditableRules(body({ subs: { perMatch: 5, emergency: true, emergencyChargeSeconds: 0 } })))).toBe('bad_subs');
+    expect(errOf(readEditableRules(body({ subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 900 } })))).toBe('bad_sub_charge');
+    expect(errOf(readEditableRules(body({ staffCall: { cooldownSeconds: 20 } })))).toBe('bad_call_cooldown');
+    expect(errOf(readEditableRules(body({ series: { nextGameSeconds: 20 } })))).toBe('bad_next_game');
   });
 
   it('refuses each out-of-range or mistyped field with its own reason', () => {
@@ -145,6 +160,18 @@ describe('editing a ruleset', () => {
     okOf(updateRuleset(db, { by: ADMIN, id: idOf('Standard Cup'), name: 'Standard Cup', rules: edit({ noShowGraceMinutes: 45 }) }));
     expect(db.prepare('SELECT id, rules_json FROM event_stages WHERE event_id = ? ORDER BY id').all(eventId)).toEqual(stagesBefore);
     expect(JSON.parse((db.prepare('SELECT rules_json FROM bookings').get() as { rules_json: string }).rules_json).noShowGraceMinutes).toBe(15);
+  });
+
+  it('keeps every plan T5 field the body leaves out, as it keeps subs', () => {
+    const id = okOf(createRuleset(db, { by: ADMIN, copyFrom: idOf('Standard Cup'), name: 'Spring Cup' })).id;
+    const stored = { ...cupEditable, pause: { ...cupEditable.pause, techSeconds: 120 }, disconnect: { teamSeconds: 900 }, staffCall: { cooldownSeconds: 60 }, series: { nextGameSeconds: 90 }, subs: { perMatch: 1, emergency: false, emergencyChargeSeconds: 20 } };
+    okOf(updateRuleset(db, { by: ADMIN, id, name: 'Spring Cup', rules: stored }));
+    const { disconnect: _d, staffCall: _c, series: _s, subs: _u, ...bare } = stored;
+    okOf(updateRuleset(db, { by: ADMIN, id, name: 'Spring Cup', rules: { ...bare, pause: { limit: 2, seconds: 90, mutualUnpause: true, techPauses: 1 } } }));
+    expect(JSON.parse(row(id).rules_json)).toMatchObject({
+      pause: { limit: 2, seconds: 90, techPauses: 1, techSeconds: 120 }, disconnect: { teamSeconds: 900 }, staffCall: { cooldownSeconds: 60 }, series: { nextGameSeconds: 90 },
+      subs: { perMatch: 1, emergency: false, emergencyChargeSeconds: 20 },
+    });
   });
 });
 

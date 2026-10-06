@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { parseRules, type MatchRules } from './rulesets.js';
+import { MATCH_PLAY_DEFAULTS, RULE_RANGES, parseRules, type MatchRules } from './rulesets.js';
 import { rulesSummary } from './events/format.js';
 import { OPEN_STATES_SQL } from './bookings/rules.js';
 import { logAdmin } from './admin/audit.js';
@@ -35,6 +35,12 @@ export const RULESET_ERRORS = {
   bad_tech_pauses: { status: 400, text: 'Technical pauses is a whole number from 0 to 5.' },
   bad_grace: { status: 400, text: 'No-show grace is 5 to 60 minutes.' },
   bad_choice: { status: 400, text: 'Pick one of the listed options.' },
+  bad_tech_seconds: { status: 400, text: 'Technical time is 60 to 1800 seconds per team per game.' },
+  bad_reconnect: { status: 400, text: 'Reconnect time is 60 to 3600 seconds per team per game.' },
+  bad_subs: { status: 400, text: 'Subs per match is a whole number from 0 to 4.' },
+  bad_sub_charge: { status: 400, text: 'An emergency sub costs 0 to 600 seconds of reconnect time.' },
+  bad_call_cooldown: { status: 400, text: 'The !admin cooldown is 30 to 600 seconds.' },
+  bad_next_game: { status: 400, text: 'The next game follows after 30 to 600 seconds.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type RulesetError = keyof typeof RULESET_ERRORS;
 export type RulesetResult<T> = { ok: true; value: T } | { ok: false; error: RulesetError };
@@ -119,12 +125,30 @@ export function readEditableRules(raw: unknown): RulesetResult<EditableRules> {
   for (const b of [pause.mutualUnpause, r.teamLock, r.playerMapControl, restartHalf.allowed, restartHalf.lockAfterDamage, spectate.sideLocked]) {
     if (typeof b !== 'boolean') return fail('bad_rules');
   }
-  // Tournaments plan T3c: the editor has no field for subs yet, so a body
-  // without them reads as the default; one with them is range-checked.
+  // Plan T3c subs and the plan T5 fields: a body without one reads as the
+  // default (updateRuleset fills in the stored value first); one with it is
+  // range-checked, each with its own sentence.
+  const within = (v: unknown, range: readonly [number, number]) => whole(v, range[0], range[1]);
+  if (pause.techSeconds !== undefined && !within(pause.techSeconds, RULE_RANGES.techSeconds)) return fail('bad_tech_seconds');
   const subs = r.subs as Record<string, unknown> | null | undefined;
-  if (subs !== undefined && (typeof subs !== 'object' || subs === null || !whole(subs.perMatch, 0, 4))) return fail('bad_rules');
+  if (subs !== undefined && (typeof subs !== 'object' || subs === null || !whole(subs.perMatch, 0, 4))) return fail('bad_subs');
+  if (subs && subs.emergency !== undefined && typeof subs.emergency !== 'boolean') return fail('bad_rules');
+  if (subs && subs.emergencyChargeSeconds !== undefined && !within(subs.emergencyChargeSeconds, RULE_RANGES.emergencyChargeSeconds)) return fail('bad_sub_charge');
+  const field = (key: 'disconnect' | 'staffCall' | 'series', name: string): unknown => {
+    const v = r[key];
+    return typeof v === 'object' && v !== null ? (v as Record<string, unknown>)[name] : v === undefined ? undefined : null;
+  };
+  const teamSeconds = field('disconnect', 'teamSeconds');
+  if (teamSeconds !== undefined && !within(teamSeconds, RULE_RANGES.teamSeconds)) return fail('bad_reconnect');
+  const cooldownSeconds = field('staffCall', 'cooldownSeconds');
+  if (cooldownSeconds !== undefined && !within(cooldownSeconds, RULE_RANGES.cooldownSeconds)) return fail('bad_call_cooldown');
+  const nextGameSeconds = field('series', 'nextGameSeconds');
+  if (nextGameSeconds !== undefined && !within(nextGameSeconds, RULE_RANGES.nextGameSeconds)) return fail('bad_next_game');
   return ok({
-    pause: { limit: pause.limit as number | null, seconds: pause.seconds as number | null, mutualUnpause: pause.mutualUnpause as boolean, techPauses: pause.techPauses as number },
+    pause: {
+      limit: pause.limit as number | null, seconds: pause.seconds as number | null, mutualUnpause: pause.mutualUnpause as boolean, techPauses: pause.techPauses as number,
+      techSeconds: (pause.techSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.techSeconds,
+    },
     teamLock: r.teamLock as boolean,
     playerMapControl: r.playerMapControl as boolean,
     restartHalf: { allowed: restartHalf.allowed as boolean, lockAfterDamage: (restartHalf.allowed as boolean) && (restartHalf.lockAfterDamage as boolean) },
@@ -132,7 +156,14 @@ export function readEditableRules(raw: unknown): RulesetResult<EditableRules> {
     bosses: r.bosses as MatchRules['bosses'],
     sideRule: r.sideRule as MatchRules['sideRule'],
     spectate: { sideLocked: spectate.sideLocked as boolean },
-    subs: { perMatch: subs ? (subs.perMatch as number) : 2 },
+    subs: {
+      perMatch: subs ? (subs.perMatch as number) : 2,
+      emergency: (subs?.emergency as boolean | undefined) ?? MATCH_PLAY_DEFAULTS.emergency,
+      emergencyChargeSeconds: (subs?.emergencyChargeSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.emergencyChargeSeconds,
+    },
+    disconnect: { teamSeconds: (teamSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.teamSeconds },
+    staffCall: { cooldownSeconds: (cooldownSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.cooldownSeconds },
+    series: { nextGameSeconds: (nextGameSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.nextGameSeconds },
   });
 }
 
@@ -142,7 +173,7 @@ export function unratedRules(e: EditableRules): MatchRules {
   return {
     rated: false, pause: e.pause, teamLock: e.teamLock, playerMapControl: e.playerMapControl, restartHalf: e.restartHalf,
     noShowGraceMinutes: e.noShowGraceMinutes, penalties: false, bosses: e.bosses, sideRule: e.sideRule, spectate: e.spectate,
-    subs: e.subs,
+    subs: e.subs, disconnect: e.disconnect, staffCall: e.staffCall, series: e.series,
   };
 }
 
@@ -174,6 +205,18 @@ export function createRuleset(db: DB, o: { by: string; copyFrom: unknown; name: 
   })();
 }
 
+/** A body's missing rule objects and fields filled from the stored rules, so
+ *  an editor that does not send them (an older web bundle, or a field the
+ *  form leaves out) never resets them to the defaults (plan T3c subs, plan T5). */
+function mergeStored(body: unknown, stored: MatchRules | null): unknown {
+  if (typeof body !== 'object' || body === null || stored === null) return body;
+  const b = { ...(body as Record<string, unknown>) };
+  for (const key of ['subs', 'disconnect', 'staffCall', 'series'] as const) if (!(key in b)) b[key] = stored[key];
+  if (typeof b.subs === 'object' && b.subs !== null) b.subs = { emergency: stored.subs.emergency, emergencyChargeSeconds: stored.subs.emergencyChargeSeconds, ...(b.subs as object) };
+  if (typeof b.pause === 'object' && b.pause !== null && !('techSeconds' in (b.pause as object))) b.pause = { ...(b.pause as object), techSeconds: stored.pause.techSeconds };
+  return b;
+}
+
 /** Change a ruleset's name and rules. PUG is refused; a template keeps its name. */
 export function updateRuleset(db: DB, o: { by: string; id: number; name: unknown; rules: unknown }): RulesetResult<null> {
   return db.transaction((): RulesetResult<null> => {
@@ -184,9 +227,8 @@ export function updateRuleset(db: DB, o: { by: string; id: number; name: unknown
     if (!name) return fail('bad_name');
     if (row.template === 1 && name !== row.name) return fail('template_locked');
     if (nameTaken(db, name, row.id)) return fail('name_taken');
-    // A body without subs keeps the ruleset's stored value (the editor sends none, plan T3c).
-    const stored = rulesOf(row)?.subs;
-    const body = typeof o.rules === 'object' && o.rules !== null && !('subs' in o.rules) && stored ? { ...(o.rules as object), subs: stored } : o.rules;
+    // A body without a field keeps the ruleset's stored value (plan T3c subs, plan T5).
+    const body = mergeStored(o.rules, rulesOf(row));
     const edited = readEditableRules(body);
     if (!edited.ok) return edited;
     const json = JSON.stringify(unratedRules(edited.value));

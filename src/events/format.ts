@@ -44,7 +44,14 @@ export function rulesLines(r: MatchRules): string[] {
     ? 'Pauses: no limit'
     : `Pauses: ${r.pause.limit} per team${r.pause.seconds !== null ? `, up to ${r.pause.seconds} s each` : ''}`);
   if (r.pause.mutualUnpause) lines.push('Unpausing needs both teams');
-  if (r.pause.techPauses > 0) lines.push(`Technical pauses: ${r.pause.techPauses} per team`);
+  const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  if (r.pause.techPauses > 0) {
+    lines.push(`Technical pauses: ${r.pause.techPauses} per team per game, ${clock(r.pause.techSeconds)} of technical time in all; past it a pause uses tactical pauses`);
+  }
+  lines.push(`Reconnect time: ${clock(r.disconnect.teamSeconds)} per team per game; at zero the team forfeits the game`);
+  lines.push(r.subs.emergency
+    ? `Subs: ${r.subs.perMatch} per match, one may come in mid-chapter for a disconnected player`
+    : `Subs: ${r.subs.perMatch} per match, between chapters`);
   lines.push(`No-show grace: ${r.noShowGraceMinutes} minutes`);
   lines.push(SIDE_RULE[r.sideRule]);
   lines.push(BOSSES[r.bosses]);
