@@ -72,3 +72,14 @@ export function fakeBooking(f: RoomFixture, at: Date): number {
 export function fakeMatch(f: RoomFixture): number {
   return Number(f.db.prepare("INSERT INTO matches (season_id, state, campaign, kind) VALUES (?, 'live', 'no_mercy', 'tournament')").run(currentSeasonId(f.db)).lastInsertRowid);
 }
+
+/** The same room in a window stage (plan T4): the match waits with a
+ *  window of a week from NOW and no time yet, so captains may propose. */
+export async function windowFixture(o: Parameters<typeof roomFixture>[0] & { from?: Date; to?: Date } = {}): Promise<RoomFixture> {
+  const f = await roomFixture(o);
+  const from = o.from ?? o.now ?? NOW;
+  const to = o.to ?? new Date(from.getTime() + 7 * 86_400_000);
+  f.db.prepare("UPDATE event_stages SET scheduling = 'window' WHERE id = ?").run(f.stageId);
+  f.db.prepare('UPDATE event_matches SET window_start = ?, window_end = ? WHERE stage_id = ?').run(from.toISOString(), to.toISOString(), f.stageId);
+  return f;
+}
