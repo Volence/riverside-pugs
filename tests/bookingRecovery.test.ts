@@ -8,7 +8,7 @@ import { setSetting } from '../src/settings.js';
 import { currentSeasonId } from '../src/players.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
-  cancelBooking, confirmBooking, createBooking, endBooking, getBooking,
+  cancelBooking, confirmBooking, createBooking, createTournamentBooking, endBooking, getBooking, setNext,
   beginRecovery, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
 } from '../src/bookings/bookings.js';
 import { bookingLimits, bookingsDue } from '../src/bookings/rules.js';
@@ -749,5 +749,95 @@ describe('box gone', () => {
     expect(getBooking(db, id)!.ended_at).not.toBeNull();
     expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ state: 'aborted', abort_cause: 'booking_ended' });
     expect(unregistered).toContain('tok123');
+  });
+});
+
+describe('srcds restarted under a tournament booking (plan T3b)', () => {
+  useMissions();
+
+  const hooks = () => ({
+    gameLines: vi.fn((_id: number, campaign: string) => [`sm_pug_match 1 tok ${campaign}`]),
+    pendingLines: vi.fn(() => [] as string[]),
+    ready: vi.fn(), presence: vi.fn(), gameEnded: vi.fn(), ended: vi.fn(), gameLost: vi.fn(),
+  });
+  const cmds = () => sent.filter((s) => s.server === 'ccc').flatMap((s) => s.cmds);
+
+  /** A tournament booking set up on ccc, with the given runner hooks. */
+  async function tournament(h: ReturnType<typeof hooks>): Promise<number> {
+    runner = build({ tournament: h });
+    now = START;
+    const r = createTournamentBooking(db, {
+      region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: P[9]!,
+      sides: [{ teamId: null, captain: P[0]!, players: P.slice(0, 4), spectators: [] }, { teamId: null, captain: P[4]!, players: P.slice(4, 8), spectators: [] }],
+      now: new Date(now),
+    });
+    if (!r.ok) throw new Error(r.error);
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, r.value.id)!.state).toBe('ready');
+    return r.value.id;
+  }
+
+  it('a due tiebreak load: auto-track off, the game burst before the changelevel, and next_map loaded', async () => {
+    const h = hooks();
+    const id = await tournament(h);
+    setNext(db, id, 'no_mercy', new Date(now + 10 * MIN).toISOString(), new Date(now), null, 'l4d_vs_hospital04_interior');
+    crash();
+    sent = [];
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    const c = cmds();
+    expect(c).toContain('sm_pug_auto_track 0');
+    expect(c).not.toContain('sm_pug_auto_track 1');
+    expect(c.indexOf('sm_pug_match 1 tok no_mercy')).toBeGreaterThan(-1);
+    expect(c.indexOf('sm_pug_match 1 tok no_mercy')).toBeLessThan(c.indexOf('changelevel l4d_vs_hospital04_interior'));
+    expect(box.ccc.map).toBe('l4d_vs_hospital04_interior');
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: null, next_map: null, recovering_at: null });
+  });
+
+  it('a failed burst send leaves the due load (next_campaign, next_map) for the retry', async () => {
+    const h = hooks();
+    const id = await tournament(h);
+    setNext(db, id, 'no_mercy', new Date(now + 10 * MIN).toISOString(), new Date(now), null, 'l4d_vs_hospital04_interior');
+    crash();
+    let seen: { next_campaign: string | null; next_map: string | null } | null = null;
+    const rcon = async (server: ServerRow, c: string[]): Promise<string[]> => {
+      if (c.includes('sm_pug_match 1 tok no_mercy')) {
+        const b = getBooking(db, id)!;
+        seen ??= { next_campaign: b.next_campaign, next_map: b.next_map };
+        throw new Error('rcon exec timeout');
+      }
+      return fakeRcon(server, c);
+    };
+    runner = build({ tournament: h, rcon });
+    sent = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    now += MIN;
+    try {
+      await runner.tick();
+      await runner.idle();
+    } finally {
+      warn.mockRestore();
+    }
+    // Every try saw the load still due: the first failure did not consume it.
+    expect(seen).toEqual({ next_campaign: 'no_mercy', next_map: 'l4d_vs_hospital04_interior' });
+    expect(getBooking(db, id)).toMatchObject({ next_campaign: 'no_mercy', next_map: 'l4d_vs_hospital04_interior' });
+    // No try loaded chapter 1 (or anything) without its burst.
+    expect(cmds().filter((c) => c.startsWith('changelevel'))).toEqual([]);
+  });
+
+  it('a tournament game recovery cannot restore is handed to the engine as lost', async () => {
+    const h = hooks();
+    const id = await tournament(h);
+    const m = liveGame(id);
+    box.ccc.pugMatch = '0.3.18';
+    crash();
+    now += MIN;
+    await runner.tick();
+    await runner.idle();
+    expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(m)).toEqual({ state: 'aborted', abort_cause: 'server_lost' });
+    expect(h.gameLost).toHaveBeenCalledWith(id, m);
+    expect(h.gameLost).toHaveBeenCalledTimes(1);
   });
 });
