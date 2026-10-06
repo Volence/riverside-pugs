@@ -110,7 +110,7 @@ describe('EventMatchPage', () => {
       phase: 'live', deadline: null,
       server: { state: 'ready', name: 'box', since: '2026-10-06T00:00:00.000Z', connect: { host: '10.0.0.1', port: 27015, password: 'pw' }, present: { a: 4, b: 4 }, graceEndsAt: null },
       series: { bestOf: 1, totalScore: false, winsA: 0, winsB: 0, totalA: 0, totalB: 0, over: false, winner: null },
-      games: [{ id: 1, game: 1, ordinal: 1, tiebreak: false, campaign: 'no_mercy', campaignName: 'No Mercy', map: null, pickedBy: null, sideBy: 'b', firstSurvivors: 'b', matchId: 7, state: 'live', scoreA: null, scoreB: null, winner: null, live: { map: 'l4d_vs_hospital02_subway', scoreA: 80, scoreB: 120 } }],
+      games: [{ id: 1, game: 1, ordinal: 1, tiebreak: false, campaign: 'no_mercy', campaignName: 'No Mercy', map: null, pickedBy: null, sideBy: 'b', firstSurvivors: 'b', matchId: 7, state: 'live', scoreA: null, scoreB: null, winner: null, forfeit: null, live: { map: 'l4d_vs_hospital02_subway', scoreA: 80, scoreB: 120 } }],
     }));
     render(<EventMatchPage slug="cup" id="1" session={{ kind: 'active' } as never} />);
     expect(await screen.findByText('connect 10.0.0.1:27015; password pw')).toBeTruthy();

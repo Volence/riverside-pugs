@@ -110,7 +110,8 @@ export function seriesVerdict(config: VetoConfig, games: SeriesGame[]): SeriesVe
   if (totalScore) {
     // A !gg on either game (or a tiebreak) ends a total-score series at
     // once, for the other side, before totals even come into it.
-    const forfeited = games.find((g) => g.forfeit !== null);
+    // The first in play order (game 1, its tiebreaks, game 2), whatever order the rows came in.
+    const forfeited = playOrder(games).find((g) => g.forfeit !== null);
     if (forfeited) return { ...base, over: true, winner: other(forfeited.forfeit!), forfeit: forfeited.forfeit };
     const done = series.filter(played).length;
     if (done < 2) return { ...base, nextGame: done + 1 };

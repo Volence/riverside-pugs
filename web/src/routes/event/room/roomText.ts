@@ -48,6 +48,13 @@ export function gameTitle(g: RoomGame): string {
 export function gameLine(v: MatchRoomView, g: RoomGame): string {
   const where = g.tiebreak && g.map ? `${g.campaignName}, ${g.map}` : g.campaignName;
   const score = (a: number, b: number) => `${team(v, 'a')} ${a} - ${b} ${team(v, 'b')}`;
+  if (g.state === 'done' && g.forfeit) {
+    // A !gg loses the game whatever the score, so a forfeiting side ahead on
+    // points must not read as the winner (T3b final review).
+    const scored = g.scoreA !== null && g.scoreB !== null ? ` · ${score(g.scoreA, g.scoreB)}` : '';
+    const won = g.forfeit === 'a' ? 'b' : 'a';
+    return `${gameTitle(g)} · ${where}${scored} · FF: ${team(v, g.forfeit)} forfeited, ${team(v, won)} win`;
+  }
   if (g.state === 'done' && g.scoreA !== null && g.scoreB !== null) return `${gameTitle(g)} · ${where} · ${score(g.scoreA, g.scoreB)}`;
   if (g.state === 'live') return `${gameTitle(g)} · ${where} · live${g.live?.map ? ` on ${g.live.map}` : ''}${g.live ? ` · ${score(g.live.scoreA, g.live.scoreB)}` : ''}`;
   const first = g.firstSurvivors ? ` · ${team(v, g.firstSurvivors)} start as survivors` : '';

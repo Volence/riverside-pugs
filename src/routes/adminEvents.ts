@@ -356,6 +356,12 @@ export async function adminEventRoutes(
         // recordResultFlow in src/events/flow.ts).
         console.error(`[events] settle after a disqualification in event ${ev.id} failed:`, err instanceof Error ? err.message : err);
       }
+      // T3b final review: a room the settle forfeited while its booking ran
+      // (a series mid-game) ends that booking as a staff end, as a staff
+      // result does; staffResult leaves every other room alone.
+      for (const m of rooms) {
+        try { opts.series?.staffResult(m.id, me); } catch (err) { console.error(`[events] ending the booking of match ${m.id} after a disqualification failed:`, err instanceof Error ? err.message : err); }
+      }
       for (const m of rooms) opts.rooms?.pushChange(m.id);
     }
     logAdmin(db, me, action, ev.id, { entryId: entry.id, name: entry.name, ...(p.action === 'disqualify' ? { reason: body.reason } : {}) });

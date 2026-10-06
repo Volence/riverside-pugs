@@ -4,15 +4,17 @@ import cookie from '@fastify/cookie';
 import * as B from '../src/bookings/bookings.js';
 import { recordResultFlow } from '../src/events/flow.js';
 import * as R from '../src/events/room.js';
+import * as E from '../src/events/events.js';
+import { matchRoomView } from '../src/events/roomViews.js';
 import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS } from '../src/events/series.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
 import { adminEventRoutes } from '../src/routes/adminEvents.js';
 import { eventRoutes } from '../src/routes/events.js';
 import type { AdminEvent } from '../src/adminFeed.js';
 import { authedCookie } from './helpers.js';
-import { ADMIN } from './eventFixture.js';
+import { ADMIN, NOW } from './eventFixture.js';
 import { A, B as BATS } from './entryFixture.js';
-import { POOL7, TIMERS } from './roomFixture.js';
+import { POOL7, TIMERS, type RoomFixture } from './roomFixture.js';
 import { MIN, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
 
 let f: SeriesFixture;
@@ -38,6 +40,9 @@ describe('SeriesEngine: booking, the game burst and connect', () => {
     const matchLine = f.sent.find((c) => c.startsWith('sm_pug_match '))!;
     expect(matchLine).toMatch(new RegExp(`^sm_pug_match ${g1.match_id} [A-Za-z0-9]+ no_mercy( "l4d_vs_hospital\\w+")?$`));
     expect(f.sent.indexOf(matchLine)).toBeLessThan(f.sent.indexOf('changelevel l4d_vs_hospital01_apartment'));
+    // T3b final review: no PUG abandon and no end kick on a tournament box, set in the game burst itself.
+    const burst = f.sent.slice(0, f.sent.indexOf(matchLine));
+    expect(burst.slice(-2)).toEqual(['sm_pug_leave_budget 0', 'sm_pug_end_kick 0']);
     // Bats survive first: their four are pug team a.
     expect(f.sent.filter((c) => c.startsWith('sm_pug_roster '))).toEqual([...BATS.slice(0, 4).map((s) => `sm_pug_roster "${s}:a"`), ...A.slice(0, 4).map((s) => `sm_pug_roster "${s}:b"`)]);
     expect(f.sent.some((c) => c.startsWith('say [Match] Game 1: No Mercy. Bats start as survivors.'))).toBe(true);
@@ -62,10 +67,24 @@ describe('SeriesEngine: booking, the game burst and connect', () => {
     expect(f.match().status).toBe('connect');
   });
 
-  it('re-pushes the game burst each minute until the game heartbeats', async () => {
+  it('re-pushes the game burst each minute until the game heartbeats, only to a box that lost it', async () => {
     f = await seriesFixture();
     await f.tick();
     const line = f.sent.find((c) => c.startsWith('sm_pug_match '))!;
+    // The box holds the game (pending): nothing is sent again.
+    f.sent.length = 0;
+    f.t.t += MIN;
+    await f.tick();
+    expect(f.sent).toContain('sm_pug_status');
+    expect(f.sent).not.toContain(line);
+    // T3b final review: the game is live on the box but its MATCH_START never arrived: never reset it.
+    f.box.pug.state = 'live';
+    f.sent.length = 0;
+    f.t.t += MIN;
+    await f.tick();
+    expect(f.sent).not.toContain(line);
+    // The box lost it (a burst that never arrived, srcds restarted under the game): sent again.
+    f.box.pug = { state: 'none', match: 0 };
     f.sent.length = 0;
     f.t.t += MIN;
     await f.tick();
@@ -75,6 +94,25 @@ describe('SeriesEngine: booking, the game burst and connect', () => {
     f.t.t += MIN;
     await f.tick();
     expect(f.sent).not.toContain(line);
+  });
+});
+
+describe('SeriesEngine: a setup retry after a heartbeat (T3b final review)', () => {
+  it('pushes the same game again when the box heartbeated but the game never started, and creates no second game', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1).match_id!;
+    const line = f.sent.find((c) => c.startsWith('sm_pug_match '))!;
+    // A heartbeat (no map: only MATCH_START or a round start names one), then setup or recovery restarts the box and asks again.
+    f.db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, NULL, datetime('now'))").run(g1);
+    const again = f.series.gameLines(f.booking().id, 'no_mercy');
+    expect(again).toContain(line);
+    expect(f.db.prepare('SELECT COUNT(*) FROM matches WHERE booking_id = ?').pluck().get(f.booking().id)).toBe(1);
+    // The minute re-push keeps the heartbeat rule: a heartbeating game is not pushed each minute.
+    expect(f.series.pendingLines(f.booking().id)).toEqual([]);
+    // Once the game started (MATCH_START named its map) it is never pushed again.
+    f.goLive(g1);
+    expect(() => f.series.gameLines(f.booking().id, 'no_mercy')).toThrow();
   });
 });
 
@@ -168,6 +206,33 @@ describe('SeriesEngine: no-show on the server', () => {
     hooks.gameLost!(f.booking().id, g1);
     expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'game_lost' });
     expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('could not be restored'))).toHaveLength(1);
+  });
+});
+
+describe('SeriesEngine: a game aborted outside crash recovery (T3b final review)', () => {
+  it('holds the match once and alerts staff when its running game is aborted by staff, the reaper or an abandon', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1).match_id!;
+    f.box.humans = [...A.slice(0, 4), ...BATS.slice(0, 4)];
+    f.goLive(g1);
+    // The staff Abort on the match page (src/admin/matches.ts) writes the row and nothing tells the engine.
+    f.db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'admin', ended_at = datetime('now') WHERE id = ?").run(g1);
+    await f.tick();
+    expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'game_aborted' });
+    await f.tick();
+    expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes(`match ${g1}) was aborted`))).toHaveLength(1);
+    // The booking still runs: staff replay or decide.
+    expect(f.booking().ending_at).toBeNull();
+  });
+
+  it('holds a match still in connect whose pushed game was aborted', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1).match_id!;
+    f.db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'orphaned', ended_at = datetime('now') WHERE id = ?").run(g1);
+    f.series.tick(new Date(f.t.t));
+    expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'game_aborted' });
   });
 });
 
@@ -375,6 +440,9 @@ describe('SeriesEngine: the end of a series and the box (T3b ledger rulings)', (
     const log = JSON.parse(f.db.prepare("SELECT detail FROM event_log WHERE action = 'game_recorded'").pluck().get() as string);
     expect(log).toMatchObject({ scoreA: 100, scoreB: 400, forfeit: 'b', winner: 'a' });
     expect(f.match().status).toBe('confirming');
+    // The room page marks it (T3b final review): Bats lead on score but forfeited.
+    const view = matchRoomView(f.db, E.getEvent(f.db, f.eventId)!, f.match(), null, false, new Date(f.t.t));
+    expect(view.games[0]).toMatchObject({ state: 'done', scoreA: 100, scoreB: 400, winner: 'a', forfeit: 'b' });
   });
 
   it('ends the running booking as a staff end when an admin enters the result on the desk', async () => {
@@ -407,6 +475,34 @@ describe('SeriesEngine: the end of a series and the box (T3b ledger rulings)', (
       const before = events.get(b.id);
       f.series.staffResult(f.matchId, ADMIN);
       expect(events.get(b.id)).toBe(before);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('ends the running booking as a staff end when a team is disqualified mid-series (T3b final review)', async () => {
+    f = await seriesFixture();
+    f.db.prepare("UPDATE players SET is_admin = 1, status = 'active' WHERE steamid = ?").run(ADMIN);
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.box.humans = [...A.slice(0, 4), ...BATS.slice(0, 4)];
+    f.goLive(g1.match_id!);
+    const b = f.booking();
+    const app = Fastify();
+    await app.register(cookie, { secret: 'x'.repeat(32) });
+    await app.register(adminEventRoutes, { db: f.db, store: () => { throw new Error('no store'); }, publicUrl: 'https://x', series: f.series });
+    await app.ready();
+    try {
+      const res = await app.inject({
+        method: 'POST', url: `/api/admin/events/${f.eventId}/entries/${f.entryB}/disqualify`,
+        cookies: authedCookie(app, f.db, ADMIN), payload: { reason: 'Ringer on the roster' },
+      });
+      expect(res.statusCode).toBe(200);
+      await f.runner.idle();
+      expect(f.match()).toMatchObject({ status: 'forfeit', winner_entry: f.entryA });
+      expect(B.getBooking(f.db, b.id)).toMatchObject({ state: 'ended', end_reason: 'staff' });
+      expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').pluck().get(g1.match_id!)).toBe('aborted');
+      expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'match_held'").pluck().get()).toBe(0);
     } finally {
       await app.close();
     }
@@ -504,6 +600,116 @@ describe('SeriesEngine: robustness (T3b Task 6 review)', () => {
     expect(line).not.toContain('closes in 5 minutes');
     expect(f.booking().close_at).toBeNull();
     expect(f.send).toHaveBeenCalledWith(expect.anything(), 'event_match_result', expect.objectContaining({ content: expect.stringContaining('Rats beat Bats 1 game to 0.') }));
+  });
+});
+
+describe('SeriesEngine: a load that failed after the game was appended (T3b final review)', () => {
+  it('schedules the next game again without appending it twice', async () => {
+    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 300, b: 200 }, { map: 'm2', a: 100, b: 400 }]);
+    expect(R.actVeto(f.db, { matchId: f.matchId, steamid: BATS[0]!, step: 7, action: 'pick', campaign: POOL7[4]!, timers: TIMERS, now: new Date(f.t.t) }).ok).toBe(true);
+    expect(R.actVeto(f.db, { matchId: f.matchId, steamid: A[0]!, step: 8, action: 'survivors', campaign: null, timers: TIMERS, now: new Date(f.t.t) }).ok).toBe(true);
+    f.series.afterPick(f.matchId);
+    expect(f.booking()).toMatchObject({ next_campaign: POOL7[4], games_allowed: 2 });
+    // loadNext could not build the burst: it cleared the load (runner.ts) and alerted staff.
+    B.setNext(f.db, f.booking().id, null, null, new Date(f.t.t));
+    const endsAt = f.booking().ends_at;
+    f.series.continueSeries(f.matchId);
+    expect(f.booking()).toMatchObject({ next_campaign: POOL7[4], games_allowed: 2, ends_at: endsAt });
+    expect(JSON.parse(f.booking().playlist_json)).toHaveLength(2);
+    f.t.t += MIN;
+    await f.tick();
+    expect(f.gameOf(2).match_id).not.toBeNull();
+  });
+
+  it('schedules a tiebreak again whose load failed, without appending it twice', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital02_subway', a: 200, b: 200 }]);
+    expect(f.booking()).toMatchObject({ next_campaign: 'no_mercy', next_map: 'l4d_vs_hospital02_subway', games_allowed: 2 });
+    B.setNext(f.db, f.booking().id, null, null, new Date(f.t.t));
+    f.series.continueSeries(f.matchId);
+    expect(f.booking()).toMatchObject({ next_campaign: 'no_mercy', next_map: 'l4d_vs_hospital02_subway', games_allowed: 2 });
+    expect(R.gamesOf(f.db, f.matchId).filter((g) => g.tiebreak_of === g1.id)).toHaveLength(1);
+  });
+});
+
+describe('SeriesEngine: a staff hold while a game runs (T3b final review)', () => {
+  it('records the game that ends under the hold, and moves the series no further', async () => {
+    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    expect(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'checking a report', now: new Date(f.t.t) }).ok).toBe(true);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 300, b: 200 }, { map: 'm2', a: 100, b: 400 }]);
+    expect(f.gameOf(1)).toMatchObject({ score_a: 600, score_b: 400, winner: f.entryA });
+    expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'checking a report', deadline: null });
+    expect(f.booking().next_campaign).toBeNull();
+    expect(f.sent.some((c) => c.startsWith('say [Match] Bats: pick game 2'))).toBe(false);
+    // Twice is harmless.
+    f.series.gameEnded(f.booking().id, g1.match_id!);
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'game_recorded'").pluck().get()).toBe(1);
+  });
+});
+
+describe('SeriesEngine: a Bo2 home and away (T3b final review)', () => {
+  const HA = ['no_mercy', 'dead_air', 'death_toll', 'blood_harvest'];
+  /** Rats go second, Bats pick death_toll and Rats survive first, Rats pick no_mercy and Bats take infected: Rats survive first in both. */
+  const driveHomeAway = (r: RoomFixture): void => {
+    const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+    const ok = <T>(x: { ok: true; value: T } | { ok: false; error: string }): T => { if (!x.ok) throw new Error(x.error); return x.value; };
+    ok(R.openRoom(r.db, { matchId: r.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    for (const who of [A[0]!, BATS[0]!]) ok(R.readyUp(r.db, { matchId: r.matchId, steamid: who, timers: TIMERS, now: at(1) }));
+    const steps: [string, number, string, string | null][] = [
+      [A[0]!, 0, 'second', null], [BATS[0]!, 1, 'pick', 'death_toll'], [A[0]!, 2, 'survivors', null], [A[0]!, 3, 'pick', 'no_mercy'], [BATS[0]!, 4, 'infected', null],
+    ];
+    for (const [who, step, action, campaign] of steps) ok(R.actVeto(r.db, { matchId: r.matchId, steamid: who, step, action, campaign, timers: TIMERS, now: at(2) }));
+    ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: A[0]!, steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
+    ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: BATS[0]!, steamids: BATS.slice(0, 4), timers: TIMERS, now: at(4) }));
+  };
+
+  it('plays both games, and tied totals replay game 2\'s last chapter as the tiebreak', async () => {
+    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    await f.tick();
+    const g1 = f.gameOf(1);
+    expect(g1).toMatchObject({ campaign: 'death_toll', first_survivors: f.entryA });
+    f.goLive(g1.match_id!);
+    // Rats are team a (they survive first): Rats 500, Bats 400.
+    f.endGame(g1.match_id!, [{ map: 'l4d_vs_smalltown01_caves', a: 500, b: 400 }]);
+    expect(f.gameOf(1)).toMatchObject({ score_a: 500, score_b: 400 });
+    // Total score: game 2 always follows, with no pick step in between.
+    expect(f.match()).toMatchObject({ status: 'live', deadline: null });
+    expect(f.booking()).toMatchObject({ next_campaign: 'no_mercy', next_map: null, games_allowed: 2 });
+    f.t.t += MIN;
+    await f.tick();
+    const g2 = f.gameOf(2);
+    expect(g2.match_id).not.toBeNull();
+    expect(f.sent.some((c) => c === 'changelevel l4d_vs_hospital01_apartment')).toBe(true);
+    f.goLive(g2.match_id!);
+    // Rats 300, Bats 400: 800 to 800 on total.
+    f.endGame(g2.match_id!, [{ map: 'l4d_vs_hospital01_apartment', a: 100, b: 100, half1Surv: 'a' }, { map: 'l4d_vs_hospital02_subway', a: 200, b: 300, half1Surv: 'b' }]);
+    const tb = R.gamesOf(f.db, f.matchId).find((g) => g.tiebreak_of === g2.id)!;
+    // On game 2's last chapter Bats (team b) survived first, so Rats start the tiebreak as survivors.
+    expect(tb).toMatchObject({ ordinal: 21, campaign: 'no_mercy', map: 'l4d_vs_hospital02_subway', first_survivors: f.entryA });
+    expect(R.gamesOf(f.db, f.matchId).filter((g) => g.tiebreak_of === g1.id)).toEqual([]);
+    expect(f.booking()).toMatchObject({ next_campaign: 'no_mercy', next_map: 'l4d_vs_hospital02_subway', games_allowed: 3 });
+    f.sent.length = 0;
+    f.t.t += MIN;
+    await f.tick();
+    const played = f.gameOf(21);
+    expect(f.sent).toContain('changelevel l4d_vs_hospital02_subway');
+    f.goLive(played.match_id!);
+    f.endGame(played.match_id!, [{ map: 'l4d_vs_hospital02_subway', a: 50, b: 80 }]);
+    expect(f.match().status).toBe('confirming');
+    expect(f.sent.some((c) => c.startsWith('say [Match] Series over: Bats beat Rats'))).toBe(true);
+    expect((await f.series.confirm(f.matchId, A[0]!, new Date(f.t.t))).ok).toBe(true);
+    expect((await f.series.confirm(f.matchId, BATS[0]!, new Date(f.t.t))).ok).toBe(true);
+    expect(f.match()).toMatchObject({ status: 'done', winner_entry: f.entryB, result_source: 'auto' });
   });
 });
 

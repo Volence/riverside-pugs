@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer, activatePlayer, getPlayer } from '../src/players.js';
 import { addServer } from '../src/serverPool.js';
@@ -67,6 +67,25 @@ describe('handleAbandon', () => {
     for (const p of IDS.filter((x) => x !== IDS[2])) expect(getPlayer(db, p)?.status).toBe('active');
     // No rating change for anyone.
     expect(db.prepare('SELECT COUNT(*) AS n FROM rating_history').get()).toEqual({ n: 0 });
+  });
+
+  it('never ends a booked game (a tournament game): no abort, no ban, no release, logged once (T3b final review)', async () => {
+    db.prepare("INSERT INTO bookings (id, purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, playlist_json, games_allowed, created_by, created_at) VALUES (77, 'tournament', 'na', '2026-10-06T00:00:00Z', '2026-10-06T02:00:00Z', 'pw', 'tv', 'standard', '{}', '[\"dead_air\"]', 1, ?, '2026-10-06T00:00:00Z')").run(IDS[0]);
+    db.prepare('UPDATE matches SET booking_id = 77 WHERE id = ?').run(matchId);
+    let asked = 0;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const d = { ...deps(), confirm: async () => { asked++; return true; } };
+      expect(await handleAbandon(d, TOKEN, IDS[2])).toBeNull();
+      expect(await handleAbandon(d, TOKEN, IDS[2])).toBeNull();
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('booked'))).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(asked).toBe(0);
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').pluck().get(matchId)).toBe('live');
+    expect(released).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bans').get()).toEqual({ n: 0 });
   });
 
   it('is idempotent: the repeated heartbeat line does nothing the second time', async () => {

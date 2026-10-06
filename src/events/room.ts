@@ -351,14 +351,18 @@ export function linkGame(db: DB, o: { matchId: number; gameId: number; gameMatch
  *  side that typed !gg (forfeit, scores optional then). The stored winner
  *  is derived by seriesRules' winnerOf, null for a tie. */
 export function recordGame(
-  db: DB, o: { matchId: number; gameId: number; scoreA: number | null; scoreB: number | null; forfeit: Side | null; now?: Date },
+  db: DB, o: {
+    matchId: number; gameId: number; scoreA: number | null; scoreB: number | null; forfeit: Side | null; now?: Date;
+    /** T3b final review: also on a match staff held while the game ran (the series moves no further). */
+    held?: boolean;
+  },
 ): V.Checked<P.MatchRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<P.MatchRow> => {
     const c = liveMatch(db, o.matchId);
     if (!c.ok) return c;
     const { m, ev } = c.value;
-    if (m.status !== 'live') return V.fail('not_live_phase');
+    if (m.status !== 'live' && !(o.held && m.status === 'admin_hold')) return V.fail('not_live_phase');
     const g = gameIn(db, m, o.gameId);
     if (!g) return V.fail('game_not_found');
     if (g.match_id === null || g.ended_at !== null) return V.fail('changed');

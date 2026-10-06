@@ -21,7 +21,7 @@ import { POOL7, TIMERS, driveToBooking, roomFixture, type RoomFixture } from './
 export const MIN = 60_000;
 export interface SeriesFixture extends RoomFixture {
   t: { t: number }; runner: BookingRunner; series: SeriesEngine; clock: RoomClock;
-  sent: string[]; box: { map: string; humans: string[]; down: boolean }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
+  sent: string[]; box: { map: string; humans: string[]; down: boolean; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
   /** The room clock (which ticks the series engine), then the runner's
    *  minute pass, then any tracked work. */
   tick(): Promise<void>;
@@ -43,7 +43,7 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
   f.db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(serverId);
   const t = { t: NOW.getTime() + 10 * MIN };
   const sent: string[] = [];
-  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, marker: '', type: 'Rotoblin Pub VS' };
+  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
   const status = () => [
     'hostname: test', `map     : ${box.map} at: 0 x, 0 y, 0 z`, `players : ${box.humans.length} humans, 0 bots (31 max)`,
     '# userid name uniqueid connected ping loss state rate adr',
@@ -54,6 +54,10 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
     return cmds.map((c) => {
       sent.push(c);
       if (c === 'status') return status();
+      // pug-match's own state (sm_pug_status), as the plugin keeps it across a changelevel.
+      if (c === 'sm_pug_status') return `STATUS state=${box.pug.state} match=${box.pug.match} token=(none) campaign=(none) map=${box.map} stopAfterMap=(none)\nSTATUS end`;
+      const pm = /^sm_pug_match (\d+) /.exec(c);
+      if (pm) box.pug = { state: 'pending', match: Number(pm[1]) };
       if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${box.type}" ( def. "" )`;
       if (c === 'l4d_booking_version') return '"l4d_booking_version" = "1.4.0" ( def. "1.0.0" )';
       if (c === 'l4d_booking_id') return `"l4d_booking_id" = "${box.marker}" ( def. "" )`;
@@ -74,7 +78,7 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
   const runner = new BookingRunner({
     db: f.db, publicUrl: 'https://x', rcon,
     release: async (id) => { f.db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(id); return true; },
-    restart: async () => { box.map = 'l4d_vs_hospital01_apartment'; box.marker = ''; box.type = 'Rotoblin Pub VS'; return true; },
+    restart: async () => { box.map = 'l4d_vs_hospital01_apartment'; box.marker = ''; box.type = 'Rotoblin Pub VS'; box.pug = { state: 'none', match: 0 }; return true; },
     notifier, preempt: () => {}, sleep: async () => {}, now: () => t.t, tournament: lateHooks(() => series),
   });
   series = new SeriesEngine({ db: f.db, runner, notifier, publicUrl: 'https://x', push: (id) => pushes.push(id), registerToken: () => {}, now: () => t.t });

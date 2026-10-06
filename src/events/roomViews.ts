@@ -27,6 +27,8 @@ export interface RoomGame {
   id: number; game: number; ordinal: number; tiebreak: boolean; campaign: string; campaignName: string; map: string | null;
   pickedBy: 'a' | 'b' | null; sideBy: 'a' | 'b' | null; firstSurvivors: 'a' | 'b' | null;
   matchId: number | null; state: 'upcoming' | 'live' | 'done'; scoreA: number | null; scoreB: number | null; winner: 'a' | 'b' | null;
+  /** The side that typed !gg on this game (it lost the game whatever the score), or null. */
+  forfeit: 'a' | 'b' | null;
   live: { map: string | null; scoreA: number; scoreB: number } | null;
 }
 export interface RoomSeries { bestOf: number; totalScore: boolean; winsA: number; winsB: number; totalA: number; totalB: number; over: boolean; winner: 'a' | 'b' | null }
@@ -130,7 +132,7 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
     return {
       id: g.id, game: gameNumberOf(sg, seriesRows), ordinal: g.ordinal, tiebreak: g.tiebreak_of !== null, campaign: g.campaign, campaignName: name(g.campaign), map: g.map,
       pickedBy: sideOfEntry(g.picked_by), sideBy: sideOfEntry(g.side_by), firstSurvivors: sideOfEntry(g.first_survivors),
-      matchId: g.match_id, state, scoreA: g.score_a, scoreB: g.score_b, winner: sideOfEntry(g.winner), live: state === 'live' ? liveScore(g.match_id!) : null,
+      matchId: g.match_id, state, scoreA: g.score_a, scoreB: g.score_b, winner: sideOfEntry(g.winner), forfeit: g.forfeit_side, live: state === 'live' ? liveScore(g.match_id!) : null,
     };
   });
   let server: RoomServer | null = null;
