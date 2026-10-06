@@ -15,11 +15,11 @@ import { activeMembers } from '../teams/teams.js';
 import type { Notifier } from '../notify/notify.js';
 import { bookingMessage, reviewAskMessage, type BookingNotifyType } from './messages.js';
 import { claimReviewAsk } from '../scrims/reviews.js';
-import { DEFAULT_GRACE_MINUTES, bookingLimits, isLateCancel } from './rules.js';
+import { DEFAULT_GRACE_MINUTES, bookingLimits, byPriority, isLateCancel } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
-  beginMove, beginRecovery, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
+  beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
   BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { classifyBox } from './recovery.js';
@@ -79,6 +79,8 @@ const END_SAY: Record<string, string> = {
   no_show: 'the other side did not show',
   setup_failed: 'it could not be set up',
   done: 'everyone left',
+  // Server priority Ruling 7: the goodbye on a scrim's box a tournament match takes.
+  bumped: 'a tournament match needs it',
 };
 /** The goodbye for a `done` end once every booked campaign is played. */
 const ALL_PLAYED_SAY = 'every booked campaign is played';
@@ -339,14 +341,18 @@ export class BookingRunner {
   }
 
   /** Take a box for every confirmed booking at its hold time. Run by the
-   *  tick and whenever the releaser frees a box. */
+   *  tick and whenever the releaser frees a box. Bookings are walked by
+   *  priority (rules.ts byPriority): a tournament match before a scrim. */
   allocate(): void {
     // Waiting bookings first: the only time a booking goes ahead of PUGs.
     this.relocate();
     const nowMs = this.now();
     const lead = bookingLimits(this.db).holdLeadMinutes * 60_000;
     let preempt = false;
-    for (const b of openBookings(this.db)) {
+    // Boxes tournament matches in each region still wait for in this pass
+    // (Ruling 6): one scrim past its start is bumped for each, no more.
+    const owed = new Map<string, number>();
+    for (const b of this.queue()) {
       if (b.state !== 'scheduled' || b.server_id !== null || b.ending_at !== null) continue;
       if (Date.parse(b.starts_at) - lead > nowMs) continue;
       if (sidesOf(this.db, b.id).some((s) => s.confirmed_at === null)) continue;
@@ -355,7 +361,24 @@ export class BookingRunner {
         // Preempt practice and side games only when the region has no free
         // box at all; an idle box that cannot load the playlist (dlc4, a
         // custom campaign) would not be helped by emptying another one.
-        if (this.freeBoxes(b.region) === 0) preempt = true;
+        if (this.freeBoxes(b.region) === 0) {
+          preempt = true;
+          // Server priority (Rulings 4 and 6): once practice and side games
+          // have nothing left to give back in the region, a tournament match
+          // bumps the unstarted scrim holding a box it can use, and a scrim
+          // past its start is bumped for a match still waiting on a box
+          // rather than waiting on itself for the no_server close.
+          if (!this.preemptable(b.region)) {
+            if (b.purpose === 'tournament') {
+              this.bumpFor(b, nowMs);
+            } else if (nowMs >= Date.parse(b.starts_at)) {
+              const left = owed.get(b.region) ?? this.tournamentsOwed(b.region);
+              const match = left > 0 ? this.waitingTournament(b.region) : null;
+              owed.set(b.region, match ? left - 1 : left);
+              if (match) { this.bump(b, match, nowMs); continue; }
+            }
+          }
+        }
         if (b.purpose !== 'tournament' && nowMs >= Date.parse(b.starts_at) && !this.latePublished.has(b.id)) {
           this.latePublished.add(b.id);
           publishAdminEvent({
@@ -371,11 +394,23 @@ export class BookingRunner {
     if (preempt) this.deps.preempt();
   }
 
+  /** Every booking still holding something, in the order boxes go to them
+   *  (server priority Ruling 2). */
+  private queue(): BookingRow[] {
+    return openBookings(this.db).sort(byPriority);
+  }
+
   /** Idle, enabled boxes in the region that nothing holds. */
   private freeBoxes(region: string): number {
     return (this.db.prepare(
       `SELECT COUNT(*) AS n FROM servers WHERE status = 'idle' AND enabled = 1 AND region = ? AND ${NOT_HELD_SQL}`,
     ).get(region) as { n: number }).n;
+  }
+
+  /** Whether this box can load every campaign on the booking's playlist. */
+  private fits(b: BookingRow, s: ServerRow): boolean {
+    const registry = campaignRegistry(this.db);
+    return (JSON.parse(b.playlist_json) as string[]).every((c) => loadsOn(this.db, registry.get(c), s));
   }
 
   /** An idle box for this booking: enabled, in its region, held by nothing,
@@ -385,9 +420,87 @@ export class BookingRunner {
     const rows = this.db.prepare(
       `SELECT * FROM servers WHERE status = 'idle' AND enabled = 1 AND region = ? AND ${NOT_HELD_SQL} ORDER BY id DESC`,
     ).all(b.region) as ServerRow[];
-    const registry = campaignRegistry(this.db);
-    const playlist = JSON.parse(b.playlist_json) as string[];
-    return rows.find((s) => playlist.every((c) => loadsOn(this.db, registry.get(c), s))) ?? null;
+    return rows.find((s) => this.fits(b, s)) ?? null;
+  }
+
+  // ---------- server priority (owner, 2026-10-07) ----------
+
+  /** Practice leases and side games on enabled boxes in the region: what
+   *  deps.preempt can still give back, which always comes before a scrim
+   *  gives way (Ruling 4). */
+  private preemptable(region: string): boolean {
+    return !!this.db.prepare(
+      `SELECT 1 FROM open_server_holds h JOIN servers s ON s.id = h.server_id
+        WHERE h.kind IN ('practice', 'side') AND s.region = ? AND s.enabled = 1 LIMIT 1`,
+    ).get(region);
+  }
+
+  /** Tournament bookings in the region waiting for a box, less the boxes
+   *  bumped scrims there are already winding down to give them: how many
+   *  more scrims may give way right now (Rulings 4 and 6). */
+  private tournamentsOwed(region: string): number {
+    const waiting = (this.db.prepare(
+      "SELECT COUNT(*) AS n FROM bookings WHERE purpose = 'tournament' AND region = ? AND state = 'scheduled' AND server_id IS NULL AND ending_at IS NULL",
+    ).get(region) as { n: number }).n;
+    const coming = (this.db.prepare(
+      "SELECT COUNT(*) AS n FROM bookings WHERE purpose = 'scrim' AND region = ? AND end_reason = 'bumped' AND server_id IS NOT NULL AND ended_at IS NULL",
+    ).get(region) as { n: number }).n;
+    return Math.max(0, waiting - coming);
+  }
+
+  /** The tournament booking in the region waiting for a box that a scrim
+   *  past its start gives way to (Ruling 6): the first in queue order. */
+  private waitingTournament(region: string): BookingRow | null {
+    const rows = this.db.prepare(
+      "SELECT * FROM bookings WHERE purpose = 'tournament' AND region = ? AND state = 'scheduled' AND server_id IS NULL AND ending_at IS NULL",
+    ).all(region) as BookingRow[];
+    return rows.sort(byPriority)[0] ?? null;
+  }
+
+  /** The scrim a tournament match may bump (Ruling 4): open, holding a box
+   *  in the match's region, not started (never active, no live game, not in
+   *  crash recovery), on a box that loads the match's campaign. The latest
+   *  start first, then the newest row: the scrim with the most time to
+   *  rebook gives way. */
+  private bumpable(forB: BookingRow): BookingRow | null {
+    const rows = this.db.prepare(
+      `SELECT * FROM bookings WHERE purpose = 'scrim' AND region = ? AND server_id IS NOT NULL AND ending_at IS NULL
+         AND recovering_at IS NULL AND state IN ('held', 'setup', 'ready') ORDER BY starts_at DESC, id DESC`,
+    ).all(forB.region) as BookingRow[];
+    for (const v of rows) {
+      if (liveBookingGame(this.db, v.id)) continue;
+      const s = getServer(this.db, v.server_id!);
+      if (s && this.fits(forB, s)) return v;
+    }
+    return null;
+  }
+
+  /** A tournament match with no idle box in its region and nothing left to
+   *  preempt: bump one scrim for it, unless a bumped box is already on its
+   *  way back (Ruling 4). */
+  private bumpFor(forB: BookingRow, nowMs: number): void {
+    if (this.tournamentsOwed(forB.region) === 0) return;
+    const victim = this.bumpable(forB);
+    if (victim) this.bump(victim, forB, nowMs);
+  }
+
+  /** Close the scrim as bumped, tell staff and both sides, and start the
+   *  wind-down (settle), which gives its box back through the releaser;
+   *  the freed hook then runs allocate again for the match (Rulings 5 and 7). */
+  private bump(victim: BookingRow, forB: BookingRow, nowMs: number): void {
+    const r = bumpBooking(this.db, { bookingId: victim.id, byBookingId: forB.id, now: new Date(nowMs) });
+    if (!r.ok) return;
+    const [a, bs] = sidesOf(this.db, victim.id);
+    const names = `${sideName(this.db, a)} vs ${sideName(this.db, bs)}`;
+    console.log(`[booking] ${victim.id} (${names}) bumped by tournament booking ${forB.id}`);
+    publishAdminEvent({
+      kind: 'problem',
+      text: `Booking ${victim.id} (${names}, ${victim.starts_at.slice(11, 16)} UTC) was bumped by tournament match booking ${forB.id}: `
+        + `${r.value.hadServer ? 'its server is going back to the pool for the match' : 'no server was free and the match is ahead of it'}. `
+        + `Both sides are told${r.value.nearestSlot ? ` and offered ${r.value.nearestSlot.slice(11, 16)} UTC` : ''}; it counts against neither side.`,
+    });
+    this.tell(victim.id, this.everyone(victim.id), 'booking_bumped', { slot: r.value.nearestSlot });
+    this.settle(victim.id);
   }
 
   private stillSettingUp(id: number): BookingRow | null {
@@ -868,7 +981,7 @@ export class BookingRunner {
     const nowMs = this.now();
     const wait = bookingLimits(this.db).recoverWaitMinutes * 60_000;
     let preempt = false;
-    for (const b of openBookings(this.db)) {
+    for (const b of this.queue()) {
       if (b.waiting_since === null || b.server_id !== null || b.ending_at !== null || this.busy.has(b.id)) continue;
       if (nowMs - Date.parse(b.waiting_since) >= wait) {
         this.giveUp(b.id, `no server came free within ${wait / 60_000} minutes after its server went down`, 'the server went down and no other server was free');
@@ -1722,7 +1835,7 @@ export class BookingRunner {
   /** Never throws: a notice runs after a committed state change, and a
    *  failure to word or send it must not undo the caller's work (a route's
    *  answer, a release). */
-  private tell(id: number, steamids: Iterable<string>, type: BookingNotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean; moved?: boolean; restored?: string | null } = {}): void {
+  private tell(id: number, steamids: Iterable<string>, type: BookingNotifyType, extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean; moved?: boolean; restored?: string | null; slot?: string | null } = {}): void {
     try {
       const payload = bookingMessage(this.db, this.deps.publicUrl, id, type, extra);
       if (payload) this.deps.notifier.send(steamids, type, payload);
