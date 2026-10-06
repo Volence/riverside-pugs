@@ -2287,6 +2287,10 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .desktools { margin-top: var(--sp-2); }
 .desktools summary { cursor: pointer; }
 .desktools__group { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-1) 0; }
+/* Plan T5: technical pauses, one line each, on the desk and the room page. */
+.desktools__pauses, .room__pauses { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
+.desktools__pauses li, .room__pauses li { overflow-wrap: anywhere; }
+.desktools__pauses { flex-basis: 100%; }
 .desk-line { font-size: var(--fs-dense); }
 
 /* Clips nested inside one player-round. The round is the reviewable unit, so

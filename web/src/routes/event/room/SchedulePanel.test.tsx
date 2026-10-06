@@ -24,7 +24,7 @@ const view = (s: RoomSchedule): MatchRoomView => ({
   a: { id: 1, name: 'Rats', tag: 'RAT', logoKey: null, seed: 1, out: false }, b: { id: 2, name: 'Bats', tag: 'BAT', logoKey: null, seed: 2, out: false },
   phase: 'waiting', higher: null, deadline: null, serverNow: TIME, ready: { a: false, b: false }, vetoSummary: '', pool: [], log: [], games: [], next: null,
   lineups: { a: null, b: null, aLocked: false, bLocked: false }, holdReason: null, result: null, me: null, series: null, server: null, confirm: null, dispute: null, frozen: false,
-  schedule: s,
+  schedule: s, pauses: [],
 });
 const handlers = () => ({ onPropose: vi.fn(), onRespond: vi.fn(), onCounter: vi.fn(), onWithdraw: vi.fn() });
 

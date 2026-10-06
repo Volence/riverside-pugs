@@ -154,6 +154,9 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
    *  releases that hold with the time, final review). */
   const heldFromWaiting = phase === 'hold' && d.holdFrom === 'waiting';
   const canTime = (phase === 'waiting' || heldFromWaiting) && d.schedule !== null;
+  /** Plan T5: the match's technical pauses, each with a Warn and, while its
+   *  game is the one being played, a Forfeit the game. */
+  const canTech = d.pauses.length > 0;
   const chapters = d.liveGame?.chapters ?? [];
   const fourIds = four.split(/[\s,]+/).filter(Boolean);
   const chapterLabel = (c: { ordinal: number; map: string }) => `Chapter ${c.ordinal + 1}: ${c.map}`;
@@ -176,7 +179,7 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
     });
   };
   // A phase with no tool (confirming, for one) shows no empty disclosure.
-  if (!canAct && !canReopen && !canBox && !canTime) return null;
+  if (!canAct && !canReopen && !canBox && !canTime && !canTech) return null;
   return (
     <details class="desktools" ref={detailsRef} open={open} onToggle={onToggle}>
       <summary>{`Staff tools: ${names}`}</summary>
@@ -268,6 +271,38 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
             await adminApi.setEventMatchTime(eventId, m.id, fromLocalInput(time)!);
             setTime('');
           }, { title: `Set ${names} for ${whenText(fromLocalInput(time)!)}?`, body: `Both rosters are told. An open proposal expires. The room opens before the time on its own.${heldFromWaiting ? ' The hold is released with it.' : ''}` })}>Set time</button>
+        </div>
+      )}
+      {open && canTech && (
+        <div class="desktools__group">
+          <p class="muted">Technical pauses</p>
+          <ul class="desktools__pauses">
+            {d.pauses.map((p) => {
+              const team = p.side === 'a' ? m.a?.name ?? 'Team A' : m.b?.name ?? 'Team B';
+              const flag = p.flaggedBy ? `, flagged by ${p.flaggedBy}${p.flagNote ? ` ("${p.flagNote}")` : ''}` : '';
+              return (
+                <li key={p.id}>
+                  {`Game ${p.game}${p.tiebreak ? ' tiebreak' : ''}, ${team}, ${p.cause === 'disconnect' ? 'disconnect' : 'technical'}${p.reason !== null ? `: "${p.reason}"` : ''}${p.byName ? ` by ${p.byName}` : ''}${flag}`}
+                  {p.penalty !== null
+                    ? ` (${p.penalty === 'warning' ? 'warned' : 'game forfeited'}${p.penaltyNote ? `: ${p.penaltyNote}` : ''})`
+                    : (
+                      <>
+                        {' '}
+                        <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.techPenaltyEventMatch(eventId, m.id, p.id, 'warning'),
+                          { title: `Warn ${team} over this technical pause?`, body: 'Both teams get a DM, and it is kept on the match log.', confirmLabel: 'Warn' })}>Warn</button>
+                        {p.live && (
+                          <>
+                            {' '}
+                            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.techPenaltyEventMatch(eventId, m.id, p.id, 'forfeit'),
+                              { title: `${team} forfeits this game?`, body: 'The server ends the game now as a forfeit by this team; the series records it like a !gg. Both teams get a DM.', confirmLabel: 'Forfeit the game', danger: true })}>Forfeit the game</button>
+                          </>
+                        )}
+                      </>
+                    )}
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
     </details>
