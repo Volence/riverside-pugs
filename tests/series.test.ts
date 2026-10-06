@@ -2,12 +2,10 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import * as B from '../src/bookings/bookings.js';
-import * as E from '../src/events/events.js';
 import { recordResultFlow } from '../src/events/flow.js';
 import * as R from '../src/events/room.js';
 import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS } from '../src/events/series.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
-import { autoAction, isHumanStep } from '../src/events/veto.js';
 import { adminEventRoutes } from '../src/routes/adminEvents.js';
 import type { AdminEvent } from '../src/adminFeed.js';
 import { authedCookie } from './helpers.js';
@@ -161,23 +159,6 @@ describe('SeriesEngine: no-show on the server', () => {
   });
 });
 
-/** What the room clock does to an overdue between-game step (Task 7 moves it
- *  into RoomClock.expireOne): the team's saved order acts, then the engine
- *  takes over once no human step is left. */
-function timeOut(f: SeriesFixture): void {
-  const m = f.match();
-  expect(m.status).toBe('live');
-  expect(m.deadline !== null && m.deadline <= new Date(f.t.t).toISOString()).toBe(true);
-  const st = R.roomState(f.db, m);
-  if (!isHumanStep(st.next)) throw new Error('no human step');
-  const stage = E.getStage(f.db, m.stage_id)!;
-  const entryId = R.entryOn(m, st.next.by);
-  const a = autoAction(st, E.stageSettingsOf(stage).campaignPool, { campaigns: R.campaignPrefs(f.db, entryId, stage.id), side: R.entryPrefs(f.db, entryId).side });
-  const r = R.actVeto(f.db, { matchId: m.id, steamid: null, step: st.used, action: a.action, campaign: a.campaign, timers: TIMERS, now: new Date(f.t.t) });
-  if (!r.ok) throw new Error(r.error);
-  f.series.afterPick(m.id);
-}
-
 describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
   it('plays a Bo3 with loser picks: records game 1, opens the loser\'s pick, schedules each game with its sides, and ends in the confirm window', async () => {
     f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
@@ -238,13 +219,12 @@ describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
     expect(f.booking().close_at).toBe(new Date(f.t.t + 5 * MIN).toISOString());
     expect(f.sent.some((c) => c.startsWith('say [Match] Series over: Rats beat Bats 2 games to 1'))).toBe(true);
     expect(f.send).toHaveBeenCalledWith(expect.arrayContaining([A[0], BATS[0]]), 'event_match_result', expect.objectContaining({ content: expect.stringContaining('Rats beat Bats 2 games to 1') }));
-    // Before the window passes the result waits.
-    await f.series.finalize(f.matchId, new Date(f.t.t + 15 * MIN - 1));
-    expect(f.match().status).toBe('confirming');
-    f.t.t += 15 * MIN;
+    // Before the window passes the result waits; the room clock records it once it has.
+    f.t.t += 15 * MIN - 1_000;
     await f.tick();
-    // The room clock calls finalize once the window passed (Task 7 wires it).
-    await f.series.finalize(f.matchId, new Date(f.t.t));
+    expect(f.match().status).toBe('confirming');
+    f.t.t += 1_000;
+    await f.tick();
     expect(f.match()).toMatchObject({ status: 'done', winner_entry: f.entryA, score_a: 2, score_b: 1, result_source: 'auto' });
   });
 
@@ -256,12 +236,12 @@ describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
     f.goLive(g1.match_id!);
     f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
     f.t.t += MIN;
-    timeOut(f);
+    await f.tick();
     expect(f.gameOf(2)).toMatchObject({ campaign: POOL7[6], picked_by: f.entryB });
     // The side step is a human step again: nothing is scheduled yet.
     expect(f.booking().next_campaign).toBeNull();
     f.t.t += MIN;
-    timeOut(f);
+    await f.tick();
     // Rats did not pick, so Rats choose sides; with no saved side the clock takes survivors first.
     expect(f.gameOf(2).first_survivors).toBe(f.entryA);
     expect(f.booking()).toMatchObject({ next_campaign: POOL7[6], games_allowed: 2 });
@@ -328,7 +308,6 @@ describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
     expect(alert.link?.path).toBe(`/event/${f.slug}/match/${f.matchId}`);
     f.t.t += 20 * MIN;
     await f.tick();
-    await f.series.finalize(f.matchId, new Date(f.t.t));
     expect(f.match().status).toBe('admin_hold');
   });
 
@@ -369,7 +348,6 @@ describe('SeriesEngine: the end of a series and the box (T3b ledger rulings)', (
     expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('server booking ended'))).toHaveLength(0);
     f.t.t += 10 * MIN;
     await f.tick();
-    await f.series.finalize(f.matchId, new Date(f.t.t));
     expect(f.match()).toMatchObject({ status: 'done', winner_entry: f.entryA, score_a: 1, score_b: 0, result_source: 'auto' });
   });
 
@@ -450,5 +428,69 @@ describe('SeriesEngine: the end of a series and the box (T3b ledger rulings)', (
     } finally {
       err.mockRestore();
     }
+  });
+});
+
+describe('SeriesEngine: robustness (T3b Task 6 review)', () => {
+  it('adds no second tiebreak while the first is being played', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital02_subway', a: 200, b: 200 }]);
+    f.t.t += MIN;
+    await f.tick();
+    const tb = f.gameOf(11);
+    expect(tb.match_id).not.toBeNull();
+    f.goLive(tb.match_id!);
+    f.series.continueSeries(f.matchId);
+    expect(R.gamesOf(f.db, f.matchId).filter((g) => g.tiebreak_of === g1.id)).toHaveLength(1);
+    expect(f.booking().games_allowed).toBe(2);
+    expect(f.match()).toMatchObject({ status: 'live', hold_reason: null });
+  });
+
+  it('holds the match and tells staff once when the tiebreak is refused', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    // All nine tiebreak slots of game 1 already used, each tied: the next one is refused.
+    const ins = f.db.prepare("INSERT INTO event_games (event_match_id, ordinal, campaign, tiebreak_of, map, score_a, score_b, created_at) VALUES (?, ?, 'no_mercy', ?, 'm', 10, 10, ?)");
+    for (let i = 11; i <= 19; i++) ins.run(f.matchId, i, g1.id, new Date(f.t.t).toISOString());
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'l4d_vs_hospital02_subway', a: 200, b: 200 }]);
+    expect(f.match()).toMatchObject({ status: 'admin_hold', hold_reason: 'tiebreak_refused' });
+    f.series.continueSeries(f.matchId);
+    f.series.gameEnded(f.booking().id, g1.match_id!);
+    expect(f.alerts.filter((a) => a.kind === 'problem' && a.text.includes('tiebreak'))).toHaveLength(1);
+  });
+
+  it('refuses to reset a finished match and leaves its booking running', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    expect((await f.series.confirm(f.matchId, A[0]!, new Date(f.t.t))).ok).toBe(true);
+    expect((await f.series.confirm(f.matchId, BATS[0]!, new Date(f.t.t))).ok).toBe(true);
+    expect(f.match().status).toBe('done');
+    const b = f.booking();
+    expect(B.isOpen(b)).toBe(true);
+    expect(f.series.reset(f.matchId, ADMIN, new Date(f.t.t))).toEqual({ ok: false, error: 'wrong_status' });
+    expect(B.getBooking(f.db, b.id)).toMatchObject({ state: b.state, ending_at: null });
+  });
+
+  it('says "1 game to 0" for a Bo1, and promises the close only when it was set', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    // A close the booking refuses (more games allowed than played): no promise of a close.
+    f.db.prepare('UPDATE bookings SET games_allowed = 5 WHERE id = ?').run(f.booking().id);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    const line = f.sent.find((c) => c.startsWith('say [Match] Series over:'))!;
+    expect(line).toContain('Rats beat Bats 1 game to 0.');
+    expect(line).not.toContain('closes in 5 minutes');
+    expect(f.booking().close_at).toBeNull();
+    expect(f.send).toHaveBeenCalledWith(expect.anything(), 'event_match_result', expect.objectContaining({ content: expect.stringContaining('Rats beat Bats 1 game to 0.') }));
   });
 });

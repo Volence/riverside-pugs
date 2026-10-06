@@ -18,7 +18,7 @@ import * as R from './room.js';
 import * as V from './validate.js';
 import { autoResultFlow, forfeitMatch } from './flow.js';
 import { tellConnect, tellReadyForfeit, tellSeriesResult } from './notices.js';
-import { gameNumberOf, playOrder, seriesResult, seriesVerdict, tiebreakFirstSurvivors } from './seriesRules.js';
+import { gameNumberOf, playOrder, seriesResult, seriesVerdict, tiebreakFirstSurvivors, winsLine } from './seriesRules.js';
 import { isHumanStep, other, type Side } from './veto.js';
 
 /**
@@ -399,7 +399,7 @@ export class SeriesEngine {
       ? `by forfeit (${this.name(m, v.forfeit)} typed !gg)`
       : v.totalScore
       ? `${w === 'a' ? v.totalA : v.totalB} to ${w === 'a' ? v.totalB : v.totalA} on total score`
-      : `${w === 'a' ? v.winsA : v.winsB} games to ${w === 'a' ? v.winsB : v.winsA}`;
+      : winsLine(w === 'a' ? v.winsA : v.winsB, w === 'a' ? v.winsB : v.winsA);
     return `${this.name(m, w)} beat ${this.name(m, l)} ${line}`;
   }
 
@@ -425,8 +425,8 @@ export class SeriesEngine {
       if (!R.startConfirm(this.db, { matchId: m.id, timers, now }).ok) return;
       if (b && open) {
         // The box closes after the usual grace (the idle end covers a refused close).
-        B.setCloseAt(this.db, b.id, gamesPlayed(this.db, b.id), new Date(now.getTime() + CLOSE_GRACE_MS).toISOString(), now);
-        this.deps.runner.announce(b.id, `Series over: ${this.scoreline(m, v)}. Captains confirm or dispute on the site within ${timers.confirmMinutes} minutes. The server closes in 5 minutes.`);
+        const closing = B.setCloseAt(this.db, b.id, gamesPlayed(this.db, b.id), new Date(now.getTime() + CLOSE_GRACE_MS).toISOString(), now);
+        this.deps.runner.announce(b.id, `Series over: ${this.scoreline(m, v)}. Captains confirm or dispute on the site within ${timers.confirmMinutes} minutes.${closing ? ' The server closes in 5 minutes.' : ''}`);
       }
       tellSeriesResult(this.deps, m.event_id, m.id);
       console.log(`[series] match ${m.id}: series over, confirm window open`);
@@ -437,7 +437,8 @@ export class SeriesEngine {
 
     if (v.tiebreakOf) {
       const parent = rows.find((g) => g.id === v.tiebreakOf!.id)!;
-      if (rows.some((g) => g.tiebreak_of === parent.id && g.match_id === null)) return;
+      // A tiebreak not yet played (waiting for the box, or being played now) is the one this tie gets.
+      if (rows.some((g) => g.tiebreak_of === parent.id && g.score_a === null && g.forfeit_side === null)) return;
       const played = playOrder(series).map((x) => rows.find((g) => g.id === x.id)!)
         .filter((g) => (g.id === parent.id || g.tiebreak_of === parent.id) && g.match_id !== null).at(-1)!;
       const chapter = this.lastChapter(m, played);
@@ -449,7 +450,14 @@ export class SeriesEngine {
         return;
       }
       const tb = R.addTiebreak(this.db, { matchId: m.id, ofGameId: parent.id, map: chapter.map, firstSurvivors: chapter.firstSurvivors, now });
-      if (!tb.ok) return;
+      if (!tb.ok) {
+        // Held, so staff are told once (a held match is not held again) and nothing stalls silently.
+        if (R.holdMatch(this.db, { matchId: m.id, by: null, reason: 'tiebreak_refused', now }).ok) {
+          this.alert(m, `game ${parent.ordinal} tied again but no further tiebreak could be added (${tb.error}). It is on hold; enter the result on the Events desk.`);
+          this.push(m.id);
+        }
+        return;
+      }
       B.appendTournamentGame(this.db, { bookingId: b.id, campaign: parent.campaign, map: chapter.map, now });
       B.setNext(this.db, b.id, parent.campaign, new Date(now.getTime() + NEXT_DELAY_MS).toISOString(), now, null, chapter.map);
       this.deps.runner.announce(b.id, `Game ${parent.ordinal} is tied ${played.score_a} to ${played.score_b}: its last chapter is replayed as a tiebreaker in about a minute. ${this.name(m, chapter.firstSurvivors)} start as survivors.`);
@@ -530,6 +538,8 @@ export class SeriesEngine {
   reset(matchId: number, by: string, now = new Date(this.now())): V.Checked<P.MatchRow> {
     const m = P.getMatch(this.db, matchId);
     if (!m) return V.fail('match_not_found');
+    // Checked before the booking is cancelled: a refused reset must leave a running box alone.
+    if (!R.RESETTABLE.has(m.status)) return V.fail('wrong_status');
     let cancelled: number | null = null;
     if (m.booking_id !== null) {
       const b = B.getBooking(this.db, m.booking_id);

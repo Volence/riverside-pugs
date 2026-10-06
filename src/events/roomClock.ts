@@ -11,13 +11,20 @@ import { autoAction, isHumanStep, type Side } from './veto.js';
 
 export const ROOM_TICK_MS = 5_000;
 
+/** The statuses whose deadline the clock acts on and resumes: the T3a
+ *  ready check, veto and lineups, and (plan T3b) a live match's between-game
+ *  pick and the confirm window. A connect deadline is the engine's (presence). */
+const ACTING: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'live', 'confirming']);
+
 /**
  * The match room's clock (tournaments plan T3a), every 5 seconds. It opens
  * rooms in rolling stages (Ruling 2) and acts on every passed deadline: the
  * ready check (forfeit or hold), a veto step (from the team's saved order,
- * Ruling 7), the lineups (Ruling 9). resume() runs once at start (Ruling
- * 16). Each match is caught on its own, so one bad row never stops the rest;
- * every change it makes is pushed so the room page refetches.
+ * Ruling 7), the lineups (Ruling 9); from plan T3b it also ticks the series
+ * engine, acts on a timed-out between-game pick and a passed confirm window,
+ * and resumes both. resume() runs once at start (Ruling 16). Each match is
+ * caught on its own, so one bad row never stops the rest; every change it
+ * makes is pushed so the room page refetches.
  */
 
 /** Ruling 5: the better stage seed in a bracket, the better standing (then
@@ -72,7 +79,7 @@ export class RoomClock {
 
   constructor(private readonly deps: {
     db: DB; notifier?: Notifier; publicUrl?: string; push?: (matchId: number) => void; now?: () => number; seed?: () => number;
-    /** The series engine (plan T3b); used from Task 7. */
+    /** The series engine (plan T3b). */
     series?: { tick(now: Date): void; afterPick(matchId: number): void; finalize(matchId: number, now: Date): Promise<void> };
   }) {
     this.now = deps.now ?? Date.now;
@@ -90,7 +97,7 @@ export class RoomClock {
     const now = new Date(this.now());
     const timers = R.roomTimers(db);
     const rows = db.prepare(
-      `SELECT m.id FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('veto','lineup') AND m.deadline IS NOT NULL AND m.deadline <= ?`,
+      `SELECT m.id FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('veto','lineup','live','confirming') AND m.deadline IS NOT NULL AND m.deadline <= ?`,
     ).all(now.toISOString()) as { id: number }[];
     for (const { id } of rows) {
       try { R.resumeDeadline(db, { matchId: id, timers, now }); } catch (err) { console.error(`[rooms] resume of match ${id} failed:`, err); }
@@ -103,6 +110,8 @@ export class RoomClock {
     try {
       const now = new Date(this.now());
       this.openDue(now);
+      // Tournaments plan T3b: bookings, the server wait alert, the presence fallback.
+      try { this.deps.series?.tick(now); } catch (err) { console.error('[rooms] series tick failed:', err instanceof Error ? err.message : err); }
       await this.expire(now);
     } catch (err) {
       console.error('[rooms] tick failed:', err instanceof Error ? err.message : err);
@@ -129,7 +138,7 @@ export class RoomClock {
   private async expire(now: Date): Promise<void> {
     const { db } = this.deps;
     const rows = db.prepare(
-      `SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('veto','lineup') AND m.deadline IS NOT NULL AND m.deadline <= ?
+      `SELECT m.* FROM event_matches m WHERE ${R.ROOM_LIVE_SQL} AND m.status IN ('veto','lineup','live','confirming') AND m.deadline IS NOT NULL AND m.deadline <= ?
        ORDER BY m.deadline, m.id`,
     ).all(now.toISOString()) as P.MatchRow[];
     for (const m of rows) {
@@ -147,8 +156,14 @@ export class RoomClock {
   private async expireOne(snap: P.MatchRow, now: Date): Promise<void> {
     const { db } = this.deps;
     const m = P.getMatch(db, snap.id);
-    if (!m || (m.status !== 'veto' && m.status !== 'lineup') || m.deadline === null || m.deadline > now.toISOString()) return;
+    if (!m || !ACTING.has(m.status) || m.deadline === null || m.deadline > now.toISOString()) return;
     const timers = R.roomTimers(db);
+    if (m.status === 'confirming') {
+      // T3b Ruling 9: the window passed with no dispute.
+      await this.deps.series?.finalize(m.id, now);
+      this.pushChange(m.id);
+      return;
+    }
     if (m.status === 'veto' && (m.ready_a_at === null || m.ready_b_at === null)) {
       const a = m.ready_a_at !== null;
       const b = m.ready_b_at !== null;
@@ -164,7 +179,7 @@ export class RoomClock {
       this.pushChange(m.id);
       return;
     }
-    if (m.status === 'veto') {
+    if (m.status === 'veto' || m.status === 'live') {
       const st = R.roomState(db, m);
       if (!isHumanStep(st.next)) return;
       const stage = E.getStage(db, m.stage_id)!;
@@ -172,6 +187,8 @@ export class RoomClock {
       const pool = E.stageSettingsOf(stage).campaignPool;
       const a = autoAction(st, pool, { campaigns: R.campaignPrefs(db, entryId, stage.id), side: R.entryPrefs(db, entryId).side });
       R.actVeto(db, { matchId: m.id, steamid: null, step: st.used, action: a.action, campaign: a.campaign, timers, now });
+      // T3b Ruling 4: a timed-out between-game pick; once nothing human is left the game is scheduled.
+      if (m.status === 'live') this.deps.series?.afterPick(m.id);
       this.pushChange(m.id);
       return;
     }

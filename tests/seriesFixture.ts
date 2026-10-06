@@ -22,8 +22,8 @@ export const MIN = 60_000;
 export interface SeriesFixture extends RoomFixture {
   t: { t: number }; runner: BookingRunner; series: SeriesEngine; clock: RoomClock;
   sent: string[]; box: { map: string; humans: string[]; down: boolean }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
-  /** The room clock, the series engine's tick (Task 7 moves it inside the
-   *  room clock), then the runner's minute pass, then any tracked work. */
+  /** The room clock (which ticks the series engine), then the runner's
+   *  minute pass, then any tracked work. */
   tick(): Promise<void>;
   match(): P.MatchRow; booking(): B.BookingRow; gameOf(ordinal: number): R.GameRow;
   /** The plugin's MATCH_START for a pushed game: the heartbeat row, then the engine. */
@@ -87,7 +87,7 @@ export async function seriesFixture(o: { veto?: object; pool?: string[]; drive?:
   const settle = async () => { await new Promise((r) => setTimeout(r, 0)); await runner.idle(); };
   return {
     ...f, t, runner, series, clock, sent, box, send, alerts, pushes,
-    async tick() { await clock.tick(); series!.tick(new Date(t.t)); await runner.tick(); await runner.idle(); await settle(); },
+    async tick() { await clock.tick(); await runner.tick(); await runner.idle(); await settle(); },
     match: () => P.getMatch(db, f.matchId)!,
     booking: () => B.getBooking(db, P.getMatch(db, f.matchId)!.booking_id!)!,
     gameOf: (ordinal) => R.gamesOf(db, f.matchId).find((g) => g.ordinal === ordinal)!,

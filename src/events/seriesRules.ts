@@ -71,6 +71,11 @@ export function tiebreakOrdinal(parent: Pick<SeriesGame, 'id' | 'ordinal'>, game
   return next > parent.ordinal * 10 + 9 ? null : next;
 }
 
+/** "2 games to 1", "1 game to 0": the winner's games counted, singular when one. */
+export function winsLine(won: number, lost: number): string {
+  return `${won} ${won === 1 ? 'game' : 'games'} to ${lost}`;
+}
+
 /** Game 1, its tiebreaks, game 2, its tiebreaks, ... */
 export function playOrder(games: SeriesGame[]): SeriesGame[] {
   return [...games].sort((x, y) => gameNumberOf(x, games) - gameNumberOf(y, games) || x.ordinal - y.ordinal);
