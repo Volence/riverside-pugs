@@ -85,6 +85,13 @@ const END_SAY: Record<string, string> = {
 /** The goodbye for a `done` end once every booked campaign is played. */
 const ALL_PLAYED_SAY = 'every booked campaign is played';
 
+/** A tournament booking (aliased t) waiting for a box: scheduled at its
+ *  start with none yet, or recovering after its box died (waiting_since is
+ *  set by dropBox and beginMove). Either way it has no box and is not ending. */
+const WAITING_MATCH_SQL = "t.server_id IS NULL AND t.ending_at IS NULL AND (t.state = 'scheduled' OR t.waiting_since IS NOT NULL)";
+
+const ordinal = (n: number): string => ({ 2: 'second', 3: 'third' } as Record<number, string>)[n] ?? `${n}th`;
+
 /** The refusal of `!nextmap` and `!stay` once the count is reached. */
 function allPlayedText(n: number): string {
   return n === 1 ? 'The booked campaign is played. !addcampaign for one more.' : `All ${n} campaigns are played. !addcampaign for one more.`;
@@ -371,7 +378,8 @@ export class BookingRunner {
             } else if (nowMs >= Date.parse(b.starts_at)) {
               // One scrim per waiting match, across passes: a match any scrim
               // was already bumped for is not offered again (waitingTournament).
-              const match = this.waitingTournament(b.region);
+              // A box on its way back is owed to the match first (Important 1).
+              const match = this.tournamentsOwed(b.region) > 0 ? this.waitingTournament(b.region) : null;
               if (match) { this.bump(b, match, nowMs); continue; }
             }
           }
@@ -432,17 +440,48 @@ export class BookingRunner {
     ).get(region);
   }
 
-  /** Tournament bookings in the region waiting for a box, less the boxes
-   *  bumped scrims there are already winding down to give them: how many
-   *  more scrims may give way right now (Rulings 4 and 6). */
+  /** Tournament bookings in the region waiting for a box (at their start,
+   *  or recovering from a box that died: WAITING_MATCH_SQL), less the boxes
+   *  already on their way back there (bumped scrims winding down, and boxes
+   *  the releaser is restarting): how many more scrims may give way right
+   *  now (Rulings 4 and 6, final review Importants 1 and 2). */
   private tournamentsOwed(region: string): number {
     const waiting = (this.db.prepare(
-      "SELECT COUNT(*) AS n FROM bookings WHERE purpose = 'tournament' AND region = ? AND state = 'scheduled' AND server_id IS NULL AND ending_at IS NULL",
+      `SELECT COUNT(*) AS n FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${WAITING_MATCH_SQL}`,
     ).get(region) as { n: number }).n;
-    const coming = (this.db.prepare(
+    const bumped = (this.db.prepare(
       "SELECT COUNT(*) AS n FROM bookings WHERE purpose = 'scrim' AND region = ? AND end_reason = 'bumped' AND server_id IS NOT NULL AND ended_at IS NULL",
     ).get(region) as { n: number }).n;
-    return Math.max(0, waiting - coming);
+    return Math.max(0, waiting - bumped - this.restartingBoxes(region));
+  }
+
+  /** Boxes in the region the releaser is restarting that come back to the
+   *  pool when it is done (final review, Important 1): offline, enabled, not
+   *  gone (a gone box is not coming back), held by no practice lease or side
+   *  game, and held by no booking that keeps it (a running one, or a bumped
+   *  scrim, which tournamentsOwed counts already). A booking winding down for
+   *  any other end gives its box back, so that box counts. Without the
+   *  releasing dep, none. */
+  private restartingBoxes(region: string): number {
+    const releasing = this.deps.releasing;
+    if (!releasing) return 0;
+    const rows = this.db.prepare(
+      `SELECT id FROM servers WHERE status = 'offline' AND enabled = 1 AND region = ? AND gone_since IS NULL
+         AND id NOT IN (SELECT server_id FROM open_server_holds WHERE kind <> 'booking')
+         AND id NOT IN (SELECT server_id FROM bookings WHERE server_id IS NOT NULL AND ended_at IS NULL AND (ending_at IS NULL OR end_reason = 'bumped'))`,
+    ).all(region) as { id: number }[];
+    return rows.filter((r) => {
+      try {
+        return releasing(r.id);
+      } catch {
+        return false;
+      }
+    }).length;
+  }
+
+  /** Whether any tournament booking in the region waits for a box. */
+  private tournamentsWaiting(region: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${WAITING_MATCH_SQL} LIMIT 1`).get(region);
   }
 
   /** The tournament booking in the region waiting for a box that a scrim
@@ -453,7 +492,7 @@ export class BookingRunner {
    *  already winding down for takes no second one. */
   private waitingTournament(region: string): BookingRow | null {
     const rows = this.db.prepare(
-      `SELECT * FROM bookings t WHERE purpose = 'tournament' AND region = ? AND state = 'scheduled' AND server_id IS NULL AND ending_at IS NULL
+      `SELECT * FROM bookings t WHERE purpose = 'tournament' AND region = ? AND ${WAITING_MATCH_SQL}
          AND NOT EXISTS (SELECT 1 FROM booking_events e WHERE e.event = 'bumped' AND json_extract(e.detail, '$.byBookingId') = t.id)`,
     ).all(region) as BookingRow[];
     return rows.sort(byPriority)[0] ?? null;
@@ -492,8 +531,16 @@ export class BookingRunner {
    *  wind-down (settle), which gives its box back through the releaser;
    *  the freed hook then runs allocate again for the match (Rulings 5 and 7). */
   private bump(victim: BookingRow, forB: BookingRow, nowMs: number): void {
+    // Scrims already bumped for this match: a later one means the box an
+    // earlier bump freed never reached it (its restart failed).
+    const before = (this.db.prepare(
+      "SELECT COUNT(*) AS n FROM booking_events WHERE event = 'bumped' AND json_extract(detail, '$.byBookingId') = ?",
+    ).get(forB.id) as { n: number }).n;
     const r = bumpBooking(this.db, { bookingId: victim.id, byBookingId: forB.id, now: new Date(nowMs) });
-    if (!r.ok) return;
+    if (!r.ok) {
+      console.warn(`[booking] bumping booking ${victim.id} for ${forB.id} refused: ${r.error}`);
+      return;
+    }
     const [a, bs] = sidesOf(this.db, victim.id);
     const names = `${sideName(this.db, a)} vs ${sideName(this.db, bs)}`;
     console.log(`[booking] ${victim.id} (${names}) bumped by tournament booking ${forB.id}`);
@@ -501,7 +548,8 @@ export class BookingRunner {
       kind: 'problem',
       text: `Booking ${victim.id} (${names}, ${victim.starts_at.slice(11, 16)} UTC) was bumped by tournament match booking ${forB.id}: `
         + `${r.value.hadServer ? 'its server is going back to the pool for the match' : 'no server was free and the match is ahead of it'}. `
-        + `Both sides are told${r.value.nearestSlot ? ` and offered ${r.value.nearestSlot.slice(11, 16)} UTC` : ''}; it counts against neither side.`,
+        + `Both sides are told${r.value.nearestSlot ? ` and offered ${r.value.nearestSlot.slice(11, 16)} UTC` : ''}; it counts against neither side.`
+        + (before > 0 ? ` It is the ${ordinal(before + 1)} scrim bumped for match booking ${forB.id}: the server the earlier bump freed did not come back.` : ''),
     });
     this.tell(victim.id, this.everyone(victim.id), 'booking_bumped', { slot: r.value.nearestSlot });
     this.settle(victim.id);
@@ -663,6 +711,17 @@ export class BookingRunner {
     this.emptyWatches.delete(id);
     this.a2sMisses.delete(id);
     this.announced.delete(id);
+    // Final review, Important 3: the releaser's own waiters (allocate among
+    // them) ran before markReleased, while the hold still hid the box. A box
+    // a bumped scrim gave up, or any box while a match in its region waits,
+    // goes to the match now, before the freed hook wakes the PUG queue.
+    if (b.end_reason === 'bumped' || this.tournamentsWaiting(b.region)) {
+      try {
+        this.allocate();
+      } catch (err) {
+        console.error(`[booking] ${id}: allocating after the release failed:`, err);
+      }
+    }
     try {
       this.deps.freed?.();
     } catch (err) {
@@ -993,7 +1052,15 @@ export class BookingRunner {
         continue;
       }
       const s = this.pickBox(b);
-      if (!s || !reholdBox(this.db, b.id, s.id, new Date(nowMs))) { preempt = true; continue; }
+      if (!s || !reholdBox(this.db, b.id, s.id, new Date(nowMs))) {
+        preempt = true;
+        // Server priority (final review, Important 2): a tournament match
+        // whose box died bumps an unstarted scrim on the same terms as one
+        // waiting at its start (allocate): no free box, nothing coming back,
+        // nothing left to preempt, and one scrim per match still owed.
+        if (b.purpose === 'tournament' && this.freeBoxes(b.region) === 0 && !this.preemptable(b.region)) this.bumpFor(b, nowMs);
+        continue;
+      }
       console.log(`[booking] ${b.id} moves to ${s.name}`);
       this.freshBox.add(b.id);
       this.track(b.id, () => this.recover(b.id));

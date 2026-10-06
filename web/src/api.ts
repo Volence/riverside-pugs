@@ -2365,8 +2365,8 @@ export interface AdminBookingRow {
   toxic: { a: boolean; b: boolean };
 }
 
-/** src/routes/adminBookings.ts: the scrim cap, how much of it is in use, and the PUG reserve (server priority Ruling 9). */
-export interface AdminBookingPriority { scrimMax: number; scrimsHolding: number; pugReserve: number }
+/** src/routes/adminBookings.ts: the scrim cap and PUG reserve (each per region), and the scrims holding a box per region (server priority Ruling 9). */
+export interface AdminBookingPriority { scrimMax: number; pugReserve: number; regions: { region: string; scrimsHolding: number }[] }
 
 /** src/routes/adminEvents.ts */
 export interface AdminEventRow {

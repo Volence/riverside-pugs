@@ -72,7 +72,7 @@ describe('BookingsPanel', () => {
         { ...ROW, id: 5, purpose: 'tournament', aName: 'Owls', bName: 'Rats', state: 'scheduled', server: null },
         { ...ROW, id: 6, aName: 'Owls', bName: "p1's group", state: 'cancelled', endReason: 'bumped', server: null },
       ],
-      priority: { scrimMax: 2, scrimsHolding: 1, pugReserve: 2 },
+      priority: { scrimMax: 2, pugReserve: 2, regions: [{ region: 'na', scrimsHolding: 1 }] },
     });
     render(<BookingsPanel nudge={0} />);
     await screen.findByText('Owls vs Rats');
@@ -84,6 +84,16 @@ describe('BookingsPanel', () => {
     // still open, so each still gets its own +1 campaign button; queryByRole
     // throws on more than one match, so this checks for at least one instead.
     expect(screen.queryAllByRole('button', { name: '+1 campaign' })[0]).toBeTruthy();
+  });
+
+  it('with more than one region, counts scrims against the cap per region (final review minor)', async () => {
+    mockAdmin.bookings.mockResolvedValue({
+      bookings: [ROW],
+      priority: { scrimMax: 2, pugReserve: 2, regions: [{ region: 'eu', scrimsHolding: 0 }, { region: 'na', scrimsHolding: 2 }] },
+    });
+    render(<BookingsPanel nudge={0} />);
+    await screen.findByText("Rats vs p1's group");
+    expect(screen.getByTestId('booking-priority').textContent).toBe('Priority: Match, then Scrim, then PUG, then practice and side games. Scrims hold 0 of 2 servers they may hold at once in EU, 2 of 2 in NA; 2 always left for PUGs. A match with no free server bumps a scrim that has not started.');
   });
 
   it('shows no priority line when the answer carries none', async () => {

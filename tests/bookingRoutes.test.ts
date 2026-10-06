@@ -155,10 +155,19 @@ describe('staff', () => {
     const list = (await call('GET', '/api/admin/bookings', MOD)).json();
     expect(list.bookings.find((b: { id: number }) => b.id === id).purpose).toBe('scrim');
     const reserve = Number((db.prepare("SELECT value FROM settings WHERE key = 'pug_reserve_servers'").get() as { value: string }).value);
-    expect(list.priority).toEqual({ scrimMax: 2, scrimsHolding: 0, pugReserve: reserve });
+    expect(list.priority).toEqual({ scrimMax: 2, pugReserve: reserve, regions: [{ region: 'na', scrimsHolding: 0 }] });
     db.prepare("UPDATE settings SET value = '3' WHERE key = 'scrim_max_servers'").run();
     db.prepare("UPDATE bookings SET server_id = (SELECT id FROM servers WHERE name = 'a'), state = 'held' WHERE id = ?").run(id);
-    expect((await call('GET', '/api/admin/bookings', MOD)).json().priority).toEqual({ scrimMax: 3, scrimsHolding: 1, pugReserve: reserve });
+    expect((await call('GET', '/api/admin/bookings', MOD)).json().priority).toEqual({ scrimMax: 3, pugReserve: reserve, regions: [{ region: 'na', scrimsHolding: 1 }] });
+  });
+
+  it('counts scrims against the cap per region, since the cap is per region (final review minor)', async () => {
+    const id = await create();
+    db.prepare("UPDATE bookings SET server_id = (SELECT id FROM servers WHERE name = 'a'), state = 'held' WHERE id = ?").run(id);
+    db.prepare("UPDATE servers SET region = 'eu' WHERE name = 'a'").run();
+    db.prepare("UPDATE bookings SET region = 'eu' WHERE id = ?").run(id);
+    const regions = (await call('GET', '/api/admin/bookings', MOD)).json().priority.regions;
+    expect(regions).toEqual([{ region: 'eu', scrimsHolding: 1 }, { region: 'na', scrimsHolding: 0 }]);
   });
 });
 
