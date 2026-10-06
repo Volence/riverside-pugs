@@ -13,7 +13,8 @@ import { isPug } from '../rulesetStore.js';
 import { newLeasePassword } from '../practiceLeases.js';
 import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
-import { bookingGames, gamesPlayed, type BookingGameView } from './games.js';
+import { bookingGames, gamesPlayed, liveBookingGame, type BookingGameView } from './games.js';
+import { nearestFreeSlot } from '../scrims/rules.js';
 import { castersOf, type CasterView } from './casters.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
@@ -652,6 +653,41 @@ export function cancelBooking(db: DB, o: { bookingId: number; by: string; staff?
     close(db, b.id, 'cancelled', o.staff ? 'staff' : 'cancelled', now, { cancelledBy: o.by, cancelSide: side, cancelReason: reason });
     logEvent(db, b.id, o.by, 'cancelled', { side, reason, staff: !!o.staff }, now);
     return ok({ hadServer: b.server_id !== null });
+  })();
+}
+
+/** The reason a bumped scrim carries on its page (Ruling 5); the DM says
+ *  the same. The time is written as whenUtc does (src/bookings/messages.ts
+ *  imports this module, so the format is repeated rather than imported). */
+export function bumpReason(nearestSlot: string | null): string {
+  const slot = nearestSlot
+    ? `The nearest free slot is ${nearestSlot.slice(0, 10)} ${nearestSlot.slice(11, 16)} UTC.`
+    : 'No other slot is free within 3 hours of the start.';
+  return `A tournament match needed the server. ${slot}`;
+}
+
+/**
+ * A scrim bumped by a tournament match (server priority, Rulings 4 to 6):
+ * closed as cancelled with end_reason 'bumped' and a side of nobody, so it is
+ * never a late cancel, a no-show or a short side and nothing lands on either
+ * record. Once the row no longer counts, the nearest free slot of the same
+ * length (src/scrims/rules.ts) is worked out for the reason, the event and
+ * the DM. Only an open scrim that has not started: never a tournament
+ * booking, never one that is active, has a live game or is in crash
+ * recovery. The runner winds the box down and tells both sides.
+ */
+export function bumpBooking(db: DB, o: { bookingId: number; byBookingId: number; now?: Date }): Result<{ hadServer: boolean; nearestSlot: string | null }> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<{ hadServer: boolean; nearestSlot: string | null }> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    if (b.purpose !== 'scrim' || !isOpen(b) || b.state === 'active' || b.recovering_at !== null || liveBookingGame(db, b.id)) return fail('wrong_state');
+    if (!close(db, b.id, 'cancelled', 'bumped', now)) return fail('wrong_state');
+    const minutes = Math.round((Date.parse(b.ends_at) - Date.parse(b.starts_at)) / 60_000);
+    const nearestSlot = nearestFreeSlot(db, b.region, Date.parse(b.starts_at), minutes, now.getTime());
+    db.prepare('UPDATE bookings SET cancel_reason = ? WHERE id = ?').run(bumpReason(nearestSlot), b.id);
+    logEvent(db, b.id, null, 'bumped', { byBookingId: o.byBookingId, nearestSlot }, now);
+    return ok({ hadServer: b.server_id !== null, nearestSlot });
   })();
 }
 

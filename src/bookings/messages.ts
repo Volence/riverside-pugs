@@ -11,17 +11,17 @@ export const whenUtc = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice
 /** Added to a late cancel's notice for the side that was cancelled on. */
 export const LATE_CANCEL_LINE = 'This is a late cancel. If it is fine with you, excuse it on the booking page so it does not count against them.';
 
-/** The six booking notice types this module knows how to word. Narrower than
+/** The booking notice types this module knows how to word. Narrower than
  *  the full NotifyType (which also carries the scrim board's types, worded
  *  elsewhere) so the switch below stays exhaustive as NotifyType grows. */
 export type BookingNotifyType =
-  'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_recovered' | 'booking_cancelled' | 'booking_no_show';
+  'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_recovered' | 'booking_cancelled' | 'booking_no_show' | 'booking_bumped';
 
 /** The DM for one booking notification, or null for a booking that is gone.
  *  Every player-chosen name goes through escapeName, as in teamButtons.ts. */
 export function bookingMessage(
   db: DB, publicUrl: string, bookingId: number, type: BookingNotifyType,
-  extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean; moved?: boolean; restored?: string | null } = {},
+  extra: { minutes?: number; reason?: string | null; addedBy?: string; lateCancel?: boolean; moved?: boolean; restored?: string | null; slot?: string | null } = {},
 ): MessagePayload | null {
   const b = getBooking(db, bookingId);
   if (!b) return null;
@@ -57,6 +57,12 @@ export function bookingMessage(
       break;
     case 'booking_no_show':
       content = `Your side was recorded as a no-show for ${vs} on ${when}.`;
+      break;
+    case 'booking_bumped':
+      // Server priority Ruling 5: the slot is nearestFreeSlot's, worked out when the scrim was closed.
+      content = `${vs} on ${when} was bumped: a tournament match needed the server. ${extra.slot
+        ? `The nearest free slot is ${whenUtc(extra.slot)}: book it again from the booking page, or leave it.`
+        : 'No other slot is free within 3 hours of the start: book another time from the booking page, or leave it.'} It counts against neither side.`;
       break;
     case 'booking_recovered': {
       const s = b.server_id !== null ? getServer(db, b.server_id) : undefined;
