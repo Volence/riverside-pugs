@@ -546,7 +546,9 @@ export function setAdminPause(
     const c = liveMatch(db, o.matchId);
     if (!c.ok) return c;
     const { m, ev } = c.value;
-    if (!SUB_PHASES.has(m.status)) return V.fail('not_live_phase');
+    // A hold taken from a box phase still records the box's freeze (fix round 1): it is the truth about the box.
+    const boxPhase = SUB_PHASES.has(m.status) || (m.status === 'admin_hold' && m.hold_from !== null && SUB_PHASES.has(m.hold_from));
+    if (!boxPhase) return V.fail('not_live_phase');
     if (o.on === (m.admin_pause_at !== null)) return V.fail(o.on ? 'already_frozen' : 'not_frozen');
     db.prepare('UPDATE event_matches SET admin_pause_at = ?, admin_pause_by = ? WHERE id = ?').run(o.on ? at : null, o.on ? o.by : null, m.id);
     E.logEvent(db, ev.id, o.by, o.on ? 'match_frozen' : 'match_unfrozen', at, { matchId: m.id, cause: o.cause });
@@ -626,9 +628,12 @@ export function releaseHold(
       if (!b || b.ending_at !== null || (b.state !== 'ready' && b.state !== 'active')) return V.fail('hold_not_releasable');
     }
     let deadline: string | null = null;
+    // Both ready and no step left for a person: advance() moves on as the veto would (lineups and their deadline).
+    let moveOn = false;
     if (to === 'veto') {
       if (m.ready_a_at === null || m.ready_b_at === null) deadline = plus(now, o.timers.readyMinutes * 60_000);
       else if (isHumanStep(roomState(db, m).next)) deadline = plus(now, o.timers.stepSeconds * 1000);
+      else moveOn = true;
     } else if (to === 'lineup') deadline = plus(now, o.timers.lineupMinutes * 60_000);
     else if (to === 'connect') deadline = plus(now, o.graceMinutes * 60_000);
     else if (to === 'confirming') deadline = plus(now, o.timers.confirmMinutes * 60_000);
@@ -637,6 +642,8 @@ export function releaseHold(
       `UPDATE event_matches SET status = ?, deadline = ?, hold_reason = NULL, hold_from = NULL,
          dispute_side = NULL, dispute_by = NULL, dispute_reason = NULL, disputed_at = NULL WHERE id = ?`,
     ).run(to, deadline, m.id);
+    if (moveOn) advance(db, m.id, o.timers, now);
+    // A hold from 'booking' goes back with no deadline: the series engine rebooks it.
     E.logEvent(db, ev.id, o.by, 'hold_released', at, {
       matchId: m.id, to, reason: m.hold_reason,
       dispute: m.dispute_side === null ? null : { side: m.dispute_side, by: m.dispute_by, reason: m.dispute_reason, at: m.disputed_at },

@@ -538,3 +538,40 @@ describe('desk tools on the room (plan T3c)', () => {
     expect(lastAction(f)).toEqual({ action: 'chapter_replayed', actor: ADMIN });
   });
 });
+
+describe('fix round 1 (plan T3c Task 2)', () => {
+  it('records the box freeze during a hold taken from a box phase, and refuses one on a hold taken in veto', async () => {
+    const f = await toBooking();
+    ok(R.attachBooking(f.db, { matchId: f.matchId, bookingId: fakeBooking(f, at(5)), now: at(5) }));
+    ok(R.startConnect(f.db, { matchId: f.matchId, graceMinutes: 15, now: at(5) }));
+    ok(R.linkGame(f.db, { matchId: f.matchId, gameId: game(f, 1).id, gameMatchId: fakeMatch(f), now: at(6) }));
+    ok(R.startLive(f.db, { matchId: f.matchId, now: at(7) }));
+    ok(R.setAdminPause(f.db, { matchId: f.matchId, on: true, by: ADMIN, cause: 'staff', now: at(8) }));
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: at(9) }));
+    const n = () => (f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'match_unfrozen'").get() as { n: number }).n;
+    const off = ok(R.setAdminPause(f.db, { matchId: f.matchId, on: false, by: ADMIN, cause: 'staff', now: at(10) }));
+    expect(off).toMatchObject({ status: 'admin_hold', admin_pause_at: null, admin_pause_by: null });
+    expect(n()).toBe(1);
+    const on = ok(R.setAdminPause(f.db, { matchId: f.matchId, on: true, by: A[0]!, cause: 'call', now: at(11) }));
+    expect(on).toMatchObject({ status: 'admin_hold', admin_pause_at: at(11).toISOString(), admin_pause_by: A[0] });
+    expect(lastAction(f)).toEqual({ action: 'match_frozen', actor: A[0] });
+
+    const g = await roomFixture();
+    open(g);
+    ok(R.holdMatch(g.db, { matchId: g.matchId, by: ADMIN, reason: 'Checking', now: at(3) }));
+    expect(R.setAdminPause(g.db, { matchId: g.matchId, on: true, by: ADMIN, cause: 'staff', now: at(4) })).toEqual({ ok: false, error: 'not_live_phase' });
+  });
+
+  it('releases a veto hold with both ready and no step left for a person straight on to lineups', async () => {
+    const f = await roomFixture({ pool: ['no_mercy'], veto: { games: 1, banTo: 1, firstBan: 'coin', firstPick: 'higher', laterPicks: 'alternate', lateBans: 0, sides: 'coin' } });
+    open(f);
+    ok(R.readyUp(f.db, { matchId: f.matchId, steamid: A[0]!, timers: TIMERS, now: at(1) }));
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking', now: at(2) }));
+    // Test setup: team b's ready landed with the hold (both ready, nothing for a person to do).
+    f.db.prepare('UPDATE event_matches SET ready_b_at = ? WHERE id = ?').run(at(2).toISOString(), f.matchId);
+    const m = ok(R.releaseHold(f.db, { matchId: f.matchId, by: ADMIN, timers: TIMERS, graceMinutes: 15, now: at(10) }));
+    expect(m).toMatchObject({ status: 'lineup', deadline: at(15).toISOString(), hold_from: null });
+    expect(R.gamesOf(f.db, f.matchId)).toEqual([expect.objectContaining({ ordinal: 1, campaign: 'no_mercy' })]);
+    expect(lastAction(f)).toEqual({ action: 'hold_released', actor: ADMIN });
+  });
+});
