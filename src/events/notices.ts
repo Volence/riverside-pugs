@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
 import * as N from './entries.js';
 import * as P from './play.js';
-import { eventMessage, type EventNotifyType } from './messages.js';
+import { eventMessage, type EventNotifyType, type StaffAction } from './messages.js';
 
 /**
  * The event DMs (plan T1b Ruling 11), shared by the minute tick
@@ -71,4 +71,8 @@ export function tellConnect(d: NoticeDeps, eventId: number, matchId: number, to:
 /** The series is over and its confirm window open: both rosters. */
 export function tellSeriesResult(d: NoticeDeps, eventId: number, matchId: number): void {
   tell(d, rostersOf(d, matchId), eventId, 'event_match_result', { matchId });
+}
+/** A desk action (plan T3c Ruling 17): both rosters, one sentence. */
+export function tellStaffAction(d: NoticeDeps, eventId: number, matchId: number, what: StaffAction, detail?: string): void {
+  tell(d, rostersOf(d, matchId), eventId, 'event_match_staff', { matchId, what, detail });
 }

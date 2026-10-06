@@ -43,6 +43,9 @@ describe('preferences', () => {
       { type: 'event_match_connect', label: 'My tournament server is ready, with the connect line' },
       { type: 'event_match_result', label: 'A tournament match of mine finished and is in its confirm window' },
     ]);
+    expect(NOTIFY_TYPES.find((t) => t.type === 'event_match_staff')).toEqual({
+      type: 'event_match_staff', label: 'Staff act on a tournament match of mine (a freeze, a reopened veto, a replayed chapter, a moved server, more time, a released hold)',
+    });
   });
 });
 

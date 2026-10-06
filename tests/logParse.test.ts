@@ -755,6 +755,8 @@ describe('parseLogDatagram: l4d_nightmode look lines', () => {
       .toEqual({ kind: 'admin_pause', token: TOKEN, on: true, by: BY, cause: 'call' });
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=off by=site cause=staff`)))
       .toEqual({ kind: 'admin_pause', token: TOKEN, on: false, by: null, cause: 'staff' });
+    expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=off by=${BY} cause=forced`)))
+      .toEqual({ kind: 'admin_pause', token: TOKEN, on: false, by: BY, cause: 'forced' });
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=off by=site cause=whatever`)))
       .toEqual({ kind: 'admin_pause', token: TOKEN, on: false, by: null, cause: 'staff' });
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ADMINPAUSE state=maybe by=site cause=call`))).toBeNull();

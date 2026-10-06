@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import type { AdminPauseCause } from '../logParse.js';
 import { settingNumber } from '../settings.js';
 import * as E from './events.js';
 import * as N from './entries.js';
@@ -500,11 +501,13 @@ const SUB_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect'
 const BOX_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect', 'live', 'confirming']);
 const REOPENABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking']);
 
-/** Subs a side has made in this match: its player_subbed log rows (Ruling 4). */
+/** Subs a side has made in this match (Ruling 4): its player_subbed log
+ *  rows less the ones the box refused (sub_reverted, plan T3c Task 6). */
 export function subsUsed(db: DB, m: P.MatchRow, side: Side): number {
   return (db.prepare(
-    `SELECT COUNT(*) AS n FROM event_log WHERE event_id = ? AND action = 'player_subbed'
-       AND json_extract(detail, '$.matchId') = ? AND json_extract(detail, '$.side') = ?`,
+    `SELECT COALESCE(SUM(CASE action WHEN 'player_subbed' THEN 1 ELSE -1 END), 0) AS n FROM event_log
+      WHERE event_id = ? AND action IN ('player_subbed', 'sub_reverted')
+        AND json_extract(detail, '$.matchId') = ? AND json_extract(detail, '$.side') = ?`,
   ).get(m.event_id, m.id, side) as { n: number }).n;
 }
 
@@ -537,9 +540,36 @@ export function subPlayer(
   })();
 }
 
+/** A sub the box refused because a chapter is being played (pug-match
+ *  answers `PUGERR not between chapters` to sm_pug_sub): the lineup goes
+ *  back to the four it had and the sub no longer counts. Only the side's
+ *  latest sub, and only while the incoming player is still in its four. */
+export function revertSub(db: DB, o: { matchId: number; outId: string; inId: string; now?: Date }): V.Checked<{ side: Side; four: string[] }> {
+  const at = iso(o.now);
+  return db.transaction((): V.Checked<{ side: Side; four: string[] }> => {
+    const c = liveMatch(db, o.matchId);
+    if (!c.ok) return c;
+    const { m, ev } = c.value;
+    if (!SUB_PHASES.has(m.status)) return V.fail('not_live_phase');
+    const row = lineupsOf(db, m.id).find((l) => l.game === 1 && (JSON.parse(l.steamids) as string[]).includes(o.inId));
+    if (!row) return V.fail('not_in_lineup');
+    const side: Side = row.entry_id === m.entry_a ? 'a' : 'b';
+    const last = db.prepare(
+      `SELECT action, json_extract(detail, '$.out') AS out, json_extract(detail, '$.in') AS inn FROM event_log
+        WHERE event_id = ? AND action IN ('player_subbed', 'sub_reverted') AND json_extract(detail, '$.matchId') = ? AND json_extract(detail, '$.side') = ?
+        ORDER BY id DESC LIMIT 1`,
+    ).get(ev.id, m.id, side) as { action: string; out: string; inn: string } | undefined;
+    if (!last || last.action !== 'player_subbed' || last.out !== o.outId || last.inn !== o.inId) return V.fail('changed');
+    const four = (JSON.parse(row.steamids) as string[]).map((s) => (s === o.inId ? o.outId : s));
+    db.prepare('UPDATE event_lineups SET steamids = ? WHERE id = ?').run(JSON.stringify(four), row.id);
+    E.logEvent(db, ev.id, null, 'sub_reverted', at, { matchId: m.id, side, out: o.outId, in: o.inId, reason: 'not_between_chapters' });
+    return V.ok({ side, four });
+  })();
+}
+
 /** Ruling 9: the staff freeze as the box reports it (or as the desk sent it). Idempotent each way. */
 export function setAdminPause(
-  db: DB, o: { matchId: number; on: boolean; by: string | null; cause: 'call' | 'staff' | 'reset'; now?: Date },
+  db: DB, o: { matchId: number; on: boolean; by: string | null; cause: AdminPauseCause; now?: Date },
 ): V.Checked<P.MatchRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<P.MatchRow> => {

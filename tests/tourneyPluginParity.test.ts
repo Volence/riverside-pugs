@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseLogDatagram } from '../src/logParse.js';
+import { SUB_NOT_BETWEEN, adminPauseTook, parseSubReply } from '../src/events/series.js';
 
 /** The plugin half of plan T3c's in-game lines (plugin/pug-tourney.inc,
  *  pug-match 0.3.25). Nothing here can run SourcePawn, so like the other
@@ -91,10 +92,9 @@ describe('pug-tourney.inc log lines', () => {
       ['off', 'site', 'staff', { on: false, by: null, cause: 'staff' }],
       ['off', STAFF, 'staff', { on: false, by: STAFF, cause: 'staff' }],
       ['off', 'site', 'reset', { on: false, by: null, cause: 'reset' }],
-      // cause=forced (an admin's !forceunpause) reads as a staff lift: the
-      // parser keeps call and reset and files every other cause under staff.
-      ['off', STAFF, 'forced', { on: false, by: STAFF, cause: 'staff' }],
-      ['off', 'site', 'forced', { on: false, by: null, cause: 'staff' }],
+      // cause=forced (an admin's !forceunpause) keeps its own cause (plan T3c Task 6).
+      ['off', STAFF, 'forced', { on: false, by: STAFF, cause: 'forced' }],
+      ['off', 'site', 'forced', { on: false, by: null, cause: 'forced' }],
     ];
     for (const [state, by, cause, want] of cases) {
       expect(parseLogDatagram(emitPug(fmt, state, by, cause))).toEqual({ kind: 'admin_pause', token: TOKEN, ...want });
@@ -162,5 +162,29 @@ describe('sm_pug_sub and sm_pug_adminpause', () => {
     const v = /#define PLUGIN_VERSION "0\.3\.(\d+)"/.exec(matchSrc);
     expect(v).not.toBeNull();
     expect(Number(v![1])).toBeGreaterThanOrEqual(25);
+  });
+});
+
+/** The rcon answers the series engine reads (src/events/series.ts), from the
+ *  plugin's own PrintToServer formats (plan T3c ledger). */
+describe('pug-tourney.inc rcon answers', () => {
+  const printed = [...tourneySrc.matchAll(/PrintToServer\("((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
+  it('answers sm_pug_sub in the shapes parseSubReply reads', () => {
+    expect(printed).toContain('PUGOK sub out=%s in=%s slot=%d');
+    expect(printed).toContain('PUGOK sub already');
+    expect(printed).toContain(`PUGERR ${SUB_NOT_BETWEEN}`);
+    expect(parseSubReply(`${fill('PUGOK sub out=%s in=%s slot=%d', OUT, IN, 5)}\n`, OUT, IN)).toEqual({ ok: true, already: false });
+    expect(parseSubReply('PUGOK sub already\n', OUT, IN)).toEqual({ ok: true, already: true });
+    for (const err of printed.filter((p) => p.startsWith('PUGERR ') && !p.includes('%'))) {
+      expect(parseSubReply(`${err}\n`, OUT, IN)).toEqual({ ok: false, error: err.slice('PUGERR '.length) });
+    }
+  });
+  it('answers sm_pug_adminpause in the shape adminPauseTook reads', () => {
+    const fmt = printed.find((p) => p.startsWith('PUGOK adminpause='));
+    expect(fmt).toBe('PUGOK adminpause=%s frozen=%d');
+    expect(adminPauseTook(fill(fmt!, 'on', 1), true)).toBe(true);
+    expect(adminPauseTook(fill(fmt!, 'off', 0), false)).toBe(true);
+    expect(adminPauseTook(fill(fmt!, 'on', 0), true)).toBe(false);
+    expect(adminPauseTook('PUGERR adminpause state is on or off', true)).toBe(false);
   });
 });

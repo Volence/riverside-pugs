@@ -384,3 +384,28 @@ describe('LogListener: the authenticator', () => {
     expect(got).toEqual([]);
   });
 });
+
+describe('LogListener: the reset line of an ended tournament game (plan T3c)', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 60));
+  it('admits ADMINPAUSE off cause=reset with an unregistered token from a game server, and nothing else of the kind', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('127.0.0.1');
+    await send(port, `PUG ${OTHER} ADMINPAUSE state=off by=site cause=reset`);
+    await send(port, `PUG ${OTHER} ADMINPAUSE state=on by=site cause=staff`);
+    await send(port, `PUG ${OTHER} ADMINPAUSE state=off by=site cause=staff`);
+    await send(port, `PUG ${OTHER} SUB by=76561199000000801 out=76561199000000804 in=76561199000000805 map=0`);
+    await settle();
+    expect(got).toEqual([{ kind: 'admin_pause', token: OTHER, on: false, by: null, cause: 'reset' }]);
+  });
+  it('drops it from an address that is not a game server', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.allowMatchCreateFrom('203.0.113.7');
+    await send(port, `PUG ${OTHER} ADMINPAUSE state=off by=site cause=reset`);
+    await settle();
+    expect(got).toEqual([]);
+  });
+});
