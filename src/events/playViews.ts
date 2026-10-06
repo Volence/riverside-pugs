@@ -10,10 +10,26 @@ import type * as V from './validate.js';
 /** Brackets, standings and rounds of the stages that have started (plan T2),
  *  for the public event page and the desk alike. Never SR. */
 
+/** Where a match's room stands (plan T3a). Lives here rather than in
+ *  roomViews.ts, which imports this file; roomViews.ts re-exports it. */
+export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'hold' | 'done';
+
+export function phaseOf(m: Pick<P.MatchRow, 'status' | 'ready_a_at' | 'ready_b_at'>): RoomPhase {
+  switch (m.status) {
+    case 'pending': return 'pending';
+    case 'waiting': return 'waiting';
+    case 'veto': return m.ready_a_at !== null && m.ready_b_at !== null ? 'veto' : 'ready';
+    case 'lineup': return 'lineup';
+    case 'admin_hold': return 'hold';
+    case 'done': case 'forfeit': case 'bye': return 'done';
+    default: return 'server';
+  }
+}
+
 export interface PlayEntry { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; out: boolean }
 export interface PlayMatch {
   id: number; group: number; round: number; slot: number; a: PlayEntry | null; b: PlayEntry | null; status: string;
-  winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean;
+  winner: 'a' | 'b' | null; scoreA: number | null; scoreB: number | null; forfeit: boolean; bye: boolean; phase: RoomPhase;
 }
 /** dates: a league round's week, first and last day (YYYY-MM-DD); null for
  *  every other stage type. */
@@ -30,35 +46,55 @@ export interface StagePlayView {
   pairsAsItGoes: boolean;
 }
 
-export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
-  const entries = new Map(N.entriesOf(db, ev.id).map((e): [number, PlayEntry] => [e.id, {
+/** Every entry of the event as a bracket shows it, by entry id. */
+export function playEntriesOf(db: DB, ev: E.EventRow): Map<number, PlayEntry> {
+  return new Map(N.entriesOf(db, ev.id).map((e): [number, PlayEntry] => [e.id, {
     id: e.id, name: e.name, tag: e.tag, logoKey: e.logo_key, seed: e.seed, out: e.status === 'dropped' || e.status === 'disqualified',
   }]));
+}
+
+/** A stage's round labels and league dates, from its matches. */
+function stageLabels(ev: E.EventRow, s: E.StageRow, ms: P.MatchRow[]) {
+  const st = E.stageSettingsOf(s);
+  // A double elimination of 2 is played as a single final (bracket.ts createBracket).
+  const labelType: V.StageType = st.type === 'double_elim' && ms.every((m) => m.grp === 1) ? 'single_elim' : st.type;
+  // Ruling 19: week 1 starts on the season start, or the day the stage started.
+  const league = st.type === 'league' ? st.config as V.StageConfigs['league'] : null;
+  const seasonStart = league ? league.seasonStart ?? (s.started_at ?? ev.starts_at).slice(0, 10) : null;
+  const last = new Map<number, number>();
+  for (const m of ms) last.set(m.grp, Math.max(last.get(m.grp) ?? 0, m.round));
+  return {
+    labelType,
+    label: (grp: number, round: number) => roundLabel(labelType, st.config, grp, round, last.get(grp)!),
+    dates: (round: number) => (league && seasonStart ? weekDates(seasonStart, weekOfRound(round, league.matchesPerWeek)) : null),
+  };
+}
+
+/** One match's round label, exactly as its stage's bracket shows it. */
+export function matchLabel(db: DB, ev: E.EventRow, m: P.MatchRow): string {
+  return stageLabels(ev, E.getStage(db, m.stage_id)!, P.matchesOf(db, m.stage_id)).label(m.grp, m.round);
+}
+
+export function stagePlayViews(db: DB, ev: E.EventRow): StagePlayView[] {
+  const entries = playEntriesOf(db, ev);
   const entry = (id: number | null) => (id === null ? null : entries.get(id) ?? null);
   return E.stagesOf(db, ev.id).filter((s) => s.status !== 'pending').map((s) => {
     const st = E.stageSettingsOf(s);
     const elim = st.type === 'single_elim' || st.type === 'double_elim';
     const ms = P.matchesOf(db, s.id);
-    // A double elimination of 2 is played as a single final (bracket.ts createBracket).
-    const labelType: V.StageType = st.type === 'double_elim' && ms.every((m) => m.grp === 1) ? 'single_elim' : st.type;
-    // Ruling 19: week 1 starts on the season start, or the day the stage started.
-    const league = st.type === 'league' ? st.config as V.StageConfigs['league'] : null;
-    const seasonStart = league ? league.seasonStart ?? (s.started_at ?? ev.starts_at).slice(0, 10) : null;
-    const leagueDates = (round: number) => (league && seasonStart ? weekDates(seasonStart, weekOfRound(round, league.matchesPerWeek)) : null);
-    const last = new Map<number, number>();
-    for (const m of ms) last.set(m.grp, Math.max(last.get(m.grp) ?? 0, m.round));
+    const { labelType, label, dates } = stageLabels(ev, s, ms);
     const rounds: PlayRound[] = [];
     for (const m of ms) {
       let r = rounds.find((x) => x.group === m.grp && x.round === m.round);
       if (!r) {
-        r = { group: m.grp, round: m.round, label: roundLabel(labelType, st.config, m.grp, m.round, last.get(m.grp)!), dates: leagueDates(m.round), matches: [] };
+        r = { group: m.grp, round: m.round, label: label(m.grp, m.round), dates: dates(m.round), matches: [] };
         rounds.push(r);
       }
       const resolved = P.RESOLVED.has(m.status);
       r.matches.push({
         id: m.id, group: m.grp, round: m.round, slot: m.slot, a: entry(m.entry_a), b: entry(m.entry_b), status: m.status,
         winner: !resolved || m.winner_entry === null ? null : m.winner_entry === m.entry_a ? 'a' : 'b',
-        scoreA: m.score_a, scoreB: m.score_b, forfeit: m.status === 'forfeit', bye: m.status === 'bye',
+        scoreA: m.score_a, scoreB: m.score_b, forfeit: m.status === 'forfeit', bye: m.status === 'bye', phase: phaseOf(m),
       });
     }
     const groups = [...new Set(ms.map((m) => m.grp))].sort((x, y) => x - y).map((n) => ({ number: n, label: groupLabel(labelType, n) }));

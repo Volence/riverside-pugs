@@ -66,7 +66,7 @@ describe('event play routes', () => {
     // Never SR: the entry and match shapes carry exactly their declared
     // fields, nothing extra (a positive check, not a leak-pattern guess).
     expect(Object.keys(page.play[0].standings[0].entry).sort()).toEqual(['id', 'logoKey', 'name', 'out', 'seed', 'tag']);
-    const matchKeys: (keyof PlayMatch)[] = ['id', 'group', 'round', 'slot', 'a', 'b', 'status', 'winner', 'scoreA', 'scoreB', 'forfeit', 'bye'];
+    const matchKeys: (keyof PlayMatch)[] = ['id', 'group', 'round', 'slot', 'a', 'b', 'status', 'winner', 'scoreA', 'scoreB', 'forfeit', 'bye', 'phase'];
     expect(Object.keys(page.play[0].rounds[0].matches[0]).sort()).toEqual([...matchKeys].sort());
     expect((await post(`/api/admin/events/${f.eventId}/start`, ADMIN)).statusCode).toBe(409);
   });

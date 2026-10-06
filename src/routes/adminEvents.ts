@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import type { CommunityStore } from '../community/store.js';
@@ -9,6 +10,7 @@ import { campaignRegistry } from '../campaignRegistry.js';
 import * as E from '../events/events.js';
 import * as N from '../events/entries.js';
 import * as P from '../events/play.js';
+import * as R from '../events/room.js';
 import * as V from '../events/validate.js';
 import { recordResultFlow, settleEvent, startEventFlow } from '../events/flow.js';
 import { stageSummary } from '../events/format.js';
@@ -16,8 +18,8 @@ import { adminEntryViews } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCheckinOpen, tellDropped, tellRosterAdded } from '../events/notices.js';
-import type { RoomClock } from '../events/roomClock.js';
+import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded } from '../events/notices.js';
+import { higherSide, type RoomClock } from '../events/roomClock.js';
 
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; startsAt: string; stages: number; updatedAt: string;
@@ -366,4 +368,32 @@ export async function adminEventRoutes(
     });
     return {};
   });
+
+  /** Plan T3a Ruling 13: open a room by hand (any waiting match with both
+   *  teams, window stages included), reset one to waiting, or hold one. */
+  const roomAction = (action: 'open-room' | 'reset-room' | 'hold', audit: string) =>
+    app.post(`/api/admin/events/:id/matches/:matchId/${action}`, async (req, reply) => {
+      const me = requireAdmin(req, reply);
+      if (!me) return;
+      const p = req.params as { id: string; matchId: string };
+      const ev = eventOf(p.id);
+      const matchId = idOf(p.matchId);
+      const m = ev && matchId !== null ? P.getMatch(db, matchId) : undefined;
+      if (!ev || !m || m.event_id !== ev.id) return refuse(reply, 'match_not_found');
+      // The hold reason shows on the public room page: one clean line, 3 to 300 characters.
+      const nr = action === 'hold' ? V.normalizeReason(((req.body ?? {}) as { reason?: unknown }).reason) : V.ok(null);
+      const reason = nr.ok ? nr.value ?? '' : '';
+      if (action === 'hold' && reason.length < 3) return refuse(reply, 'bad_reason');
+      const r = action === 'open-room'
+        ? R.openRoom(db, { matchId: m.id, by: me, higher: higherSide(db, m), seed: randomInt(2 ** 31), timers: R.roomTimers(db) })
+        : action === 'reset-room' ? R.resetRoom(db, { matchId: m.id, by: me }) : R.holdMatch(db, { matchId: m.id, by: me, reason });
+      if (!r.ok) return refuse(reply, r.error);
+      if (action === 'open-room') tellRoomOpen(opts, ev.id, m.id);
+      opts.rooms?.pushChange(m.id);
+      logAdmin(db, me, audit, ev.id, { matchId: m.id, ...(action === 'hold' ? { reason } : {}) });
+      return {};
+    });
+  roomAction('open-room', 'event_room_open');
+  roomAction('reset-room', 'event_room_reset');
+  roomAction('hold', 'event_hold');
 }
