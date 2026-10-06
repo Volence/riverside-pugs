@@ -116,7 +116,7 @@ function timeIn(m: P.MatchRow, raw: unknown, at: string, minAheadMs: number): st
 
 function insertProposal(db: DB, m: P.MatchRow, side: Side, by: string, time: string, note: string, at: string, rules: ScheduleRules): number {
   const opens = m.scheduled_at === null ? null : Date.parse(m.scheduled_at) - rules.leadMinutes * 60_000;
-  const auto = autoAcceptAt(Date.parse(at), Date.parse(time), rules.autoAcceptHours, opens, (rules.autoAcceptMinAheadHours ?? 48) * 3_600_000);
+  const auto = autoAcceptAt(Date.parse(at), Date.parse(time), rules.autoAcceptHours, opens, rules.autoAcceptMinAheadHours !== undefined ? rules.autoAcceptMinAheadHours * 3_600_000 : AUTO_ACCEPT_MIN_AHEAD_MS);
   return Number(db.prepare(
     'INSERT INTO event_reschedules (event_match_id, side, proposed_by, proposed_time, note, created_at, auto_accept_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(m.id, side, by, time, note, at, auto).lastInsertRowid);
@@ -139,7 +139,7 @@ export function proposeTime(
     const side = sideOf(db, m, o.by);
     if (!side) return V.fail('not_manager');
     if (openProposal(db, m.id)) return V.fail('proposal_open');
-    const time = timeIn(m, o.time, at, (o.rules.minAheadMinutes ?? 60) * 60_000);
+    const time = timeIn(m, o.time, at, o.rules.minAheadMinutes !== undefined ? o.rules.minAheadMinutes * 60_000 : PROPOSE_MIN_AHEAD_MS);
     if (!time) return V.fail('bad_time');
     const nr = V.normalizeReason(o.note);
     if (!nr.ok) return nr;
@@ -185,7 +185,7 @@ export function counterProposal(
     const p = openProposal(db, m.id);
     if (!p) return V.fail('no_proposal');
     if (p.side === side) return V.fail('own_proposal');
-    const time = timeIn(m, o.time, at, (o.rules.minAheadMinutes ?? 60) * 60_000);
+    const time = timeIn(m, o.time, at, o.rules.minAheadMinutes !== undefined ? o.rules.minAheadMinutes * 60_000 : PROPOSE_MIN_AHEAD_MS);
     // A counter at the open proposal's own time is an accept, not a counter (final review).
     if (!time || time === p.proposed_time) return V.fail('bad_time');
     const nr = V.normalizeReason(o.note);
@@ -278,7 +278,8 @@ export function autoAccept(db: DB, o: { proposalId: number; now?: Date }): V.Che
 export function remindersDue(db: DB, now: Date): RescheduleRow[] {
   // A lock already due goes out on its own: no reminder after downtime (final review).
   const at = now.toISOString();
-  const before = (scheduleRules(db).reminderHours ?? 24) * 3_600_000;
+  const hours = scheduleRules(db).reminderHours;
+  const before = hours !== undefined ? hours * 3_600_000 : REMINDER_BEFORE_MS;
   const rows = db.prepare(`${OPEN_SQL} AND r.reminded_at IS NULL AND r.auto_accept_at IS NOT NULL AND r.auto_accept_at > ? ORDER BY r.id`).all(at) as RescheduleRow[];
   return rows.filter((r) => { const t = reminderAt(Date.parse(r.created_at), r.auto_accept_at, before); return t !== null && t <= at; });
 }
