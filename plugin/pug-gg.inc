@@ -354,7 +354,7 @@ public Action Cmd_Gg(int client, int args)
 	if (client <= 0 || !IsClientInGame(client)) return Plugin_Handled;
 	int slot = g_iClientRoster[client];
 	int gt = GetClientTeam(client);
-	if (slot == -1 || (gt != TEAM_SURVIVOR && gt != TEAM_INFECTED))
+	if (slot == -1 || Tourney_SlotOut(slot) || (gt != TEAM_SURVIVOR && gt != TEAM_INFECTED))
 	{
 		ReplyToCommand(client, "[PUG] Only players in the match can forfeit.");
 		return Plugin_Handled;
@@ -421,7 +421,7 @@ void Gg_Count(int &yes, int &need)
 	{
 		if (!IsClientInGame(c) || IsFakeClient(c)) continue;
 		int slot = g_iClientRoster[c];
-		if (slot == -1 || g_iRosterTeam[slot] != g_iGgTeam) continue;
+		if (slot == -1 || g_iRosterTeam[slot] != g_iGgTeam || Tourney_SlotOut(slot)) continue;
 		int gt = GetClientTeam(c);
 		if (gt != TEAM_SURVIVOR && gt != TEAM_INFECTED) continue;
 		need++;

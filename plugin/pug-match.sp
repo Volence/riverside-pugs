@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.24"
+#define PLUGIN_VERSION "0.3.25"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -429,6 +429,7 @@ ConVar g_cvAutoTrack;                    // 1 = track any campaign that goes liv
 ConVar g_cvAutoMinPlayers;               // humans on teams needed for auto-track to start a match
 ConVar g_cvRecordDemos;                  // 1 = record a named demo per map during a match
 ConVar g_cvEndKick;                      // 0 = no kick after a backend match ends (a tournament box, 0.3.24)
+ConVar g_cvTournament;                   // 1 = a tournament box: !sub, !admin and the staff freeze (pug-tourney.inc)
 
 public Plugin myinfo =
 {
@@ -544,6 +545,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	ModCall_Init();
 	StaffChat_Init();
 	Gg_Init();
+	Tourney_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -2865,6 +2867,9 @@ void StopMatchDemo()
 public Action Cmd_Abort(int args)
 {
 	if (!TokenArgOk(args)) return Plugin_Handled;
+	// A teardown unpauses through LeaveUnpauseNow (BeginTeardown), which the
+	// staff freeze would otherwise refuse.
+	Tourney_Lift("site", "reset", "");
 	bool teardown = false;
 	char map[64];
 	if (args >= 2)
@@ -2997,6 +3002,7 @@ public Action Cmd_Status(int args)
 	}
 	LeaveStatus();
 	PauseStatus();
+	Tourney_Status();
 	DumpLine("STATUS end");
 	return Plugin_Handled;
 }
@@ -3070,6 +3076,9 @@ bool TokenArgOk(int args)
 
 void ResetMatchState()
 {
+	// First: a held freeze is lifted while g_State still holds the match (EmitPug
+	// sends nothing in MS_None) and before LeaveReset, so its unpause runs unguarded.
+	Tourney_Reset();
 	g_bReplayFailed = false;
 	g_iRplMapSeq = 0;
 	g_bRplFirstMapSeen = false;
@@ -3598,6 +3607,7 @@ public void OnClientDisconnect(int client)
 	ModCall_OnDisconnect(client);
 	Gg_OnDisconnect(client);
 	StaffChat_OnDisconnect(client);
+	Tourney_OnDisconnect(client);
 	int slot = g_iClientRoster[client];
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
@@ -3617,7 +3627,8 @@ void OrientationVote(int &straight, int &inverted)
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		int slot = g_iClientRoster[c];
-		if (slot == -1 || !IsClientInGame(c)) continue;
+		// A subbed-out slot (pug-tourney.inc) never votes on the orientation.
+		if (slot == -1 || !IsClientInGame(c) || Tourney_SlotOut(slot)) continue;
 		int gt = GetClientTeam(c);
 		if (gt == TEAM_SURVIVOR || gt == TEAM_INFECTED) onSide[g_iRosterTeam[slot]][gt]++;
 	}
@@ -3805,6 +3816,13 @@ public Action Timer_TeamLock(Handle timer)
 	{
 		int slot = g_iClientRoster[c];
 		if (slot == -1 || !IsClientInGame(c)) continue;
+		if (Tourney_SlotOut(slot))
+		{
+			// Subbed out (pug-tourney.inc, Ruling 5): never placed, and taken off a side whenever they sit on one.
+			int t = GetClientTeam(c);
+			if (t == TEAM_SURVIVOR || t == TEAM_INFECTED) ChangeClientTeam(c, TEAM_SPEC);
+			continue;
+		}
 		int want = g_iPugSide[g_iRosterTeam[slot]];
 		if (want == 0) continue;
 		int have = GetClientTeam(c);
@@ -4050,7 +4068,7 @@ void CheckRosterMismatch()
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		int slot = g_iClientRoster[c];
-		if (slot == -1 || !IsClientInGame(c)) { continue; }
+		if (slot == -1 || !IsClientInGame(c) || Tourney_SlotOut(slot)) { continue; }
 		int have = GetClientTeam(c);
 		if (have != TEAM_SURVIVOR && have != TEAM_INFECTED) continue;
 		if (have == g_iPugSide[g_iRosterTeam[slot]]) { g_iMismatchHalves[c] = 0; continue; }
@@ -4179,6 +4197,7 @@ public void OnRoundIsLive()
 		RosterLateJoiners();
 		CheckRosterMismatch();
 		RplOpen();
+		Tourney_OnRoundLive();
 	}
 	else if (g_State == MS_None && g_cvReplayStandalone.BoolValue)
 	{
@@ -5288,3 +5307,5 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-modcall.inc"
 #include "pug-staffchat.inc"
 #include "pug-gg.inc"
+// Last: reads pug-leave.inc's pause state and pug-modcall.inc's cooldown.
+#include "pug-tourney.inc"

@@ -203,11 +203,14 @@ static void PauseClockTick()
 		// A pause the leave module caused is nobody's: not charged, and not
 		// subject to the ceiling either, because the player it is waiting for
 		// has a reconnect allowance that is allowed to outlast it.
-		g_iPauseOwner = g_bLeavePaused ? 0 : g_iPausePendingTeam;
+		// A pause the staff freeze caused is nobody's either (plan T3c);
+		// g_iPausePendingTeam may hold a stale request Rotoblin refused, which
+		// must not be charged for it.
+		g_iPauseOwner = (g_bLeavePaused || TourneyFrozen()) ? 0 : g_iPausePendingTeam;
 		g_iPausePendingTeam = 0;
 		// Only a request from the last few seconds: one Rotoblin refused
 		// without pausing must not be pinned on a later, unrelated pause.
-		if (g_bLeavePaused || GetEngineTime() - g_fPausePendingAt > PAUSE_BY_WINDOW) g_sPauseBy[0] = '\0';
+		if (g_bLeavePaused || GetEngineTime() - g_fPausePendingAt > PAUSE_BY_WINDOW || TourneyFrozen()) g_sPauseBy[0] = '\0';
 		else strcopy(g_sPauseBy, sizeof(g_sPauseBy), g_sPausePendingBy);
 		g_sPausePendingBy[0] = '\0';
 		if (g_iPauseOwner == 1 || g_iPauseOwner == 2)
@@ -246,7 +249,11 @@ static void PauseClockTick()
 
 	// Paused, and we have seen it before: run the ceiling.
 	int ceiling = g_cvPauseSeconds.IntValue;
-	if (ceiling <= 0 || g_iPauseOwner == 0) return;
+	// A team's pause held by the staff freeze does not run out under it (the
+	// expiry path would call LeaveUnpauseNow, which the freeze refuses, say
+	// "Unpausing." and emit PAUSE_EXPIRED for nothing); the freeze decides when
+	// the game resumes, and the clock picks up again once it is lifted.
+	if (ceiling <= 0 || g_iPauseOwner == 0 || TourneyFrozen()) return;
 
 	// The clock does not run while a rostered player is actually away. A
 	// player pause that a disconnect lands in the middle of must not expire
@@ -334,6 +341,8 @@ void PhaseFields(const char[] key, char[] out, int len)
 	{
 		Format(out, len, "%s=%s team=%d limit=%d leave=%d",
 			key, state, g_iPauseOwner, g_cvPauseSeconds.IntValue, g_bLeavePaused ? 1 : 0);
+		// The staff freeze (plan T3c), so the site's pause ledger and live page know.
+		if (TourneyFrozen()) Format(out, len, "%s admin=1", out);
 		// Who typed !pause, only when known: the backend never guesses one
 		// from the team, so an absent field is the honest "unknown".
 		if (g_sPauseBy[0] != '\0') Format(out, len, "%s by=%s", out, g_sPauseBy);
