@@ -13,7 +13,10 @@ import type { MatchKind } from './matchKinds.js';
  */
 export interface MatchRules {
   rated: boolean;
-  pause: { limit: number | null; seconds: number | null; mutualUnpause: boolean; techPauses: number };
+  /** limit and seconds are the tactical pauses; techPauses and techSeconds the
+   *  technical ones (plan T5 Rulings 4 to 6). A tournament box counts all of
+   *  them per game; a PUG box per campaign, which is the same thing. */
+  pause: { limit: number | null; seconds: number | null; mutualUnpause: boolean; techPauses: number; techSeconds: number };
   teamLock: boolean;
   playerMapControl: boolean;
   restartHalf: { allowed: boolean; lockAfterDamage: boolean };
@@ -22,9 +25,27 @@ export interface MatchRules {
   bosses: 'random_published' | 'fixed' | 'voteboss';
   sideRule: 'higher_seed_chooses' | 'non_picker_chooses' | 'coin';
   spectate: { sideLocked: boolean };
-  /** Tournaments plan T3c: substitutions a side may make per match (in-game !sub between chapters). */
-  subs: { perMatch: number };
+  /** Tournaments plan T3c: substitutions a side may make per match (in-game
+   *  !sub between chapters); plan T5: whether one may come in mid-chapter
+   *  for a disconnected player, and what that costs the team's reconnect time. */
+  subs: { perMatch: number; emergency: boolean; emergencyChargeSeconds: number };
+  /** Plan T5, tournament boxes only: reconnect time per team per game. */
+  disconnect: { teamSeconds: number };
+  /** Plan T5, tournament boxes only: seconds between two !admin calls of one player. */
+  staffCall: { cooldownSeconds: number };
+  /** Plan T5: seconds between two games of a series. */
+  series: { nextGameSeconds: number };
 }
+
+/** Plan T5 Ruling 3: what a ruleset or stage snapshot saved before these
+ *  fields reads as, and what every template carries. */
+export const MATCH_PLAY_DEFAULTS = {
+  techSeconds: 300, teamSeconds: 600, emergency: true, emergencyChargeSeconds: 0, cooldownSeconds: 180, nextGameSeconds: 60,
+} as const;
+/** Inclusive ranges, shared by parseRules and the editor (rulesetStore.ts). */
+export const RULE_RANGES = {
+  techSeconds: [60, 1800], teamSeconds: [60, 3600], emergencyChargeSeconds: [0, 600], cooldownSeconds: [30, 600], nextGameSeconds: [30, 600],
+} as const satisfies Record<string, readonly [number, number]>;
 
 const BOSSES: MatchRules['bosses'][] = ['random_published', 'fixed', 'voteboss'];
 const SIDE_RULES: MatchRules['sideRule'][] = ['higher_seed_chooses', 'non_picker_chooses', 'coin'];
@@ -34,10 +55,12 @@ const SIDE_RULES: MatchRules['sideRule'][] = ['higher_seed_chooses', 'non_picker
 // by overrides/left4dead/cfg/pug_match.cfg or rotoblin_pug_4v4.cfg (checked
 // 2026-09-30). noShowGraceMinutes 10 is DEFAULT_SETTINGS.noshow_minutes in
 // src/db.ts, the live no-show deadline every PUG uses today.
+// Plan T5: the match-play defaults below act only on a tournament box
+// (sm_pug_tournament 1); a PUG box never receives them.
 export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRules> = {
   PUG: {
     rated: true,
-    pause: { limit: 3, seconds: 120, mutualUnpause: false, techPauses: 0 },
+    pause: { limit: 3, seconds: 120, mutualUnpause: false, techPauses: 0, techSeconds: 300 },
     teamLock: true,
     playerMapControl: false,
     restartHalf: { allowed: false, lockAfterDamage: false },
@@ -46,11 +69,14 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     bosses: 'random_published',
     sideRule: 'coin',
     spectate: { sideLocked: false },
-    subs: { perMatch: 2 },
+    subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
+    disconnect: { teamSeconds: 600 },
+    staffCall: { cooldownSeconds: 180 },
+    series: { nextGameSeconds: 60 },
   },
   'Standard Cup': {
     rated: false,
-    pause: { limit: 3, seconds: 120, mutualUnpause: true, techPauses: 2 },
+    pause: { limit: 3, seconds: 120, mutualUnpause: true, techPauses: 2, techSeconds: 300 },
     teamLock: true,
     playerMapControl: false,
     restartHalf: { allowed: false, lockAfterDamage: false },
@@ -59,11 +85,14 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     bosses: 'random_published',
     sideRule: 'higher_seed_chooses',
     spectate: { sideLocked: true },
-    subs: { perMatch: 2 },
+    subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
+    disconnect: { teamSeconds: 600 },
+    staffCall: { cooldownSeconds: 180 },
+    series: { nextGameSeconds: 60 },
   },
   'Casual Scrim': {
     rated: false,
-    pause: { limit: null, seconds: null, mutualUnpause: true, techPauses: 0 },
+    pause: { limit: null, seconds: null, mutualUnpause: true, techPauses: 0, techSeconds: 300 },
     teamLock: true,
     playerMapControl: true,
     restartHalf: { allowed: true, lockAfterDamage: false },
@@ -72,7 +101,10 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     bosses: 'random_published',
     sideRule: 'non_picker_chooses',
     spectate: { sideLocked: false },
-    subs: { perMatch: 2 },
+    subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
+    disconnect: { teamSeconds: 600 },
+    staffCall: { cooldownSeconds: 180 },
+    series: { nextGameSeconds: 60 },
   },
 };
 
@@ -109,6 +141,9 @@ export function parseRules(json: string): MatchRules {
   const pauseSeconds = numberOrNull(pause.seconds, 'pause.seconds');
   if (typeof pause.mutualUnpause !== 'boolean') fail('pause.mutualUnpause');
   if (typeof pause.techPauses !== 'number') fail('pause.techPauses');
+  const inRange = (v: unknown, range: readonly [number, number]): v is number => Number.isInteger(v) && (v as number) >= range[0] && (v as number) <= range[1];
+  // Plan T5: absent in every ruleset and snapshot saved before the field.
+  if (pause.techSeconds !== undefined && !inRange(pause.techSeconds, RULE_RANGES.techSeconds)) fail('pause.techSeconds');
 
   if (typeof r.teamLock !== 'boolean') fail('teamLock');
   if (typeof r.playerMapControl !== 'boolean') fail('playerMapControl');
@@ -128,19 +163,40 @@ export function parseRules(json: string): MatchRules {
   const spectate = r.spectate as Record<string, unknown>;
   if (typeof spectate.sideLocked !== 'boolean') fail('spectate.sideLocked');
 
-  // Tournaments plan T3c. Absent in every ruleset and stage snapshot saved
-  // before the field existed: read as the default rather than failing them.
-  let subsPerMatch = 2;
+  // Tournaments plan T3c, extended by plan T5. Absent in every ruleset and
+  // stage snapshot saved before the field: read as the default.
+  let subs: MatchRules['subs'] = { perMatch: 2, emergency: MATCH_PLAY_DEFAULTS.emergency, emergencyChargeSeconds: MATCH_PLAY_DEFAULTS.emergencyChargeSeconds };
   if (r.subs !== undefined) {
     if (typeof r.subs !== 'object' || r.subs === null) fail('subs');
-    const subs = r.subs as Record<string, unknown>;
-    if (!Number.isInteger(subs.perMatch) || (subs.perMatch as number) < 0 || (subs.perMatch as number) > 4) fail('subs.perMatch');
-    subsPerMatch = subs.perMatch as number;
+    const s = r.subs as Record<string, unknown>;
+    if (!Number.isInteger(s.perMatch) || (s.perMatch as number) < 0 || (s.perMatch as number) > 4) fail('subs.perMatch');
+    if (s.emergency !== undefined && typeof s.emergency !== 'boolean') fail('subs.emergency');
+    if (s.emergencyChargeSeconds !== undefined && !inRange(s.emergencyChargeSeconds, RULE_RANGES.emergencyChargeSeconds)) fail('subs.emergencyChargeSeconds');
+    subs = {
+      perMatch: s.perMatch as number,
+      emergency: (s.emergency as boolean | undefined) ?? MATCH_PLAY_DEFAULTS.emergency,
+      emergencyChargeSeconds: (s.emergencyChargeSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.emergencyChargeSeconds,
+    };
   }
+  /** One plan T5 object of a single whole-number field: absent reads as the default. */
+  const one = (key: 'disconnect' | 'staffCall' | 'series', field: string, range: readonly [number, number], fallback: number): number => {
+    const v = r[key];
+    if (v === undefined) return fallback;
+    if (typeof v !== 'object' || v === null) fail(key);
+    const n = (v as Record<string, unknown>)[field];
+    if (!inRange(n, range)) fail(`${key}.${field}`);
+    return n as number;
+  };
+  const teamSeconds = one('disconnect', 'teamSeconds', RULE_RANGES.teamSeconds, MATCH_PLAY_DEFAULTS.teamSeconds);
+  const cooldownSeconds = one('staffCall', 'cooldownSeconds', RULE_RANGES.cooldownSeconds, MATCH_PLAY_DEFAULTS.cooldownSeconds);
+  const nextGameSeconds = one('series', 'nextGameSeconds', RULE_RANGES.nextGameSeconds, MATCH_PLAY_DEFAULTS.nextGameSeconds);
 
   return {
     rated: r.rated,
-    pause: { limit: pauseLimit, seconds: pauseSeconds, mutualUnpause: pause.mutualUnpause, techPauses: pause.techPauses },
+    pause: {
+      limit: pauseLimit, seconds: pauseSeconds, mutualUnpause: pause.mutualUnpause, techPauses: pause.techPauses,
+      techSeconds: (pause.techSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.techSeconds,
+    },
     teamLock: r.teamLock,
     playerMapControl: r.playerMapControl,
     restartHalf: { allowed: restartHalf.allowed, lockAfterDamage: restartHalf.lockAfterDamage },
@@ -149,7 +205,10 @@ export function parseRules(json: string): MatchRules {
     bosses: r.bosses as MatchRules['bosses'],
     sideRule: r.sideRule as MatchRules['sideRule'],
     spectate: { sideLocked: spectate.sideLocked },
-    subs: { perMatch: subsPerMatch },
+    subs,
+    disconnect: { teamSeconds },
+    staffCall: { cooldownSeconds },
+    series: { nextGameSeconds },
   };
 }
 
