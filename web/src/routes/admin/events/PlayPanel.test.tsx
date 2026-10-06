@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { AdminEventPlay, PlayMatch } from '../../../api';
 import { ApiError } from '../../../api';
@@ -35,6 +36,7 @@ const twoMatches = () => play({
     rounds: [{ group: 1, round: 1, label: 'Semifinals', dates: null, matches: [
       m(),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'lineup', phase: 'lineup' }),
+      m({ id: 9, slot: 3, a: team(5, 'Emus'), b: team(6, 'Foxes'), status: 'live', phase: 'live' }),
     ] }] }],
 });
 
@@ -214,5 +216,23 @@ describe('PlayPanel', () => {
     render(<PlayPanel eventId={9} canEdit={false} />);
     await screen.findByText('Semifinals');
     expect(screen.queryByRole('button', { name: /Open room|Reset room|Hold:/ })).toBeNull();
+  });
+
+  it('asks before resetting a room that holds a server, and offers Hold and a result there (plan T3b)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(twoMatches());
+    mockAdmin.resetEventRoom.mockResolvedValue({});
+    const ask = confirm as Mock;
+    ask.mockResolvedValueOnce(false);
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reset room: Emus vs Foxes' }));
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(expect.objectContaining({ body: expect.stringContaining('cancels the match\'s server booking') })));
+    expect(mockAdmin.resetEventRoom).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset room: Emus vs Foxes' }));
+    await waitFor(() => expect(mockAdmin.resetEventRoom).toHaveBeenCalledWith(9, 9));
+    expect(screen.getByText(/Live/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Hold: Emus vs Foxes' })).toBeTruthy();
+    expect(screen.getByLabelText('Emus score')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset room: Cats vs Dogs' }));
+    await waitFor(() => expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('Ready, veto and lineups are cleared') })));
   });
 });

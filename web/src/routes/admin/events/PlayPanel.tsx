@@ -8,15 +8,17 @@ import { PHASE_TEXT } from '../../event/room/roomText';
 
 /** The real match.status values (src/events/play.ts MatchStatus) where a
  *  result may still be entered as a first result: before the room opens,
- *  and through every room status up to admin_hold. 'connect', 'live' and
- *  'confirming' (phase 'server') are left out: by then staff reports from
- *  the room, not the desk. */
-const OPEN = new Set(['waiting', 'veto', 'lineup', 'booking', 'admin_hold']);
+ *  and through every room status (play.ts ROOM_OPEN). A result entered while
+ *  the booking runs (connect, live, confirming) ends the booking as a staff
+ *  end (plan T3b). */
+const OPEN = new Set(['waiting', 'veto', 'lineup', 'booking', 'connect', 'live', 'confirming', 'admin_hold']);
 /** Phases where the room is open and the desk offers Reset and Hold. */
-const ROOM_LIVE = new Set<RoomPhase>(['ready', 'veto', 'lineup', 'server', 'hold']);
+const ROOM_LIVE = new Set<RoomPhase>(['ready', 'veto', 'lineup', 'server', 'connect', 'live', 'confirming', 'hold']);
+/** Phases where the match holds a server booking, so a reset cancels it. */
+const BOOKED = new Set<RoomPhase>(['connect', 'live', 'confirming']);
 const CORRECTABLE = new Set(['done', 'forfeit']);
 /** T2's labels, kept for the statuses that predate rooms. Every other
- *  status (veto, lineup, booking/connect/live/confirming, admin_hold) reads
+ *  status (veto, lineup, booking, connect, live, confirming, admin_hold) reads
  *  its label from the match's room phase through PHASE_TEXT instead. */
 const STATUS: Record<string, string> = { pending: 'Waiting for teams', waiting: 'To play', done: 'Done', forfeit: 'Forfeit', bye: 'Bye' };
 const matchLabel = (m: PlayMatch): string => STATUS[m.status] ?? PHASE_TEXT[m.phase];
@@ -129,9 +131,9 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
       )}
       {editable && ROOM_LIVE.has(m.phase) && (
         <>
-          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.resetEventRoom(eventId, m.id), {
-            title: 'Reset this match room?', body: 'Ready, veto and lineups are cleared and the room opens again.',
-          })}>{`Reset room: ${names}`}</button>
+          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.resetEventRoom(eventId, m.id), BOOKED.has(m.phase)
+            ? { title: 'Reset the room?', body: 'This cancels the match\'s server booking and aborts any game on it.' }
+            : { title: 'Reset this match room?', body: 'Ready, veto and lineups are cleared and the room opens again.' })}>{`Reset room: ${names}`}</button>
           {m.phase !== 'hold' && !holding && (
             <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => setHolding(true)}>{`Hold: ${names}`}</button>
           )}
