@@ -66,8 +66,10 @@ function EntryRow({ e, canEdit, locked, showMove, canRestore, busy, active, onMo
  *  check-in on; Close the list in the phase the clock would close it from
  *  (check-in, or registration with check-in off); Restore before the list is
  *  final in registration or check-in. */
-export function EntriesPanel({ eventId, status, checkin, canEdit }: { eventId: number; status: string; checkin: boolean; canEdit: boolean }) {
-  const { data, error: loadError, reload } = useFetch((s) => adminApi.eventEntries(eventId, s), [eventId]);
+export function EntriesPanel({ eventId, status, checkin, canEdit, gen = 0, onChange }: {
+  eventId: number; status: string; checkin: boolean; canEdit: boolean; gen?: number; onChange?: () => void;
+}) {
+  const { data, error: loadError, reload } = useFetch((s) => adminApi.eventEntries(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
   if (loadError) return <Panel><h3>Entries</h3><p class="error">Could not load the entries.</p></Panel>;
   if (!data) return <Panel><h3>Entries</h3></Panel>;
@@ -95,10 +97,10 @@ export function EntriesPanel({ eventId, status, checkin, canEdit }: { eventId: n
       {canEdit && !locked && (
         <div class="inlinerow">
           {canOpenCheckin && (
-            <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.openEventCheckin(eventId), 'Open check-in now?')}>Open check-in now</button>
+            <button class="btn btn--ghost" disabled={busy} onClick={() => run(async () => { await adminApi.openEventCheckin(eventId); onChange?.(); }, 'Open check-in now?')}>Open check-in now</button>
           )}
           {canClose && (
-            <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.lockEventEntries(eventId), {
+            <button class="btn btn--ghost" disabled={busy} onClick={() => run(async () => { await adminApi.lockEventEntries(eventId); onChange?.(); }, {
               title: 'Close the entry list now?', body: 'Entries that are not ready are dropped, the waitlist is cut at the cap, and seeds are set by SR.',
             })}>Close the entry list now</button>
           )}

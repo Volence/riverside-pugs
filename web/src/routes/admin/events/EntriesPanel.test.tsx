@@ -99,4 +99,18 @@ describe('EntriesPanel', () => {
     expect(await buttons('cancelled', true, null, out)).not.toContain('Restore');
     expect(await buttons('checkin', true, 'x', out)).not.toContain('Restore');
   });
+
+  it('tells the editor after closing the list or opening check-in', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [entry()] });
+    mockAdmin.lockEventEntries.mockResolvedValue({});
+    mockAdmin.openEventCheckin.mockResolvedValue({});
+    const onChange = vi.fn();
+    render(<EntriesPanel eventId={9} status="checkin" checkin canEdit onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Close the entry list now' }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    cleanup();
+    render(<EntriesPanel eventId={9} status="registration" checkin canEdit onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open check-in now' }));
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2));
+  });
 });
