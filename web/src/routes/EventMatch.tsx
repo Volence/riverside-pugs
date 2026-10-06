@@ -58,17 +58,23 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
     return () => clearInterval(clock);
   }, [hasDeadline]);
 
-  const run = async (fn: () => Promise<unknown>) => {
+  /** Returns whether `fn` went through, so a caller that needs to know (the
+   *  Schedule panel's counter form, which should stay open on a refusal) can
+   *  await it; everyone else just discards it with `void`. */
+  const run = async (fn: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true);
     setProblem(null);
+    let ok = true;
     try {
       await fn();
     } catch (e) {
+      ok = false;
       setProblem(e instanceof ApiError ? e.message : 'That did not go through. Try again.');
     } finally {
       setBusy(false);
       await load();
     }
+    return ok;
   };
 
   if (missing || !Number.isInteger(matchId)) return <main class="page page--profile"><PageHeader title="Match" /><Empty>No such match.</Empty></main>;
@@ -99,7 +105,7 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
             v={v} busy={busy}
             onPropose={(time, note) => { void run(() => eventsApi.propose(slug, matchId, time, note)); }}
             onRespond={(accept) => { void run(() => eventsApi.respond(slug, matchId, accept)); }}
-            onCounter={(time, note) => { void run(() => eventsApi.counter(slug, matchId, time, note)); }}
+            onCounter={(time, note) => run(() => eventsApi.counter(slug, matchId, time, note))}
             onWithdraw={() => { void run(() => eventsApi.withdrawProposal(slug, matchId)); }}
           />
         </Panel>
@@ -146,7 +152,7 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
       {showLineups && v.a && v.b && (
         <Panel>
           <h3>Lineups</h3>
-          <LineupPanel v={v} busy={busy} onLock={(ids) => run(() => eventsApi.lineup(slug, matchId, ids))} />
+          <LineupPanel v={v} busy={busy} onLock={async (ids) => { await run(() => eventsApi.lineup(slug, matchId, ids)); }} />
         </Panel>
       )}
       {v.phase === 'confirming' && (

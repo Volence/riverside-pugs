@@ -189,7 +189,11 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
                     league={s.settings.type === 'league' ? { matches: (s.settings.config as StageConfigs['league']).matches, matchesPerWeek: (s.settings.config as StageConfigs['league']).matchesPerWeek } : null}
                     seasonStart={s.settings.type === 'league' ? (s.settings.config as StageConfigs['league']).seasonStart : null}
                     roundsKnown={s.roundsKnown} initial={s.schedule} busy={busy}
-                    onSave={(rounds) => void run(async () => { await adminApi.setRoundSchedule(id, s.id, rounds); setScheduling(null); })}
+                    onSave={(rounds) => void run(async () => { await adminApi.setRoundSchedule(id, s.id, rounds); setScheduling(null); },
+                      ev.status === 'live' ? {
+                        title: "Apply this schedule to the stage's waiting matches?",
+                        body: "Already agreed or staff-set times are kept; every other waiting match's window and default time are replaced.",
+                      } : undefined)}
                   />
                 )}
               </li>

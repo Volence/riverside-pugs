@@ -120,7 +120,7 @@ function DeskLine({ m }: { m: PlayMatch }) {
   if (d.subs.a + d.subs.b > 0) parts.push(`Subs: ${a} ${d.subs.a}, ${b} ${d.subs.b}`);
   if (m.scheduledAt) parts.push(`Time: ${whenText(m.scheduledAt)}${m.scheduleSource === 'agreed' ? ' (agreed)' : m.scheduleSource === 'staff' ? ' (staff)' : ''}`);
   if (d.schedule?.windowEnd) parts.push(playByText(d.schedule.windowEnd));
-  if (d.schedule?.proposal) parts.push(`Proposal open: ${d.schedule.proposal.byName} (${d.schedule.proposal.side === 'a' ? a : b}) ${whenText(d.schedule.proposal.time)}${d.schedule.proposal.autoAcceptAt ? `, locks ${whenText(d.schedule.proposal.autoAcceptAt)}` : ''} · ${d.schedule.proposals} proposals`);
+  if (d.schedule?.proposal) parts.push(`Proposal open: ${d.schedule.proposal.byName} (${d.schedule.proposal.side === 'a' ? a : b}) ${whenText(d.schedule.proposal.time)}${d.schedule.proposal.autoAcceptAt ? `, locks ${whenText(d.schedule.proposal.autoAcceptAt)}` : ''} · ${d.schedule.proposals} ${d.schedule.proposals === 1 ? 'proposal' : 'proposals'}`);
   if (parts.length === 0) return null;
   return <p class="muted desk-line">{parts.join(' · ')}</p>;
 }
@@ -259,8 +259,10 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
       {open && canTime && (
         <div class="desktools__group">
           <label>Match time <input type="datetime-local" aria-label="Match time" value={time} onInput={(e) => setTime((e.target as HTMLInputElement).value)} /></label>
-          <button class="btn btn--ghost btn--sm" disabled={busy || !fromLocalInput(time)} onClick={() => void run(() => adminApi.setEventMatchTime(eventId, m.id, fromLocalInput(time)!),
-            { title: `Set ${names} for ${whenText(fromLocalInput(time)!)}?`, body: 'Both rosters are told. An open proposal expires. The room opens before the time on its own.' })}>Set time</button>
+          <button class="btn btn--ghost btn--sm" disabled={busy || !fromLocalInput(time)} onClick={() => void run(async () => {
+            await adminApi.setEventMatchTime(eventId, m.id, fromLocalInput(time)!);
+            setTime('');
+          }, { title: `Set ${names} for ${whenText(fromLocalInput(time)!)}?`, body: 'Both rosters are told. An open proposal expires. The room opens before the time on its own.' })}>Set time</button>
         </div>
       )}
     </details>

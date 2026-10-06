@@ -8,9 +8,9 @@ describe('RoundScheduleForm', () => {
   it('fills a league from a weekly pattern and saves the rows as UTC', () => {
     const onSave = vi.fn();
     render(<RoundScheduleForm scheduling="window" league={{ matches: 3, matchesPerWeek: 2 }} seasonStart="2026-10-12" roundsKnown={3} initial={[]} busy={false} onSave={onSave} />);
-    fireEvent.change(screen.getByLabelText('Match 1 weekday'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Match 1 weekday (UTC)'), { target: { value: '3' } });
     fireEvent.input(screen.getByLabelText('Match 1 time (UTC)'), { target: { value: '21:00' } });
-    fireEvent.change(screen.getByLabelText('Match 2 weekday'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('Match 2 weekday (UTC)'), { target: { value: '0' } });
     fireEvent.input(screen.getByLabelText('Match 2 time (UTC)'), { target: { value: '19:30' } });
     fireEvent.click(screen.getByRole('button', { name: 'Fill from the pattern' }));
     expect(screen.getAllByLabelText(/^Round \d default time$/)).toHaveLength(3);

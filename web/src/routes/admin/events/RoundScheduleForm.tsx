@@ -49,8 +49,8 @@ export function RoundScheduleForm({ scheduling, league, seasonStart, roundsKnown
         <div class="inlinerow">
           {slots.map((s, i) => (
             <span key={i} class="inlinerow">
-              <label>{`Match ${i + 1} weekday`}
-                <select aria-label={`Match ${i + 1} weekday`} value={String(s.day)} onChange={(e) => setSlots((xs) => xs.map((x, k) => (k === i ? { ...x, day: Number((e.target as HTMLSelectElement).value) } : x)))}>
+              <label>{`Match ${i + 1} weekday (UTC)`}
+                <select aria-label={`Match ${i + 1} weekday (UTC)`} value={String(s.day)} onChange={(e) => setSlots((xs) => xs.map((x, k) => (k === i ? { ...x, day: Number((e.target as HTMLSelectElement).value) } : x)))}>
                   {DAYS.map((d, k) => <option key={d} value={String(k)}>{d}</option>)}
                 </select>
               </label>
@@ -63,6 +63,7 @@ export function RoundScheduleForm({ scheduling, league, seasonStart, roundsKnown
           {!seasonStart && <span class="muted">Set the season start on the stage to fill from a pattern.</span>}
         </div>
       )}
+      <p class="muted">Times below are in your time zone.</p>
       <ol class="admin-list">
         {rows.map((r, i) => (
           <li key={r.round} class="inlinerow">

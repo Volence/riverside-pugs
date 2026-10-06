@@ -321,4 +321,27 @@ describe('EventEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
     await waitFor(() => expect(mockAdmin.setRoundSchedule).toHaveBeenCalledWith(1, 3, [{ round: 1, at: new Date('2026-10-24T21:00').toISOString(), from: null, to: null }]));
   });
+
+  it('warns before applying a schedule to a live event\'s matches, but not a draft\'s (plan T4 review)', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'live', stages: [{ ...stage(3, 1, true), rulesSnapshotted: true, schedule: [], roundsKnown: 4 }] }));
+    mockAdmin.setRoundSchedule.mockResolvedValue({ stamped: 2 });
+    render(<EventEditor id={1} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule stage 1' }));
+    fireEvent.input(screen.getByLabelText('Round 1 default time'), { target: { value: '2026-10-24T21:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
+    await waitFor(() => expect(mockAdmin.setRoundSchedule).toHaveBeenCalledTimes(1));
+    expect(mockConfirm).toHaveBeenCalledWith({
+      title: "Apply this schedule to the stage's waiting matches?",
+      body: expect.stringContaining('kept'),
+    });
+    cleanup();
+
+    mockAdmin.event.mockResolvedValue(detail({ status: 'draft' }));
+    render(<EventEditor id={1} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule stage 1' }));
+    fireEvent.input(screen.getByLabelText('Round 1 default time'), { target: { value: '2026-10-24T21:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
+    await waitFor(() => expect(mockAdmin.setRoundSchedule).toHaveBeenCalledTimes(2));
+    expect(mockConfirm).toHaveBeenCalledTimes(1);
+  });
 });
