@@ -476,6 +476,14 @@ void Tourney_Tech(int client, const char[] args)
 		PrintToChat(client, "[Match] Your team has used all %d technical pauses this game.", g_cvTechLimit.IntValue);
 		return;
 	}
+	// A pause request from a moment ago (anyone's !pause or !tech) has not
+	// landed yet: this !tech must not claim that pause as its own.
+	if ((g_iPausePendingTeam != 0 && GetEngineTime() - g_fPausePendingAt <= Tourney_RetryGap())
+		|| (g_iTechPendingTeam != 0 && GetEngineTime() - g_fTechPendingAt <= Tourney_RetryGap()))
+	{
+		PrintToChat(client, "[Match] A pause is already on its way. Try !tech again in a few seconds if the game does not pause.");
+		return;
+	}
 	if (Tech_Left(team) <= 0)
 	{
 		PrintToChat(client, "[Match] Your team has no technical time left this game. Use !pause for a tactical pause.");
@@ -757,6 +765,13 @@ void Tourney_LiftFromGame(int client)
  *  freeze is already cleared when it is sent. */
 public Action Listener_TourneyUnpause(int client, const char[] command, int argc)
 {
+	// Plan T5 fix round 1: the team that called a technical pause owns its
+	// end. Plain tactical pauses keep Rotoblin's mutual ready.
+	if (!g_bTourneyFrozen && TourneyOn() && g_iTechOwner != 0)
+	{
+		int team = Tourney_TeamOf(client);
+		if (team != 0 && Tech_OwnerReady(team)) return Plugin_Handled;
+	}
 	if (!g_bTourneyFrozen) return Plugin_Continue;
 	if (client < 1 || client > MaxClients || !IsClientInGame(client)) return Plugin_Continue;
 	if (!LeaveRotoblinPaused()) return Plugin_Continue;

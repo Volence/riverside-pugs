@@ -75,7 +75,7 @@ without eight people in the server.
 | `sm_pug_leave_budget` | `300` | Seconds each rostered player may spend disconnected over a whole backend match before it ends as an abandon. `0` disables leave tracking. The backend sets it at match setup from the `leave_budget_seconds` setting. |
 | `sm_pug_leave_autounpause` | `1` | `1` unpauses on a 10 second countdown once every disconnected player is back. `0` makes both teams type `!ready`. Set at match setup from `leave_auto_unpause`. |
 | `sm_pug_leave_hold_max` | `1800` | 0.3.4 and later. Longest an admin hold (`sm_pug_leave ... hold`) may freeze one player's allowance. The hold releases itself after this and says so, so a release that never arrives cannot pin a server paused. Set at match setup from `clock_hold_max_minutes`. Bounds 10 to 7200; the low bound exists so the ceiling can be tested in under a minute. |
-| `sm_pug_tech_limit` | `0` | 0.3.26 and later; the site pushes it from the stage's ruleset to a tournament box and resets it when the booking ends. Technical pauses each team may call per game. `0` turns `!tech` off. |
+| `sm_pug_tech_limit` | `0` | 0.3.26 and later; the site pushes it from the stage's ruleset to a tournament box and resets it when the booking ends. Technical pauses each team may call per game. `0` turns `!tech` off. While the pause is still technical, the calling team's `!ready` alone ends it; once it has run over into a tactical pause, both teams ready as usual. |
 | `sm_pug_tech_seconds` | `300` | 0.3.26 and later; pushed and reset as above. Technical time each team has per game. Past it the pause uses the team's tactical pauses, then unpauses. |
 | `sm_pug_dc_team_seconds` | `0` | 0.3.26 and later; pushed and reset as above. Reconnect seconds each team has per game on a tournament box. At zero the team forfeits the game with `forfeit_why=disconnect`. `0` leaves tracking to `sm_pug_leave_budget`. |
 | `sm_pug_sub_emergency` | `0` | 0.3.26 and later; pushed and reset as above. `1` lets a captain `!sub` a disconnected player mid-chapter while the game is paused for them. |
@@ -147,7 +147,8 @@ PUGCALL ... reason=tech target=none ...
   (`cause=disconnect`: the leave module's pause, and `used`/`budget` are the
   team's reconnect time; else technical time). `over`: technical time ran out;
   `tactical` is the team's tactical pauses left after the charge, `-1` when it
-  had none and the game unpaused. `flag`: `by` flagged it, `text` is their
+  had none and the game unpaused, and also `-1` when the tactical budget is off
+  (`sm_pug_pause_limit 0`, unlimited) and the pause ran on as a tactical pause. `flag`: `by` flagged it, `text` is their
   note. `text=` runs to the end of the line.
 - `SUB ... emergency=1` (0.3.26): a mid-chapter sub for a disconnected player.
 - `MATCH_END ... forfeit=<a|b> forfeit_why=<...>` and the dump's

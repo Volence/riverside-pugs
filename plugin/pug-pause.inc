@@ -251,6 +251,32 @@ static void Tech_End()
 	g_sTechReason[0] = '\0';
 }
 
+/** Set while Tech_OwnerReady forces the unpause: LeaveUnpauseNow issues
+ *  sm_ready from a client of each side, which comes back through the ready
+ *  listener and must not be taken for the owner readying again. */
+bool g_bTechForcing;
+
+/** Fix round 1 ruling: the team that called a technical pause owns its end.
+ *  `team` (a pug team) readied while its technical pause still runs (not a
+ *  disconnect record, not yet converted to tactical): both sides are readied
+ *  the way Tech_Overrun's out-of-pauses branch does, so the other team cannot
+ *  hold the game and drain the caller's technical and tactical time. True when
+ *  it forced the unpause. The clock keeps running until the game is seen
+ *  unpaused, so a countdown that is cancelled leaves the pause on its budget. */
+bool Tech_OwnerReady(int team)
+{
+	if (g_bTechForcing || !TourneyOn() || TourneyFrozen()) return false;
+	if (g_iTechOwner == 0 || g_iTechOwner != team || g_bPauseConverted) return false;
+	if (!LeaveRotoblinPaused()) return false;
+	char name[16];
+	PauseTeamName(team, name, sizeof(name));
+	PrintToChatAll("\x04[Match]\x01 %s called the technical pause and is ready, so play resumes.", name);
+	g_bTechForcing = true;
+	LeaveUnpauseNow();
+	g_bTechForcing = false;
+	return true;
+}
+
 /** Once a second while a !tech pause holds (Ruling 6). */
 static void Tech_Tick()
 {
@@ -298,7 +324,8 @@ static void Tech_Overrun()
 	int left = PauseLimit() > 0 ? PauseRemaining(team) : -1;
 	if (left >= 0) PrintToChatAll("\x04[Match]\x01 %s is out of technical time: this pause now uses one of their tactical pauses (\x05%d\x01 left).", name, left);
 	else PrintToChatAll("\x04[Match]\x01 %s is out of technical time: this pause is now a tactical pause.", name);
-	Tech_Emit("over", team, g_sTechBy, used, g_cvTechSeconds.IntValue, left < 0 ? 0 : left, "");
+	// tactical=-1 also when the budget is off (unlimited tactical pauses).
+	Tech_Emit("over", team, g_sTechBy, used, g_cvTechSeconds.IntValue, left, "");
 	EmitPug("PAUSE team=%d used=%d limit=%d", team, g_iPauseUsed[team], PauseLimit());
 }
 
@@ -508,13 +535,17 @@ static void PauseClockTick()
 		return;
 	}
 
+	// Plan T5: a converted pause whose ceiling rolls into another tactical
+	// pause does not unpause there, so it must not say it will.
+	bool rollsOn = g_bPauseConverted && PauseLimit() > 0 && PauseRemaining(g_iPauseOwner) > 0;
 	// Announced once each, so nobody is surprised by the game unfreezing.
 	for (int mark = 30; mark >= 10; mark -= 20)
 	{
 		if (left <= mark && g_iPauseWarned != mark && (g_iPauseWarned == 0 || g_iPauseWarned > mark))
 		{
 			g_iPauseWarned = mark;
-			PrintToChatAll("\x04[PUG]\x01 Unpausing in \x05%d\x01 seconds. Type \x05!ready\x01 to go now.", mark);
+			if (rollsOn) PrintToChatAll("\x04[Match]\x01 \x05%d\x01 seconds left of this tactical pause, then it uses another one. Type \x05!ready\x01 to go now.", mark);
+			else PrintToChatAll("\x04[PUG]\x01 Unpausing in \x05%d\x01 seconds. Type \x05!ready\x01 to go now.", mark);
 			break;
 		}
 	}
