@@ -107,7 +107,8 @@ describe('pug-tourney.inc log lines', () => {
   });
 
   it('the !admin PUGCALL parses as an admin call with no target, the map named and the text last', () => {
-    const m = /Format\(line, sizeof\(line\), "(PUGCALL [^"]*)"/.exec(tourneySrc);
+    // The !admin call's line; !flag (plan T5) formats its own reason=tech PUGCALL in the same file.
+    const m = /Format\(line, sizeof\(line\), "(PUGCALL [^"]*reason=admin[^"]*)"/.exec(tourneySrc);
     expect(m).not.toBeNull();
     const fmt = m![1];
     expect(fmt).toBe('PUGCALL steamid=%s target=none tteam=%d reason=admin match=%d ord=%d half=%d tms=%d via=game map=%s text=%s');

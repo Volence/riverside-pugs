@@ -123,9 +123,8 @@ int LeaveTeamLeft(int team)
 	return left < 0 ? 0 : left;
 }
 
-/** The first rostered slot that is disconnected now, or -1. Stock until
- *  Task 5's caller lands, so the build stays free of a new warning. */
-stock int LeaveFirstAbsent()
+/** The first rostered slot that is disconnected now, or -1. */
+int LeaveFirstAbsent()
 {
 	for (int i = 0; i < g_iRosterCount; i++)
 	{
@@ -142,10 +141,12 @@ void LeaveCharge(int team, int secs)
 	float cap = float(g_cvDcTeamSeconds.IntValue - 1);
 	float next = g_fTeamDcUsed[team] + float(secs);
 	if (next > cap) next = g_fTeamDcUsed[team] > cap ? g_fTeamDcUsed[team] : cap;
+	// The chat line states what was actually charged after the cap, not what was asked.
+	int charged = RoundToFloor(next) - RoundToFloor(g_fTeamDcUsed[team]);
 	g_fTeamDcUsed[team] = next;
 	int left = LeaveTeamLeft(team);
 	PrintToChatAll("\x04[Match]\x01 The emergency sub costs Team %s %d seconds of reconnect time (\x05%d:%02d\x01 left).",
-		team == 1 ? "A" : "B", secs, left / 60, left % 60);
+		team == 1 ? "A" : "B", charged, left / 60, left % 60);
 }
 
 int LeaveRemaining(int slot)

@@ -53,8 +53,9 @@ or when more than `MAX_ROSTER` (8) players are on teams.
 | `sm_pug_leave` | `<token> <steamid64> hold\|release\|add <seconds>\|end` | 0.3.4 and later. Admin control of one rostered player's reconnect allowance, sent by the website's live board. `hold` freezes it (dropped players only) until `release`, their return, or `sm_pug_leave_hold_max`; `release` is idempotent; `add` grants 1 to 3600 more seconds to anyone rostered, connected or not, capped so the allowance never exceeds an hour; `end` zeroes it so the ordinary ABANDON path fires within a second (dropped players only). Answers `PUGOK leave steamid=<id64> absent=<0\|1> remaining=<s> held=<0\|1> hold_left=<s>` or `PUGERR <reason>`, then echoes the state on the log stream. Backend matches only: refused with `PUGERR leave tracking is off` for a self-started match. |
 | `sm_pug_sub` | `<token> <out64> <in64>` | 0.3.25 and later. The site's answer to a captain's `!sub` on a tournament box (`sm_pug_tournament 1`). The outgoing slot keeps its stats and is marked out (never placed by the team lock, no reconnect clock, no `!gg` vote); the sub is rostered on the same team from the maps finished so far (or gets their old slot back) and the team lock places them within two seconds. Answers `PUGOK sub out=<id64> in=<id64> slot=<n>`, `PUGOK sub already` for a sub already in place, or `PUGERR <reason>`. |
 | `sm_pug_adminpause` | `<token> on\|off ["by"]` | 0.3.25 and later. The staff freeze from the Events desk: `on` freezes the game (a Rotoblin pause now, or at the next go-live) that only staff lift, `off` lifts it; `"by"` is the name said in chat. Every change is echoed as a signed `PUG <token> ADMINPAUSE state= by= cause=` line. Answers `PUGOK adminpause=<state> frozen=<0\|1>`. |
+| `sm_pug_forfeit` | `<token> <a\|b>` | 0.3.26 and later, tournament box only. Staff ruled that this pug team forfeits the game (the Events desk's Forfeit the game). The game ends as a `!gg` does, with `forfeit=<team> forfeit_why=staff` and the other team as `winner=`. Answers `PUGOK forfeit team=<x>`, `PUGOK forfeit team=<x> already`, or `PUGERR <reason>`. |
 
-`sm_pug_dump`, `sm_pug_abort`, `sm_pug_leave`, `sm_pug_sub` and `sm_pug_adminpause` all check `<token>` against the
+`sm_pug_dump`, `sm_pug_abort`, `sm_pug_leave`, `sm_pug_sub`, `sm_pug_adminpause` and `sm_pug_forfeit` all check `<token>` against the
 token set by the most recent `sm_pug_match` and reply `PUGERR bad token` if it
 doesn't match.
 
@@ -70,10 +71,16 @@ without eight people in the server.
 | `sm_pug_config` | `pug_match.cfg` | Config `!load_4v4p` execs. `pug_match.cfg` execs the pinned ruleset (`rotoblin_pug_4v4.cfg`, a clone of hardcore 4v4), loads `skill_detect` as a data source, and restores `sm_pug_min_orient 3`. Changing this changes the rules under every rating earned from here on. |
 | `sm_pug_record_demos` | `1` | `1` stops `tv_autorecord`'s file and records `pug_<token>_<ordinal>_<map>.dem` for each map of a match, so the demo is linked to the match by name rather than guessed at by timestamp. |
 | `sm_pug_end_kick` | `1` | 0.3.24 and later. `1` kicks everyone a few seconds after a backend match ends, so a queue PUG empties the box. `0` keeps everyone on; the site pushes `0` on a tournament box, which plays the next game of a series on the same server, and back to `1` when it releases a booked box. |
-| `sm_pug_tournament` | `0` | 0.3.25 and later. `1` is a tournament box, set by the site's booking runner with a tournament booking and back to `0` when it ends. Turns on `!sub` (between chapters), `!admin` as a staff call with a freeze only staff lift, and `!lift` (admin command `sm_pug_lift`, `ADMFLAG_GENERIC`). `0` leaves `!admin` to SourceMod's admin menu and `!sub` is plain chat. |
+| `sm_pug_tournament` | `0` | 0.3.25 and later. `1` is a tournament box, set by the site's booking runner with a tournament booking and back to `0` when it ends. Turns on `!sub` (between chapters), `!admin` as a staff call with a freeze only staff lift, and `!lift` (admin command `sm_pug_lift`, `ADMFLAG_GENERIC`), and from 0.3.26 `!tech <reason>` and `!flag [note]`. `0` leaves `!admin` to SourceMod's admin menu and `!sub` is plain chat. |
 | `sm_pug_leave_budget` | `300` | Seconds each rostered player may spend disconnected over a whole backend match before it ends as an abandon. `0` disables leave tracking. The backend sets it at match setup from the `leave_budget_seconds` setting. |
 | `sm_pug_leave_autounpause` | `1` | `1` unpauses on a 10 second countdown once every disconnected player is back. `0` makes both teams type `!ready`. Set at match setup from `leave_auto_unpause`. |
 | `sm_pug_leave_hold_max` | `1800` | 0.3.4 and later. Longest an admin hold (`sm_pug_leave ... hold`) may freeze one player's allowance. The hold releases itself after this and says so, so a release that never arrives cannot pin a server paused. Set at match setup from `clock_hold_max_minutes`. Bounds 10 to 7200; the low bound exists so the ceiling can be tested in under a minute. |
+| `sm_pug_tech_limit` | `0` | 0.3.26 and later; the site pushes it from the stage's ruleset to a tournament box and resets it when the booking ends. Technical pauses each team may call per game. `0` turns `!tech` off. |
+| `sm_pug_tech_seconds` | `300` | 0.3.26 and later; pushed and reset as above. Technical time each team has per game. Past it the pause uses the team's tactical pauses, then unpauses. |
+| `sm_pug_dc_team_seconds` | `0` | 0.3.26 and later; pushed and reset as above. Reconnect seconds each team has per game on a tournament box. At zero the team forfeits the game with `forfeit_why=disconnect`. `0` leaves tracking to `sm_pug_leave_budget`. |
+| `sm_pug_sub_emergency` | `0` | 0.3.26 and later; pushed and reset as above. `1` lets a captain `!sub` a disconnected player mid-chapter while the game is paused for them. |
+| `sm_pug_sub_charge` | `0` | 0.3.26 and later; pushed and reset as above. Seconds of reconnect time an emergency sub costs. Never forfeits by itself. |
+| `sm_pug_admin_cooldown` | `180` | 0.3.26 and later; pushed and reset as above. Seconds between two `!admin` calls of one player. `/mod` keeps 180. |
 
 Debug output goes to the SourceMod log, not the `logaddress` stream, because the
 UDP grammar is parsed by `src/logParse.ts` and free-text lines there would be
@@ -126,6 +133,29 @@ with `sm_pug_leave` or the hold ceiling releases it (`auto=1`). The bracketed
 keys are optional on purpose: a backend older than the plugin ignores them, and
 a plugin older than the backend never sends them. `RETURN` is also what
 `sm_pug_leave ... add` echoes for a player who is connected.
+
+Tournament box lines (0.3.26):
+
+```
+PUG <token> TECH event=<start|end|over|flag> id=<unix second it began> team=<a|b> cause=<call|disconnect> by=<steamid64|none> used=<s> budget=<s> [tactical=<n>] text=<free text>
+PUG <token> SUB ... emergency=1
+PUG <token> MATCH_END ... forfeit=<a|b> forfeit_why=<disconnect|staff>
+PUGCALL ... reason=tech target=none ...
+```
+
+- `TECH` (0.3.26, tournament box): a technical pause of pug team `team`
+  (`cause=disconnect`: the leave module's pause, and `used`/`budget` are the
+  team's reconnect time; else technical time). `over`: technical time ran out;
+  `tactical` is the team's tactical pauses left after the charge, `-1` when it
+  had none and the game unpaused. `flag`: `by` flagged it, `text` is their
+  note. `text=` runs to the end of the line.
+- `SUB ... emergency=1` (0.3.26): a mid-chapter sub for a disconnected player.
+- `MATCH_END ... forfeit=<a|b> forfeit_why=<...>` and the dump's
+  `END ... forfeit=<a|b> forfeit_why=<...>` (0.3.26): a forfeit that is not a
+  `!gg`; `winner=` is then the other team whatever the score. A `!gg` carries
+  no `forfeit_why`.
+- `PUGCALL ... reason=tech target=none ...` (0.3.26): `!flag` on a tournament
+  box.
 
 Self-started matches (`!load_4v4p`) emit one more burst, once, up front:
 

@@ -166,6 +166,21 @@ bool Tourney_OnSay(int client, const char[] text)
 		Tourney_Sub(client, text[rest]);
 		return true;
 	}
+	// Plan T5: a technical pause, and the other team's flag on one.
+	rest = ModCall_TriggerEnd(text, "!tech");
+	if (rest < 0) rest = ModCall_TriggerEnd(text, "/tech");
+	if (rest >= 0)
+	{
+		Tourney_Tech(client, text[rest]);
+		return true;
+	}
+	rest = ModCall_TriggerEnd(text, "!flag");
+	if (rest < 0) rest = ModCall_TriggerEnd(text, "/flag");
+	if (rest >= 0)
+	{
+		Tourney_Flag(client, text[rest]);
+		return true;
+	}
 	rest = ModCall_TriggerEnd(text, "!admin");
 	if (rest < 0) rest = ModCall_TriggerEnd(text, "/admin");
 	if (rest >= 0)
@@ -405,6 +420,128 @@ public Action Cmd_PugSub(int args)
 	LogMessage("[tourney] sub: %s out, %s in (team %s, slot %d, map %d)", outId, inId, team == 1 ? "a" : "b", inSlot, g_iMapCount);
 	PrintToServer("PUGOK sub out=%s in=%s slot=%d", outId, inId, inSlot);
 	return Plugin_Handled;
+}
+
+// ---------- !tech and !flag (plan T5) ----------
+
+/** The pug team of a rostered, not subbed-out client, else 0. */
+static int Tourney_TeamOf(int client)
+{
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return 0;
+	int slot = g_iClientRoster[client];
+	if (slot < 0 || Tourney_SlotOut(slot)) return 0;
+	int team = g_iRosterTeam[slot];
+	return team == 1 || team == 2 ? team : 0;
+}
+
+/** !tech <reason> (Ruling 5): the pause is Rotoblin's own sm_pause from this
+ *  player, unbudgeted as a tactical pause; pug-pause.inc makes it technical
+ *  once the game is seen paused. */
+void Tourney_Tech(int client, const char[] args)
+{
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return;
+	if (g_cvTechLimit.IntValue <= 0)
+	{
+		PrintToChat(client, "[Match] Technical pauses are off in this match.");
+		return;
+	}
+	int team = Tourney_TeamOf(client);
+	if (team == 0)
+	{
+		PrintToChat(client, "[Match] Only players in the match can call a technical pause.");
+		return;
+	}
+	char reason[160];
+	strcopy(reason, sizeof(reason), args);
+	StripQuotes(reason);
+	TrimString(reason);
+	SanitizeChat(reason, sizeof(reason));
+	if (strlen(reason) < 3)
+	{
+		PrintToChat(client, "[Match] Usage: !tech <reason>. Both teams and staff see the reason.");
+		return;
+	}
+	if (g_State != MS_Live || InReadyUp() || g_bRoundEnded || g_fRoundLiveAt <= 0.0)
+	{
+		PrintToChat(client, "[Match] A technical pause is called during a live round.");
+		return;
+	}
+	if (LeaveRotoblinPaused())
+	{
+		PrintToChat(client, "[Match] The game is already paused.");
+		return;
+	}
+	if (g_iTechCount[team] >= g_cvTechLimit.IntValue)
+	{
+		PrintToChat(client, "[Match] Your team has used all %d technical pauses this game.", g_cvTechLimit.IntValue);
+		return;
+	}
+	if (Tech_Left(team) <= 0)
+	{
+		PrintToChat(client, "[Match] Your team has no technical time left this game. Use !pause for a tactical pause.");
+		return;
+	}
+	char by[24];
+	if (!ModCall_AuthId(client, by, sizeof(by)))
+	{
+		PrintToChat(client, "[PUG] Your Steam ID is not verified yet, try again in a moment.");
+		return;
+	}
+	g_iTechPendingTeam = team;
+	g_fTechPendingAt = GetEngineTime();
+	strcopy(g_sTechPendingBy, sizeof(g_sTechPendingBy), by);
+	strcopy(g_sTechPendingReason, sizeof(g_sTechPendingReason), reason);
+	// Unbudgeted as a tactical pause, as the leave module's pause is.
+	PauseAllowInternal();
+	FakeClientCommand(client, "sm_pause");
+}
+
+/** !flag [note] (Ruling 11): the other team's technical pause, once, to
+ *  staff through the mod-call path. Play is not affected. */
+void Tourney_Flag(int client, const char[] args)
+{
+	int team = Tourney_TeamOf(client);
+	if (team == 0)
+	{
+		PrintToChat(client, "[Match] Only players in the match can flag a technical pause.");
+		return;
+	}
+	if (g_iTechOpen == 0 || g_iTechOpen == team)
+	{
+		PrintToChat(client, "[Match] !flag is for the other team's technical pause, while it runs.");
+		return;
+	}
+	if (g_bTechFlagged)
+	{
+		PrintToChat(client, "[Match] This technical pause is already flagged for staff.");
+		return;
+	}
+	char id[24];
+	if (!ModCall_AuthId(client, id, sizeof(id)))
+	{
+		PrintToChat(client, "[PUG] Your Steam ID is not verified yet, try again in a moment.");
+		return;
+	}
+	char note[160];
+	strcopy(note, sizeof(note), args);
+	StripQuotes(note);
+	TrimString(note);
+	SanitizeChat(note, sizeof(note));
+	g_bTechFlagged = true;
+	char pausing[16];
+	strcopy(pausing, sizeof(pausing), g_iTechOpen == 1 ? "Team A" : "Team B");
+	char map[64];
+	GetCurrentMap(map, sizeof(map));
+	char line[512];
+	// text= stays last: it runs to the end of the line.
+	Format(line, sizeof(line), "PUGCALL steamid=%s target=none tteam=%d reason=tech match=%d ord=%d half=%d tms=%d via=game map=%s text=%s technical pause: %s%s%s",
+		id, GetClientTeam(client), g_iMatchId, g_iRplMapSeq, g_iHalf, RoundMs(), map, pausing, g_sTechReason, note[0] != '\0' ? " | " : "", note);
+	PugLog("%s", line);
+	LogMessage("[tourney] %s", line);
+	bool dc = g_iTechCause == TECH_CAUSE_DC;
+	Tech_Emit("flag", g_iTechOpen, id, dc ? LeaveTeamUsed(g_iTechOpen) : RoundToFloor(g_fTechUsed[g_iTechOpen]),
+		dc ? g_cvDcTeamSeconds.IntValue : g_cvTechSeconds.IntValue, -2, note);
+	PrintToChatAll("\x04[Match]\x01 %N flagged %s's technical pause for staff review. Play goes on as normal; staff decide.", client, pausing);
 }
 
 // ---------- !admin and the freeze ----------
