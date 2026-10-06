@@ -2277,4 +2277,58 @@ describe('server priority (owner, 2026-10-07)', () => {
     expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 1 });
     expect(getBooking(db, scrim)!.server_id).toBeNull();
   });
+
+  it('a scrim past its start with no box is bumped at its start for a match waiting on one, with the slot offer, and never gets the late alert (Ruling 6)', async () => {
+    const events: AdminEvent[] = [];
+    const unsubscribe = subscribeAdminEvents((e) => events.push(e));
+    const scrim = book();
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    now = START - 15 * MIN;
+    runner.allocate();
+    expect(getBooking(db, scrim)!.state).toBe('scheduled');
+    now = START;
+    dms = [];
+    const match = tournament(); // 20:00 to 21:30; room for 2: the scrim's next slot is 20:30
+    runner.allocate();
+    unsubscribe();
+    const b = getBooking(db, scrim)!;
+    expect(b).toMatchObject({ state: 'cancelled', end_reason: 'bumped', cancel_side: null, server_id: null, ended_at: new Date(now).toISOString() });
+    expect(b.cancel_reason).toBe('A tournament match needed the server. The nearest free slot is 2026-10-02 20:30 UTC.');
+    expect(dms.filter((d) => d.content.includes('was bumped')).map((d) => d.to).sort()).toEqual(['d0', 'd1']);
+    expect(events.filter((e) => e.kind === 'problem').map((e) => e.text)).toEqual([
+      `Booking ${scrim} (p0's group vs p1's group, 20:00 UTC) was bumped by tournament match booking ${match}: no server was free and the match is ahead of it. Both sides are told and offered 20:30 UTC; it counts against neither side.`,
+    ]);
+    expect(getBooking(db, match)!.state).toBe('scheduled');
+    await runner.idle();
+    expect(released).toEqual([]);
+  });
+
+  it('a match that already holds a box owes nothing: a scrim short of a box beside it waits for the no_server close as before (Ruling 6)', async () => {
+    db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
+    now = START - 20 * MIN;
+    const match = tournament();
+    runner.allocate();
+    await runner.idle();
+    expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 3 });
+    const scrim = book();
+    now = START + 14 * MIN;
+    dms = [];
+    await runner.tick();
+    expect(getBooking(db, scrim)!.state).toBe('scheduled');
+    expect(dms).toEqual([]);
+    now = START + 15 * MIN;
+    await runner.tick();
+    expect(getBooking(db, scrim)).toMatchObject({ state: 'cancelled', end_reason: 'no_server' });
+  });
+
+  it('one scrim per waiting match: two scrims past their start and one match bump only the earlier-started one (Ruling 6)', () => {
+    const first = book();
+    const second = book();
+    db.prepare("UPDATE servers SET status = 'live'").run();
+    now = START + MIN;
+    tournament();
+    runner.allocate();
+    expect(getBooking(db, first)).toMatchObject({ state: 'cancelled', end_reason: 'bumped' });
+    expect(getBooking(db, second)!.state).toBe('scheduled');
+  });
 });
