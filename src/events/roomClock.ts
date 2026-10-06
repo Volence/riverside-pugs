@@ -108,6 +108,9 @@ export class RoomClock {
    *  stage no longer live, a window moved. Expected, so logged once each and
    *  retried every tick until staleProposals or the window end closes them. */
   private readonly refusedProposals = new Set<number>();
+  /** Matches whose window-end forfeit or hold was refused: logged once each,
+   *  forgotten once the match is no longer an expired window. */
+  private readonly refusedWindows = new Set<number>();
 
   constructor(private readonly deps: {
     db: DB; notifier?: Notifier; publicUrl?: string; push?: (matchId: number) => void; now?: () => number; seed?: () => number;
@@ -148,7 +151,8 @@ export class RoomClock {
     this.ticking = true;
     try {
       const now = new Date(this.now());
-      await this.schedule(now);
+      // A fault in the proposals pass never skips the rooms, the series or the deadlines (Task 4 review).
+      try { await this.schedule(now); } catch (err) { console.error('[rooms] schedule pass failed:', err instanceof Error ? err.message : err); }
       this.openDue(now);
       // Tournaments plan T3b: bookings, the server wait alert, the presence fallback.
       try { this.deps.series?.tick(now); } catch (err) { console.error('[rooms] series tick failed:', err instanceof Error ? err.message : err); }
@@ -207,23 +211,35 @@ export class RoomClock {
         this.pushChange(r.value.id);
       } catch (err) { console.error(`[rooms] auto-accept of proposal ${p.id} failed:`, err instanceof Error ? err.message : err); }
     }
+    // Window ends before the stale pass, so a proposal still open when its
+    // window ends is closed as window_ended (Task 4 review).
+    const ended = S.expiredWindows(db, now);
+    const endedIds = new Set(ended.map((m) => m.id));
+    for (const id of this.refusedWindows) if (!endedIds.has(id)) this.refusedWindows.delete(id);
+    for (const m of ended) {
+      try {
+        await this.expireWindow(m.id, now);
+      } catch (err) { console.error(`[rooms] window end of match ${m.id} failed:`, err instanceof Error ? err.message : err); }
+    }
     for (const p of S.staleProposals(db, now)) {
       try {
         if (S.expireProposal(db, { proposalId: p.id, reason: 'time_passed', now }).ok) this.pushChange(p.event_match_id);
       } catch (err) { console.error(`[rooms] expiry of proposal ${p.id} failed:`, err instanceof Error ? err.message : err); }
     }
-    for (const m of S.expiredWindows(db, now)) {
-      try {
-        await this.expireWindow(m.id, now);
-      } catch (err) { console.error(`[rooms] window end of match ${m.id} failed:`, err instanceof Error ? err.message : err); }
-    }
+  }
+
+  private refusedWindow(matchId: number, what: 'forfeit' | 'hold', error: string): void {
+    if (this.refusedWindows.has(matchId)) return;
+    this.refusedWindows.add(matchId);
+    console.error(`[rooms] match ${matchId}: the window end ${what} was refused (${error}); retrying while the window stays ended`);
   }
 
   /** Ruling 8: the silent side forfeits; otherwise staff decide from the
    *  proposal log. The match is re-read (an earlier forfeit in this loop
    *  awaited), and the forfeit re-checks inside the event's chain that the
-   *  match still waits with the same silent side, so a time locked meanwhile
-   *  is never forfeited. */
+   *  match still waits with the same silent side and its window still ended,
+   *  so a time locked or a window moved meanwhile is never forfeited. A
+   *  refused forfeit or hold is logged once. */
   private async expireWindow(matchId: number, now: Date): Promise<void> {
     const { db } = this.deps;
     const m = S.expiredWindows(db, now).find((x) => x.id === matchId);
@@ -234,12 +250,17 @@ export class RoomClock {
     if (silent !== null) {
       const r = await forfeitMatch(db, {
         eventId: m.event_id, matchId: m.id, winner: other(silent), now,
-        expect: (x) => x.status === 'waiting' && S.silentSide(db, x) === silent,
+        expect: (x) => x.status === 'waiting' && x.window_end !== null && x.window_end <= now.toISOString() && S.silentSide(db, x) === silent,
       });
-      if (r.ok) tellReadyForfeit(this.deps, m.event_id, m.id, 'window');
+      if (r.ok) {
+        this.refusedWindows.delete(m.id);
+        tellReadyForfeit(this.deps, m.event_id, m.id, 'window');
+      } else this.refusedWindow(m.id, 'forfeit', r.error);
     } else {
       const r = R.holdMatch(db, { matchId: m.id, by: null, reason: 'window_expired', now });
-      if (r.ok) {
+      if (!r.ok) this.refusedWindow(m.id, 'hold', r.error);
+      else {
+        this.refusedWindows.delete(m.id);
         const ev = E.getEvent(db, m.event_id)!;
         const name = (id: number) => N.getEntry(db, id)?.name ?? 'a team';
         publishAdminEvent({
