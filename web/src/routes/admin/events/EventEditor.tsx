@@ -185,7 +185,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
         )}
       </Panel>
       {ev.status !== 'draft' && ev.status !== 'announced' && <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />}
-      {['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />}
+      {['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />}
       <Panel>
         <h3>History</h3>
         <ul class="admin-list">

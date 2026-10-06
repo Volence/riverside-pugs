@@ -3538,13 +3538,23 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 /* Plan T2: brackets, standings and rounds on the event page. */
 .bracket { display: flex; gap: var(--sp-3); overflow-x: auto; padding-bottom: var(--sp-1); }
 .bracket__round { display: flex; flex-direction: column; justify-content: space-around; gap: var(--sp-2); min-width: 180px; }
-.matchcard { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.matchcard { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; position: relative; }
 .matchcard__side { display: flex; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); }
 .matchcard__side + .matchcard__side { border-top: 1px solid var(--border); }
 .matchcard__side--won { font-weight: 700; }
 .matchcard__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .matchcard__score { font-variant-numeric: tabular-nums; }
 .matchcard--pending { opacity: 0.7; }
+/* A match card linked to its room (plan T3a): same look, no underline, a
+   hover state like other card links (the focus ring comes from the site's
+   generic :where(a, button, input):focus-visible rule). */
+a.matchcard--link { display: block; color: inherit; text-decoration: none; }
+a.matchcard--link:hover { border-color: var(--border-strong); }
+.matchcard__phase {
+  position: absolute; top: var(--sp-1); right: var(--sp-1);
+  display: inline-block; padding: 1px var(--sp-1); border: 1px solid var(--border-strong); background: var(--surface);
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
+}
 .playtable { width: 100%; border-collapse: collapse; }
 .playtable th, .playtable td { padding: var(--sp-1) var(--sp-2); text-align: left; font-variant-numeric: tabular-nums; }
 .playround { margin-top: var(--sp-3); }
@@ -3558,7 +3568,10 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .room__clock { font-variant-numeric: tabular-nums; }
 .room__ready { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .room__ready li { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-.room__games { list-style: none; margin: var(--sp-3) 0 0; padding: var(--sp-3) 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--sp-1); }
+.room__ready li > * { min-width: 0; }
+.room__ready li span { overflow-wrap: anywhere; }
+.roomteam { display: inline-flex; align-items: center; gap: var(--sp-1); vertical-align: middle; }
+.room__games { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 .room__log { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
 /* Reuses the event status chip's border/colour roles: ready and veto read
    as live, lineup as checkin, server and hold as a warning, done as finished. */

@@ -36,12 +36,12 @@ function Standings({ rows, swiss }: { rows: PlayStanding[]; swiss: boolean }) {
 
 /** One started stage on the event page (plan T2): an elimination bracket, or
  *  standings (one table per group) followed by the rounds. */
-export function StagePlay({ stage }: { stage: StagePlayView }) {
+export function StagePlay({ stage, slug }: { stage: StagePlayView; slug: string }) {
   const swiss = stage.type === 'swiss';
   return (
     <Panel>
       <h3>Stage {stage.ordinal}: {stage.layout === 'bracket' ? 'bracket' : 'standings'}{stage.status === 'finished' ? ' (finished)' : ''}</h3>
-      {stage.layout === 'bracket' ? <Bracket stage={stage} /> : (
+      {stage.layout === 'bracket' ? <Bracket stage={stage} slug={slug} /> : (
         <>
           {stage.advanceCount !== null && <p class="muted">{`Top ${stage.advanceCount} advance`}</p>}
           {stage.groups.map((g) => (
@@ -55,7 +55,7 @@ export function StagePlay({ stage }: { stage: StagePlayView }) {
               <span class="eyebrow">
                 {`${groupPrefix(stage, r)}${r.label}${r.dates ? ` · ${weekRangeText(r.dates.from, r.dates.to)}` : ''}`}
               </span>
-              <div class="playround__matches">{r.matches.map((m) => <MatchCard key={m.id} m={m} />)}</div>
+              <div class="playround__matches">{r.matches.map((m) => <MatchCard key={m.id} m={m} slug={slug} />)}</div>
             </section>
           ))}
         </>

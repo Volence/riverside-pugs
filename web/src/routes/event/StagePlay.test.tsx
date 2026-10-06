@@ -21,7 +21,7 @@ describe('StagePlay', () => {
         { group: 1, round: 2, label: 'Final', dates: null, matches: [match({ id: 3, a: team(1, 'Rats'), b: null, status: 'pending' })] },
       ],
     };
-    render(<StagePlay stage={stage} />);
+    render(<StagePlay stage={stage} slug="cup" />);
     expect(screen.getByRole('heading', { name: /Stage 2/ })).toBeTruthy();
     const cols = document.querySelectorAll('.bracket__round');
     expect(cols).toHaveLength(2);
@@ -45,7 +45,7 @@ describe('StagePlay', () => {
         match({ id: 2, slot: 2, a: team(3, 'Cats'), b: null, status: 'bye', winner: 'a', bye: true }),
       ] }],
     };
-    render(<StagePlay stage={stage} />);
+    render(<StagePlay stage={stage} slug="cup" />);
     const table = screen.getByRole('table');
     expect(within(table).getByText('Buchholz')).toBeTruthy();
     expect(within(table).getByText('+300')).toBeTruthy();
@@ -56,7 +56,7 @@ describe('StagePlay', () => {
   });
 
   it('shows a league round\'s week dates next to its label', () => {
-    render(<StagePlay stage={{
+    render(<StagePlay slug="cup" stage={{
       ordinal: 1, type: 'league', status: 'live', layout: 'table', advanceCount: null, pairsAsItGoes: false, standings: [], groups: [{ number: 1, label: 'Rounds' }],
       rounds: [{ group: 1, round: 3, label: 'Week 3', dates: { from: '2026-10-26', to: '2026-11-01' }, matches: [] }],
     }} />);
@@ -65,12 +65,24 @@ describe('StagePlay', () => {
 
   it('shows one table per round robin group', () => {
     const s = (id: number, name: string, group: number) => ({ entry: team(id, name), group, rank: id, groupRank: 1, played: 0, wins: 0, losses: 0, points: 0, buchholz: 0, scoreDiff: 0 });
-    render(<StagePlay stage={{
+    render(<StagePlay slug="cup" stage={{
       ordinal: 1, type: 'round_robin', status: 'live', layout: 'table', advanceCount: null, pairsAsItGoes: false, rounds: [],
       groups: [{ number: 1, label: 'Group A' }, { number: 2, label: 'Group B' }], standings: [s(1, 'Rats', 1), s(2, 'Bats', 2)],
     }} />);
     expect(screen.getAllByRole('table')).toHaveLength(2);
     expect(screen.getByText('Group B')).toBeTruthy();
+  });
+
+  it('links a match with both teams to its room and shows the room phase', () => {
+    const stage: StagePlayView = {
+      ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      rounds: [{ group: 1, round: 1, label: 'Final', dates: null, matches: [match({ id: 7, status: 'veto', phase: 'veto' }), match({ id: 8, b: null, status: 'pending', phase: 'pending' })] }],
+    };
+    render(<StagePlay stage={stage} slug="cup" />);
+    const link = screen.getByRole('link', { name: /Rats.*Bats/ });
+    expect(link.getAttribute('href')).toBe('/event/cup/match/7');
+    expect(within(link).getByText('Veto')).toBeTruthy();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
   });
 
   it('placementText', () => {
