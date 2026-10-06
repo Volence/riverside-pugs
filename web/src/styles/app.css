@@ -3479,6 +3479,20 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 }
 .chip--ok { border-color: var(--win); color: var(--win); }
 .chip--bad { border-color: var(--loss); color: var(--loss); }
+/* Plan T3a: a team's match prep on the event page (PrepPanel.tsx), what the
+   room's timers act from. Default four, side and one block per stage's
+   campaign order; buttons wrap under the name at phone width so nothing
+   scrolls sideways. */
+.prep section + section { margin-top: var(--sp-5); }
+.prep__order { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); counter-reset: prep-order; }
+.prep__order li {
+  counter-increment: prep-order;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) 0; border-bottom: 1px solid var(--border);
+}
+.prep__order li::before { content: counter(prep-order) '.'; color: var(--text-muted); flex-shrink: 0; }
+.prep__order li span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.prep select { max-width: 100%; }
 /* The admin event forms (EventsDesk, EventFieldsForm, StageForm): Settings
    desk rows (.admin-setting) under titled groups. Numbers are narrow, dates
    and selects keep their natural width, text fills its column. */
