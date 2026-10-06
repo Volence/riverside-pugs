@@ -30,7 +30,11 @@ const HEX64 = /^[0-9a-f]{64}$/;
  * that does not exist, so whether a draft exists cannot be read off the answer.
  */
 export async function eventRoutes(
-  app: FastifyInstance, opts: { db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock },
+  app: FastifyInstance, opts: {
+    db: DB; store: () => CommunityStore; notifier?: Notifier; publicUrl?: string; rooms?: RoomClock;
+    /** The series engine (plan T3b): a pick on a live match hands the series on (Task 8 uses it). */
+    series?: { afterPick(matchId: number): void };
+  },
 ): Promise<void> {
   const { db } = opts;
   const optionalViewer = makeOptionalViewer(db);

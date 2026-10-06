@@ -1,11 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
 import { RoomClock, dueRooms, higherSide } from '../src/events/roomClock.js';
 import type { Notifier } from '../src/notify/notify.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { A, B } from './entryFixture.js';
-import { TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { POOL7, TIMERS, roomFixture, type RoomFixture } from './roomFixture.js';
+import { MIN, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
+import { presetConfig } from '../src/events/vetoConfig.js';
 import { RR, SE, SWISS, playFixture } from './playFixture.js';
 import { autoAction } from '../src/events/veto.js';
 import * as E from '../src/events/events.js';
@@ -206,5 +208,57 @@ describe('RoomClock: deadlines', () => {
     expect(push).not.toHaveBeenCalled();
     expect(dueRooms(f.db, new Date(at(60)))).toEqual([]);
     expect(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'x', now: new Date(at(60)) })).toEqual({ ok: false, error: 'not_live' });
+  });
+});
+
+describe('RoomClock with the series (plan T3b)', () => {
+  let f: SeriesFixture;
+  afterEach(() => f?.close());
+
+  it('resumes an overdue pick step with its full length, leaves a connect deadline alone, and acts on the pick when it passes', async () => {
+    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    await f.tick();
+    const connectDeadline = f.match().deadline;
+    expect(f.match().status).toBe('connect');
+    f.t.t += 60 * MIN;
+    f.clock.resume();
+    expect(f.match().deadline).toBe(connectDeadline);
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    expect(R.roomState(f.db, f.match()).next).toEqual({ kind: 'pick', by: 'b', game: 2 });
+    f.t.t += 10 * MIN;
+    f.clock.resume();
+    expect(f.match().deadline).toBe(new Date(f.t.t + 60_000).toISOString());
+    await f.clock.tick();
+    expect(R.roomState(f.db, f.match()).next).toEqual({ kind: 'pick', by: 'b', game: 2 });
+    f.t.t += MIN;
+    await f.clock.tick();
+    expect(f.gameOf(2)).toMatchObject({ picked_by: f.entryB });
+    expect(f.db.prepare('SELECT auto FROM event_vetoes ORDER BY step DESC LIMIT 1').pluck().get()).toBe(1);
+  });
+
+  it('resumes an overdue confirm window, then records the result when it passes', async () => {
+    f = await seriesFixture();
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    expect(f.match().status).toBe('confirming');
+    f.t.t += 40 * MIN;
+    f.clock.resume();
+    expect(f.match().deadline).toBe(new Date(f.t.t + 15 * MIN).toISOString());
+    await f.clock.tick();
+    expect(f.match().status).toBe('confirming');
+    f.t.t += 15 * MIN;
+    await f.clock.tick();
+    expect(f.match()).toMatchObject({ status: 'done', result_source: 'auto', winner_entry: f.entryA });
+  });
+
+  it('books through the series engine on its own tick, with no separate series tick', async () => {
+    f = await seriesFixture();
+    expect(f.match()).toMatchObject({ status: 'booking', booking_id: null });
+    await f.clock.tick();
+    expect(f.match().booking_id).not.toBeNull();
   });
 });

@@ -8,7 +8,7 @@ import { getEntry } from './entries.js';
 import * as R from './entryRules.js';
 import * as P from './play.js';
 import { gamesOf, roomTimers, seriesGames } from './room.js';
-import { seriesVerdict } from './seriesRules.js';
+import { seriesVerdict, winsLine } from './seriesRules.js';
 import { bookingRules, getBooking } from '../bookings/bookings.js';
 import { getServer } from '../serverPool.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
@@ -69,7 +69,7 @@ export function eventMessage(
           ? `by forfeit (${loser} typed !gg)`
           : v.totalScore
           ? `${v.winner === 'a' ? v.totalA : v.totalB} to ${v.winner === 'a' ? v.totalB : v.totalA} on total score`
-          : `${v.winner === 'a' ? v.winsA : v.winsB} games to ${v.winner === 'a' ? v.winsB : v.winsA}`;
+          : winsLine(v.winner === 'a' ? v.winsA : v.winsB, v.winner === 'a' ? v.winsB : v.winsA);
         content = `${a} vs ${b} in ${event}: ${winner} beat ${loser} ${line}. Captains have ${roomTimers(db).confirmMinutes} minutes to confirm or dispute the result on the match page; otherwise it stands.`;
       }
       return {

@@ -216,7 +216,8 @@ export function holdMatch(db: DB, o: { matchId: number; by: string | null; reaso
   })();
 }
 
-const RESETTABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking', 'connect', 'live', 'confirming', 'admin_hold']);
+/** The statuses a room may be reset from (the series engine checks them before it cancels a booking). */
+export const RESETTABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking', 'connect', 'live', 'confirming', 'admin_hold']);
 
 /** by is null when the engine resets it (a bracket correction, flow.ts). */
 export function resetRoom(db: DB, o: { matchId: number; by: string | null; now?: Date }): V.Checked<P.MatchRow> {

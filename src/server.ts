@@ -163,6 +163,7 @@ import { adminRulesetRoutes } from './routes/adminRulesets.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
 import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
 import { RoomClock, ROOM_TICK_MS } from './events/roomClock.js';
+import { SeriesEngine, lateHooks } from './events/series.js';
 import { getMatch as getEventMatch } from './events/play.js';
 import { isParticipant as isRoomParticipant } from './events/room.js';
 import { ScrimPoster } from './scrims/poster.js';
@@ -812,6 +813,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // end of buildServer, and the orchestrator hands it each finished booking
   // game. Null until then, so an early call no-ops.
   let bookingRunnerRef: BookingRunner | null = null;
+  // Forward reference again (tournaments plan T3b): the series engine is
+  // built after the booking runner, whose tournament hooks and the
+  // match_start line below reach it through this. Null until then.
+  let seriesRef: SeriesEngine | null = null;
   if (!orchestrator) {
     if (deps.config.devMode) {
       orchestrator = new DevOrchestrator();
@@ -1212,6 +1217,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               const roster = deps.db.prepare('SELECT player_id FROM match_players WHERE match_id = ?')
                 .all(started.id) as { player_id: string }[];
               refreshSignals(roster.map((r) => r.player_id), { sharing: true, matchId: started.id });
+              // T3b: the first game of a tournament match going live makes the match live.
+              seriesRef?.gameStarted(started.id);
             }
           }
           else if (ev.kind === 'heartbeat') {
@@ -2011,6 +2018,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db,
     dm: () => { const transport = bot?.transport; return transport ? (userId, payload) => transport.dm(userId, payload) : null; },
   });
+  // Tournaments plan T3a Ruling 17: a room change goes to its two rosters and staff.
+  const pushRoom = (matchId: number): void => {
+    const m = getEventMatch(deps.db, matchId);
+    if (m) hub.sendTo('event_room', (id) => isActiveStaff(deps.db, id) || isRoomParticipant(deps.db, m, id));
+  };
   const bookingRunner = new BookingRunner({
     db: deps.db,
     publicUrl: deps.config.publicUrl,
@@ -2033,8 +2045,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // A private voice channel per side (plan 4c). Read per call: the bot logs
     // in some seconds after this runs, and may never (no bot, dev mode).
     voice: new BookingVoice({ db: deps.db, voice: () => bot?.transport?.voice ?? null }),
+    // Tournaments plan T3b: the series engine starts each tournament game.
+    tournament: lateHooks(() => seriesRef),
   });
   bookingRunnerRef = bookingRunner;
+  // Tournaments plan T3b: the series engine books, starts and scores tournament games on the booking runner.
+  // Built before resume(): a recovery or wind-down it starts may reach the tournament hooks at once.
+  const series = new SeriesEngine({
+    db: deps.db, runner: bookingRunner, notifier, publicUrl: deps.config.publicUrl, push: pushRoom,
+    registerToken: (token) => logListener?.register(token),
+  });
+  seriesRef = series;
   bookingRunner.resume();
   releaser.onFreed(() => bookingRunner.allocate());
   const bookingTick = setInterval(() => { void bookingRunner.tick(); }, BOOKING_TICK_MS);
@@ -2046,20 +2067,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // before this start get their full length again (Ruling 16), then every
   // 5 s it opens rooms and acts on deadlines. Pushes go to the two rosters
   // and staff only (Ruling 17). Built before the Events desk and the public
-  // event routes so both can push through it (rooms).
-  const roomClock = new RoomClock({
-    db: deps.db, notifier, publicUrl: deps.config.publicUrl,
-    push: (matchId) => {
-      const m = getEventMatch(deps.db, matchId);
-      if (m) hub.sendTo('event_room', (id) => isActiveStaff(deps.db, id) || isRoomParticipant(deps.db, m, id));
-    },
-  });
+  // event routes so both can push through it (rooms). From plan T3b it also
+  // ticks the series engine and acts on its pick and confirm deadlines.
+  const roomClock = new RoomClock({ db: deps.db, notifier, publicUrl: deps.config.publicUrl, push: pushRoom, series });
   roomClock.resume();
   const roomTick = setInterval(() => { void roomClock.tick(); }, ROOM_TICK_MS);
   roomTick.unref();
 
   // The Events desk (tournaments plan T1a): staff read, admins write, not behind the switch.
-  await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock });
+  await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock, series });
 
   // Setup > Rulesets and Game configs (rulesets editor plan): admins only.
   await app.register(adminRulesetRoutes, { db: deps.db });
@@ -2090,7 +2106,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // Events (tournaments plan T1a/T1b): the public pages and entry routes,
   // behind the competitive switch.
-  await app.register(eventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock });
+  await app.register(eventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock, series });
   // Caster studio: the producer panel and the OBS overlay feed.
   await app.register(castStudioRoutes, { db: deps.db, config: deps.config, store: getCommunityStore });
 
