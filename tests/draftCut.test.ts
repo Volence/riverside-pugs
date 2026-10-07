@@ -225,7 +225,7 @@ describe('signupFacts', () => {
 
 describe('pickCaptains', () => {
   const want = (f: DraftFixture, xs: string[]) => {
-    f.db.prepare("UPDATE draft_signups SET captain_pref = 'willing'").run();
+    f.db.prepare("UPDATE draft_signups SET captain_pref = 'no'").run();
     for (const s of xs) f.db.prepare("UPDATE draft_signups SET captain_pref = 'want' WHERE steamid = ?").run(s);
   };
   const pick = (f: DraftFixture) => D.pickCaptains(f.db, { eventId: f.eventId, actor: ADMIN, now: LATER });
@@ -242,6 +242,16 @@ describe('pickCaptains', () => {
     expect(logs(f, 'draft_captains_picked')).toEqual([{ captains: [P[17], P[14], P[12], P[9], P[4]], short: 0 }]);
   });
 
+  it('ranks willing and want purely by SR and never auto-picks a no', () => {
+    const f = closed();
+    want(f, [P[1], P[2]]);
+    f.db.prepare("UPDATE draft_signups SET captain_pref = 'willing' WHERE steamid IN (?, ?, ?, ?)").run(P[18], P[16], P[14], P[12]);
+    f.db.prepare("UPDATE draft_signups SET captain_pref = 'no' WHERE steamid = ?").run(P[20]);
+    const r = must(pick(f));
+    expect(r).toEqual({ captains: [P[18], P[16], P[14], P[12], P[2]], short: 0 });
+    expect(roles(f).captain).not.toContain(P[20]);
+  });
+
   it('breaks SR ties by signup order', () => {
     const f = closed();
     want(f, [P[3], P[4], P[5], P[6], P[7], P[8]]);
@@ -249,9 +259,10 @@ describe('pickCaptains', () => {
     expect(must(pick(f)).captains).toEqual([P[3], P[4], P[5], P[6], P[7]]);
   });
 
-  it('with only 3 eligible want signups makes those 3 captains and short is 2', () => {
+  it('with only 3 eligible want or willing signups makes those 3 captains and short is 2', () => {
     const f = closed();
     want(f, [P[2], P[6], P[10]]);
+    f.db.prepare("UPDATE draft_signups SET captain_pref = 'no' WHERE steamid = ?").run(P[15]);
     const r = must(pick(f));
     expect(r.captains).toEqual([P[10], P[6], P[2]]);
     expect(r.short).toBe(2);

@@ -37,7 +37,8 @@ describe('DraftPanel', () => {
     }));
     render(<DraftPanel eventId={9} canEdit />);
     expect(await screen.findByText(/2 signups · 2 teams \(most 2\)/)).toBeTruthy();
-    expect(screen.getByText('Choose 1 more captain.')).toBeTruthy();
+    expect(screen.getByText(/^1 more captain needed\. Offer captaincy/)).toBeTruthy();
+    expect(screen.queryByText('Choose 1 more captain.')).toBeNull();
     expect(screen.getByText('The pool must be exactly 6.')).toBeTruthy();
     expect(screen.getByText('1 signup is not eligible; remove it.')).toBeTruthy();
     expect(screen.getByText('Discord is not linked')).toBeTruthy();
@@ -174,7 +175,7 @@ describe('DraftPanel', () => {
     await waitFor(() => expect(mockAdmin.draftTeams).toHaveBeenCalledWith(9, 3));
   });
 
-  it('Pick captains asks first, calls the API, and says how many captains are still needed', async () => {
+  it('Pick captains asks first, then calls the API', async () => {
     mockAdmin.eventDraft.mockResolvedValue(view());
     mockAdmin.draftPickCaptains.mockResolvedValue({ ok: true, captains: ['1'], short: 1 });
     render(<DraftPanel eventId={9} canEdit />);
@@ -186,22 +187,24 @@ describe('DraftPanel', () => {
     await waitFor(() => expect(mockAdmin.draftPickCaptains).toHaveBeenCalledWith(9));
     expect(confirmMock).toHaveBeenLastCalledWith(expect.objectContaining({
       title: 'Pick captains?',
-      body: 'The highest-SR signups who want to captain become the 2 captains. This replaces the current captains and resets the pool and bench.',
+      body: 'The highest-SR signups who want to or will captain become the 2 captains. This replaces the current captains and resets the pool and bench.',
     }));
-    expect(await screen.findByText('1 more captain needed. Offer captaincy to willing signups, or make someone captain by hand.')).toBeTruthy();
   });
 
-  it('says captains in the plural when more than one is short, and nothing when none is', async () => {
-    mockAdmin.eventDraft.mockResolvedValue(view());
-    mockAdmin.draftPickCaptains.mockResolvedValue({ ok: true, captains: [], short: 2 });
+  it('derives the captains-needed line from the loaded cut: singular, plural, gone when met, one line with the problem', async () => {
+    const caps = (n: number) => Array.from({ length: 4 }, (_, i) => su({ steamid: String(i), name: `P${i}`, role: i < n ? 'captain' : 'pool' }));
+    mockAdmin.eventDraft.mockResolvedValue(view({ teams: 3, maxTeams: 3, problems: ['too_few_captains'], signups: caps(2) }));
     render(<DraftPanel eventId={9} canEdit />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Pick captains' }));
+    expect(await screen.findByText('1 more captain needed. Offer captaincy to willing signups, or make someone captain by hand.')).toBeTruthy();
+    expect(screen.queryByText(/^Choose /)).toBeNull();
+    cleanup();
+    mockAdmin.eventDraft.mockResolvedValue(view({ teams: 3, maxTeams: 3, problems: ['too_few_captains'], signups: caps(1) }));
+    render(<DraftPanel eventId={9} canEdit />);
     expect(await screen.findByText(/^2 more captains needed\./)).toBeTruthy();
     cleanup();
-    mockAdmin.draftPickCaptains.mockResolvedValue({ ok: true, captains: ['1', '2'], short: 0 });
+    mockAdmin.eventDraft.mockResolvedValue(view({ teams: 2, maxTeams: 2, signups: caps(2) }));
     render(<DraftPanel eventId={9} canEdit />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Pick captains' }));
-    await waitFor(() => expect(mockAdmin.draftPickCaptains).toHaveBeenCalledTimes(2));
+    await screen.findByText('P0', { selector: 'td' });
     expect(screen.queryByText(/captains? needed/)).toBeNull();
   });
 
