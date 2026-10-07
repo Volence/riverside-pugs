@@ -231,8 +231,9 @@ export function setCaptain(db: DB, o: { eventId: number; steamid: string; captai
   })();
 }
 
-/** Staff pick the captains in one step: the active signups who want to
- *  captain and pass the starter eligibility check, highest current-season SR
+/** Staff pick the captains in one step: the active signups who want to or
+ *  will captain (never 'no'; the preference between the two does not
+ *  matter) and pass the starter eligibility check, highest current-season SR
  *  first (ties by signup order), the first draft_teams of them. The working
  *  captain set is replaced, pool and bench recomputed as setCaptain does, and
  *  an open offer to a picked player is stopped. short is how many captains
@@ -246,7 +247,7 @@ export function pickCaptains(db: DB, o: { eventId: number; actor: string; now: D
     const elig = E.fieldsOf(ev).eligibility;
     const teams = ev.draft_teams ?? 0;
     const ranked = activeSignups(db, ev.id).flatMap((s, i) => {
-      if (s.captain_pref !== 'want') return [];
+      if (s.captain_pref === 'no') return [];
       const facts = playerFacts(db, s.steamid, o.now);
       return R.problemsOf(elig, facts, 'starter').length > 0 ? [] : [{ s, i, sr: facts.sr }];
     }).sort((a, b) => b.sr - a.sr || a.i - b.i);

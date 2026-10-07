@@ -74,9 +74,9 @@ describe('the draft desk over HTTP', () => {
   it('picks captains for an admin only, audited', async () => {
     const r = await post(`${base()}/pick-captains`, ADMIN);
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ ok: true, captains: [P[2], P[1], P[0]], short: 2 });
+    expect(r.json()).toEqual({ ok: true, captains: [P[20], P[19], P[18], P[17], P[16]], short: 0 });
     expect((f.db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'event_draft_pick_captains'").get() as { n: number }).n).toBe(1);
-    expect((await get(base(), ADMIN)).json().signups.filter((s: { role: string }) => s.role === 'captain')).toHaveLength(3);
+    expect((await get(base(), ADMIN)).json().signups.filter((s: { role: string }) => s.role === 'captain')).toHaveLength(5);
   });
 
   it('runs the cut as an admin, audited, and refuses what the writer refuses', async () => {

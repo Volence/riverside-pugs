@@ -88,7 +88,6 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
   const { busy, error, run } = useAction(() => { reload(); onChange?.(); });
   const [teams, setTeams] = useState('');
   const [refused, setRefused] = useState<string[]>([]);
-  const [short, setShort] = useState(0);
   if (loadError) return <Panel><h3>Draft</h3><p class="error">Could not load the draft.</p></Panel>;
   if (!data) return <Panel><h3>Draft</h3></Panel>;
   const locked = data.lockedAt !== null;
@@ -97,6 +96,7 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
   const captains = data.signups.filter((s) => s.role === 'captain').length;
   const ineligible = data.signups.filter((s) => s.problems.length > 0).length;
   const sentence = (c: CutProblem) => problemText(c, { teams: data.teams, maxTeams: data.maxTeams, captains, ineligible, active: n });
+  const short = locked && !published ? Math.max((data.teams ?? 0) - captains, 0) : 0;
   const canAct = canEdit && !published;
   const teamValue = teams !== '' ? teams : String(data.teams ?? data.maxTeams);
 
@@ -139,8 +139,8 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
       )}
       {!canEdit && <p class="muted">Read only: admins run events.</p>}
       {error && <p class="error" role="alert">{error}</p>}
-      {locked && !published && data.problems.length > 0 && (
-        <ul class="muted">{data.problems.map((c) => <li key={c}>{sentence(c)}</li>)}</ul>
+      {locked && !published && data.problems.some((c) => !(c === 'too_few_captains' && short > 0)) && (
+        <ul class="muted">{data.problems.filter((c) => !(c === 'too_few_captains' && short > 0)).map((c) => <li key={c}>{sentence(c)}</li>)}</ul>
       )}
       {refused.length > 0 && (
         <div class="error" role="alert">
@@ -152,11 +152,9 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
         <>
           {canEdit && (
             <div class="inlinerow">
-              <button class="btn btn--ghost" disabled={busy} onClick={() => run(async () => {
-                setShort((await adminApi.draftPickCaptains(eventId)).short);
-              }, {
+              <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.draftPickCaptains(eventId), {
                 title: 'Pick captains?',
-                body: `The highest-SR signups who want to captain become the ${data.teams ?? 0} captains. This replaces the current captains and resets the pool and bench.`,
+                body: `The highest-SR signups who want to or will captain become the ${data.teams ?? 0} captains. This replaces the current captains and resets the pool and bench.`,
               })}>Pick captains</button>
             </div>
           )}
