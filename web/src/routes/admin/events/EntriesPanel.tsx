@@ -9,10 +9,11 @@ const DROP: Record<string, string> = {
 };
 const ROLE: Record<string, string> = { starter: 'Starter', sub: 'Sub', coach: 'Coach' };
 
-function statusText(e: AdminEntryView): string {
+function statusText(e: AdminEntryView, draft: boolean): string {
   if (e.status === 'dropped') return `Dropped (${DROP[e.dropReason ?? ''] ?? 'dropped'})`;
   if (e.status === 'disqualified') return 'Disqualified';
-  if (e.status === 'checked_in') return 'Checked in';
+  // A draft's entries are created as checked_in; a draft has no check-in step.
+  if (e.status === 'checked_in' && !draft) return 'Checked in';
   return e.waitlist !== null ? `Waitlist ${e.waitlist}` : 'Registered';
 }
 
@@ -23,20 +24,27 @@ const SEEDS_CLOSED: readonly string[] = ['live', 'finished', 'cancelled'];
 
 /** One entry's row. Its own component so the Disqualify reason box is this
  *  row's state alone, never shared with any other row's box or send. */
-function EntryRow({ e, canEdit, locked, showMove, canRestore, busy, active, onMove, onDisqualify, onRestore }: {
-  e: AdminEntryView; canEdit: boolean; locked: boolean; showMove: boolean; canRestore: boolean; busy: boolean; active: boolean;
+function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, busy, active, onMove, onDisqualify, onRestore, onRename }: {
+  e: AdminEntryView; draft: boolean; canRename: boolean; onRename: (id: number, name: string) => void; canEdit: boolean; locked: boolean; showMove: boolean; canRestore: boolean; busy: boolean; active: boolean;
   onMove: (id: number, by: -1 | 1) => void; onDisqualify: (id: number, name: string, reason: string) => void; onRestore: (id: number, name: string) => void;
 }) {
   const [reason, setReason] = useState('');
+  const [name, setName] = useState(e.name);
   return (
     <li class={active ? '' : 'muted'}>
       <strong>{e.seed !== null && active ? `#${e.seed} ` : ''}{e.name}</strong> <span class="muted">[{e.tag}]</span>
-      {' '}· {statusText(e)} · SR {e.sr} · by {e.registeredByName}
+      {' '}· {statusText(e, draft)} · SR {e.sr} · by {e.registeredByName}
       <ul class="entrypanel__roster">
         {e.roster.map((p) => (
           <li key={p.steamid}><span class="chip">{ROLE[p.role]}</span> {p.name}{p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}</li>
         ))}
       </ul>
+      {canEdit && canRename && active && (
+        <div class="inlinerow">
+          <input type="text" aria-label={`Team name for ${e.name}`} maxLength={24} value={name} onInput={(ev) => setName((ev.target as HTMLInputElement).value)} />
+          <button class="btn btn--ghost btn--sm" aria-label={`Save name for ${e.name}`} disabled={busy || name === e.name} onClick={() => onRename(e.id, name)}>Save name</button>
+        </div>
+      )}
       {canEdit && (
         <div class="inlinerow">
           {showMove && locked && active && e.seed !== null && (
@@ -66,8 +74,8 @@ function EntryRow({ e, canEdit, locked, showMove, canRestore, busy, active, onMo
  *  check-in on; Close the list in the phase the clock would close it from
  *  (check-in, or registration with check-in off); Restore before the list is
  *  final in registration or check-in. */
-export function EntriesPanel({ eventId, status, checkin, canEdit, gen = 0, onChange }: {
-  eventId: number; status: string; checkin: boolean; canEdit: boolean; gen?: number; onChange?: () => void;
+export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false, gen = 0, onChange }: {
+  eventId: number; status: string; checkin: boolean; canEdit: boolean; draft?: boolean; gen?: number; onChange?: () => void;
 }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventEntries(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
@@ -90,6 +98,8 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, gen = 0, onCha
   };
   const disqualify = (id: number, name: string, reason: string) => void run(() => adminApi.disqualifyEventEntry(eventId, id, reason), `Disqualify ${name}?`);
   const restore = (id: number, name: string) => void run(() => adminApi.restoreEventEntry(eventId, id), `Restore ${name}?`);
+  const rename = (id: number, name: string) => void run(() => adminApi.setEntryIdentity(eventId, id, { name }));
+  const canRename = draft && !SEEDS_CLOSED.includes(status);
   const active = (e: AdminEntryView) => e.status !== 'dropped' && e.status !== 'disqualified';
   return (
     <Panel>
@@ -111,7 +121,7 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, gen = 0, onCha
       {data.entries.length === 0 ? <Empty>No entries yet.</Empty> : (
         <ul class="admin-list">
           {data.entries.map((e) => (
-            <EntryRow key={e.id} e={e} canEdit={canEdit} locked={locked} showMove={showMove} canRestore={canRestore} busy={busy} active={active(e)}
+            <EntryRow key={e.id} e={e} draft={draft} canRename={canRename} onRename={rename} canEdit={canEdit} locked={locked} showMove={showMove} canRestore={canRestore} busy={busy} active={active(e)}
               onMove={move} onDisqualify={disqualify} onRestore={restore} />
           ))}
         </ul>

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import type { AdminEntryView } from '../../../api';
 
 const { mockAdmin } = vi.hoisted(() => ({
-  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn() },
+  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn(), setEntryIdentity: vi.fn() },
 }));
 vi.mock('../../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api')>();
@@ -31,6 +31,29 @@ describe('EntriesPanel', () => {
     expect(screen.getAllByText(/Discord is not linked/)).toHaveLength(2);
     expect(screen.getByText(/Waitlist 1/)).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('shows no check-in anywhere for a draft event entry', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [entry({ status: 'checked_in', seed: 1, teamSlug: null })] });
+    render(<EntriesPanel eventId={9} status="registration" checkin={false} draft canEdit={false} />);
+    expect(await screen.findByText(/Rats/)).toBeTruthy();
+    expect(screen.queryByText(/Checked in/)).toBeNull();
+    expect(screen.queryByText(/check-in/i)).toBeNull();
+  });
+
+  it('a team event entry still shows Checked in', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [entry({ status: 'checked_in' })] });
+    render(<EntriesPanel eventId={9} status="registration" checkin canEdit={false} />);
+    expect(await screen.findByText(/Checked in/)).toBeTruthy();
+  });
+
+  it('lets staff rename a draft entry', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [entry({ teamSlug: null, status: 'checked_in' })] });
+    mockAdmin.setEntryIdentity.mockResolvedValue({});
+    render(<EntriesPanel eventId={9} status="registration" checkin={false} draft canEdit />);
+    fireEvent.input(await screen.findByLabelText('Team name for Rats'), { target: { value: 'The Rats' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name for Rats' }));
+    await waitFor(() => expect(mockAdmin.setEntryIdentity).toHaveBeenCalledWith(9, 1, { name: 'The Rats' }));
   });
 
   it('lets an admin close the entry list early and move a seed up', async () => {

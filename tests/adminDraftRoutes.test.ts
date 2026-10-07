@@ -53,6 +53,11 @@ describe('the draft desk over HTTP', () => {
   const post = (url: string, as: string, body: object = {}) => app.inject({ method: 'POST', url, cookies: cookies[as], payload: body });
   const base = () => `/api/admin/events/${f.eventId}/draft`;
 
+  it('the event detail carries cutAt and teamsMadeAt for the desk panels', async () => {
+    const res = await get(`/api/admin/events/${f.eventId}`, MOD);
+    expect(res.json()).toMatchObject({ cutAt: null, teamsMadeAt: null });
+  });
+
   it('lets a mod read the desk and refuses a mod every write', async () => {
     const res = await get(base(), MOD);
     expect(res.statusCode).toBe(200);

@@ -123,6 +123,47 @@ describe('EventPage', () => {
     expect(screen.queryByText(/in 2 days/)).toBeNull();
   });
 
+  it('a draft event with its teams made lists the teams with logos, keeps the cut lists, and shows no check-in or SR', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft', status: 'registration', lockedAt: inMinutes(-60), eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },
+      draft: {
+        signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 6, names: ['Ann', 'Bob'],
+        cut: { captains: ['Ann', 'Eve'], pool: ['Bob', 'Cy'], bench: ['Di'] },
+      },
+      entries: [
+        { id: 1, name: 'Team Ann', tag: 'ANN', logoKey: 'abc', seed: 1, status: 'checked_in', waitlist: null, placement: null },
+        { id: 2, name: 'Team Eve', tag: '', logoKey: null, seed: 2, status: 'checked_in', waitlist: null, placement: null },
+      ],
+    }));
+    const { container } = render(<EventPage slug="riverside-cup" session={session} />);
+    expect(await screen.findByRole('heading', { name: 'Teams' })).toBeTruthy();
+    expect(screen.getByText('Team Ann')).toBeTruthy();
+    expect(screen.getByText('Team Eve')).toBeTruthy();
+    expect(container.querySelector('img.evententry__logo')?.getAttribute('src')).toBe('/api/events/logos/abc.png');
+    expect(screen.getByRole('heading', { name: 'Captains' })).toBeTruthy();
+    expect(screen.queryByText('Checked in')).toBeNull();
+    expect(container.textContent).not.toMatch(/\bSR\b(?! \d+ (or|to))|forecast|spread|average/i);
+    expect(container.textContent).not.toMatch(/\d{3,4} SR|SR \d{3,4}/);
+  });
+
+  it('a draft event before its teams are made shows no Teams list', async () => {
+    mockEvents.get.mockResolvedValue(view({ entryKind: 'draft', status: 'registration', draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 1, names: ['Ann'], cut: null } }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    await screen.findByText('Riverside Cup');
+    expect(screen.queryByRole('heading', { name: 'Teams' })).toBeNull();
+  });
+
+  it('shows a draft captain their identity panel', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft', status: 'registration',
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 6, names: [], cut: { captains: ['Ann'], pool: [], bench: [] } },
+    }));
+    mockEvents.mine.mockResolvedValue({ entries: [], register: [], canRegister: false, signup: null, offer: null, captainOf: { entryId: 1, name: 'Team Ann', tag: '', logoKey: null, editable: true } });
+    render(<EventPage slug="riverside-cup" session={{ kind: 'active' } as never} />);
+    expect(await screen.findByRole('heading', { name: 'Your team' })).toBeTruthy();
+    expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Team Ann');
+  });
+
   it('a draft staff preview is marked as such', async () => {
     mockEvents.get.mockResolvedValue(view({ status: 'draft' }));
     render(<EventPage slug="riverside-cup" session={session} />);

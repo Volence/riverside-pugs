@@ -3487,6 +3487,17 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftpanel__note { width: 100%; max-width: none; box-sizing: border-box; }
 .draftsection .eventpool { min-width: 0; overflow-wrap: anywhere; }
 .draftsection h4 { margin: var(--sp-3) 0 0; }
+.maketeams { display: flex; flex-direction: column; gap: var(--sp-3); }
+.maketeams h3, .maketeams p { margin: 0; }
+.maketeams__modes { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.maketeams__teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3); }
+.maketeam { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; }
+.maketeam h4, .maketeam p { margin: 0; }
+.maketeam__players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.maketeam__players li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); overflow-wrap: anywhere; }
+.maketeams__fair { display: flex; flex-direction: column; gap: var(--sp-2); }
+.draftidentity { display: flex; flex-direction: column; gap: var(--sp-3); }
+.draftidentity h3 { margin: 0; }
 .entrypanel__roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .rosterpick__list { list-style: none; margin: var(--sp-2) 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .rosterpick__row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
