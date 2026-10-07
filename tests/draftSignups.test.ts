@@ -129,7 +129,7 @@ describe('closeSignups and removeSignup', () => {
     expect(err(D.withdrawSignup(f.db, { eventId: f.eventId, steamid: P[0], now: NOW }))).toBe('closed');
     must(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[0], reason: 'ineligible', actor: ADMIN, now: NOW }));
     expect(f.db.prepare('SELECT withdraw_reason FROM draft_signups WHERE steamid = ?').get(P[0])).toEqual({ withdraw_reason: 'ineligible' });
-    expect(JSON.parse(logs(f.db, 'draft_signup_removed')[0]!.detail)).toEqual({ steamid: P[0], reason: 'ineligible' });
+    expect(JSON.parse(logs(f.db, 'draft_signup_removed')[0]!.detail)).toEqual({ steamid: P[0], reason: 'ineligible', promoted: null });
     expect(err(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[0], reason: 'removed', actor: ADMIN, now: NOW }))).toBe('not_signed_up');
     expect(D.activeSignups(f.db, f.eventId).map((s) => s.steamid)).toEqual([P[1]]);
   });

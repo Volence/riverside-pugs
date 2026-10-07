@@ -128,14 +128,15 @@ describe('publishCut', () => {
     expect(err(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[5], reason: 'removed', actor: ADMIN, now: LATER }))).toBe('cut_published');
   });
 
-  it('refuses a stale cut: a pool player removed just before publish gives cut_changed with pool_size', () => {
+  it('refuses a stale cut: a captain removed just before publish gives cut_changed with too_few_captains, and nobody is promoted', () => {
     const f = ready();
-    must(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[7], reason: 'removed', actor: ADMIN, now: LATER }));
+    must(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[0], reason: 'removed', actor: ADMIN, now: LATER }));
+    expect(logs(f, 'draft_signup_removed')).toEqual([{ steamid: P[0], reason: 'removed', promoted: null }]);
     const r = D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: LATER });
     expect(r.ok).toBe(false);
     expect(r.ok ? null : r.error).toBe('cut_changed');
     if (r.ok || !('cut' in r)) throw new Error('expected the cut detail');
-    expect(r.cut).toEqual({ problems: ['pool_size'], teams: 5, maxTeams: 5, active: 20, captains: 5, pool: 14, poolNeeded: 15, bench: 1, unassigned: 0, ineligible: [] });
+    expect(r.cut).toEqual({ problems: ['too_few_captains'], teams: 5, maxTeams: 5, active: 20, captains: 4, pool: 15, poolNeeded: 15, bench: 1, unassigned: 0, ineligible: [] });
     expect(E.getEvent(f.db, f.eventId)!.cut_at).toBeNull();
     expect(logs(f, 'draft_cut_published')).toEqual([]);
   });
@@ -150,6 +151,35 @@ describe('publishCut', () => {
     expect(r.cut.problems).toEqual(['ineligible']);
     expect(r.cut.ineligible).toEqual([{ steamid: P[6], problems: ['0 of 5 completed PUGs'] }]);
     expect(E.getEvent(f.db, f.eventId)!.cut_at).toBeNull();
+  });
+});
+
+describe('removeSignup after close', () => {
+  it('promotes the first bench signup when a pool player is removed, and keeps an earlier swap', () => {
+    const f = draftFixture();
+    P.slice(0, 13).forEach((s, i) => must(D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: new Date(NOW.getTime() + i * 1000) })));
+    must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+    expect(E.getEvent(f.db, f.eventId)!.draft_teams).toBe(3);
+    for (const s of P.slice(0, 3)) must(cap(f, s));
+    expect(roles(f).pool).toEqual(P.slice(3, 12));
+    expect(roles(f).bench).toEqual([P[12]]);
+    must(D.swapPoolBench(f.db, { eventId: f.eventId, poolSteamid: P[3], benchSteamid: P[12], actor: ADMIN, now: LATER }));
+    const before = (f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n;
+    must(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[5], reason: 'removed', actor: ADMIN, now: LATER }));
+    expect((f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n).toBe(before + 1);
+    const r = roles(f);
+    expect(r.pool).toHaveLength(9);
+    expect(r.pool).toEqual([P[3], P[4], ...P.slice(6, 13)]);
+    expect(r.bench).toEqual([]);
+    expect(D.signupOf(f.db, f.eventId, P[12])).toMatchObject({ role: 'pool', role_manual: 1 });
+    expect(logs(f, 'draft_signup_removed')).toEqual([{ steamid: P[5], reason: 'removed', promoted: P[3] }]);
+    expect(D.cutState(f.db, f.eventId, LATER).problems).toEqual([]);
+  });
+
+  it('before close nobody has a role, so nobody is promoted', () => {
+    const f = closed({ close: false });
+    must(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[0], reason: 'removed', actor: ADMIN, now: LATER }));
+    expect(logs(f, 'draft_signup_removed')).toEqual([{ steamid: P[0], reason: 'removed', promoted: null }]);
   });
 });
 

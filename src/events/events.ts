@@ -229,12 +229,15 @@ export function updateEvent(db: DB, o: { eventId: number; by: string; fields: un
     if (!ev) return V.fail('not_found');
     if (!V.EVENT_EDITABLE.has(ev.status)) return V.fail('wrong_status');
     // With check-in off an event stays in registration after its list is
-    // final; the cap, rules and start must not move under a final list.
-    if (ev.locked_at !== null) return V.fail('entries_locked');
+    // final; the cap, rules and start must not move under a final list. A
+    // draft-kind event's locked_at only closes signups, so it stays editable,
+    // except that its draft times are fixed once the cut is published.
+    if (ev.locked_at !== null && ev.entry_kind !== 'draft') return V.fail('entries_locked');
     const before = fieldsOf(ev);
     const parsed = V.parseEventFields(o.fields, before);
     if (!parsed.ok) return parsed;
     const f = parsed.value;
+    if (ev.cut_at !== null && JSON.stringify(f.draft) !== JSON.stringify(before.draft)) return V.fail('draft_times_locked');
     if (f.entryKind !== before.entryKind && ev.status !== 'draft') return V.fail('kind_locked');
     if (f.startsAt !== before.startsAt && f.startsAt <= at) return V.fail('start_passed');
     const changed = (Object.keys(f) as (keyof V.EventFields)[]).filter((k) => JSON.stringify(f[k]) !== JSON.stringify(before[k]));
@@ -361,6 +364,11 @@ export function publishEvent(db: DB, o: { eventId: number; by: string; now?: Dat
     if (!ev) return V.fail('not_found');
     if (!V.nextStatusAllowed(ev.status, 'announced')) return V.fail('wrong_status');
     if (ev.starts_at <= at) return V.fail('start_passed');
+    if (ev.entry_kind === 'draft') {
+      const d = fieldsOf(ev).draft;
+      if (!d) return V.fail('bad_draft_times');
+      if (at >= d.signupsCloseAt) return V.fail('draft_close_passed');
+    }
     const chain = chainOf(db, ev);
     if (!chain.ok) return chain;
     const snapshots: [number, string][] = [];
@@ -387,6 +395,11 @@ export function openRegistration(db: DB, o: { eventId: number; by: string; now?:
     if (!ev) return V.fail('not_found');
     if (!V.nextStatusAllowed(ev.status, 'registration')) return V.fail('wrong_status');
     if (ev.starts_at <= at) return V.fail('start_passed');
+    if (ev.entry_kind === 'draft') {
+      const d = fieldsOf(ev).draft;
+      if (!d) return V.fail('bad_draft_times');
+      if (at >= d.signupsCloseAt) return V.fail('draft_close_passed');
+    }
     const chain = chainOf(db, ev);
     if (!chain.ok) return chain;
     db.prepare("UPDATE events SET status = 'registration', updated_at = ? WHERE id = ?").run(at, ev.id);
@@ -402,6 +415,7 @@ export function openCheckin(db: DB, o: { eventId: number; by: string | null; now
   return db.transaction((): EventResult<EventRow> => {
     const ev = getEvent(db, o.eventId);
     if (!ev) return V.fail('not_found');
+    if (ev.entry_kind !== 'team') return V.fail('team_only');
     if (!fieldsOf(ev).checkin.enabled) return V.fail('no_checkin');
     if (!V.nextStatusAllowed(ev.status, 'checkin') || ev.locked_at !== null) return V.fail('wrong_status');
     db.prepare("UPDATE events SET status = 'checkin', updated_at = ? WHERE id = ?").run(at, ev.id);

@@ -81,7 +81,7 @@ export function eventMessage(
         ? `You are a captain in ${event}. The draft is ${when}. Build your pick list before then: ${link}`
         : extra.cutRole === 'pool'
           ? `You are in the draft pool for ${event}. The draft is ${when}; captains pick you live: ${link}`
-          : `You are on the free-agent bench for ${event}. Captains can call on you as a stand-in, so keep the night free if you can: ${link}`;
+          : `You are on the free-agent bench for ${event}. The draft is ${when}; captains can call on you as a stand-in, so keep the night free if you can: ${link}`;
       break;
     }
     case 'draft_captain_offer':
