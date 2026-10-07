@@ -432,7 +432,7 @@ export const identityOpen = (ev: { status: V.EventStatus }): boolean => ev.statu
 export function identityRefusal(ev: E.EventRow, entry: EntryRow, steamid: string, staff: boolean): V.EventError | null {
   if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return 'not_draft_entry';
   if (!staff && entry.captain_steamid !== steamid) return 'not_captain';
-  if (!identityOpen(ev)) return 'entries_locked';
+  if (!identityOpen(ev)) return 'identity_locked';
   if (!isActive(entry)) return 'entry_out';
   return null;
 }
