@@ -883,9 +883,10 @@ export class SeriesEngine {
         const km = kept[0] ? P.getMatch(this.db, kept[0].matchId) : reply ? undefined : P.getMatch(this.db, g.matchId);
         if (km) {
           const what = `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} ${reply ? 'was taken by one server and refused by another' : 'got no answer from the server'}`;
+          // The undo got no answer or was refused: the site cannot know which player the box has.
           this.alert(km, kept.length === 0
             ? `${what}; it was asked to undo it and the server undid it.`
-            : `${what}, and it was NOT undone: the server has ${this.playerName(o.in)}, the site has ${this.playerName(o.out)}.`);
+            : `${what}; the site could not confirm the server's state: it may have ${this.playerName(o.in)} or ${this.playerName(o.out)}. Check the live roster or use !sub.`);
         }
         console.log(`[series] match ${g.matchId}: the box refused the staff replace of ${o.out} by ${o.in} (${reply ? reply.error : 'no answer'})`);
         return V.fail('replace_in_game', [{ steamid: o.out, problems: [reply ? `The server said: ${reply.error}.` : 'The server did not answer.'] }]);

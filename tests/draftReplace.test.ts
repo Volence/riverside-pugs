@@ -248,6 +248,42 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
     expect(snapshot(s)).toBe(before);
   });
 
+  it('no answer from the box and no answer to the reverse sub either: staff are told the site cannot confirm the server\'s state', async () => {
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    await s.tick();
+    s.goLive(s.gameOf(1).match_id!);
+    const token = s.liveGameToken();
+    const before = snapshot(s);
+    const real = s.runner.send.bind(s.runner);
+    vi.spyOn(s.runner, 'send').mockImplementation(async (id, lines, what) => {
+      if (lines[0] === `sm_pug_sub ${token} ${A[3]} ${OUTSIDER}` || lines[0] === `sm_pug_sub ${token} ${OUTSIDER} ${A[3]}`) return null;
+      return real(id, lines, what);
+    });
+    const r = await replace();
+    expect(r.ok ? null : r.error).toBe('replace_in_game');
+    const alert = s.alerts.find((a): a is Extract<typeof a, { kind: 'problem' }> => a.kind === 'problem' && a.text.includes('staff replace'))!;
+    expect(alert.text).toContain('got no answer from the server');
+    expect(alert.text).toContain(`could not confirm the server's state: it may have p${A.length + BATS.length} or p3. Check the live roster or use !sub.`);
+    expect(alert.text).not.toContain('NOT undone');
+    expect(snapshot(s)).toBe(before);
+  });
+
+  it('no answer from the box and the reverse sub refused: the same could-not-confirm wording', async () => {
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    await s.tick();
+    s.goLive(s.gameOf(1).match_id!);
+    const token = s.liveGameToken();
+    const real = s.runner.send.bind(s.runner);
+    vi.spyOn(s.runner, 'send').mockImplementation(async (id, lines, what) => {
+      if (lines[0] === `sm_pug_sub ${token} ${A[3]} ${OUTSIDER}`) { s.box.subOk = false; return null; }
+      return real(id, lines, what);
+    });
+    const r = await replace();
+    expect(r.ok ? null : r.error).toBe('replace_in_game');
+    const alert = s.alerts.find((a): a is Extract<typeof a, { kind: 'problem' }> => a.kind === 'problem' && a.text.includes('staff replace'))!;
+    expect(alert.text).toContain(`could not confirm the server's state: it may have p${A.length + BATS.length} or p3. Check the live roster or use !sub.`);
+  });
+
   it('a room state refusal unrelated to the box is replace_not_possible with the room\'s reason, and nothing is written', async () => {
     s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
     await s.tick();
