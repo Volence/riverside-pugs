@@ -144,6 +144,8 @@ export function readEditableRules(raw: unknown): RulesetResult<EditableRules> {
   if (cooldownSeconds !== undefined && !within(cooldownSeconds, RULE_RANGES.cooldownSeconds)) return fail('bad_call_cooldown');
   const nextGameSeconds = field('series', 'nextGameSeconds');
   if (nextGameSeconds !== undefined && !within(nextGameSeconds, RULE_RANGES.nextGameSeconds)) return fail('bad_next_game');
+  const carryScore = field('series', 'carryScore');
+  if (carryScore !== undefined && typeof carryScore !== 'boolean') return fail('bad_rules');
   return ok({
     pause: {
       limit: pause.limit as number | null, seconds: pause.seconds as number | null, mutualUnpause: pause.mutualUnpause as boolean, techPauses: pause.techPauses as number,
@@ -163,7 +165,10 @@ export function readEditableRules(raw: unknown): RulesetResult<EditableRules> {
     },
     disconnect: { teamSeconds: (teamSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.teamSeconds },
     staffCall: { cooldownSeconds: (cooldownSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.cooldownSeconds },
-    series: { nextGameSeconds: (nextGameSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.nextGameSeconds },
+    series: {
+      nextGameSeconds: (nextGameSeconds as number | undefined) ?? MATCH_PLAY_DEFAULTS.nextGameSeconds,
+      carryScore: (carryScore as boolean | undefined) ?? MATCH_PLAY_DEFAULTS.carryScore,
+    },
   });
 }
 
@@ -213,6 +218,7 @@ function mergeStored(body: unknown, stored: MatchRules | null): unknown {
   const b = { ...(body as Record<string, unknown>) };
   for (const key of ['subs', 'disconnect', 'staffCall', 'series'] as const) if (!(key in b)) b[key] = stored[key];
   if (typeof b.subs === 'object' && b.subs !== null) b.subs = { emergency: stored.subs.emergency, emergencyChargeSeconds: stored.subs.emergencyChargeSeconds, ...(b.subs as object) };
+  if (typeof b.series === 'object' && b.series !== null) b.series = { carryScore: stored.series.carryScore, ...(b.series as object) };
   if (typeof b.pause === 'object' && b.pause !== null && !('techSeconds' in (b.pause as object))) b.pause = { ...(b.pause as object), techSeconds: stored.pause.techSeconds };
   return b;
 }

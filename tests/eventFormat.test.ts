@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { chaptersLabel, groupLabel, roundLabel, rulesLines, rulesSummary, stageSummary } from '../src/events/format.js';
-import { TEMPLATES } from '../src/rulesets.js';
+import { TEMPLATES, parseRules } from '../src/rulesets.js';
 
 describe('stage summary', () => {
   it('reads each type with its settings and the advance count', () => {
@@ -57,6 +57,15 @@ describe('rules lines', () => {
     expect(lines).toContain('Subs: 2 per match, one may come in mid-chapter for a disconnected player');
     expect(rulesLines({ ...TEMPLATES['Standard Cup'], pause: { ...TEMPLATES['Standard Cup'].pause, techPauses: 0 } }).some((l) => l.startsWith('Technical pauses'))).toBe(false);
     expect(rulesLines({ ...TEMPLATES['Standard Cup'], subs: { perMatch: 1, emergency: false, emergencyChargeSeconds: 0 } })).toContain('Subs: 1 per match, between chapters');
+  });
+});
+
+describe('rules lines (plan T6)', () => {
+  it('names the score carry-over only when it is on', () => {
+    const r = parseRules(JSON.stringify(TEMPLATES['Standard Cup']));
+    expect(rulesLines(r).some((l) => l.includes('carries'))).toBe(false);
+    const on = { ...r, series: { ...r.series, carryScore: true } };
+    expect(rulesLines(on)).toContain("Best of 2: game 2 starts with game 1's score, so later chapters follow the running total");
   });
 });
 

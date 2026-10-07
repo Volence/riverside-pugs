@@ -52,6 +52,7 @@ export function rulesLines(r: MatchRules): string[] {
   lines.push(r.subs.emergency
     ? `Subs: ${r.subs.perMatch} per match, one may come in mid-chapter for a disconnected player`
     : `Subs: ${r.subs.perMatch} per match, between chapters`);
+  if (r.series.carryScore) lines.push("Best of 2: game 2 starts with game 1's score, so later chapters follow the running total");
   lines.push(`No-show grace: ${r.noShowGraceMinutes} minutes`);
   lines.push(SIDE_RULE[r.sideRule]);
   lines.push(BOSSES[r.bosses]);

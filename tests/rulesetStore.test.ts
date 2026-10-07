@@ -49,6 +49,13 @@ describe('reading the editable rules', () => {
     expect(errOf(readEditableRules(body({ series: { nextGameSeconds: 20 } })))).toBe('bad_next_game');
   });
 
+  it('reads series.carryScore (plan T6) and refuses a non-boolean', () => {
+    const body = (over: Record<string, unknown>) => ({ ...cupEditable, ...over });
+    expect(okOf(readEditableRules(body({ series: { nextGameSeconds: 60, carryScore: true } }))).series).toEqual({ nextGameSeconds: 60, carryScore: true });
+    expect(okOf(readEditableRules(body({ series: { nextGameSeconds: 60 } }))).series).toEqual({ nextGameSeconds: 60, carryScore: false });
+    expect(errOf(readEditableRules(body({ series: { nextGameSeconds: 60, carryScore: 1 } })))).toBe('bad_rules');
+  });
+
   it('refuses each out-of-range or mistyped field with its own reason', () => {
     const p = cupEditable.pause;
     expect(errOf(readEditableRules(edit({ pause: { ...p, limit: 11 } })))).toBe('bad_pause_limit');
@@ -172,6 +179,15 @@ describe('editing a ruleset', () => {
       pause: { limit: 2, seconds: 90, techPauses: 1, techSeconds: 120 }, disconnect: { teamSeconds: 900 }, staffCall: { cooldownSeconds: 60 }, series: { nextGameSeconds: 90 },
       subs: { perMatch: 1, emergency: false, emergencyChargeSeconds: 20 },
     });
+  });
+});
+
+describe('series.carryScore on update (plan T6)', () => {
+  it('keeps the stored carryScore when the body sends series without it', () => {
+    const id = okOf(createRuleset(db, { by: ADMIN, copyFrom: idOf('Standard Cup'), name: 'Spring Cup' })).id;
+    okOf(updateRuleset(db, { by: ADMIN, id, name: 'Spring Cup', rules: { ...cupEditable, series: { nextGameSeconds: 90, carryScore: true } } }));
+    okOf(updateRuleset(db, { by: ADMIN, id, name: 'Spring Cup', rules: { ...cupEditable, series: { nextGameSeconds: 120 } } }));
+    expect(JSON.parse(row(id).rules_json).series).toEqual({ nextGameSeconds: 120, carryScore: true });
   });
 });
 

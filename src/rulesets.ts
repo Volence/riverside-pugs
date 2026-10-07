@@ -33,14 +33,15 @@ export interface MatchRules {
   disconnect: { teamSeconds: number };
   /** Plan T5, tournament boxes only: seconds between two !admin calls of one player. */
   staffCall: { cooldownSeconds: number };
-  /** Plan T5: seconds between two games of a series. */
-  series: { nextGameSeconds: number };
+  /** Plan T5: seconds between two games of a series. Plan T6: carryScore
+   *  starts game 2 of a best of 2 with game 1's totals in the box's tally. */
+  series: { nextGameSeconds: number; carryScore: boolean };
 }
 
 /** Plan T5 Ruling 3: what a ruleset or stage snapshot saved before these
  *  fields reads as, and what every template carries. */
 export const MATCH_PLAY_DEFAULTS = {
-  techSeconds: 300, teamSeconds: 600, emergency: true, emergencyChargeSeconds: 0, cooldownSeconds: 180, nextGameSeconds: 60,
+  techSeconds: 300, teamSeconds: 600, emergency: true, emergencyChargeSeconds: 0, cooldownSeconds: 180, nextGameSeconds: 60, carryScore: false,
 } as const;
 /** Inclusive ranges, shared by parseRules and the editor (rulesetStore.ts). */
 export const RULE_RANGES = {
@@ -72,7 +73,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
     disconnect: { teamSeconds: 600 },
     staffCall: { cooldownSeconds: 180 },
-    series: { nextGameSeconds: 60 },
+    series: { nextGameSeconds: 60, carryScore: false },
   },
   'Standard Cup': {
     rated: false,
@@ -88,7 +89,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
     disconnect: { teamSeconds: 600 },
     staffCall: { cooldownSeconds: 180 },
-    series: { nextGameSeconds: 60 },
+    series: { nextGameSeconds: 60, carryScore: false },
   },
   'Casual Scrim': {
     rated: false,
@@ -104,7 +105,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
     disconnect: { teamSeconds: 600 },
     staffCall: { cooldownSeconds: 180 },
-    series: { nextGameSeconds: 60 },
+    series: { nextGameSeconds: 60, carryScore: false },
   },
 };
 
@@ -180,7 +181,7 @@ export function parseRules(json: string): MatchRules {
     };
   }
   /** One plan T5 object of a single whole-number field: absent reads as the default. */
-  const one = (key: 'disconnect' | 'staffCall' | 'series', field: string, range: readonly [number, number], fallback: number): number => {
+  const one = (key: 'disconnect' | 'staffCall', field: string, range: readonly [number, number], fallback: number): number => {
     const v = r[key];
     if (v === undefined) return fallback;
     if (typeof v !== 'object' || v === null) fail(key);
@@ -190,7 +191,14 @@ export function parseRules(json: string): MatchRules {
   };
   const teamSeconds = one('disconnect', 'teamSeconds', RULE_RANGES.teamSeconds, MATCH_PLAY_DEFAULTS.teamSeconds);
   const cooldownSeconds = one('staffCall', 'cooldownSeconds', RULE_RANGES.cooldownSeconds, MATCH_PLAY_DEFAULTS.cooldownSeconds);
-  const nextGameSeconds = one('series', 'nextGameSeconds', RULE_RANGES.nextGameSeconds, MATCH_PLAY_DEFAULTS.nextGameSeconds);
+  let series: MatchRules['series'] = { nextGameSeconds: MATCH_PLAY_DEFAULTS.nextGameSeconds, carryScore: MATCH_PLAY_DEFAULTS.carryScore };
+  if (r.series !== undefined) {
+    if (typeof r.series !== 'object' || r.series === null) fail('series');
+    const s = r.series as Record<string, unknown>;
+    if (!inRange(s.nextGameSeconds, RULE_RANGES.nextGameSeconds)) fail('series.nextGameSeconds');
+    if (s.carryScore !== undefined && typeof s.carryScore !== 'boolean') fail('series.carryScore');
+    series = { nextGameSeconds: s.nextGameSeconds as number, carryScore: (s.carryScore as boolean | undefined) ?? MATCH_PLAY_DEFAULTS.carryScore };
+  }
 
   return {
     rated: r.rated,
@@ -209,7 +217,7 @@ export function parseRules(json: string): MatchRules {
     subs,
     disconnect: { teamSeconds },
     staffCall: { cooldownSeconds },
-    series: { nextGameSeconds },
+    series,
   };
 }
 
