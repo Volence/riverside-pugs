@@ -163,6 +163,8 @@ export interface MyEventView {
   /** A draft-kind event: the viewer's own open captaincy offer, or null.
    *  Never anyone else's (Global Constraints, privacy). */
   offer: { expiresAt: string } | null;
+  /** A draft captain's own entry identity (drafts plan D2a), or null. */
+  captainOf: { entryId: number; name: string; tag: string; logoKey: string | null; editable: boolean } | null;
 }
 
 /** What one signed-in player can do on this event page: the entries they
@@ -227,7 +229,13 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
   const offerLive = ev.entry_kind === 'draft' && ev.cut_at === null && (ev.status === 'registration' || ev.status === 'checkin');
   const open = offerLive ? D.openOffer(db, ev.id) : null;
   const offer = open && open.steamid === viewer ? { expiresAt: open.expires_at } : null;
-  return { entries, register, canRegister, signup: own ? signupView(ev, own) : null, offer };
+  const cap = ev.entry_kind === 'draft'
+    ? N.entriesOf(db, ev.id).find((e) => N.isActive(e) && e.captain_steamid === viewer)
+    : undefined;
+  const captainOf = cap
+    ? { entryId: cap.id, name: cap.name, tag: cap.tag, logoKey: cap.logo_key, editable: ev.status === 'registration' || ev.status === 'checkin' }
+    : null;
+  return { entries, register, canRegister, signup: own ? signupView(ev, own) : null, offer, captainOf };
 }
 
 export interface AdminEntryView {

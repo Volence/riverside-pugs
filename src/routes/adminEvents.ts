@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DB } from '../db.js';
 import type { CommunityStore } from '../community/store.js';
-import { BANNER_MAX_BYTES, bannerType, checkBanner } from '../community/validate.js';
+import { BANNER_MAX_BYTES, LOGO_MAX_BYTES, bannerType, checkBanner, checkLogo } from '../community/validate.js';
 import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { currentSeasonId, getPlayer } from '../players.js';
@@ -522,6 +522,45 @@ export async function adminEventRoutes(
     logAdmin(db, me, 'event_draft_publish', ev.id, { slug: ev.slug, ...counts });
     tellCutRole(opts, ev.id, r.value);
     return counts;
+  });
+
+  /** Staff set a draft entry's name, tag or logo from the desk (Ruling 7). */
+  app.post('/api/admin/events/:id/entries/:entryId/identity', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; entryId: string };
+    const ev = eventOf(p.id);
+    const entry = ev && entryOf(ev, p.entryId);
+    if (!ev || !entry) return refuse(reply, 'entry_not_found');
+    const body = (req.body ?? {}) as { name?: unknown; tag?: unknown };
+    if ((body.name !== undefined && typeof body.name !== 'string') || (body.tag !== undefined && typeof body.tag !== 'string')) return refuse(reply, 'bad_request');
+    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: true, name: body.name as string | undefined, tag: body.tag as string | undefined, now: new Date() });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_entry_identity', ev.id, { entryId: entry.id, name: body.name, tag: body.tag });
+    return { ok: true };
+  });
+
+  app.post('/api/admin/events/:id/entries/:entryId/logo', { bodyLimit: Math.ceil(LOGO_MAX_BYTES * 1.4) + 1024 }, async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; entryId: string };
+    const ev = eventOf(p.id);
+    const entry = ev && entryOf(ev, p.entryId);
+    if (!ev || !entry) return refuse(reply, 'entry_not_found');
+    if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return refuse(reply, 'not_draft_entry');
+    if (ev.status === 'live' || ev.status === 'finished' || ev.status === 'cancelled') return refuse(reply, 'entries_locked');
+    const raw = ((req.body ?? {}) as { png?: unknown }).png;
+    if (typeof raw !== 'string') return reply.code(400).send({ error: 'The logo is missing.' });
+    const bytes = Buffer.from(raw, 'base64');
+    const checked = checkLogo(bytes);
+    if (!checked.ok) return reply.code(checked.status).send({ error: checked.error });
+    const store = opts.store();
+    if (!(await store.canTake(bytes.length))) return reply.code(507).send({ error: 'The community shelf is full right now.' });
+    const { name } = store.putLogo(bytes);
+    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: true, logoKey: name, now: new Date() });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_entry_logo', ev.id, { entryId: entry.id, logoKey: name });
+    return { logoKey: name };
   });
 
   app.post('/api/admin/events/:id/entries/:entryId/:action', async (req, reply) => {

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import type { CommunityStore } from '../community/store.js';
-import { bannerType } from '../community/validate.js';
+import { bannerType, checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
 import { getPlayer } from '../players.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { competitiveAccess, competitivePublic } from '../teams/access.js';
@@ -148,6 +148,46 @@ export async function eventRoutes(
     if (!r.ok) return refuse(reply, r);
     tellAdded(ev, entry.id, me, r.value.added);
     return {};
+  });
+
+  /** A draft entry's identity (drafts plan D2a Ruling 7): its captain sets
+   *  the name and tag, and uploads the logo, until the event goes live. */
+  app.post('/api/events/:slug/entries/:id/identity', async (req, reply) => {
+    const me = allowedActive(req, reply);
+    if (!me) return;
+    const p = req.params as SlugId;
+    const ev = visibleEvent(p.slug, me);
+    const entry = ev && entryIn(ev, p.id);
+    if (!ev || !entry) return refuse(reply, { error: 'entry_not_found' });
+    const body = (req.body ?? {}) as { name?: unknown; tag?: unknown };
+    if ((body.name !== undefined && typeof body.name !== 'string') || (body.tag !== undefined && typeof body.tag !== 'string')) return refuse(reply, { error: 'bad_request' });
+    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: isStaff(me), name: body.name as string | undefined, tag: body.tag as string | undefined, now: new Date() });
+    if (!r.ok) return refuse(reply, r);
+    return {};
+  });
+
+  app.post('/api/events/:slug/entries/:id/logo', { bodyLimit: Math.ceil(LOGO_MAX_BYTES * 1.4) + 1024 }, async (req, reply) => {
+    const me = allowedActive(req, reply);
+    if (!me) return;
+    const p = req.params as SlugId;
+    const ev = visibleEvent(p.slug, me);
+    const entry = ev && entryIn(ev, p.id);
+    if (!ev || !entry) return refuse(reply, { error: 'entry_not_found' });
+    // Judged before the file is stored, so a refused caller leaves nothing on the shelf.
+    if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return refuse(reply, { error: 'not_draft_entry' });
+    if (!isStaff(me) && entry.captain_steamid !== me) return refuse(reply, { error: 'not_captain' });
+    if (ev.status === 'live' || ev.status === 'finished' || ev.status === 'cancelled') return refuse(reply, { error: 'entries_locked' });
+    const raw = ((req.body ?? {}) as { png?: unknown }).png;
+    if (typeof raw !== 'string') return reply.code(400).send({ error: 'The logo is missing.' });
+    const bytes = Buffer.from(raw, 'base64');
+    const checked = checkLogo(bytes);
+    if (!checked.ok) return reply.code(checked.status).send({ error: checked.error });
+    const store = opts.store();
+    if (!(await store.canTake(bytes.length))) return reply.code(507).send({ error: 'The community shelf is full right now.' });
+    const { name } = store.putLogo(bytes);
+    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: isStaff(me), logoKey: name, now: new Date() });
+    if (!r.ok) return refuse(reply, r);
+    return { logoKey: name };
   });
 
   for (const action of ['withdraw', 'checkin', 'leave'] as const) {

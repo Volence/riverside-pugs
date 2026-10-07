@@ -258,6 +258,11 @@ describe('event_log guard', () => {
     };
     const DRAFT_ENTRY_MUTATIONS: Record<string, { action: string; setup: (f: DraftFixture) => void; run: (f: DraftFixture) => V.Checked<unknown> }> = {
       createDraftEntries: { action: 'draft_teams_published', setup: balancedDraft, run: (f) => N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
+      setEntryIdentity: {
+        action: 'entry_identity_set',
+        setup: (f) => { balancedDraft(f); must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); },
+        run: (f) => N.setEntryIdentity(f.db, { eventId: f.eventId, entryId: (f.db.prepare('SELECT id FROM event_entries ORDER BY id LIMIT 1').get() as { id: number }).id, steamid: ADMIN, staff: true, name: 'Night Owls', tag: 'OWL', now: NOW }),
+      },
     };
 
     it('every exported function of entries.ts is a known read or a guarded mutation', () => {
