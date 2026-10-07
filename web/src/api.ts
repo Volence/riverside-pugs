@@ -2429,7 +2429,7 @@ export interface MatchRules {
   subs: { perMatch: number; emergency: boolean; emergencyChargeSeconds: number };
   disconnect: { teamSeconds: number };
   staffCall: { cooldownSeconds: number };
-  series: { nextGameSeconds: number };
+  series: { nextGameSeconds: number; carryScore: boolean };
 }
 /** What the Rulesets editor sends: everything but rated and penalties,
  *  which the server sets to false on every ruleset but PUG. */

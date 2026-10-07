@@ -66,7 +66,7 @@ export function readRules(base: EditableRules, typed: RulesTyped): { ok: true; v
       subs: { ...base.subs, perMatch: got.subs!, emergencyChargeSeconds: got.subCharge ?? base.subs.emergencyChargeSeconds },
       disconnect: { teamSeconds: got.reconnect! },
       staffCall: { cooldownSeconds: got.cooldown! },
-      series: { nextGameSeconds: got.nextGame! },
+      series: { nextGameSeconds: got.nextGame!, carryScore: base.series.carryScore },
     },
   };
 }

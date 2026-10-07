@@ -18,13 +18,13 @@ const PUG_RULES: MatchRules = {
   rated: true, pause: { limit: 3, seconds: 120, mutualUnpause: false, techPauses: 0, techSeconds: 300 }, teamLock: true, playerMapControl: false,
   restartHalf: { allowed: false, lockAfterDamage: false }, noShowGraceMinutes: 10, penalties: true, bosses: 'random_published',
   sideRule: 'coin', spectate: { sideLocked: false },
-  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 },
+  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60, carryScore: false },
 };
 const SCRIM_RULES: MatchRules = {
   rated: false, pause: { limit: null, seconds: null, mutualUnpause: true, techPauses: 0, techSeconds: 300 }, teamLock: true, playerMapControl: true,
   restartHalf: { allowed: true, lockAfterDamage: false }, noShowGraceMinutes: 15, penalties: false, bosses: 'random_published',
   sideRule: 'non_picker_chooses', spectate: { sideLocked: false },
-  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 },
+  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60, carryScore: false },
 };
 const none = { bookings: 0, events: 0 };
 const ROWS: AdminRuleset[] = [
@@ -105,7 +105,7 @@ describe('AdminRulesets', () => {
       pause: { limit: 2, seconds: null, mutualUnpause: true, techPauses: 0, techSeconds: 300 }, teamLock: true, playerMapControl: true,
       restartHalf: { allowed: true, lockAfterDamage: true }, noShowGraceMinutes: 20, bosses: 'random_published', sideRule: 'coin',
       spectate: { sideLocked: false },
-      subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 },
+      subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60, carryScore: false },
     });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save ruleset' })).toBeNull());
   });
@@ -184,5 +184,18 @@ describe('AdminRulesets', () => {
       pause: expect.objectContaining({ techSeconds: 240 }), disconnect: { teamSeconds: 900 }, subs: expect.objectContaining({ emergency: false }),
     })));
     expect(screen.queryByLabelText('Emergency sub cost')).toBeNull();
+  });
+
+  it('toggles Carry score into game 2 and sends it with the series seconds (plan T6)', async () => {
+    render(<AdminRulesets />);
+    await screen.findByText('Late Night', { selector: 'strong' });
+    fireEvent.click(within(rowOf('Late Night')).button('Edit')!);
+    const box = (await screen.findByLabelText('Carry score into game 2')) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole('button', { name: 'Save ruleset' }));
+    await waitFor(() => expect(mockAdmin.updateRuleset).toHaveBeenCalledWith(4, 'Late Night', expect.objectContaining({
+      series: { nextGameSeconds: 60, carryScore: true },
+    })));
   });
 });
