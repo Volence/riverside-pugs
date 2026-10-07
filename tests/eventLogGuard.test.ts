@@ -330,6 +330,7 @@ describe('event_log guard', () => {
       closeSignups: { action: 'draft_signups_closed', setup: signed, run: (f) => D.closeSignups(f.db, { eventId: f.eventId, actor: null, now: NOW }) },
       setDraftTeams: { action: 'draft_teams_set', setup: cut, run: (f) => D.setDraftTeams(f.db, { eventId: f.eventId, teams: 2, actor: ADMIN, now: NOW }) },
       setCaptain: { action: 'draft_captain_set', setup: cut, run: (f) => D.setCaptain(f.db, { eventId: f.eventId, steamid: DP[0], captain: true, actor: ADMIN, now: NOW }) },
+      pickCaptains: { action: 'draft_captains_picked', setup: cut, run: (f) => D.pickCaptains(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
       swapPoolBench: { action: 'draft_swap', setup: cut, run: (f) => D.swapPoolBench(f.db, { eventId: f.eventId, poolSteamid: DP[0], benchSteamid: DP[11], actor: ADMIN, now: NOW }) },
       publishCut: { action: 'draft_cut_published', setup: publishable, run: (f) => D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
       // Captaincy offers (Task 4). cut gives 12 willing signups, 3 teams and

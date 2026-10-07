@@ -222,3 +222,74 @@ describe('signupFacts', () => {
     expect(facts[0]!.signedUpAt).toBe(NOW.toISOString());
   });
 });
+
+describe('pickCaptains', () => {
+  const want = (f: DraftFixture, xs: string[]) => {
+    f.db.prepare("UPDATE draft_signups SET captain_pref = 'willing'").run();
+    for (const s of xs) f.db.prepare("UPDATE draft_signups SET captain_pref = 'want' WHERE steamid = ?").run(s);
+  };
+  const pick = (f: DraftFixture) => D.pickCaptains(f.db, { eventId: f.eventId, actor: ADMIN, now: LATER });
+  const voidPugs = (f: DraftFixture, s: string) =>
+    f.db.prepare('UPDATE matches SET voided_at = ? WHERE id IN (SELECT match_id FROM match_players WHERE player_id = ?)').run(NOW.toISOString(), s);
+
+  it('takes the top 5 eligible want signups by SR, skipping an ineligible one, and short is 0', () => {
+    const f = closed();
+    want(f, [P[1], P[4], P[9], P[12], P[14], P[17], P[19]]);
+    voidPugs(f, P[19]);
+    const r = must(pick(f));
+    expect(r).toEqual({ captains: [P[17], P[14], P[12], P[9], P[4]], short: 0 });
+    expect(roles(f).captain.sort()).toEqual([P[17], P[14], P[12], P[9], P[4]].sort());
+    expect(logs(f, 'draft_captains_picked')).toEqual([{ captains: [P[17], P[14], P[12], P[9], P[4]], short: 0 }]);
+  });
+
+  it('breaks SR ties by signup order', () => {
+    const f = closed();
+    want(f, [P[3], P[4], P[5], P[6], P[7], P[8]]);
+    for (const s of [P[3], P[4], P[5], P[6], P[7], P[8]]) f.db.prepare('UPDATE player_ratings SET mu = 12 WHERE player_id = ?').run(s);
+    expect(must(pick(f)).captains).toEqual([P[3], P[4], P[5], P[6], P[7]]);
+  });
+
+  it('with only 3 eligible want signups makes those 3 captains and short is 2', () => {
+    const f = closed();
+    want(f, [P[2], P[6], P[10]]);
+    const r = must(pick(f));
+    expect(r.captains).toEqual([P[10], P[6], P[2]]);
+    expect(r.short).toBe(2);
+    expect(roles(f).captain).toHaveLength(3);
+  });
+
+  it('replaces a hand-made captain who is not picked and recomputes pool and bench', () => {
+    const f = closed();
+    must(cap(f, P[0]));
+    must(D.swapPoolBench(f.db, { eventId: f.eventId, poolSteamid: P[5], benchSteamid: P[20], actor: ADMIN, now: LATER }));
+    want(f, [P[11], P[12], P[13], P[14], P[15]]);
+    must(pick(f));
+    const r = roles(f);
+    expect(r.captain.sort()).toEqual([P[11], P[12], P[13], P[14], P[15]].sort());
+    expect(r.captain).not.toContain(P[0]);
+    const rest = without(P, r.captain);
+    expect(r.pool).toEqual(rest.slice(0, 15));
+    expect(r.bench).toEqual(rest.slice(15));
+    expect(r.manual).toEqual([]);
+  });
+
+  it('stops the open offer of a player it picks', () => {
+    const f = closed();
+    must(D.startOffers(f.db, { eventId: f.eventId, actor: ADMIN, now: LATER, minutes: 30 }));
+    const offered = D.openOffer(f.db, f.eventId)!.steamid;
+    want(f, [offered]);
+    must(pick(f));
+    expect(D.openOffer(f.db, f.eventId)).toBeNull();
+    expect(roles(f).captain).toEqual([offered]);
+  });
+
+  it('is refused before close and after publish', () => {
+    const open = closed({ close: false });
+    expect(err(pick(open))).toBe('not_closed');
+    const f = closed();
+    want(f, P.slice(0, 5));
+    must(pick(f));
+    must(D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: LATER }));
+    expect(err(pick(f))).toBe('cut_published');
+  });
+});

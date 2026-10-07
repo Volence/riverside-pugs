@@ -422,6 +422,19 @@ export async function adminEventRoutes(
     typeof b.pool !== 'string' || typeof b.bench !== 'string' ? null
       : D.swapPoolBench(db, { eventId: ev.id, poolSteamid: b.pool, benchSteamid: b.bench, actor: me, now: new Date() }));
 
+  /** The top-SR eligible volunteers become the captains (replacing the
+   *  working set); the reply says how many captains are still missing. */
+  app.post('/api/admin/events/:id/draft/pick-captains', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = D.pickCaptains(db, { eventId: ev.id, actor: me, now: new Date() });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_draft_pick_captains', ev.id, { slug: ev.slug, captains: r.value.captains.length, short: r.value.short });
+    return { ok: true, ...r.value };
+  });
+
   /** Captaincy offers on or off (Ruling 6). On makes the first offer at once
    *  and DMs it; the minute tick carries the chain on from there. */
   app.post('/api/admin/events/:id/draft/offers', async (req, reply) => {

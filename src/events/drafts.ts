@@ -231,6 +231,38 @@ export function setCaptain(db: DB, o: { eventId: number; steamid: string; captai
   })();
 }
 
+/** Staff pick the captains in one step: the active signups who want to
+ *  captain and pass the starter eligibility check, highest current-season SR
+ *  first (ties by signup order), the first draft_teams of them. The working
+ *  captain set is replaced, pool and bench recomputed as setCaptain does, and
+ *  an open offer to a picked player is stopped. short is how many captains
+ *  are still missing. */
+export function pickCaptains(db: DB, o: { eventId: number; actor: string; now: Date }): V.Checked<{ captains: string[]; short: number }> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<{ captains: string[]; short: number }> => {
+    const found = cutOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    const elig = E.fieldsOf(ev).eligibility;
+    const teams = ev.draft_teams ?? 0;
+    const ranked = activeSignups(db, ev.id).flatMap((s, i) => {
+      if (s.captain_pref !== 'want') return [];
+      const facts = playerFacts(db, s.steamid, o.now);
+      return R.problemsOf(elig, facts, 'starter').length > 0 ? [] : [{ s, i, sr: facts.sr }];
+    }).sort((a, b) => b.sr - a.sr || a.i - b.i);
+    const captains = ranked.slice(0, teams).map((x) => x.s.steamid);
+    db.prepare("UPDATE draft_signups SET role = NULL WHERE event_id = ? AND withdrawn_at IS NULL AND role = 'captain'").run(ev.id);
+    const set = db.prepare("UPDATE draft_signups SET role = 'captain' WHERE event_id = ? AND steamid = ? AND withdrawn_at IS NULL");
+    for (const c of captains) set.run(ev.id, c);
+    recompute(db, ev.id, teams);
+    const open = openOffer(db, ev.id);
+    if (open && captains.includes(open.steamid)) db.prepare("UPDATE draft_captain_offers SET answer = 'stopped', answered_at = ? WHERE id = ?").run(at, open.id);
+    const short = Math.max(0, teams - captains.length);
+    E.logEvent(db, ev.id, o.actor, 'draft_captains_picked', at, { captains, short });
+    return V.ok({ captains, short });
+  })();
+}
+
 /** One pool player to the bench and one bench player into the pool, by hand.
  *  It lasts until the next team-count or captain change (Ruling 5). */
 export function swapPoolBench(db: DB, o: { eventId: number; poolSteamid: string; benchSteamid: string; actor: string; now: Date }): V.Checked<null> {
