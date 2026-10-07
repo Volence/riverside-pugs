@@ -11,7 +11,7 @@ import type { Notifier } from '../src/notify/notify.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as D from '../src/events/drafts.js';
 import * as E from '../src/events/events.js';
-import { ADMIN } from './eventFixture.js';
+import { ADMIN, must } from './eventFixture.js';
 import { P, draftFixture, type DraftFixture } from './draftFixture.js';
 
 let f: DraftFixture;
@@ -159,6 +159,14 @@ describe('captaincy offers over HTTP', () => {
     const actions = (f.db.prepare("SELECT action, detail FROM admin_actions WHERE action = 'event_draft_offers' ORDER BY id").all() as { action: string; detail: string }[])
       .map((r) => JSON.parse(r.detail));
     expect(actions).toEqual([{ slug: f.slug, on: true }, { slug: f.slug, on: false }]);
+  });
+
+  it('a cancelled event shows nobody their open offer', async () => {
+    eightClosed();
+    expect((await post(`/api/admin/events/${f.eventId}/draft/offers`, ADMIN, { on: true })).json()).toEqual({ offered: P[7] });
+    expect((await get(`/api/events/${f.slug}/mine`, P[7])).json().offer).not.toBeNull();
+    must(E.cancelEvent(f.db, { eventId: f.eventId, by: ADMIN, reason: 'Not enough people' }));
+    expect((await get(`/api/events/${f.slug}/mine`, P[7])).json().offer).toBeNull();
   });
 
   it('answers 404 for the switch closed and an unknown event', async () => {

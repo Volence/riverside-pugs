@@ -222,7 +222,10 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
       .map((t) => ({ teamId: t.id, name: t.name, tag: t.tag, logoKey: t.logo_key, members: memberOptions(t.id, null) }))
     : [];
   const own = ev.entry_kind === 'draft' ? D.signupOf(db, ev.id, viewer) : null;
-  const open = ev.entry_kind === 'draft' && ev.cut_at === null ? D.openOffer(db, ev.id) : null;
+  // Only before the draft: a cancelled event's open offer row is left as it
+  // was (cancelEvent may not write the draft tables), so it is never shown.
+  const offerLive = ev.entry_kind === 'draft' && ev.cut_at === null && (ev.status === 'registration' || ev.status === 'checkin');
+  const open = offerLive ? D.openOffer(db, ev.id) : null;
   const offer = open && open.steamid === viewer ? { expiresAt: open.expires_at } : null;
   return { entries, register, canRegister, signup: own ? signupView(ev, own) : null, offer };
 }

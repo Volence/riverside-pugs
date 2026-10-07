@@ -125,7 +125,19 @@ export function removeSignup(
     // Their open captaincy offer, if any, is stopped, so the runner moves on
     // at the next tick instead of waiting out the window (Ruling 6).
     db.prepare("UPDATE draft_captain_offers SET answer = 'stopped', answered_at = ? WHERE event_id = ? AND steamid = ? AND answer IS NULL").run(at, ev.id, o.steamid);
-    E.logEvent(db, ev.id, o.actor, 'draft_signup_removed', at, { steamid: o.steamid, reason: o.reason });
+    // After close, a pool player taken off is replaced by the first bench
+    // signup in signup order, so the pool stays teams x 3 and other hand
+    // swaps stand. A captain taken off is not replaced: too_few_captains
+    // tells staff.
+    let promoted: string | null = null;
+    if (ev.locked_at !== null && s.role === 'pool') {
+      const next = activeSignups(db, ev.id).find((x) => x.role === 'bench');
+      if (next) {
+        db.prepare("UPDATE draft_signups SET role = 'pool' WHERE id = ?").run(next.id);
+        promoted = next.steamid;
+      }
+    }
+    E.logEvent(db, ev.id, o.actor, 'draft_signup_removed', at, { steamid: o.steamid, reason: o.reason, promoted });
     return V.ok(null);
   })();
 }

@@ -90,10 +90,11 @@ describe('the draft desk over HTTP', () => {
 
   it('refuses a stale publish with the problems and counts', async () => {
     for (const s of P.slice(0, 5)) must(D.setCaptain(f.db, { eventId: f.eventId, steamid: s, captain: true, actor: ADMIN, now: new Date() }));
-    must(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[8], reason: 'removed', actor: ADMIN, now: new Date() }));
+    // A captain removed: nobody is promoted, so the cut is short a captain.
+    must(D.removeSignup(f.db, { eventId: f.eventId, steamid: P[0], reason: 'removed', actor: ADMIN, now: new Date() }));
     const res = await post(`${base()}/publish`, ADMIN);
     expect(res.statusCode).toBe(409);
-    expect(res.json()).toMatchObject({ problems: ['pool_size'], cut: { pool: 14, poolNeeded: 15, active: 20 } });
+    expect(res.json()).toMatchObject({ problems: ['too_few_captains'], cut: { captains: 4, pool: 15, poolNeeded: 15, active: 20 } });
     expect(E.getEvent(f.db, f.eventId)!.cut_at).toBeNull();
   });
 
@@ -148,7 +149,7 @@ describe('the cut DMs', () => {
     expect(calls).toEqual([
       { to: P.slice(0, 5), type: 'draft_cut_role', content: `You are a captain in Draft Night. The draft is ${when}. Build your pick list before then: https://x/event/${f.slug}` },
       { to: P.slice(5, 20), type: 'draft_cut_role', content: `You are in the draft pool for Draft Night. The draft is ${when}; captains pick you live: https://x/event/${f.slug}` },
-      { to: [P[20]], type: 'draft_cut_role', content: `You are on the free-agent bench for Draft Night. Captains can call on you as a stand-in, so keep the night free if you can: https://x/event/${f.slug}` },
+      { to: [P[20]], type: 'draft_cut_role', content: `You are on the free-agent bench for Draft Night. The draft is ${when}; captains can call on you as a stand-in, so keep the night free if you can: https://x/event/${f.slug}` },
     ]);
   });
 
