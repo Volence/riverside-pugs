@@ -7,7 +7,7 @@ const CUP: MatchRules = {
   pause: { limit: 3, seconds: 120, mutualUnpause: true, techPauses: 2, techSeconds: 300 },
   teamLock: true, playerMapControl: false, restartHalf: { allowed: false, lockAfterDamage: false },
   noShowGraceMinutes: 15, penalties: false, bosses: 'random_published', sideRule: 'higher_seed_chooses', spectate: { sideLocked: true },
-  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 },
+  subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60, carryScore: false },
 };
 /** The Tournament play fields as CUP has them (plan T5). */
 const T5 = { techSeconds: '300', reconnect: '600', subs: '2', subCharge: '0', cooldown: '180', nextGame: '60' };
@@ -41,7 +41,7 @@ describe('rules draft', () => {
     const t = { ...typedFrom(e), techSeconds: '240', reconnect: '900', subs: '3', subCharge: '30', cooldown: '90', nextGame: '120' };
     expect(readRules(e, t)).toEqual({ ok: true, value: {
       ...e, pause: { ...e.pause, techSeconds: 240 }, disconnect: { teamSeconds: 900 }, subs: { ...e.subs, perMatch: 3, emergencyChargeSeconds: 30 },
-      staffCall: { cooldownSeconds: 90 }, series: { nextGameSeconds: 120 },
+      staffCall: { cooldownSeconds: 90 }, series: { nextGameSeconds: 120, carryScore: false },
     } });
     expect(readRules(e, { ...t, reconnect: '' })).toEqual({ ok: false, error: 'Reconnect time needs a whole number.' });
     expect(readRules(e, { ...t, nextGame: '1.5' })).toEqual({ ok: false, error: 'Next game after needs a whole number.' });
@@ -55,5 +55,11 @@ describe('rules draft', () => {
     // With emergency subs on, a blank cost is still refused.
     const on = editableFrom(CUP);
     expect(readRules(on, { ...typedFrom(on), subCharge: '' })).toEqual({ ok: false, error: 'Emergency sub cost needs a whole number.' });
+  });
+
+  it('keeps the Carry score switch when reading the typed numbers (plan T6)', () => {
+    const on = editableFrom({ ...CUP, series: { nextGameSeconds: 60, carryScore: true } });
+    const r = readRules(on, { ...typedFrom(on), nextGame: '90' });
+    expect(r.ok && r.value.series).toEqual({ nextGameSeconds: 90, carryScore: true });
   });
 });
