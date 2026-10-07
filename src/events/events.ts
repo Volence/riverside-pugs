@@ -62,7 +62,7 @@ export function eventLog(db: DB, eventId: number): EventLogRow[] {
 /** The JSON columns were written by this module from validated values. */
 export function fieldsOf(ev: EventRow): V.EventFields {
   return {
-    name: ev.name, startsAt: ev.starts_at, entryKind: ev.entry_kind, official: ev.official === 1, teamCap: ev.team_cap,
+    name: ev.name, startsAt: ev.starts_at, entryKind: ev.entry_kind, official: ev.official === 1, teamCap: ev.entry_kind === 'draft' ? null : ev.team_cap,
     description: ev.description,
     eligibility: JSON.parse(ev.eligibility_json) as V.Eligibility,
     checkin: JSON.parse(ev.checkin_json) as V.Checkin,

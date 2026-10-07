@@ -32,6 +32,21 @@ describe('draft event fields', () => {
     expect(E.fieldsOf(ev).draft).toEqual({ signupsCloseAt: CLOSE, draftAt: NIGHT });
   });
 
+  it('stores no team cap for a draft-kind event, on create and on update, whatever is sent', () => {
+    const f = eventFixture();
+    const ev = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'Draft Night', startsAt: START, entryKind: 'draft', teamCap: 4, draft: { signupsCloseAt: CLOSE, draftAt: NIGHT } }, now: NOW }));
+    expect(ev.team_cap).toBeNull();
+    expect(E.fieldsOf(ev).teamCap).toBeNull();
+    must(E.updateEvent(f.db, { eventId: ev.id, by: ADMIN, fields: { teamCap: 4 }, now: NOW }));
+    expect(E.getEvent(f.db, ev.id)!.team_cap).toBeNull();
+    must(E.updateEvent(f.db, { eventId: ev.id, by: ADMIN, fields: { teamCap: 'junk' }, now: NOW }));
+    expect(E.getEvent(f.db, ev.id)!.team_cap).toBeNull();
+    // A team event keeps its cap.
+    const team = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'Team Cup', startsAt: START, entryKind: 'team', teamCap: 4 }, now: NOW }));
+    expect(team.team_cap).toBe(4);
+    expect(E.fieldsOf(team).teamCap).toBe(4);
+  });
+
   it('ignores draft on a team event and stores NULL', () => {
     const f = eventFixture();
     const ev = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'Team Cup', startsAt: START, entryKind: 'team', draft: { signupsCloseAt: CLOSE, draftAt: NIGHT } }, now: NOW }));

@@ -395,7 +395,7 @@ export function parseEventFields(raw: unknown, base: EventFields | null): Checke
     if (typeof o !== 'boolean') return fail('bad_request');
     out.official = o;
   }
-  if ('teamCap' in raw) {
+  if ('teamCap' in raw && out.entryKind !== 'draft') {
     const c = intOrNull(raw.teamCap, 2, 256);
     if (c === undefined) return fail('bad_team_cap');
     out.teamCap = c;
@@ -423,6 +423,8 @@ export function parseEventFields(raw: unknown, base: EventFields | null): Checke
   if (out.entryKind !== 'draft') {
     out.draft = null;
   } else {
+    // A draft's team count comes from the cut, so no cap applies, whatever was sent.
+    out.teamCap = null;
     if (has('draft')) {
       const d = raw.draft;
       const close = isObj(d) ? parseTime(d.signupsCloseAt) : null;

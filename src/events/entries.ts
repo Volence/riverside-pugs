@@ -86,7 +86,12 @@ export function entryOfPlayer(db: DB, eventId: number, steamid: string): EntryRo
   ).get(eventId, steamid) as EntryRow | undefined;
 }
 export function placementOf(db: DB, ev: E.EventRow): R.Placement {
-  return R.placeEntries(entriesOf(db, ev.id), ev.team_cap);
+  return R.placeEntries(entriesOf(db, ev.id), capOf(ev));
+}
+/** The team cap that applies: none for a draft event, whose team count comes
+ *  from the cut, so a cap stored before the rule changed never waitlists one. */
+export function capOf(ev: Pick<E.EventRow, 'entry_kind' | 'team_cap'>): number | null {
+  return ev.entry_kind === 'draft' ? null : ev.team_cap;
 }
 /** A team's captain and co-captains right now. */
 export function managersOf(db: DB, teamId: number | null): string[] {
@@ -324,7 +329,7 @@ export function lockEntries(db: DB, o: { eventId: number; by: string | null; now
       if (!fine) dropped.push({ entryId: e.id, reason: f.checkin.enabled ? 'no_checkin' : 'incomplete' });
       return fine;
     });
-    const place = R.placeEntries(ready, ev.team_cap);
+    const place = R.placeEntries(ready, capOf(ev));
     for (const id of place.waitlist) dropped.push({ entryId: id, reason: 'over_cap' });
     const drop = db.prepare("UPDATE event_entries SET status = 'dropped', dropped_at = ?, drop_reason = ? WHERE id = ?");
     for (const d of dropped) drop.run(at, d.reason, d.entryId);

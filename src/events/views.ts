@@ -99,7 +99,7 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
   return {
     slug: ev.slug, name: ev.name, status: ev.status, entryKind: ev.entry_kind, official: ev.official === 1,
     organizerName: getPlayer(db, ev.organizer_steamid)?.name ?? null, bannerKey: ev.banner_key,
-    startsAt: ev.starts_at, description: ev.description, teamCap: ev.team_cap,
+    startsAt: ev.starts_at, description: ev.description, teamCap: N.capOf(ev),
     eligibility: f.eligibility, checkin: f.checkin, roster: f.roster,
     stages: E.stagesOf(db, ev.id).map((s) => {
       const st = E.stageSettingsOf(s);
