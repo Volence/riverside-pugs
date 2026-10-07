@@ -303,7 +303,7 @@ export class SeriesEngine {
       if (!captain) return null;
       const r = N.rosterOf(this.db, entryId);
       const rest = [...r.starters, ...r.subs, ...(r.coach ? [r.coach] : [])].filter((x) => !four.includes(x));
-      return { teamId: team ? team.id : null, captain, players: four, spectators: rest, ...(team ? {} : { name: entry.name }) };
+      return { teamId: team ? team.id : null, captain, players: four, spectators: rest, ...(team ? {} : { name: entry.name, tag: entry.tag, logoKey: entry.logo_key }) };
     };
     const a = side('a');
     const b = side('b');

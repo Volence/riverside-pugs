@@ -75,6 +75,9 @@ export interface SideRow {
   excused_at: string | null; excused_by: string | null; excuse_note: string | null;
   /** A draft entry's name (drafts plan D2a), snapshotted at booking; NULL otherwise. */
   name: string | null;
+  /** A draft entry's tag and logo key, snapshotted with the name; NULL on a
+   *  team side and when the entry has none. */
+  tag: string | null; logo_key: string | null;
 }
 export interface PersonRow {
   booking_id: number; side: Side; steamid: string; role: PersonRole; status: 'invited' | 'accepted'; added_by: string; added_at: string;
@@ -347,6 +350,8 @@ export interface TournamentSide {
   teamId: number | null; captain: string; players: readonly string[]; spectators: readonly string[];
   /** A draft entry's name (drafts plan D2a); omitted for a team side. */
   name?: string;
+  /** A draft entry's tag and logo key, for the cast overlay; omitted for a team side. */
+  tag?: string | null; logoKey?: string | null;
 }
 
 /** The series engine's booking (T3b Ruling 2): purpose tournament, starts
@@ -371,10 +376,10 @@ export function createTournamentBooking(db: DB, o: {
        VALUES ('tournament', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(o.region, iso(startMs), iso(startMs + minutes * 60_000), newLeasePassword(), newLeasePassword(), o.gameConfig, o.rulesJson, o.rulesetId,
       JSON.stringify([o.campaign]), o.createdBy, now.toISOString()).lastInsertRowid);
-    const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at, name) VALUES (?, ?, ?, ?, ?, ?)');
+    const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at, name, tag, logo_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     (['a', 'b'] as const).forEach((s, i) => {
       const t = o.sides[i]!;
-      side.run(id, s, t.teamId, t.captain, now.toISOString(), t.name ?? null);
+      side.run(id, s, t.teamId, t.captain, now.toISOString(), t.name ?? null, t.tag || null, t.logoKey || null);
       for (const sid of t.players) insertPerson(db, id, s, sid, 'player', 'accepted', o.createdBy, now);
       for (const sid of t.spectators) insertPerson(db, id, s, sid, 'spectator', 'accepted', o.createdBy, now);
     });
