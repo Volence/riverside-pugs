@@ -180,6 +180,8 @@ export const EVENT_ERRORS = {
   already_penalized: { status: 409, text: 'Staff already ruled on this technical pause.' },
   bad_penalty: { status: 400, text: 'A penalty is a warning or a forfeit of the game.' },
   emergency_off: { status: 409, text: 'Emergency subs are off in this event: subs are made between chapters.' },
+  captain_replace: { status: 409, text: 'That player is the team\'s captain. Make another player captain first.' },
+  replace_in_game: { status: 409, text: 'That player is in a game on a server and the server did not take the change (a chapter is being played). Use the in-game tools first (the staff freeze, !sub), or try again between chapters.' },
   bad_schedule: { status: 400, text: 'A round schedule lists rounds, each with a default time and, on a window stage, a window that starts before it ends and holds the default time; a rolling stage takes a date only.' },
   schedule_locked: { status: 409, text: 'The schedule of a finished stage or event cannot change.' },
   not_schedulable: { status: 409, text: 'This match cannot be rescheduled now: it is not waiting in a window stage with a scheduling window, or its window has passed.' },

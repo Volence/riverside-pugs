@@ -434,6 +434,25 @@ export function swapPlayer(db: DB, o: { bookingId: number; side: Side; outId: st
   })();
 }
 
+/** A staff replace of a draft player (drafts plan D2c Ruling 5), inside the
+ *  replace's transaction: the removed player leaves the booking, so the box's
+ *  allow list drops them, and the replacement plays for that side, accepted.
+ *  Unlike swapPlayer the replacement need not be a booking person already
+ *  (a bench player never was). */
+export function replacePlayer(db: DB, o: { bookingId: number; side: Side; outId: string; inId: string; by: string; now?: Date }): Result<null> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<null> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    if (!isOpen(b)) return fail('wrong_state');
+    db.prepare('DELETE FROM booking_people WHERE booking_id = ? AND steamid = ?').run(b.id, o.outId);
+    db.prepare(`INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, ?, ?, 'player', 'accepted', ?, ?)
+      ON CONFLICT (booking_id, steamid) DO UPDATE SET side = excluded.side, role = 'player', status = 'accepted'`).run(b.id, o.side, o.inId, o.by, now.toISOString());
+    logEvent(db, b.id, o.by, 'player_replaced', { side: o.side, out: o.outId, in: o.inId }, now);
+    return ok(null);
+  })();
+}
+
 export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?: Date }): Result<null> {
   const now = o.now ?? new Date();
   return db.transaction((): Result<null> => {

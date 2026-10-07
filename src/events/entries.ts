@@ -1,5 +1,8 @@
 import type { DB } from '../db.js';
+import * as B from '../bookings/bookings.js';
+import { addTournamentSub } from '../bookings/tournamentGames.js';
 import { completedPug } from '../matchKinds.js';
+import { hasUnsafeChars } from '../profileFields.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { seasonSr } from '../rating.js';
 import { inGoodStanding } from '../standing.js';
@@ -8,6 +11,7 @@ import { activeMembers, getTeam, normalizeName, normalizeTag } from '../teams/te
 import * as E from './events.js';
 import * as D from './drafts.js';
 import * as R from './entryRules.js';
+import * as Room from './room.js';
 import * as V from './validate.js';
 
 /**
@@ -475,6 +479,114 @@ export function setEntryIdentity(
     });
     return V.ok(null);
   })();
+}
+
+export type ReplaceReason = 'conduct' | 'cheating' | 'no_show' | 'left' | 'other';
+export const REPLACE_REASONS: readonly ReplaceReason[] = ['conduct', 'cheating', 'no_show', 'left', 'other'];
+/** The staff-only note on a replace (plan D2c Ruling 4). */
+export const REPLACE_NOTE_MAX = 200;
+/** A game of one of the entry's matches on a box right now, with the
+ *  removed player on its roster: the box takes the sub before the site does
+ *  (plan D2c Ruling 5). */
+export interface BoxGame { matchId: number; bookingId: number; gameMatchId: number; token: string; team: 'a' | 'b' }
+
+/** A refusal found after the writes began: thrown so the transaction rolls
+ *  back, and turned back into the refusal outside it. */
+class Refused extends Error {
+  constructor(readonly r: { ok: false; error: V.EventError; detail?: V.EntryProblem[] }) { super(r.error); }
+}
+
+/** The removed player's unfinished matches of this entry whose locked
+ *  lineup has them, each with its games on a box that roster them. Inside
+ *  the caller's transaction. */
+function lineupMatches(db: DB, eventId: number, entryId: number, out: string): { matchId: number; bookingId: number | null; onBox: BoxGame[] }[] {
+  const rows = db.prepare(
+    `SELECT id, booking_id FROM event_matches WHERE event_id = ? AND (entry_a = ? OR entry_b = ?) AND status NOT IN ('done', 'forfeit', 'bye') ORDER BY id`,
+  ).all(eventId, entryId, entryId) as { id: number; booking_id: number | null }[];
+  return rows.filter((m) => Room.lineupFour(db, m.id, entryId)?.includes(out)).map((m) => ({
+    matchId: m.id, bookingId: m.booking_id,
+    onBox: Room.gamesOf(db, m.id).filter((g) => g.match_id !== null && g.ended_at === null).flatMap((g) => {
+      const x = db.prepare(
+        `SELECT m.token, m.booking_id, mp.team FROM matches m JOIN match_players mp ON mp.match_id = m.id AND mp.player_id = ?
+          WHERE m.id = ? AND m.state = 'live' AND m.token IS NOT NULL AND m.booking_id IS NOT NULL`,
+      ).get(out, g.match_id) as { token: string; booking_id: number; team: 'a' | 'b' } | undefined;
+      return x ? [{ matchId: m.id, bookingId: x.booking_id, gameMatchId: g.match_id!, token: x.token, team: x.team }] : [];
+    }),
+  }));
+}
+
+/**
+ * Staff remove a draft player and put a replacement in (drafts plan D2c
+ * Rulings 4 and 5), in one transaction with one 'entry_player_replaced' row
+ * (the note is never in it). Any time from teams made until the event ends.
+ * `out` is a starter other than the captain; `in` passes the event's
+ * eligibility as a starter and holds no place in the event. When `out` is in
+ * a locked lineup of an unfinished match of this entry, the room's
+ * substitution path swaps them there too (subPlayer with staff, which never
+ * counts against the side's subs), the booking's people follow, and a game
+ * on a box rosters the new player.
+ *
+ * A game on a box must take the sub first (sm_pug_sub, which a box refuses
+ * mid-chapter): the series engine calls this with `check` (every rule, no
+ * write, the games named in onBox), asks the box, then calls it again with
+ * the games that took it in `boxTook`. A game on a box that is not in
+ * boxTook is refused as replace_in_game, so this never puts a player in on
+ * the site that the box does not have.
+ */
+export function replaceDraftPlayer(db: DB, o: {
+  eventId: number; entryId: number; out: string; in: string; reason: ReplaceReason; note: string | null; actor: string; now: Date;
+  check?: boolean; boxTook?: number[];
+}): V.Checked<{ subbedInMatch: number | null; onBox?: BoxGame[] }> {
+  const at = o.now.toISOString();
+  if (!REPLACE_REASONS.includes(o.reason)) return V.fail('bad_reason');
+  if (o.note !== null && (typeof o.note !== 'string' || o.note.length > REPLACE_NOTE_MAX || /[\r\n]/.test(o.note) || hasUnsafeChars(o.note))) return V.fail('bad_note');
+  try {
+    return db.transaction((): V.Checked<{ subbedInMatch: number | null; onBox?: BoxGame[] }> => {
+      const ev = E.getEvent(db, o.eventId);
+      if (!ev || ev.status === 'draft') return V.fail('not_found');
+      const entry = getEntry(db, o.entryId);
+      if (!entry || entry.event_id !== ev.id) return V.fail('entry_not_found');
+      if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return V.fail('not_draft_entry');
+      if (ev.teams_made_at === null || !ROSTER_OPEN.has(ev.status)) return V.fail('wrong_status');
+      if (!isActive(entry)) return V.fail('entry_out');
+      if (o.out === entry.captain_steamid) return V.fail('captain_replace');
+      const place = placesOf(db, entry.id).find((p) => p.steamid === o.out && p.role === 'starter');
+      if (!place) return V.fail('not_on_entry');
+      const other = entryOfPlayer(db, ev.id, o.in);
+      if (other) return V.fail('player_entered', [{ steamid: o.in, problems: [`Already on ${other.name}'s roster`] }]);
+      const elig = E.fieldsOf(ev).eligibility;
+      const facts = playerFacts(db, o.in, o.now);
+      const problems = R.problemsOf(elig, facts, 'starter');
+      if (problems.length > 0) return V.fail('ineligible', [{ steamid: o.in, problems: problems.map((k) => R.problemText(k, elig, facts)) }]);
+      const matches = lineupMatches(db, ev.id, entry.id, o.out);
+      const onBox = matches.flatMap((m) => m.onBox);
+      const subbedInMatch = matches[0]?.matchId ?? null;
+      if (o.check) return V.ok({ subbedInMatch, onBox });
+      if (onBox.some((g) => !(o.boxTook ?? []).includes(g.gameMatchId))) {
+        return V.fail('replace_in_game', [{ steamid: o.out, problems: ['A game with this player is on a server, and the server was not asked to take the change.'] }]);
+      }
+      db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id = ?').run(at, place.id);
+      addPlace(db, entry.id, o.in, 'starter', at);
+      for (const m of matches) {
+        const live = m.onBox[0];
+        const gameId = live ? Room.gamesOf(db, m.matchId).find((g) => g.match_id === live.gameMatchId)?.id ?? null : null;
+        const s = Room.subPlayer(db, { matchId: m.matchId, by: o.actor, outId: o.out, inId: o.in, limit: 0, gameId, staff: true, now: o.now });
+        if (!s.ok) throw new Refused(V.fail('replace_in_game', [{ steamid: o.out, problems: [V.EVENT_ERRORS[s.error].text] }]));
+        if (m.bookingId !== null) {
+          const b = B.getBooking(db, m.bookingId);
+          if (b && B.isOpen(b)) B.replacePlayer(db, { bookingId: b.id, side: s.value.side, outId: o.out, inId: o.in, by: o.actor, now: o.now });
+        }
+        for (const g of m.onBox) addTournamentSub(db, { matchId: g.gameMatchId, inId: o.in, team: g.team, now: o.now });
+      }
+      E.logEvent(db, ev.id, o.actor, 'entry_player_replaced', at, {
+        entryId: entry.id, out: o.out, in: o.in, reason: o.reason, ...(subbedInMatch !== null ? { matchId: subbedInMatch } : {}),
+      });
+      return V.ok({ subbedInMatch });
+    })();
+  } catch (err) {
+    if (err instanceof Refused) return err.r;
+    throw err;
+  }
 }
 
 /** Ruling 9: the tick drops an entry whose team was disbanded, until the list is final. */

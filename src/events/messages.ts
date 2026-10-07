@@ -14,13 +14,15 @@ import { getServer } from '../serverPool.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 import { getProposal, scheduleRules } from './schedule.js';
 import type { CutRole } from './draftRules.js';
+import type { ReplaceReason } from './entries.js';
 
 /** The event DMs (plan T1b Ruling 11, and the two match room DMs of plan
  *  T3a Ruling 2). Every player-chosen name goes through escapeName, as in
  *  src/bookings/messages.ts. */
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
-  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made';
+  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
+  | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -44,10 +46,14 @@ const ROLE_TEXT: Record<R.Role, string> = { starter: 'a starter', sub: 'a sub', 
 /** Why staff removed a draft signup (drafts plan D1 Ruling 11). */
 export type SignupRemoval = 'removed' | 'ineligible';
 const REMOVAL_TEXT: Record<SignupRemoval, string> = { removed: 'an organizer removed it', ineligible: 'you are not eligible for this event' };
+/** Why staff took a player off a draft team (drafts plan D2c Ruling 6), as the removed player reads it. */
+export const REPLACE_TEXT: Record<ReplaceReason, string> = {
+  conduct: 'conduct', cheating: 'cheating', no_show: 'did not show', left: 'left the event', other: 'a staff decision',
+};
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -97,6 +103,22 @@ export function eventMessage(
       } else {
         content = `You are on ${team} in ${event}, captained by ${nameOf(entry.captain_steamid)}. Your captain can rename the team before the event starts: ${link}`;
       }
+      break;
+    }
+    case 'draft_player_removed':
+      // Plan D2c Ruling 6: the reason in a few words, never the staff note.
+      content = `You were removed from ${team} in ${event} by staff (${REPLACE_TEXT[extra.replaceReason ?? 'other']}).`;
+      break;
+    case 'draft_player_added': {
+      if (!entry || entry.captain_steamid === null) return null;
+      const captain = escapeName(getPlayer(db, entry.captain_steamid)?.name ?? entry.captain_steamid);
+      content = `You are now on ${team} in ${event}, captained by ${captain}: ${publicUrl}/event/${ev.slug}`;
+      break;
+    }
+    case 'draft_roster_changed': {
+      if (!extra.out || !extra.in) return null;
+      const nameOf = (s: string) => escapeName(getPlayer(db, s)?.name ?? s);
+      content = `${nameOf(extra.out)} was replaced by ${nameOf(extra.in)} on your team in ${event}.`;
       break;
     }
     case 'draft_captain_offer':

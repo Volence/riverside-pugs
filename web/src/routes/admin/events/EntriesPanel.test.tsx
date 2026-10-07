@@ -3,19 +3,26 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import type { AdminEntryView } from '../../../api';
 
 const { mockAdmin } = vi.hoisted(() => ({
-  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn(), setEntryIdentity: vi.fn() },
+  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn(), setEntryIdentity: vi.fn(), replaceEntryPlayer: vi.fn() },
 }));
+const { mockPeople } = vi.hoisted(() => ({ mockPeople: { people: vi.fn() } }));
 vi.mock('../../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api')>();
-  return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin } };
+  return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin }, peopleApi: { ...actual.peopleApi, ...mockPeople } };
 });
 vi.mock('../../../components/Confirm', () => ({ confirm: vi.fn(async () => true) }));
+const { confirm } = await import('../../../components/Confirm');
 const { EntriesPanel } = await import('./EntriesPanel');
 
 const entry = (over: Partial<AdminEntryView> = {}): AdminEntryView => ({
   id: 1, teamSlug: 'rats', name: 'Rats', tag: 'RAT', status: 'registered', dropReason: null, seed: null, waitlist: null, sr: 1500,
   checkedInAt: null, createdAt: '2026-10-05T00:00:00.000Z', registeredByName: 'cap',
-  roster: [{ steamid: '1', name: 'p1', avatar: null, role: 'starter', problems: ['Discord is not linked'] }], ...over,
+  roster: [{ steamid: '1', name: 'p1', avatar: null, role: 'starter', problems: ['Discord is not linked'] }], captainSteamid: null, ...over,
+});
+/** A draft entry: captain c0 and three more starters. */
+const draftEntry = (over: Partial<AdminEntryView> = {}): AdminEntryView => entry({
+  name: 'Team c0', tag: '', teamSlug: null, status: 'checked_in', seed: 1, captainSteamid: 'c0',
+  roster: ['c0', 's1', 's2', 's3'].map((s) => ({ steamid: s, name: s, avatar: null, role: 'starter' as const, problems: [] })), ...over,
 });
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -121,6 +128,68 @@ describe('EntriesPanel', () => {
     expect(await buttons('live', true, null, out)).not.toContain('Restore');
     expect(await buttons('cancelled', true, null, out)).not.toContain('Restore');
     expect(await buttons('checkin', true, 'x', out)).not.toContain('Restore');
+  });
+
+  describe('Replace player on a draft entry (plan D2c)', () => {
+    const open = async (status = 'live', canEdit = true) => {
+      mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [draftEntry()], bench: [{ steamid: 'b1', name: 'benchy' }] });
+      render(<EntriesPanel eventId={9} status={status} checkin={false} draft canEdit={canEdit} />);
+      await screen.findByText(/Team c0/);
+    };
+
+    it('is offered on each starter but the captain, to admins only, and not once the event is over', async () => {
+      await open();
+      expect(screen.queryByRole('button', { name: 'Replace player c0' })).toBeNull();
+      expect(screen.getAllByRole('button', { name: /^Replace player s\d$/ })).toHaveLength(3);
+      cleanup();
+      await open('live', false);
+      expect(screen.queryByRole('button', { name: /Replace player/ })).toBeNull();
+      cleanup();
+      await open('finished');
+      expect(screen.queryByRole('button', { name: /Replace player/ })).toBeNull();
+    });
+
+    it('offers the bench first, needs a reason, and confirms with who loses their place', async () => {
+      mockAdmin.replaceEntryPlayer.mockResolvedValue({ subbedInMatch: null });
+      await open();
+      fireEvent.click(screen.getByRole('button', { name: 'Replace player s2' }));
+      const dialog = screen.getByRole('group', { name: 'Replace s2' });
+      expect(dialog).toBeTruthy();
+      const pick = screen.getByLabelText('Replacement') as HTMLSelectElement;
+      expect([...pick.options].map((o) => o.textContent)).toEqual(['Choose the replacement', 'benchy']);
+      expect([...(screen.getByLabelText('Reason') as HTMLSelectElement).options].map((o) => o.textContent))
+        .toEqual(['Choose a reason', 'Conduct', 'Cheating', 'No-show', 'Left the event', 'Other']);
+      const go = screen.getByRole('button', { name: 'Replace' }) as HTMLButtonElement;
+      fireEvent.change(pick, { target: { value: 'b1' } });
+      // A reason is required.
+      expect(go.disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'conduct' } });
+      fireEvent.input(screen.getByLabelText('Staff note'), { target: { value: '  Toxic in voice  ' } });
+      expect((screen.getByLabelText('Staff note') as HTMLInputElement).maxLength).toBe(200);
+      expect(go.disabled).toBe(false);
+      fireEvent.click(go);
+      await waitFor(() => expect(mockAdmin.replaceEntryPlayer).toHaveBeenCalledWith(9, 1, { out: 's2', in: 'b1', reason: 'conduct', note: 'Toxic in voice' }));
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Replace s2 with benchy?', body: 's2 loses their place on Team c0. This is not a ban; use the ban tools for that.',
+      }));
+      await waitFor(() => expect(screen.queryByRole('group', { name: 'Replace s2' })).toBeNull());
+    });
+
+    it('finds another player by the People search, leaving out the team\'s own players', async () => {
+      mockAdmin.replaceEntryPlayer.mockResolvedValue({ subbedInMatch: null });
+      mockPeople.people.mockResolvedValue({ players: [{ steamid: 's1', name: 's1' }, { steamid: 'x9', name: 'outsider' }] });
+      await open();
+      fireEvent.click(screen.getByRole('button', { name: 'Replace player s3' }));
+      fireEvent.input(screen.getByLabelText('Find another player'), { target: { value: 'outs' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+      await waitFor(() => expect(mockPeople.people).toHaveBeenCalledWith('outs'));
+      const pick = screen.getByLabelText('Replacement') as HTMLSelectElement;
+      await waitFor(() => expect([...pick.options].map((o) => o.textContent)).toEqual(['Choose the replacement', 'benchy', 'outsider']));
+      fireEvent.change(pick, { target: { value: 'x9' } });
+      fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'cheating' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
+      await waitFor(() => expect(mockAdmin.replaceEntryPlayer).toHaveBeenCalledWith(9, 1, { out: 's3', in: 'x9', reason: 'cheating', note: null }));
+    });
   });
 
   it('tells the editor after closing the list or opening check-in', async () => {

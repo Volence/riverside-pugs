@@ -1,8 +1,9 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type AdminEntryView } from '../../../api';
+import { adminApi, peopleApi, type AdminEntryView, type ReplaceReason } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
-import { useAction } from '../useAction';
+import { fileUrl } from '../adminRoutes';
+import { useAction, type Run } from '../useAction';
 
 const DROP: Record<string, string> = {
   withdrawn: 'withdrawn', no_checkin: 'did not check in', over_cap: 'over the cap', incomplete: 'short of 4 starters', team_disbanded: 'team disbanded',
@@ -17,6 +18,79 @@ function statusText(e: AdminEntryView, draft: boolean): string {
   return e.waitlist !== null ? `Waitlist ${e.waitlist}` : 'Registered';
 }
 
+const REASONS: [ReplaceReason, string][] = [['conduct', 'Conduct'], ['cheating', 'Cheating'], ['no_show', 'No-show'], ['left', 'Left the event'], ['other', 'Other']];
+/** As src/events/entries.ts REPLACE_NOTE_MAX. */
+const NOTE_MAX = 200;
+type Person = { steamid: string; name: string };
+
+/** Plan D2c Ruling 4: staff take one starter off a draft entry and put a
+ *  replacement in, from the bench first or any other player found by name
+ *  (the People desk's search; the server checks eligibility and that they
+ *  hold no other place). A reason is required; the note stays with staff. */
+function ReplaceForm({ eventId, e, out, bench, busy, run, onClose }: {
+  eventId: number; e: AdminEntryView; out: Person; bench: Person[]; busy: boolean; run: Run; onClose: () => void;
+}) {
+  const [pick, setPick] = useState('');
+  const [reason, setReason] = useState<ReplaceReason | ''>('');
+  const [note, setNote] = useState('');
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState<Person[] | null>(null);
+  const [searchError, setSearchError] = useState('');
+  const known = [...bench, ...(found ?? []).filter((p) => !bench.some((b) => b.steamid === p.steamid))];
+  const chosen = known.find((p) => p.steamid === pick);
+  const search = async () => {
+    setSearchError('');
+    try {
+      const r = await peopleApi.people(q.trim());
+      setFound(r.players.filter((p) => !e.roster.some((x) => x.steamid === p.steamid)).slice(0, 10).map((p) => ({ steamid: p.steamid, name: p.name })));
+    } catch {
+      setSearchError('Could not search players.');
+    }
+  };
+  const submit = () => {
+    if (!chosen || !reason) return;
+    void run(async () => {
+      await adminApi.replaceEntryPlayer(eventId, e.id, { out: out.steamid, in: chosen.steamid, reason, note: note.trim() === '' ? null : note.trim() });
+      onClose();
+    }, {
+      title: `Replace ${out.name} with ${chosen.name}?`,
+      body: `${out.name} loses their place on ${e.name}. This is not a ban; use the ban tools for that.`,
+      confirmLabel: 'Replace', danger: true,
+    });
+  };
+  return (
+    <div class="replaceform" role="group" aria-label={`Replace ${out.name}`}>
+      <div class="inlinerow">
+        <select aria-label="Replacement" value={pick} onChange={(ev) => setPick((ev.target as HTMLSelectElement).value)}>
+          <option value="">Choose the replacement</option>
+          {bench.length > 0 && <optgroup label="Bench">{bench.map((p) => <option key={p.steamid} value={p.steamid}>{p.name}</option>)}</optgroup>}
+          {found && found.length > 0 && (
+            <optgroup label="Found">{known.filter((p) => !bench.includes(p)).map((p) => <option key={p.steamid} value={p.steamid}>{p.name}</option>)}</optgroup>
+          )}
+        </select>
+      </div>
+      <form class="inlinerow" onSubmit={(ev) => { ev.preventDefault(); void search(); }}>
+        <input type="search" aria-label="Find another player" placeholder="Another player: name or SteamID" value={q} onInput={(ev) => setQ((ev.target as HTMLInputElement).value)} />
+        <button class="btn btn--ghost btn--sm" type="submit" disabled={q.trim() === ''}>Search</button>
+      </form>
+      {searchError && <p class="error">{searchError}</p>}
+      {found && found.length === 0 && <p class="muted">No other players match.</p>}
+      <div class="inlinerow">
+        <select aria-label="Reason" value={reason} onChange={(ev) => setReason((ev.target as HTMLSelectElement).value as ReplaceReason | '')}>
+          <option value="">Choose a reason</option>
+          {REASONS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+        </select>
+        <input type="text" aria-label="Staff note" placeholder="Note for staff (optional)" maxLength={NOTE_MAX} value={note} onInput={(ev) => setNote((ev.target as HTMLInputElement).value)} />
+      </div>
+      <p class="muted">The note stays with staff and is never sent to the player. This is not a ban: <a href={fileUrl(out.steamid)}>open {out.name}'s file</a> for the ban tools.</p>
+      <div class="inlinerow">
+        <button class="btn btn--sm" disabled={busy || !chosen || !reason} onClick={submit}>Replace</button>
+        <button class="btn btn--ghost btn--sm" onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 /** The event is past seeding entirely once it is live, finished or
  *  cancelled; the server's reorderSeeds already refuses those with
  *  `seeds_locked`, so the Up/Down controls are not offered then either. */
@@ -24,21 +98,35 @@ const SEEDS_CLOSED: readonly string[] = ['live', 'finished', 'cancelled'];
 
 /** One entry's row. Its own component so the Disqualify reason box is this
  *  row's state alone, never shared with any other row's box or send. */
-function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, busy, active, onMove, onDisqualify, onRestore, onRename }: {
+function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, busy, active, onMove, onDisqualify, onRestore, onRename, replace }: {
   e: AdminEntryView; draft: boolean; canRename: boolean; onRename: (id: number, name: string) => void; canEdit: boolean; locked: boolean; showMove: boolean; canRestore: boolean; busy: boolean; active: boolean;
   onMove: (id: number, by: -1 | 1) => void; onDisqualify: (id: number, name: string, reason: string) => void; onRestore: (id: number, name: string) => void;
+  /** Plan D2c: Replace on a draft entry's non-captain starters, while the server would take it. */
+  replace: { eventId: number; bench: Person[]; run: Run } | null;
 }) {
   const [reason, setReason] = useState('');
   const [name, setName] = useState(e.name);
+  const [replacing, setReplacing] = useState<Person | null>(null);
+  const canReplace = (p: AdminEntryView['roster'][number]) =>
+    replace !== null && canEdit && draft && active && p.role === 'starter' && e.captainSteamid !== null && p.steamid !== e.captainSteamid;
   return (
     <li class={active ? '' : 'muted'}>
       <strong>{e.seed !== null && active ? `#${e.seed} ` : ''}{e.name}</strong> <span class="muted">[{e.tag}]</span>
       {' '}· {statusText(e, draft)} · SR {e.sr} · by {e.registeredByName}
       <ul class="entrypanel__roster">
         {e.roster.map((p) => (
-          <li key={p.steamid}><span class="chip">{ROLE[p.role]}</span> {p.name}{p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}</li>
+          <li key={p.steamid}>
+            <span class="chip">{ROLE[p.role]}</span> {p.name}{p.steamid === e.captainSteamid && <span class="muted"> (captain)</span>}
+            {p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}
+            {canReplace(p) && replacing?.steamid !== p.steamid && (
+              <button class="btn btn--ghost btn--sm" aria-label={`Replace player ${p.name}`} disabled={busy} onClick={() => setReplacing({ steamid: p.steamid, name: p.name })}>Replace player</button>
+            )}
+          </li>
         ))}
       </ul>
+      {replace && replacing && e.roster.some((p) => p.steamid === replacing.steamid) && (
+        <ReplaceForm eventId={replace.eventId} e={e} out={replacing} bench={replace.bench} busy={busy} run={replace.run} onClose={() => setReplacing(null)} />
+      )}
       {canEdit && canRename && active && (
         <div class="inlinerow">
           <input type="text" aria-label={`Team name for ${e.name}`} maxLength={24} value={name} onInput={(ev) => setName((ev.target as HTMLInputElement).value)} />
@@ -100,6 +188,8 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
   const restore = (id: number, name: string) => void run(() => adminApi.restoreEventEntry(eventId, id), `Restore ${name}?`);
   const rename = (id: number, name: string) => void run(() => adminApi.setEntryIdentity(eventId, id, { name }));
   const canRename = draft && !SEEDS_CLOSED.includes(status);
+  // Plan D2c Ruling 4: from teams made (the entries exist) until the event finishes.
+  const replace = draft && canEdit && status !== 'finished' && status !== 'cancelled' ? { eventId, bench: data.bench ?? [], run } : null;
   const active = (e: AdminEntryView) => e.status !== 'dropped' && e.status !== 'disqualified';
   return (
     <Panel>
@@ -122,7 +212,7 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
         <ul class="admin-list">
           {data.entries.map((e) => (
             <EntryRow key={e.id} e={e} draft={draft} canRename={canRename} onRename={rename} canEdit={canEdit} locked={locked} showMove={showMove} canRestore={canRestore} busy={busy} active={active(e)}
-              onMove={move} onDisqualify={disqualify} onRestore={restore} />
+              onMove={move} onDisqualify={disqualify} onRestore={restore} replace={replace} />
           ))}
         </ul>
       )}

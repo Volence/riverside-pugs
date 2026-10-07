@@ -3499,6 +3499,9 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftidentity { display: flex; flex-direction: column; gap: var(--sp-3); }
 .draftidentity h3 { margin: 0; }
 .entrypanel__roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+/* The desk's replace dialog on a draft entry (plan D2c). */
+.replaceform { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); }
+.replaceform > p { margin: 0; }
 .rosterpick__list { list-style: none; margin: var(--sp-2) 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .rosterpick__row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
 .rosterpick__row--warn { border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
