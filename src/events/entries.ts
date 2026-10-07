@@ -419,6 +419,19 @@ export function createDraftEntries(db: DB, o: { eventId: number; actor: string; 
   })();
 }
 
+/** Whether a draft entry's identity may still change: until the event goes live. */
+export const identityOpen = (ev: { status: V.EventStatus }): boolean => ev.status !== 'live' && ev.status !== 'finished' && ev.status !== 'cancelled';
+
+/** The one gate for an identity change, shared by setEntryIdentity and the
+ *  logo routes (which judge it before storing a file). */
+export function identityRefusal(ev: E.EventRow, entry: EntryRow, steamid: string, staff: boolean): V.EventError | null {
+  if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return 'not_draft_entry';
+  if (!staff && entry.captain_steamid !== steamid) return 'not_captain';
+  if (!identityOpen(ev)) return 'entries_locked';
+  if (!isActive(entry)) return 'entry_out';
+  return null;
+}
+
 /**
  * A draft entry's identity (drafts plan D2a Ruling 7): its name, tag and
  * logo, set by its captain (or staff) until the event goes live. The name
@@ -433,7 +446,7 @@ export function setEntryIdentity(
 ): V.Checked<null> {
   const at = o.now.toISOString();
   const n = o.name === undefined ? null : normalizeName(o.name);
-  if (n && !n.ok) return V.fail(n.error === 'name_not_allowed' ? 'name_not_allowed' : 'bad_name');
+  if (n && !n.ok) return V.fail(n.error === 'name_not_allowed' ? 'name_not_allowed' : 'bad_entry_name');
   const t = o.tag === undefined || o.tag === '' ? null : normalizeTag(o.tag);
   if (t && !t.ok) return V.fail(t.error === 'tag_not_allowed' ? 'tag_not_allowed' : 'bad_tag');
   if (o.name === undefined && o.tag === undefined && o.logoKey === undefined) return V.fail('bad_request');
@@ -442,10 +455,8 @@ export function setEntryIdentity(
     const entry = getEntry(db, o.entryId);
     if (!ev || ev.status === 'draft') return V.fail('not_found');
     if (!entry || entry.event_id !== ev.id) return V.fail('entry_not_found');
-    if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return V.fail('not_draft_entry');
-    if (!o.staff && entry.captain_steamid !== o.steamid) return V.fail('not_captain');
-    if (ev.status === 'live' || ev.status === 'finished' || ev.status === 'cancelled') return V.fail('entries_locked');
-    if (!isActive(entry)) return V.fail('entry_out');
+    const refused = identityRefusal(ev, entry, o.steamid, o.staff);
+    if (refused) return V.fail(refused);
     if (n && n.ok) {
       const clash = entriesOf(db, ev.id).some((x) => x.id !== entry.id && isActive(x) && keyOf(x.name) === n.key);
       if (clash) return V.fail('name_taken');

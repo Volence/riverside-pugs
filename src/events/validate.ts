@@ -114,6 +114,7 @@ export const EVENT_ERRORS = {
   roster_locked: { status: 409, text: 'Rosters are locked for this event; ask staff to change yours.' },
   additions_used: { status: 409, text: 'This entry has used all the roster additions the event allows.' },
   not_on_entry: { status: 400, text: 'You are not on this roster.' },
+  bad_entry_name: { status: 400, text: 'A team name is 3 to 24 characters of plain text, with at least one letter or digit.' },
   not_draft_entry: { status: 409, text: 'Only a draft entry has a name, tag and logo of its own.' },
   not_captain: { status: 403, text: 'Only the entry\'s captain can do that.' },
   name_taken: { status: 409, text: 'Another entry in this event already has that name.' },

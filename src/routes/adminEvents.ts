@@ -536,7 +536,8 @@ export async function adminEventRoutes(
     if ((body.name !== undefined && typeof body.name !== 'string') || (body.tag !== undefined && typeof body.tag !== 'string')) return refuse(reply, 'bad_request');
     const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: true, name: body.name as string | undefined, tag: body.tag as string | undefined, now: new Date() });
     if (!r.ok) return refuse(reply, r.error);
-    logAdmin(db, me, 'event_entry_identity', ev.id, { entryId: entry.id, name: body.name, tag: body.tag });
+    const now = N.getEntry(db, entry.id)!;
+    logAdmin(db, me, 'event_entry_identity', ev.id, { entryId: entry.id, name: body.name === undefined ? undefined : now.name, tag: body.tag === undefined ? undefined : now.tag });
     return { ok: true };
   });
 
@@ -547,8 +548,8 @@ export async function adminEventRoutes(
     const ev = eventOf(p.id);
     const entry = ev && entryOf(ev, p.entryId);
     if (!ev || !entry) return refuse(reply, 'entry_not_found');
-    if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return refuse(reply, 'not_draft_entry');
-    if (ev.status === 'live' || ev.status === 'finished' || ev.status === 'cancelled') return refuse(reply, 'entries_locked');
+    const refused = N.identityRefusal(ev, entry, me, true);
+    if (refused) return refuse(reply, refused);
     const raw = ((req.body ?? {}) as { png?: unknown }).png;
     if (typeof raw !== 'string') return reply.code(400).send({ error: 'The logo is missing.' });
     const bytes = Buffer.from(raw, 'base64');
