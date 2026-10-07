@@ -101,5 +101,19 @@ describe('EventFieldsForm number fields', () => {
     expect([sent.teamCap, sent.eligibility.srFloor, sent.eligibility.srCeiling, sent.checkin.opensMinutes]).toEqual([null, null, 2500, 45]);
     expect(JSON.stringify(sent)).not.toContain('NaN');
   });
+
+  it('a draft event has no team cap field and sends no cap, while a team event keeps it', () => {
+    const onSave = vi.fn();
+    const draftFields: EventFields = { ...FIELDS, entryKind: 'draft', teamCap: 4, draft: { signupsCloseAt: '2026-10-30T09:30:00.000Z', draftAt: '2026-10-31T09:30:00.000Z' } };
+    const { unmount } = render(<EventFieldsForm fields={draftFields} status="draft" busy={false} onSave={onSave} />);
+    expect(screen.queryByLabelText('Team cap')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+    expect((onSave.mock.calls[0]![0] as EventFields).teamCap).toBeNull();
+    unmount();
+    render(<EventFieldsForm fields={{ ...FIELDS, teamCap: 8 }} status="draft" busy={false} onSave={onSave} />);
+    expect((screen.getByLabelText('Team cap') as HTMLInputElement).value).toBe('8');
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+    expect((onSave.mock.calls[1]![0] as EventFields).teamCap).toBe(8);
+  });
 });
 });

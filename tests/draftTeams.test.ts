@@ -14,6 +14,7 @@ import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
 import { balanceAroundCaptains } from '../src/events/draftBalance.js';
 import { draftFairness } from '../src/events/draftFairness.js';
+import { eventView } from '../src/events/views.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { P, cutDraft, type DraftFixture } from './draftFixture.js';
 
@@ -379,6 +380,23 @@ describe('publishing the teams (createDraftEntries)', () => {
     h.db.prepare("UPDATE events SET entry_kind = 'team' WHERE id = ?").run(h.eventId);
     expect(err(publish(h))).toBe('not_draft');
     expect(N.entriesOf(g.db, g.eventId).length + N.entriesOf(h.db, h.eventId).length).toBe(0);
+  });
+
+  it('no team cap applies to a draft: an edit with a cap stores none, and five teams are all placed even over a stored cap', () => {
+    const f = cutDraft({ balance: true });
+    must(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { teamCap: 4 }, now: LATER }));
+    expect(E.getEvent(f.db, f.eventId)!.team_cap).toBeNull();
+    must(publish(f));
+    // A cap stored before the rule changed is ignored too.
+    f.db.prepare('UPDATE events SET team_cap = 4 WHERE id = ?').run(f.eventId);
+    const ev = E.getEvent(f.db, f.eventId)!;
+    const place = N.placementOf(f.db, ev);
+    expect(place.placed).toHaveLength(5);
+    expect(place.waitlist).toEqual([]);
+    const pub = eventView(f.db, ev);
+    expect(pub.teamCap).toBeNull();
+    expect(pub.entries).toHaveLength(5);
+    expect(pub.entries.every((e) => e.waitlist === null)).toBe(true);
   });
 });
 

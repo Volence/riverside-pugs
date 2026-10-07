@@ -81,7 +81,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
       if (!night) { setProblem('Pick the draft night.'); return; }
       draft = { signupsCloseAt: close, draftAt: night };
     }
-    const used: NumKey[] = ['teamCap', 'minPugs', 'srFloor', 'srCeiling', 'maxSubs', 'maxAdditions',
+    const used: NumKey[] = [...(f.entryKind === 'draft' ? [] : ['teamCap' as const]), 'minPugs', 'srFloor', 'srCeiling', 'maxSubs', 'maxAdditions',
       ...(f.checkin.enabled ? ['opensMinutes' as const, 'closesMinutes' as const] : []),
       ...(lock.kind === 'after_round' ? ['lockStage' as const, 'lockRound' as const] : [])];
     const n: Partial<Record<NumKey, number | null>> = {};
@@ -135,9 +135,11 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
         </>
       )}
       <ToggleRow label="Official event" help="A Riverside event, not a community one." checked={f.official} onChange={() => set({ official: !f.official })} />
-      <FormRow label="Team cap" help="Most teams that can register. Blank for no cap." for={id('cap')}>
-        <input id={id('cap')} aria-label="Team cap" type="number" min={2} max={256} value={typed.teamCap} onInput={typeInto('teamCap')} />
-      </FormRow>
+      {f.entryKind !== 'draft' && (
+        <FormRow label="Team cap" help="Most teams that can register. Blank for no cap." for={id('cap')}>
+          <input id={id('cap')} aria-label="Team cap" type="number" min={2} max={256} value={typed.teamCap} onInput={typeInto('teamCap')} />
+        </FormRow>
+      )}
       <FormGroup title="Description">
         <FormRow wide label="Event page text" help="# heading, **bold**, *italic*, - list, [text](https://...)" for={id('desc')}
           aside={<button type="button" class="btn btn--ghost btn--sm" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? 'Edit' : 'Preview'}</button>}>
