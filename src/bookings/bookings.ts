@@ -73,6 +73,8 @@ export interface SideRow {
    *  locked four only (role player), shown as "N of 4". */
   present_now: number;
   excused_at: string | null; excused_by: string | null; excuse_note: string | null;
+  /** A draft entry's name (drafts plan D2a), snapshotted at booking; NULL otherwise. */
+  name: string | null;
 }
 export interface PersonRow {
   booking_id: number; side: Side; steamid: string; role: PersonRole; status: 'invited' | 'accepted'; added_by: string; added_at: string;
@@ -168,6 +170,7 @@ function currentCaptain(db: DB, s: Pick<SideRow, 'team_id' | 'captain_steamid'>)
   return s.team_id !== null ? getTeam(db, s.team_id)!.captain_steamid : s.captain_steamid;
 }
 export function sideName(db: DB, s: SideRow): string {
+  if (s.name !== null && s.name !== undefined) return s.name;
   if (s.team_id !== null) return getTeam(db, s.team_id)?.name ?? 'A team';
   return `${getPlayer(db, s.captain_steamid)?.name ?? 'Someone'}'s group`;
 }
@@ -340,7 +343,11 @@ export function createBooking(db: DB, o: {
 
 // ---------- tournament bookings (tournaments plan T3b) ----------
 
-export interface TournamentSide { teamId: number | null; captain: string; players: readonly string[]; spectators: readonly string[] }
+export interface TournamentSide {
+  teamId: number | null; captain: string; players: readonly string[]; spectators: readonly string[];
+  /** A draft entry's name (drafts plan D2a); omitted for a team side. */
+  name?: string;
+}
 
 /** The series engine's booking (T3b Ruling 2): purpose tournament, starts
  *  now, one campaign (later games and tiebreaks are appended), both sides
@@ -364,10 +371,10 @@ export function createTournamentBooking(db: DB, o: {
        VALUES ('tournament', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(o.region, iso(startMs), iso(startMs + minutes * 60_000), newLeasePassword(), newLeasePassword(), o.gameConfig, o.rulesJson, o.rulesetId,
       JSON.stringify([o.campaign]), o.createdBy, now.toISOString()).lastInsertRowid);
-    const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at) VALUES (?, ?, ?, ?, ?)');
+    const side = db.prepare('INSERT INTO booking_sides (booking_id, side, team_id, captain_steamid, confirmed_at, name) VALUES (?, ?, ?, ?, ?, ?)');
     (['a', 'b'] as const).forEach((s, i) => {
       const t = o.sides[i]!;
-      side.run(id, s, t.teamId, t.captain, now.toISOString());
+      side.run(id, s, t.teamId, t.captain, now.toISOString(), t.name ?? null);
       for (const sid of t.players) insertPerson(db, id, s, sid, 'player', 'accepted', o.createdBy, now);
       for (const sid of t.spectators) insertPerson(db, id, s, sid, 'spectator', 'accepted', o.createdBy, now);
     });
