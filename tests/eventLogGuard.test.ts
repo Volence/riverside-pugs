@@ -272,6 +272,15 @@ describe('event_log guard', () => {
           return N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId, out: N.rosterOf(f.db, entryId).starters[1]!, in: DP[8]!, reason: 'conduct', note: null, actor: ADMIN, now: NOW });
         },
       },
+      // D2c addendum: the first team's second starter made its captain.
+      setDraftCaptain: {
+        action: 'entry_captain_set',
+        setup: (f) => { balancedDraft(f); must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); },
+        run: (f) => {
+          const entryId = (f.db.prepare('SELECT id FROM event_entries ORDER BY id LIMIT 1').get() as { id: number }).id;
+          return N.setDraftCaptain(f.db, { eventId: f.eventId, entryId, steamid: N.rosterOf(f.db, entryId).starters[1]!, actor: ADMIN, now: NOW });
+        },
+      },
     };
 
     it('every exported function of entries.ts is a known read or a guarded mutation', () => {

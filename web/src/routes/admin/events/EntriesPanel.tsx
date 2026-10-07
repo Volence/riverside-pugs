@@ -121,6 +121,15 @@ function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, 
   const [reason, setReason] = useState('');
   const [name, setName] = useState(e.name);
   const [replacing, setReplacing] = useState<Person | null>(null);
+  /** D2c addendum: the same gate as Replace player; the old captain stays a starter. */
+  const makeCaptain = (r: NonNullable<typeof replace>, p: Person) => {
+    const old = e.roster.find((x) => x.steamid === e.captainSteamid)?.name ?? 'The old captain';
+    void r.run(() => adminApi.setEntryCaptain(r.eventId, e.id, p.steamid), {
+      title: `Make ${p.name} captain of ${e.name}?`,
+      body: `They take over the match room, prep and the team name. ${old} stays on the team as a player.`,
+      confirmLabel: 'Make captain',
+    });
+  };
   const canReplace = (p: AdminEntryView['roster'][number]) =>
     replace !== null && canEdit && draft && active && p.role === 'starter' && e.captainSteamid !== null && p.steamid !== e.captainSteamid;
   return (
@@ -134,6 +143,9 @@ function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, 
             {p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}
             {canReplace(p) && replacing?.steamid !== p.steamid && (
               <button class="btn btn--ghost btn--sm" aria-label={`Replace player ${p.name}`} disabled={busy} onClick={() => setReplacing({ steamid: p.steamid, name: p.name })}>Replace player</button>
+            )}
+            {canReplace(p) && replace && (
+              <button class="btn btn--ghost btn--sm" aria-label={`Make ${p.name} captain`} disabled={busy} onClick={() => makeCaptain(replace, p)}>Make captain</button>
             )}
           </li>
         ))}

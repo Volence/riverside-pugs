@@ -59,6 +59,9 @@ describe('preferences', () => {
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_player_removed')).toEqual({ type: 'draft_player_removed', label: 'Draft: removed from your team by staff' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_player_added')).toEqual({ type: 'draft_player_added', label: 'Draft: put on a team by staff' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_roster_changed')).toEqual({ type: 'draft_roster_changed', label: 'Draft: a player on your team was replaced' });
+    // D2c addendum: staff transfer a draft team's captaincy.
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_captain_set_new')).toEqual({ type: 'draft_captain_set_new', label: 'Draft: made your team\'s captain by staff' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_captain_set_old')).toEqual({ type: 'draft_captain_set_old', label: 'Draft: your team has a new captain' });
   });
   it('lists the two reschedule DMs (plan T4)', () => {
     expect(NOTIFY_TYPES.filter((t) => t.type === 'event_reschedule' || t.type === 'event_match_time')).toEqual([

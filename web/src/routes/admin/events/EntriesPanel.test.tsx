@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import type { AdminEntryView } from '../../../api';
 
 const { mockAdmin } = vi.hoisted(() => ({
-  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn(), setEntryIdentity: vi.fn(), replaceEntryPlayer: vi.fn() },
+  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn(), setEntryIdentity: vi.fn(), replaceEntryPlayer: vi.fn(), setEntryCaptain: vi.fn() },
 }));
 const { mockPeople } = vi.hoisted(() => ({ mockPeople: { people: vi.fn() } }));
 vi.mock('../../../api', async (importOriginal) => {
@@ -187,6 +187,23 @@ describe('EntriesPanel', () => {
       expect(await screen.findByText(/The server said: not between chapters\./)).toBeTruthy();
       expect(screen.getByText('That player is in a game on a server and the server did not take the change.')).toBeTruthy();
       expect(screen.getByRole('group', { name: 'Replace s2' })).toBeTruthy();
+    });
+
+    it('offers Make captain on each starter but the captain, and confirms before calling the API (D2c addendum)', async () => {
+      mockAdmin.setEntryCaptain.mockResolvedValue({ from: 'c0', to: 's1' });
+      await open();
+      expect(screen.queryByRole('button', { name: 'Make c0 captain' })).toBeNull();
+      expect(screen.getAllByRole('button', { name: /^Make s\d captain$/ })).toHaveLength(3);
+      fireEvent.click(screen.getByRole('button', { name: 'Make s1 captain' }));
+      await waitFor(() => expect(mockAdmin.setEntryCaptain).toHaveBeenCalledWith(9, 1, 's1'));
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Make s1 captain of Team c0?', body: 'They take over the match room, prep and the team name. c0 stays on the team as a player.',
+      }));
+    });
+
+    it('shows a mod no Make captain', async () => {
+      await open('live', false);
+      expect(screen.queryByRole('button', { name: /Make .* captain/ })).toBeNull();
     });
 
     it('finds another player by the People search, leaving out the team\'s own players', async () => {
