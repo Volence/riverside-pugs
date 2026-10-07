@@ -36,7 +36,7 @@ import { P as DP, draftFixture, type DraftFixture } from './draftFixture.js';
 
 const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
 const ENTRY_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_entries|event_entry_players)\b/gi;
-const DRAFT_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:draft_signups|draft_captain_offers)\b/gi;
+const DRAFT_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:draft_signups|draft_captain_offers)\b|\bUPDATE\s+events\s+SET\b[^'"`;]*\bteam_mode\s*=/gi;
 const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts', 'src/events/drafts.ts']);
 const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf', 'scheduleOf']);
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
@@ -284,7 +284,7 @@ describe('event_log guard', () => {
       if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
       return r.value;
     };
-    const DRAFT_READS = new Set(['activeSignups', 'signupOf', 'cutState', 'draftOfferMinutes', 'openOffer']);
+    const DRAFT_READS = new Set(['activeSignups', 'signupOf', 'cutState', 'draftOfferMinutes', 'openOffer', 'draftTeamsOf']);
     const signed = (f: DraftFixture) => must(D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }));
     /** 12 signups, closed: 3 teams, 9 pool (DP[0..8]) and 3 bench (DP[9..11]). */
     const cut = (f: DraftFixture) => {
@@ -297,6 +297,12 @@ describe('event_log guard', () => {
       must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
       for (const s of DP.slice(0, 2)) must(D.setCaptain(f.db, { eventId: f.eventId, steamid: s, captain: true, actor: ADMIN, now: NOW }));
     };
+    /** D2a Task 3: the cut published (DP[0], DP[1] captains), then Auto-balance
+     *  chosen, then the teams balanced. */
+    const published = (f: DraftFixture) => { publishable(f); must(D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); };
+    const auto = (f: DraftFixture) => { published(f); must(D.chooseTeamMode(f.db, { eventId: f.eventId, mode: 'auto', actor: ADMIN, now: NOW })); };
+    const balanced = (f: DraftFixture) => { auto(f); must(D.autoBalance(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); };
+    const crossPair = (f: DraftFixture) => { const [t0, t1] = D.draftTeamsOf(f.db, f.eventId)!; return { a: t0!.players[0]!.steamid, b: t1!.players[0]!.steamid }; };
     /** Offers on, with DP[11]'s offer open until NOW + 30 minutes. */
     const offering = (f: DraftFixture) => { cut(f); must(D.startOffers(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW, minutes: 30 })); };
     const declined = (f: DraftFixture) => { offering(f); must(D.answerOffer(f.db, { eventId: f.eventId, steamid: DP[11], accept: false, now: NOW })); };
@@ -340,6 +346,10 @@ describe('event_log guard', () => {
       answerOffer: { action: 'draft_offer_answered', setup: offering, run: (f) => D.answerOffer(f.db, { eventId: f.eventId, steamid: DP[11], accept: true, now: NOW }) },
       expireDueOffer: { action: 'draft_offer_expired', setup: offering, run: (f) => D.expireDueOffer(f.db, { eventId: f.eventId, now: LATE }) },
       offerNext: { action: 'draft_offer_made', setup: declined, run: (f) => D.offerNext(f.db, { eventId: f.eventId, now: NOW, minutes: 30 }) },
+      // Make teams (D2a Task 3).
+      chooseTeamMode: { action: 'draft_team_mode', setup: published, run: (f) => D.chooseTeamMode(f.db, { eventId: f.eventId, mode: 'auto', actor: ADMIN, now: NOW }) },
+      autoBalance: { action: 'draft_teams_balanced', setup: auto, run: (f) => D.autoBalance(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
+      moveDraftPlayers: { action: 'draft_teams_swapped', setup: balanced, run: (f) => D.moveDraftPlayers(f.db, { eventId: f.eventId, ...crossPair(f), actor: ADMIN, now: NOW }) },
     };
     const draftRows = (f: DraftFixture) => JSON.stringify([
       f.db.prepare('SELECT * FROM draft_signups ORDER BY id').all(),
@@ -353,6 +363,8 @@ describe('event_log guard', () => {
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(DRAFT_WRITERS) ?? []).length > 0);
       expect(offenders).toEqual([]);
       expect('update draft_signups set x = 1'.match(DRAFT_WRITERS)).toHaveLength(1);
+      expect('UPDATE events SET team_mode = ?, updated_at = ? WHERE id = ?'.match(DRAFT_WRITERS)).toHaveLength(1);
+      expect("SELECT team_mode FROM events WHERE team_mode = 'auto'".match(DRAFT_WRITERS)).toBeNull();
     });
 
     it('every exported function of drafts.ts is a known read or a guarded mutation', () => {

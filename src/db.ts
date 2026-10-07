@@ -1927,6 +1927,13 @@ export function openDb(path: string): DB {
   // Drafts plan D2a: a draft entry has no site team (team_id NULL); its
   // captain runs it (src/events/entries.ts entryManagers). NULL on team entries.
   ensureColumn(db, 'event_entries', 'captain_steamid', 'TEXT REFERENCES players(steamid)');
+  // Drafts plan D2a Task 3: Make teams. draft_team is a pool player's team in
+  // the working assignment, keyed by the captain's signup id (NULL for
+  // captains and bench); team_mode is how staff chose to make the teams;
+  // teams_made_at is stamped when the teams are published (entries.ts).
+  ensureColumn(db, 'draft_signups', 'draft_team', 'INTEGER');
+  ensureColumn(db, 'events', 'team_mode', "TEXT CHECK (team_mode IS NULL OR team_mode IN ('auto','live'))");
+  ensureColumn(db, 'events', 'teams_made_at', 'TEXT');
   // Tournaments plan T3a: a stage's veto knobs (src/events/vetoConfig.ts).
   // Null on stages made before it; stageSettingsOf reads those from veto_type.
   ensureColumn(db, 'event_stages', 'veto_json', 'TEXT');

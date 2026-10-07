@@ -5,7 +5,7 @@ import type { CommunityStore } from '../community/store.js';
 import { BANNER_MAX_BYTES, bannerType, checkBanner } from '../community/validate.js';
 import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
-import { getPlayer } from '../players.js';
+import { currentSeasonId, getPlayer } from '../players.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import * as E from '../events/events.js';
 import * as D from '../events/drafts.js';
@@ -22,6 +22,8 @@ import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
 import { tellCaptainOffer, tellCheckinOpen, tellCutRole, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTimeLocked } from '../events/notices.js';
 import { deskOrder, signupFacts } from '../events/draftFacts.js';
+import { draftFairness } from '../events/draftFairness.js';
+import { seasonSr } from '../rating.js';
 import { maxTeams } from '../events/draftRules.js';
 import type { StaffAction } from '../events/messages.js';
 import { higherSide, openMatchRoom, type RoomClock } from '../events/roomClock.js';
@@ -421,6 +423,36 @@ export async function adminEventRoutes(
   draftPost('swap', 'event_draft_swap', ['pool', 'bench'], (ev, me, b) =>
     typeof b.pool !== 'string' || typeof b.bench !== 'string' ? null
       : D.swapPoolBench(db, { eventId: ev.id, poolSteamid: b.pool, benchSteamid: b.bench, actor: me, now: new Date() }));
+
+  /**
+   * Make teams (drafts plan D2a Rulings 2 to 5): staff read the working teams
+   * with SR and the fairness readout (never in a player or public response);
+   * admins choose the method, auto-balance and swap two pool players.
+   */
+  app.get('/api/admin/events/:id/draft/teams', async (req, reply) => {
+    if (!requireStaff(req, reply)) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    if (ev.entry_kind !== 'draft') return refuse(reply, 'not_draft');
+    const season = currentSeasonId(db);
+    const nameOf = (steamid: string) => getPlayer(db, steamid)?.name ?? steamid;
+    const made = D.draftTeamsOf(db, ev.id);
+    return {
+      mode: ev.team_mode, teamsMadeAt: ev.teams_made_at,
+      teams: made?.map((t) => ({
+        captain: { steamid: t.captain.steamid, name: nameOf(t.captain.steamid) },
+        players: t.players.map((p) => ({ steamid: p.steamid, name: nameOf(p.steamid), sr: seasonSr(db, p.steamid, season) })),
+      })) ?? null,
+      fairness: draftFairness(db, ev.id),
+    };
+  });
+  draftPost('mode', 'event_draft_mode', ['mode'], (ev, me, b) =>
+    b.mode !== null && b.mode !== 'auto' && b.mode !== 'live' ? null
+      : D.chooseTeamMode(db, { eventId: ev.id, mode: b.mode, actor: me, now: new Date() }));
+  draftPost('balance', 'event_draft_balance', [], (ev, me) => D.autoBalance(db, { eventId: ev.id, actor: me, now: new Date() }));
+  draftPost('move', 'event_draft_move', ['a', 'b'], (ev, me, b) =>
+    typeof b.a !== 'string' || typeof b.b !== 'string' ? null
+      : D.moveDraftPlayers(db, { eventId: ev.id, a: b.a, b: b.b, actor: me, now: new Date() }));
 
   /** The top-SR eligible volunteers become the captains (replacing the
    *  working set); the reply says how many captains are still missing. */

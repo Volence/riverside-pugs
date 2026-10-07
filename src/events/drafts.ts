@@ -4,12 +4,16 @@ import { playerFacts } from './entries.js';
 import * as R from './entryRules.js';
 import { cleanNote, cutProblems, defaultRoles, maxTeams, nextOfferee, type CutProblem } from './draftRules.js';
 import { settingNumber } from '../settings.js';
+import { currentSeasonId } from '../players.js';
+import { seasonSr } from '../rating.js';
+import { balanceAroundCaptains } from './draftBalance.js';
 import * as V from './validate.js';
 
 /**
  * Every write to draft_signups and draft_captain_offers, and to the draft
  * columns of events (locked_at for a draft-kind event, draft_teams, cut_at,
- * offers_on), for drafts plan D1. Same shape as src/events/entries.ts: each
+ * offers_on, and plan D2a's team_mode), for drafts plan D1 and D2a's Make
+ * teams step (draft_signups.draft_team). Same shape as src/events/entries.ts: each
  * mutation is one transaction that re-reads, checks inside, writes, and adds
  * exactly one event_log row before it commits; a refusal writes nothing.
  * tests/eventLogGuard.test.ts pins both.
@@ -26,6 +30,9 @@ export interface SignupRow {
   id: number; event_id: number; steamid: string; captain_pref: CaptainPref; note: string | null; created_at: string;
   withdrawn_at: string | null; withdraw_reason: 'withdrawn' | 'removed' | 'ineligible' | null;
   role: 'captain' | 'pool' | 'bench' | null; role_manual: number;
+  /** Plan D2a: a pool player's team in the working assignment, as the
+   *  captain's signup id; NULL for captains, bench and before Make teams. */
+  draft_team: number | null;
 }
 
 /** Active signups in signup order (created_at, then id). */
@@ -487,4 +494,113 @@ export function offerNext(db: DB, o: { eventId: number; now: Date; minutes: numb
     E.logEvent(db, ev.id, null, 'draft_offers_exhausted', at, { captains, teams });
     return V.ok({ offered: null, stopped: 'exhausted' });
   })();
+}
+
+/**
+ * Make teams (plan D2a Rulings 2 to 5). Once the cut is published staff
+ * choose how the teams are made (events.team_mode), and for Auto-balance the
+ * site writes the working assignment: each pool player's draft_team, the
+ * signup id of the captain whose team they are on. Staff may then swap two
+ * pool players between teams, or balance again from scratch. Publishing the
+ * teams (entries.ts, Task 4) reads draftTeamsOf and stamps teams_made_at,
+ * after which none of this changes.
+ */
+
+export type TeamMode = 'auto' | 'live';
+
+/** A draft whose cut is published and whose teams are not, before its draft
+ *  (Ruling 2: no clock gate). */
+function makeTeamsOpen(db: DB, eventId: number): V.Checked<E.EventRow> {
+  const found = draftEvent(db, eventId);
+  if (!found.ok) return found;
+  const ev = found.value;
+  if (ev.cut_at === null) return V.fail('cut_not_published');
+  if (ev.teams_made_at !== null) return V.fail('teams_made');
+  if (!CUT_STATUSES.has(ev.status)) return V.fail('wrong_status');
+  return V.ok(ev);
+}
+
+const clearAssignment = (db: DB, eventId: number) =>
+  db.prepare('UPDATE draft_signups SET draft_team = NULL WHERE event_id = ? AND draft_team IS NOT NULL').run(eventId);
+
+/** Staff choose the method, or reset it with null. A change of method clears
+ *  the working assignment. 'live' is the D2b draft room: refused here. */
+export function chooseTeamMode(db: DB, o: { eventId: number; mode: TeamMode | null; actor: string; now: Date }): V.Checked<null> {
+  const at = o.now.toISOString();
+  if (o.mode !== null && o.mode !== 'auto' && o.mode !== 'live') return V.fail('bad_team_mode');
+  return db.transaction((): V.Checked<null> => {
+    const found = makeTeamsOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    if (o.mode === 'live') return V.fail('live_draft_later');
+    if (ev.team_mode !== o.mode) clearAssignment(db, ev.id);
+    db.prepare('UPDATE events SET team_mode = ?, updated_at = ? WHERE id = ?').run(o.mode, at, ev.id);
+    E.logEvent(db, ev.id, o.actor, 'draft_team_mode', at, { mode: o.mode, from: ev.team_mode });
+    return V.ok(null);
+  })();
+}
+
+/** Auto-balance (Ruling 3): balanceAroundCaptains over current-season SR with
+ *  signup order for ties, written as every pool player's draft_team. It
+ *  replaces any earlier assignment, hand moves included (Ruling 4). */
+export function autoBalance(db: DB, o: { eventId: number; actor: string; now: Date }): V.Checked<{ teams: number }> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<{ teams: number }> => {
+    const found = makeTeamsOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    if (ev.team_mode !== 'auto') return V.fail('not_auto_mode');
+    const all = activeSignups(db, ev.id);
+    const captains = all.filter((s) => s.role === 'captain');
+    const pool = all.filter((s) => s.role === 'pool');
+    if (captains.length < 2 || pool.length !== captains.length * 3) return V.fail('teams_changed');
+    const season = currentSeasonId(db);
+    const order = new Map(all.map((s, i) => [s.id, i]));
+    const player = (s: SignupRow) => ({ steamid: s.steamid, sr: seasonSr(db, s.steamid, season), order: order.get(s.id)! });
+    const teams = balanceAroundCaptains(captains.map(player), pool.map(player));
+    const idOf = new Map(all.map((s) => [s.steamid, s.id]));
+    clearAssignment(db, ev.id);
+    const set = db.prepare('UPDATE draft_signups SET draft_team = ? WHERE id = ?');
+    for (const t of teams) for (const p of t.players) set.run(idOf.get(t.captain)!, idOf.get(p)!);
+    E.logEvent(db, ev.id, o.actor, 'draft_teams_balanced', at, { teams: teams.length });
+    return V.ok({ teams: teams.length });
+  })();
+}
+
+/** A staff move (Ruling 4): two pool players on different teams swap teams,
+ *  so every team keeps its four. */
+export function moveDraftPlayers(db: DB, o: { eventId: number; a: string; b: string; actor: string; now: Date }): V.Checked<null> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<null> => {
+    const found = makeTeamsOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    const a = signupOf(db, ev.id, o.a);
+    const b = signupOf(db, ev.id, o.b);
+    if (!a || !b || a.role !== 'pool' || b.role !== 'pool' || a.draft_team === null || b.draft_team === null || a.draft_team === b.draft_team) {
+      return V.fail('bad_move');
+    }
+    const set = db.prepare('UPDATE draft_signups SET draft_team = ? WHERE id = ?');
+    set.run(b.draft_team, a.id);
+    set.run(a.draft_team, b.id);
+    E.logEvent(db, ev.id, o.actor, 'draft_teams_swapped', at, { a: o.a, b: o.b });
+    return V.ok(null);
+  })();
+}
+
+/** The working teams: each captain (signup order) with their pool players
+ *  (signup order). Null while there is no captain or pool, or any pool player
+ *  has no team (or a team that is not a current captain's). */
+export function draftTeamsOf(db: DB, eventId: number): { captain: SignupRow; players: SignupRow[] }[] | null {
+  const all = activeSignups(db, eventId);
+  const teams = all.filter((s) => s.role === 'captain').map((captain) => ({ captain, players: [] as SignupRow[] }));
+  const pool = all.filter((s) => s.role === 'pool');
+  if (teams.length === 0 || pool.length === 0) return null;
+  const byId = new Map(teams.map((t) => [t.captain.id, t]));
+  for (const p of pool) {
+    const t = p.draft_team === null ? undefined : byId.get(p.draft_team);
+    if (!t) return null;
+    t.players.push(p);
+  }
+  return teams;
 }
