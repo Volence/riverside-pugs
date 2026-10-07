@@ -133,7 +133,7 @@ describe('EventEditor', () => {
     await waitFor(() => expect(mockAdmin.updateEvent).toHaveBeenCalledWith(3, { ...FIELDS, teamCap: 16, description: 'Line one\nLine two' }));
   });
 
-  it('an announced team event offers Open registration and locks the entry kind; a draft-kind one does not offer it', async () => {
+  it('an announced team event offers Open registration and locks the entry kind; a draft-kind one offers Open signups', async () => {
     mockAdmin.event.mockResolvedValue(detail({ status: 'announced' }));
     const first = render(<EventEditor id={3} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Open registration' }));
@@ -142,7 +142,9 @@ describe('EventEditor', () => {
     first.unmount();
     mockAdmin.event.mockResolvedValue(detail({ status: 'announced', fields: { ...FIELDS, entryKind: 'draft' } }));
     render(<EventEditor id={3} canEdit />);
-    await screen.findByText('Swiss, 4 rounds, top 8 advance');
+    mockAdmin.openEventRegistration.mockClear();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open signups' }));
+    await waitFor(() => expect(mockAdmin.openEventRegistration).toHaveBeenCalledWith(3));
     expect(screen.queryByRole('button', { name: 'Open registration' })).toBeNull();
   });
 

@@ -75,7 +75,8 @@ describe('DraftPanel', () => {
     fireEvent.change(screen.getByLabelText('Swap Bob with'), { target: { value: '3' } });
     await waitFor(() => expect(mockAdmin.draftSwap).toHaveBeenCalledWith(9, '2', '3'));
     fireEvent.change(screen.getByLabelText('Swap Cy with'), { target: { value: '2' } });
-    await waitFor(() => expect(mockAdmin.draftSwap).toHaveBeenLastCalledWith(9, '2', '3'));
+    await waitFor(() => expect(mockAdmin.draftSwap).toHaveBeenCalledTimes(2));
+    expect(mockAdmin.draftSwap).toHaveBeenLastCalledWith(9, '2', '3');
   });
 
   it('disables Publish while there are problems and confirms with the exact title when clear', async () => {
@@ -113,6 +114,21 @@ describe('DraftPanel', () => {
     await waitFor(() => expect(mockAdmin.removeSignup).toHaveBeenCalledWith(9, '2', 'ineligible'));
     fireEvent.click(screen.getByRole('button', { name: 'Remove signup Cy' }));
     await waitFor(() => expect(mockAdmin.removeSignup).toHaveBeenCalledWith(9, '3', 'removed'));
+  });
+
+  it('Remove signup asks first, and does nothing when declined', async () => {
+    mockAdmin.eventDraft.mockResolvedValue(view());
+    mockAdmin.removeSignup.mockResolvedValue({});
+    render(<DraftPanel eventId={9} canEdit />);
+    await screen.findByText('Bob', { selector: 'td' });
+    confirmMock.mockResolvedValueOnce(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove signup Bob' }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(mockAdmin.removeSignup).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Reason for removing Bob'), { target: { value: 'ineligible' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove signup Bob' }));
+    await waitFor(() => expect(mockAdmin.removeSignup).toHaveBeenCalledWith(9, '2', 'ineligible'));
+    expect(confirmMock).toHaveBeenCalledTimes(2);
   });
 
   it('starts and stops offers and names the open offer', async () => {
