@@ -126,6 +126,12 @@ export function tellPlayerReplaced(d: NoticeDeps, eventId: number, entryId: numb
   tell(d, [inn], eventId, 'draft_player_added', { entryId });
   tell(d, [entry.captain_steamid], eventId, 'draft_roster_changed', { entryId, out, in: inn });
 }
+/** Staff made another starter a draft team's captain (D2c addendum): the
+ *  new captain (what they now run, with the event link) and the old one. */
+export function tellCaptainSet(d: NoticeDeps, eventId: number, entryId: number, from: string, to: string): void {
+  tell(d, [to], eventId, 'draft_captain_set_new', { entryId });
+  tell(d, [from], eventId, 'draft_captain_set_old', { entryId });
+}
 /** A draft's teams are published (drafts plan D2a Ruling 6): every starter
  *  of each new entry, the captain with their three named, the rest with the
  *  team and its captain. */

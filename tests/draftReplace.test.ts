@@ -97,7 +97,7 @@ describe('replaceDraftPlayer', () => {
       N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId: e0, out: out!, in: BENCH, reason: 'conduct', note: null, actor: ADMIN, now: LATER, ...over });
     const err = (r: ReturnType<typeof go>) => (r.ok ? null : r.error);
     expect(err(go({ out: captain! }))).toBe('captain_replace');
-    expect(EVENT_ERRORS.captain_replace.text).toContain('Make another player captain first.');
+    expect(EVENT_ERRORS.captain_replace.text).toContain('Make another player captain first (Make captain), then replace this player.');
     expect(err(go({ out: other }))).toBe('replace_not_starter');
     expect(err(go({ out: BENCH, in: OUTSIDER }))).toBe('replace_not_starter');
     // Review Focus 3: the one-entry-per-player rule.

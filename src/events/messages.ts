@@ -22,7 +22,8 @@ import type { ReplaceReason } from './entries.js';
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
-  | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed';
+  | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
+  | 'draft_captain_set_new' | 'draft_captain_set_old';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -119,6 +120,15 @@ export function eventMessage(
       if (!extra.out || !extra.in) return null;
       const nameOf = (s: string) => escapeName(getPlayer(db, s)?.name ?? s);
       content = `${nameOf(extra.out)} was replaced by ${nameOf(extra.in)} on your team in ${event}.`;
+      break;
+    }
+    case 'draft_captain_set_new':
+      // D2c addendum: read after the change committed, so the team is its current name.
+      content = `You are now the captain of ${team} in ${event}. You run the match room, prep and the team name: ${publicUrl}/event/${ev.slug}`;
+      break;
+    case 'draft_captain_set_old': {
+      if (!entry || entry.captain_steamid === null) return null;
+      content = `${escapeName(getPlayer(db, entry.captain_steamid)?.name ?? entry.captain_steamid)} is now the captain of ${team} in ${event}.`;
       break;
     }
     case 'draft_captain_offer':

@@ -20,7 +20,7 @@ import { adminEntryViews, draftBench } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCaptainOffer, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
+import { tellCaptainOffer, tellCaptainSet, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
 import { REPLACE_TEXT } from '../events/messages.js';
 import { addNote } from '../admin/players.js';
 import { deskOrder, signupFacts } from '../events/draftFacts.js';
@@ -603,6 +603,26 @@ export async function adminEventRoutes(
     // Without the engine (tests), the room is pushed here; staffReplace pushes it itself.
     if (!opts.series && r.value.subbedInMatch !== null) opts.rooms?.pushChange(r.value.subbedInMatch);
     return { subbedInMatch: r.value.subbedInMatch };
+  });
+
+  /** D2c addendum (owner 2026-10-07): staff make another starter a draft
+   *  team's captain. After the commit: the admin audit and the two DMs. The
+   *  box is not pushed: its captains cvar goes with the minute re-push, and
+   *  the site re-checks every in-game captain command against the booking. */
+  app.post('/api/admin/events/:id/entries/:entryId/captain', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; entryId: string };
+    const ev = eventOf(p.id);
+    const entry = ev && entryOf(ev, p.entryId);
+    if (!ev || !entry) return refuse(reply, 'entry_not_found');
+    const body = (req.body ?? {}) as { steamid?: unknown };
+    if (typeof body.steamid !== 'string') return refuse(reply, 'bad_request');
+    const r = N.setDraftCaptain(db, { eventId: ev.id, entryId: entry.id, steamid: body.steamid, actor: me, now: new Date() });
+    if (!r.ok) return refuseWith(reply, r);
+    logAdmin(db, me, 'event_entry_captain', ev.id, { entryId: entry.id, from: r.value.from, to: r.value.to });
+    tellCaptainSet(opts, ev.id, entry.id, r.value.from, r.value.to);
+    return r.value;
   });
 
   app.post('/api/admin/events/:id/entries/:entryId/:action', async (req, reply) => {

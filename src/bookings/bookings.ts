@@ -453,6 +453,24 @@ export function replacePlayer(db: DB, o: { bookingId: number; side: Side; outId:
   })();
 }
 
+/** A draft team's new captain (drafts plan D2c addendum), inside the
+ *  captaincy change's transaction: the pickup side's stored captain moves,
+ *  so every booking reader (managesSide, the in-game captain check, the
+ *  captains cvar) follows. Only on an open booking, and only on a side with
+ *  no site team (a team side's captain is the team's). */
+export function setSideCaptain(db: DB, bookingId: number, side: Side, steamid: string, by: string | null = null, now: Date = new Date()): Result<null> {
+  return db.transaction((): Result<null> => {
+    const b = getBooking(db, bookingId);
+    if (!b) return fail('not_found');
+    const s = sideRow(db, bookingId, side);
+    if (!s || !isOpen(b) || s.team_id !== null) return fail('wrong_state');
+    if (s.captain_steamid === steamid) return ok(null);
+    db.prepare('UPDATE booking_sides SET captain_steamid = ? WHERE booking_id = ? AND side = ?').run(steamid, b.id, side);
+    logEvent(db, b.id, by, 'captain_set', { side, from: s.captain_steamid, to: steamid }, now);
+    return ok(null);
+  })();
+}
+
 export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?: Date }): Result<null> {
   const now = o.now ?? new Date();
   return db.transaction((): Result<null> => {

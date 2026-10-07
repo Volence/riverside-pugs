@@ -600,6 +600,51 @@ export function replaceDraftPlayer(db: DB, o: {
   }
 }
 
+/**
+ * Staff make another starter a draft team's captain (drafts plan D2c
+ * addendum, owner 2026-10-07), in one transaction with one
+ * 'entry_captain_set' row. Same window as replaceDraftPlayer: teams made,
+ * until the event ends. The captain of every open booking side of this
+ * entry follows (bookings.ts setSideCaptain), so the box's captain check and
+ * every booking reader see the new one; everything reading entryManagers
+ * (the room, prep, identity, notices) already reads captain_steamid live.
+ * The entry's name is not touched: a default "Team <old captain>" stays
+ * until a captain renames it.
+ */
+export function setDraftCaptain(db: DB, o: { eventId: number; entryId: number; steamid: string; actor: string; now: Date }): V.Checked<{ from: string; to: string }> {
+  const at = o.now.toISOString();
+  try {
+    return db.transaction((): V.Checked<{ from: string; to: string }> => {
+      const ev = E.getEvent(db, o.eventId);
+      if (!ev || ev.status === 'draft') return V.fail('not_found');
+      const entry = getEntry(db, o.entryId);
+      if (!entry || entry.event_id !== ev.id) return V.fail('entry_not_found');
+      if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return V.fail('replace_not_draft');
+      if (ev.teams_made_at === null || !ROSTER_OPEN.has(ev.status)) return V.fail('wrong_status');
+      if (!isActive(entry)) return V.fail('entry_out');
+      if (!placesOf(db, entry.id).some((p) => p.steamid === o.steamid && p.role === 'starter')) return V.fail('replace_not_starter');
+      if (o.steamid === entry.captain_steamid) return V.fail('already_captain');
+      const from = entry.captain_steamid;
+      db.prepare('UPDATE event_entries SET captain_steamid = ? WHERE id = ?').run(o.steamid, entry.id);
+      // Booking side a is entry_a (series.ts openBooking); only open bookings still have a captain who acts.
+      const rows = db.prepare(
+        'SELECT entry_a, booking_id FROM event_matches WHERE event_id = ? AND (entry_a = ? OR entry_b = ?) AND booking_id IS NOT NULL ORDER BY id',
+      ).all(ev.id, entry.id, entry.id) as { entry_a: number | null; booking_id: number }[];
+      for (const r of rows) {
+        const b = B.getBooking(db, r.booking_id);
+        if (!b || !B.isOpen(b)) continue;
+        const set = B.setSideCaptain(db, b.id, r.entry_a === entry.id ? 'a' : 'b', o.steamid, o.actor, o.now);
+        if (!set.ok) throw new Refused(V.fail('wrong_status'));
+      }
+      E.logEvent(db, ev.id, o.actor, 'entry_captain_set', at, { entryId: entry.id, from, to: o.steamid });
+      return V.ok({ from, to: o.steamid });
+    })();
+  } catch (err) {
+    if (err instanceof Refused) return err.r;
+    throw err;
+  }
+}
+
 /** Ruling 9: the tick drops an entry whose team was disbanded, until the list is final. */
 export function dropDisbandedEntry(db: DB, o: { entryId: number; now?: Date }): V.Checked<EntryRow> {
   const at = iso(o.now);

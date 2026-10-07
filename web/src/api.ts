@@ -2643,6 +2643,9 @@ export const adminApi = {
   /** Plan D2c: staff take a starter off a draft entry and put a replacement in. */
   replaceEntryPlayer: (id: number, entryId: number, body: { out: string; in: string; reason: ReplaceReason; note: string | null }) =>
     post<{ subbedInMatch: number | null }>(`/api/admin/events/${id}/entries/${entryId}/replace`, body),
+  /** D2c addendum: staff make another starter a draft team's captain. */
+  setEntryCaptain: (id: number, entryId: number, steamid: string) =>
+    post<{ from: string; to: string }>(`/api/admin/events/${id}/entries/${entryId}/captain`, { steamid }),
   /** The Play section (plan T2 Ruling 17). */
   eventPlay: (id: number, signal?: AbortSignal) => get<AdminEventPlay>(`/api/admin/events/${id}/play`, signal),
   startEvent: (id: number) => post(`/api/admin/events/${id}/start`),
