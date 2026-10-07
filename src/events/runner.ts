@@ -46,12 +46,14 @@ export class EventRunner {
   /**
    * Plan T2 Rulings 5 and 6: start every team event whose list is final and
    * whose start time has come (one with fewer than 2 entries just waits), then
-   * settle every live event. Each event is caught on its own.
+   * settle every live event. Each event is caught on its own. A draft event
+   * starts the same way once its teams are made (drafts plan D2a Ruling 10);
+   * one without teams waits.
    */
   async play(now: Date): Promise<void> {
     const { db } = this.deps;
     const due = db.prepare(
-      `SELECT id FROM events WHERE entry_kind = 'team' AND status IN ('registration','checkin')
+      `SELECT id FROM events WHERE (entry_kind = 'team' OR (entry_kind = 'draft' AND teams_made_at IS NOT NULL)) AND status IN ('registration','checkin')
        AND locked_at IS NOT NULL AND starts_at <= ? ORDER BY id`,
     ).all(now.toISOString()) as { id: number }[];
     for (const { id } of due) {

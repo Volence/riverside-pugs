@@ -164,13 +164,16 @@ function openStage(db: DB, eventId: number, plan: StagePlan, at: string): void {
 
 /** Ruling 5: checkin or registration -> live, once the list is final, with
  *  the first stage built from the active seeded entries. by is null when the
- *  clock starts it. */
+ *  clock starts it. A draft-kind event also needs its teams made (drafts
+ *  plan D2a Ruling 10), and is otherwise started exactly like a team event. */
 export function startEvent(db: DB, o: { eventId: number; by: string | null; plan: StagePlan; now?: Date }): V.Checked<E.EventRow> {
   const at = iso(o.now);
   return db.transaction((): V.Checked<E.EventRow> => {
     const ev = E.getEvent(db, o.eventId);
     if (!ev) return V.fail('not_found');
-    if (ev.entry_kind !== 'team' || !V.nextStatusAllowed(ev.status, 'live')) return V.fail('wrong_status');
+    if (!V.nextStatusAllowed(ev.status, 'live')) return V.fail('wrong_status');
+    // Drafts plan D2a Ruling 10: a draft event starts once its teams are made.
+    if (ev.entry_kind === 'draft' && ev.teams_made_at === null) return V.fail('teams_not_made');
     if (ev.locked_at === null) return V.fail('list_not_final');
     // Stages can still be edited or reordered after registration opens, so
     // the chain checked at publish may no longer hold (final review fix 3).

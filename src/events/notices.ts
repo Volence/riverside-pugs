@@ -115,3 +115,15 @@ export function tellCaptainOffer(d: NoticeDeps, eventId: number): void {
   const o = openOffer(d.db, eventId);
   if (o) tell(d, [o.steamid], eventId, 'draft_captain_offer', { expiresAt: o.expires_at });
 }
+/** A draft's teams are published (drafts plan D2a Ruling 6): every starter
+ *  of each new entry, the captain with their three named, the rest with the
+ *  team and its captain. */
+export function tellTeamMade(d: NoticeDeps, eventId: number, entries: number[]): void {
+  for (const id of entries) {
+    const entry = N.getEntry(d.db, id);
+    if (!entry || entry.captain_steamid === null) continue;
+    const captain = entry.captain_steamid;
+    tell(d, [captain], eventId, 'draft_team_made', { entryId: id, captain: true });
+    tell(d, N.rosterOf(d.db, id).starters.filter((s) => s !== captain), eventId, 'draft_team_made', { entryId: id });
+  }
+}
