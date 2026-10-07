@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
 import { getTeam } from '../teams/teams.js';
 import * as E from './events.js';
+import * as D from './drafts.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import { settleEvent, startEventFlow } from './flow.js';
@@ -79,6 +80,20 @@ export class EventRunner {
         this.stepEvent(ev, now);
       } catch (err) {
         console.error(`[events] tick for event ${ev.id} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
+    // Drafts plan D1 Ruling 2: close signups of draft-kind events at their
+    // signupsCloseAt. A late tick closes them late, but signUp checks the
+    // time itself, so nobody gets in after it.
+    const drafts = db.prepare(
+      "SELECT * FROM events WHERE entry_kind = 'draft' AND status = 'registration' AND locked_at IS NULL ORDER BY id",
+    ).all() as E.EventRow[];
+    for (const ev of drafts) {
+      try {
+        const close = E.fieldsOf(ev).draft?.signupsCloseAt;
+        if (close && Date.parse(close) <= now.getTime()) D.closeSignups(db, { eventId: ev.id, actor: null, now });
+      } catch (err) {
+        console.error(`[events] closing signups of event ${ev.id} failed:`, err instanceof Error ? err.message : err);
       }
     }
   }

@@ -14,6 +14,8 @@ import { A, B, entryFixture, rosterA, type EntryFixture } from './entryFixture.j
 import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 import { POOL7, TIMERS, driveToBooking, fakeBooking, fakeMatch, roomFixture, windowFixture, type RoomFixture } from './roomFixture.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
+import * as D from '../src/events/drafts.js';
+import { P as DP, draftFixture, type DraftFixture } from './draftFixture.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -34,7 +36,8 @@ import { presetConfig } from '../src/events/vetoConfig.js';
 
 const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
 const ENTRY_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_entries|event_entry_players)\b/gi;
-const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts']);
+const DRAFT_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:draft_signups|draft_captain_offers)\b/gi;
+const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts', 'src/events/drafts.ts']);
 const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf', 'scheduleOf']);
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
 const HELPERS = new Set(['logEvent']);
@@ -75,7 +78,7 @@ const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileT
   .flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : e.name.endsWith('.ts') ? [`${dir}/${e.name}`] : []));
 
 describe('event_log guard', () => {
-  it('only src/events/events.ts, entries.ts and play.ts write the event tables', () => {
+  it('only src/events/events.ts, entries.ts, play.ts and drafts.ts write the event tables', () => {
     const offenders = walk('src')
       .filter((f) => !ENGINE.has(f))
       .filter((f) => (readFileSync(join(root, f), 'utf8').match(WRITERS) ?? []).length > 0);
@@ -269,6 +272,68 @@ describe('event_log guard', () => {
         );
         expect(() => m.run(f)).toThrow(/audit down/);
         expect(entryRows(f)).toBe(before);
+      });
+    }
+  });
+
+  /** Drafts plan D1: src/events/drafts.ts is the only writer of the two
+   *  draft tables (the account merge aside), and each of its mutations adds
+   *  one event_log row or, when that row cannot be written, nothing. */
+  describe('drafts guard (src/events/drafts.ts)', () => {
+    const must = <T>(r: V.Checked<T>): T => {
+      if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
+      return r.value;
+    };
+    const DRAFT_READS = new Set(['activeSignups', 'signupOf']);
+    const signed = (f: DraftFixture) => must(D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }));
+    const DRAFT_MUTATIONS: Record<string, { action: string; setup?: (f: DraftFixture) => void; run: (f: DraftFixture) => V.Checked<unknown> }> = {
+      signUp: { action: 'draft_signup', run: (f) => D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }) },
+      withdrawSignup: { action: 'draft_withdraw', setup: signed, run: (f) => D.withdrawSignup(f.db, { eventId: f.eventId, steamid: DP[0], now: NOW }) },
+      removeSignup: {
+        action: 'draft_signup_removed', setup: signed,
+        run: (f) => D.removeSignup(f.db, { eventId: f.eventId, steamid: DP[0], reason: 'removed', actor: ADMIN, now: NOW }),
+      },
+      closeSignups: { action: 'draft_signups_closed', setup: signed, run: (f) => D.closeSignups(f.db, { eventId: f.eventId, actor: null, now: NOW }) },
+    };
+    const draftRows = (f: DraftFixture) => JSON.stringify([
+      f.db.prepare('SELECT * FROM draft_signups ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM draft_captain_offers ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM events ORDER BY id').all(),
+    ]);
+
+    it('only src/events/drafts.ts (and the account merge) writes the draft tables', () => {
+      const offenders = walk('src')
+        .filter((f) => f !== 'src/events/drafts.ts' && f !== 'src/mergePlayers.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(DRAFT_WRITERS) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+      expect('update draft_signups set x = 1'.match(DRAFT_WRITERS)).toHaveLength(1);
+    });
+
+    it('every exported function of drafts.ts is a known read or a guarded mutation', () => {
+      const fns = Object.entries(D).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !DRAFT_READS.has(k)).sort()).toEqual(Object.keys(DRAFT_MUTATIONS).sort());
+    });
+
+    for (const [name, m] of Object.entries(DRAFT_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, () => {
+        const f = draftFixture();
+        m.setup?.(f);
+        const before = logCount(f);
+        const r = m.run(f);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(f)).toBe(before + 1);
+        expect(f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, () => {
+        const f = draftFixture();
+        m.setup?.(f);
+        const before = draftRows(f);
+        const logs = logCount(f);
+        f.db.exec("CREATE TRIGGER draft_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+        expect(() => m.run(f)).toThrow(/audit down/);
+        expect(draftRows(f)).toBe(before);
+        expect(logCount(f)).toBe(logs);
       });
     }
   });

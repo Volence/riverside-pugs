@@ -7,13 +7,14 @@ import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { competitiveAccess, competitivePublic } from '../teams/access.js';
 import * as E from '../events/events.js';
 import { getEventBySlug } from '../events/events.js';
+import * as D from '../events/drafts.js';
 import * as N from '../events/entries.js';
 import * as P from '../events/play.js';
 import * as R from '../events/room.js';
 import * as S from '../events/schedule.js';
 import { matchRoomView, prefsView } from '../events/roomViews.js';
 import * as V from '../events/validate.js';
-import { eventListItems, eventView, myEventView } from '../events/views.js';
+import { eventListItems, eventView, myEventView, signupView } from '../events/views.js';
 import { tellReschedule, tellRosterAdded, tellTimeLocked } from '../events/notices.js';
 import type { Notifier } from '../notify/notify.js';
 import type { RoomClock } from '../events/roomClock.js';
@@ -164,6 +165,32 @@ export async function eventRoutes(
       return {};
     });
   }
+
+  /** Draft signups (drafts plan D1): one per player, with a captain
+   *  preference and an optional private note, while signups are open. A team
+   *  event answers not_draft, and an unpublished one 404 like any draft. */
+  app.post('/api/events/:slug/signup', async (req, reply) => {
+    const me = allowedActive(req, reply);
+    if (!me) return;
+    const ev = visibleEvent((req.params as { slug: string }).slug, me);
+    if (!ev || ev.status === 'draft') return reply.code(404).send(NOT_FOUND);
+    const body = (req.body ?? {}) as { captainPref?: unknown; note?: unknown };
+    if (!D.CAPTAIN_PREFS.includes(body.captainPref as D.CaptainPref)) return refuse(reply, { error: 'bad_captain_pref' });
+    if (body.note !== undefined && body.note !== null && typeof body.note !== 'string') return refuse(reply, { error: 'bad_note' });
+    const r = D.signUp(db, { eventId: ev.id, steamid: me, captainPref: body.captainPref as D.CaptainPref, note: (body.note as string | null | undefined) ?? null, now: new Date() });
+    if (!r.ok) return refuse(reply, r);
+    return { ok: true, signup: signupView(ev, r.value) };
+  });
+
+  app.post('/api/events/:slug/withdraw-signup', async (req, reply) => {
+    const me = allowedActive(req, reply);
+    if (!me) return;
+    const ev = visibleEvent((req.params as { slug: string }).slug, me);
+    if (!ev || ev.status === 'draft') return reply.code(404).send(NOT_FOUND);
+    const r = D.withdrawSignup(db, { eventId: ev.id, steamid: me, now: new Date() });
+    if (!r.ok) return refuse(reply, r);
+    return { ok: true };
+  });
 
   /** The match room (plan T3a). A match of another event answers like one
    *  that does not exist. Every write pushes the room to its two rosters. */

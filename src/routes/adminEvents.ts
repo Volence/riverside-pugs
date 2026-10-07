@@ -8,6 +8,7 @@ import { logAdmin } from '../admin/audit.js';
 import { getPlayer } from '../players.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import * as E from '../events/events.js';
+import * as D from '../events/drafts.js';
 import * as N from '../events/entries.js';
 import * as P from '../events/play.js';
 import * as R from '../events/room.js';
@@ -19,7 +20,7 @@ import { adminEntryViews } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded, tellStaffAction, tellTimeLocked } from '../events/notices.js';
+import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTimeLocked } from '../events/notices.js';
 import type { StaffAction } from '../events/messages.js';
 import { higherSide, openMatchRoom, type RoomClock } from '../events/roomClock.js';
 
@@ -342,6 +343,34 @@ export async function adminEventRoutes(
     const r = N.reorderSeeds(db, { eventId: ev.id, by: me, order: ((req.body ?? {}) as { order?: unknown }).order });
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, 'event_seeds', ev.id, { order: r.value });
+    return {};
+  });
+
+  /** Draft signups (drafts plan D1): admins close signups early, and take a
+   *  signup off with a reason the player is DMed (Rulings 2, 7 and 11). */
+  app.post('/api/admin/events/:id/close-signups', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = D.closeSignups(db, { eventId: ev.id, actor: me, now: new Date() });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_close_signups', ev.id, { slug: ev.slug });
+    return {};
+  });
+
+  app.post('/api/admin/events/:id/signups/:steamid/remove', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; steamid: string };
+    const ev = eventOf(p.id);
+    if (!ev) return refuse(reply, 'not_found');
+    const reason = ((req.body ?? {}) as { reason?: unknown }).reason;
+    if (reason !== 'removed' && reason !== 'ineligible') return refuse(reply, 'bad_request');
+    const r = D.removeSignup(db, { eventId: ev.id, steamid: p.steamid, reason, actor: me, now: new Date() });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_signup_remove', ev.id, { steamid: p.steamid, reason });
+    tellSignupRemoved(opts, ev.id, p.steamid, reason);
     return {};
   });
 

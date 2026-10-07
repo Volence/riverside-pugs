@@ -50,6 +50,9 @@ describe('preferences', () => {
       type: 'event_match_staff', label: 'Staff act on a tournament match of mine (a freeze, a reopened veto, a replayed chapter, a moved server, more time, a released hold)',
     });
   });
+  it('lists the draft signup removal DM (plan D1)', () => {
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_signup_removed')).toEqual({ type: 'draft_signup_removed', label: 'Draft: signup removed by staff' });
+  });
   it('lists the two reschedule DMs (plan T4)', () => {
     expect(NOTIFY_TYPES.filter((t) => t.type === 'event_reschedule' || t.type === 'event_match_time')).toEqual([
       { type: 'event_reschedule', label: 'A captain proposes, counters, declines or withdraws a time for a tournament match of mine, or a proposal is about to lock' },

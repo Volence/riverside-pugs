@@ -551,6 +551,8 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT event_id, steamid FROM draft_signups WHERE withdrawn_at IS NULL ORDER BY event_id').all())
       .toEqual([{ event_id: both, steamid: MAIN }, { event_id: only, steamid: MAIN }]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM draft_signups WHERE steamid = ?').get(ALT)).toEqual({ n: 0 });
+    // The closed duplicate reads as a withdrawal, never a staff removal (which DMs).
+    expect(db.prepare('SELECT withdraw_reason FROM draft_signups WHERE withdrawn_at IS NOT NULL').all()).toEqual([{ withdraw_reason: 'withdrawn' }]);
     expect(db.prepare('SELECT steamid FROM draft_captain_offers').all()).toEqual([{ steamid: MAIN }]);
   });
 

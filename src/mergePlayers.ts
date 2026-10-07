@@ -386,7 +386,8 @@ export function mergePlayers(
       AND team_id IN (SELECT team_id FROM team_invites WHERE steamid = ? AND responded_at IS NULL)`).run(teamsNow, from, into);
     db.prepare(`UPDATE event_entry_players SET removed_at = ? WHERE steamid = ? AND removed_at IS NULL
       AND entry_id IN (SELECT entry_id FROM event_entry_players WHERE steamid = ? AND removed_at IS NULL)`).run(teamsNow, from, into);
-    db.prepare(`UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'removed' WHERE steamid = ? AND withdrawn_at IS NULL
+    // The closed alt row's role is not inherited: the cut recomputes roles.
+    db.prepare(`UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'withdrawn' WHERE steamid = ? AND withdrawn_at IS NULL
       AND event_id IN (SELECT event_id FROM draft_signups WHERE steamid = ? AND withdrawn_at IS NULL)`).run(teamsNow, from, into);
 
     for (const [table, column] of PLAIN) {
