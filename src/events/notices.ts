@@ -5,6 +5,7 @@ import * as P from './play.js';
 import { eventMessage, type EventNotifyType, type RescheduleNotice, type SignupRemoval, type StaffAction } from './messages.js';
 import { getProposal } from './schedule.js';
 import type { CutRole } from './draftRules.js';
+import { openOffer } from './drafts.js';
 
 /**
  * The event DMs (plan T1b Ruling 11), shared by the minute tick
@@ -111,7 +112,6 @@ export function tellCutRole(d: NoticeDeps, eventId: number, cut: Record<'captain
 /** A captaincy offer went out (drafts plan D1 Ruling 11): the event's open
  *  offer, read after it committed, so the DM names its expiry. */
 export function tellCaptainOffer(d: NoticeDeps, eventId: number): void {
-  const o = d.db.prepare('SELECT steamid, expires_at FROM draft_captain_offers WHERE event_id = ? AND answer IS NULL').get(eventId) as
-    { steamid: string; expires_at: string } | undefined;
+  const o = openOffer(d.db, eventId);
   if (o) tell(d, [o.steamid], eventId, 'draft_captain_offer', { expiresAt: o.expires_at });
 }

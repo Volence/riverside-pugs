@@ -39,6 +39,12 @@ export function signupOf(db: DB, eventId: number, steamid: string): SignupRow | 
     .get(eventId, steamid) as SignupRow | undefined) ?? null;
 }
 
+export interface OpenOffer { id: number; steamid: string; expires_at: string }
+/** The event's one open captaincy offer (answer NULL), if any. */
+export function openOffer(db: DB, eventId: number): OpenOffer | null {
+  return (db.prepare('SELECT id, steamid, expires_at FROM draft_captain_offers WHERE event_id = ? AND answer IS NULL').get(eventId) as OpenOffer | undefined) ?? null;
+}
+
 /** A published draft-kind event, or the refusal. */
 function draftEvent(db: DB, eventId: number): V.Checked<E.EventRow> {
   const ev = E.getEvent(db, eventId);
@@ -204,6 +210,10 @@ export function setCaptain(db: DB, o: { eventId: number; steamid: string; captai
     const s = signupOf(db, ev.id, o.steamid);
     if (!s) return V.fail('not_signed_up');
     makeCaptain(db, ev, s, o.captain);
+    // Made captain by hand while their offer is open: the offer is moot, so
+    // it is stopped and the chain moves on at the next tick (Ruling 6).
+    const open = o.captain ? openOffer(db, ev.id) : null;
+    if (open && open.steamid === o.steamid) db.prepare("UPDATE draft_captain_offers SET answer = 'stopped', answered_at = ? WHERE id = ?").run(at, open.id);
     E.logEvent(db, ev.id, o.actor, 'draft_captain_set', at, { steamid: o.steamid, captain: o.captain });
     return V.ok(null);
   })();
@@ -285,10 +295,10 @@ export function publishCut(db: DB, o: { eventId: number; actor: string; now: Dat
  * with offers on and the cut unpublished, so each tick is two mutations of
  * one log row each. One offer is open at a time (the partial unique index
  * draft_offers_open), each to the next nextOfferee, never to anyone offered
- * before in this event. The chain stops when the captains reach the team
- * count (offerNext refuses offers_not_needed and does nothing; publishCut
- * turns offers_on off later), when staff stop it, when nobody is left
- * (offers_on off, and the runner tells the admin feed) or at publish.
+ * before in this event. The chain stops on its own when the captains reach
+ * the team count or nobody is left (offerNext turns offers_on off; the
+ * runner tells the admin feed only of the second), when staff stop it, or
+ * at publish.
  */
 
 /** draft_offer_minutes, read through settingNumber (5 to 240, default 30). */
@@ -296,9 +306,6 @@ export function draftOfferMinutes(db: DB): number {
   return settingNumber(db, 'draft_offer_minutes', 30, { min: 5, max: 240, integer: true });
 }
 
-type OfferRow = { id: number; steamid: string; expires_at: string };
-const openOfferOf = (db: DB, eventId: number): OfferRow | null =>
-  (db.prepare('SELECT id, steamid, expires_at FROM draft_captain_offers WHERE event_id = ? AND answer IS NULL').get(eventId) as OfferRow | undefined) ?? null;
 const captainCount = (db: DB, eventId: number) => activeSignups(db, eventId).filter((s) => s.role === 'captain').length;
 
 /** nextOfferee over the active signups, with SR and eligibility read fresh. */
@@ -330,7 +337,7 @@ export function startOffers(db: DB, o: { eventId: number; actor: string; now: Da
     if (ev.offers_on === 1) return V.fail('offers_on');
     if (captainCount(db, ev.id) >= (ev.draft_teams ?? 0)) return V.fail('offers_not_needed');
     db.prepare('UPDATE events SET offers_on = 1, updated_at = ? WHERE id = ?').run(at, ev.id);
-    const first = openOfferOf(db, ev.id) ? null : pickOfferee(db, ev, o.now);
+    const first = openOffer(db, ev.id) ? null : pickOfferee(db, ev, o.now);
     if (first) insertOffer(db, ev.id, first, o.now, o.minutes);
     E.logEvent(db, ev.id, o.actor, 'draft_offers_started', at, { first });
     return V.ok({ offered: first });
@@ -345,7 +352,7 @@ export function stopOffers(db: DB, o: { eventId: number; actor: string; now: Dat
     if (!found.ok) return found;
     const ev = found.value;
     if (ev.offers_on !== 1) return V.fail('offers_off');
-    const open = openOfferOf(db, ev.id);
+    const open = openOffer(db, ev.id);
     db.prepare('UPDATE events SET offers_on = 0, updated_at = ? WHERE id = ?').run(at, ev.id);
     if (open) db.prepare("UPDATE draft_captain_offers SET answer = 'stopped', answered_at = ? WHERE id = ?").run(at, open.id);
     E.logEvent(db, ev.id, o.actor, 'draft_offers_stopped', at, { stopped: open?.steamid ?? null });
@@ -368,7 +375,7 @@ export function answerOffer(db: DB, o: { eventId: number; steamid: string; accep
     const found = cutOpen(db, o.eventId);
     if (!found.ok) return found;
     const ev = found.value;
-    const open = openOfferOf(db, ev.id);
+    const open = openOffer(db, ev.id);
     const s = signupOf(db, ev.id, o.steamid);
     if (!open || open.steamid !== o.steamid || !s) return V.fail('no_offer');
     if (o.now.getTime() >= Date.parse(open.expires_at)) {
@@ -390,7 +397,7 @@ export function expireDueOffer(db: DB, o: { eventId: number; now: Date }): V.Che
   return db.transaction((): V.Checked<null> => {
     const found = draftEvent(db, o.eventId);
     if (!found.ok) return found;
-    const open = openOfferOf(db, o.eventId);
+    const open = openOffer(db, o.eventId);
     if (!open || Date.parse(open.expires_at) > o.now.getTime()) return V.fail('no_offer');
     db.prepare("UPDATE draft_captain_offers SET answer = 'expired', answered_at = ? WHERE id = ?").run(at, open.id);
     E.logEvent(db, o.eventId, null, 'draft_offer_expired', at, { steamid: open.steamid });
@@ -398,30 +405,41 @@ export function expireDueOffer(db: DB, o: { eventId: number; now: Date }): V.Che
   })();
 }
 
-/** The tick, second half: while offers are on, no offer is open and the
- *  captains are fewer than the teams, offer the next willing signup; with
- *  nobody left, offers off and offered null (the runner alerts the admin
- *  feed). A refusal (offers_off, offer_open, offers_not_needed or a cut
- *  refusal) writes nothing and the runner does nothing. */
-export function offerNext(db: DB, o: { eventId: number; now: Date; minutes: number }): V.Checked<{ offered: string | null }> {
+/** What offerNext did: an offer made (offered), or the chain stopped on its
+ *  own, because nobody is left (exhausted: the runner alerts the admin feed)
+ *  or because the captains reached the team count (met: nothing more). */
+export interface OfferStep { offered: string | null; stopped: 'exhausted' | 'met' | null }
+
+/** The tick, second half: while offers are on and no offer is open, offer
+ *  the next willing signup while the captains are fewer than the teams.
+ *  Offers turn off on their own when the count is met (draft_offers_met) or
+ *  nobody is left (draft_offers_exhausted), so a later captain change never
+ *  restarts a chain nobody asked for. A refusal (offers_off, offer_open or a
+ *  cut refusal) writes nothing and the runner does nothing. */
+export function offerNext(db: DB, o: { eventId: number; now: Date; minutes: number }): V.Checked<OfferStep> {
   const at = o.now.toISOString();
-  return db.transaction((): V.Checked<{ offered: string | null }> => {
+  return db.transaction((): V.Checked<OfferStep> => {
     const found = cutOpen(db, o.eventId);
     if (!found.ok) return found;
     const ev = found.value;
     if (ev.offers_on !== 1) return V.fail('offers_off');
-    if (openOfferOf(db, ev.id)) return V.fail('offer_open');
+    if (openOffer(db, ev.id)) return V.fail('offer_open');
     const captains = captainCount(db, ev.id);
     const teams = ev.draft_teams ?? 0;
-    if (captains >= teams) return V.fail('offers_not_needed');
+    const off = () => db.prepare('UPDATE events SET offers_on = 0, updated_at = ? WHERE id = ?').run(at, ev.id);
+    if (captains >= teams) {
+      off();
+      E.logEvent(db, ev.id, null, 'draft_offers_met', at, { captains, teams });
+      return V.ok({ offered: null, stopped: 'met' });
+    }
     const next = pickOfferee(db, ev, o.now);
     if (next) {
       insertOffer(db, ev.id, next, o.now, o.minutes);
       E.logEvent(db, ev.id, null, 'draft_offer_made', at, { steamid: next });
-    } else {
-      db.prepare('UPDATE events SET offers_on = 0, updated_at = ? WHERE id = ?').run(at, ev.id);
-      E.logEvent(db, ev.id, null, 'draft_offers_exhausted', at, { captains, teams });
+      return V.ok({ offered: next, stopped: null });
     }
-    return V.ok({ offered: next });
+    off();
+    E.logEvent(db, ev.id, null, 'draft_offers_exhausted', at, { captains, teams });
+    return V.ok({ offered: null, stopped: 'exhausted' });
   })();
 }

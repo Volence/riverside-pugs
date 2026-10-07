@@ -149,7 +149,7 @@ describe('captaincy offers over HTTP', () => {
     expect((await get(`/api/events/${f.slug}/mine`, P[7])).json().offer).toBeNull();
 
     const next = D.offerNext(f.db, { eventId: f.eventId, now: new Date(), minutes: 30 });
-    expect(next).toEqual({ ok: true, value: { offered: P[6] } });
+    expect(next).toEqual({ ok: true, value: { offered: P[6], stopped: null } });
     expect((await post(url, P[6], { accept: true })).statusCode).toBe(200);
     expect(D.signupOf(f.db, f.eventId, P[6])!.role).toBe('captain');
     expect((await post(url, P[6], { accept: true })).statusCode).toBe(409);

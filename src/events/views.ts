@@ -219,10 +219,9 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
       .map((t) => ({ teamId: t.id, name: t.name, tag: t.tag, logoKey: t.logo_key, members: memberOptions(t.id, null) }))
     : [];
   const own = ev.entry_kind === 'draft' ? D.signupOf(db, ev.id, viewer) : null;
-  const offer = ev.entry_kind === 'draft' && ev.cut_at === null
-    ? (db.prepare('SELECT expires_at FROM draft_captain_offers WHERE event_id = ? AND steamid = ? AND answer IS NULL').get(ev.id, viewer) as { expires_at: string } | undefined)
-    : undefined;
-  return { entries, register, canRegister, signup: own ? signupView(ev, own) : null, offer: offer ? { expiresAt: offer.expires_at } : null };
+  const open = ev.entry_kind === 'draft' && ev.cut_at === null ? D.openOffer(db, ev.id) : null;
+  const offer = open && open.steamid === viewer ? { expiresAt: open.expires_at } : null;
+  return { entries, register, canRegister, signup: own ? signupView(ev, own) : null, offer };
 }
 
 export interface AdminEntryView {

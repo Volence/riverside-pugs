@@ -185,6 +185,37 @@ describe('captaincy offers down the willing list by SR', () => {
     expect(open(f)).toEqual([]);
   });
 
+  it('turns offers off once the count is met, so a later captain change makes no offer', () => {
+    const f = setup();
+    const events = feed();
+    for (const s of [P[4], P[5], P[6]]) must(D.setCaptain(f.db, { eventId: f.eventId, steamid: s, captain: true, actor: ADMIN, now: NOW }));
+    must(start(f));
+    must(answer(f, P[1], true));
+    expect(captains(f)).toHaveLength(5);
+    const { r, send } = runner(f);
+    r.step(at(2));
+    expect(offersOn(f)).toBe(0);
+    expect(logs(f, 'draft_offers_met')).toEqual([{ actor: null, detail: { captains: 5, teams: 5 } }]);
+    must(D.setCaptain(f.db, { eventId: f.eventId, steamid: P[6], captain: false, actor: ADMIN, now: at(3) }));
+    r.step(at(4));
+    r.step(at(5));
+    expect(open(f)).toEqual([]);
+    expect(offers(f)).toHaveLength(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
+
+  it('staff making the offeree captain by hand stops their offer, and the next tick moves on', () => {
+    const f = setup();
+    must(start(f));
+    must(D.setCaptain(f.db, { eventId: f.eventId, steamid: P[1], captain: true, actor: ADMIN, now: at(1) }));
+    expect(offers(f).map((o) => o.answer)).toEqual(['stopped']);
+    expect(logs(f, 'draft_captain_set').slice(-1)).toEqual([{ actor: ADMIN, detail: { steamid: P[1], captain: true } }]);
+    must(D.setCaptain(f.db, { eventId: f.eventId, steamid: P[7], captain: true, actor: ADMIN, now: at(1) }));
+    runner(f).r.step(at(2));
+    expect(open(f).map((o) => o.steamid)).toEqual([P[2]]);
+  });
+
   it('refuses what it should', () => {
     const f = setup();
     expect(err(answer(f, P[1], true))).toBe('no_offer');

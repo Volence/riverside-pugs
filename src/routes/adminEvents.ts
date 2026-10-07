@@ -388,8 +388,7 @@ export async function adminEventRoutes(
     if (!ev) return refuse(reply, 'not_found');
     if (ev.entry_kind !== 'draft') return refuse(reply, 'not_draft');
     const now = new Date();
-    const offer = db.prepare('SELECT steamid, expires_at FROM draft_captain_offers WHERE event_id = ? AND answer IS NULL').get(ev.id) as
-      { steamid: string; expires_at: string } | undefined;
+    const offer = D.openOffer(db, ev.id);
     const signups = signupFacts(db, ev.id, now);
     return {
       lockedAt: ev.locked_at, cutAt: ev.cut_at, teams: ev.draft_teams, maxTeams: maxTeams(signups.length), offersOn: ev.offers_on === 1,
