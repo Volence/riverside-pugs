@@ -65,10 +65,18 @@ describe('the draft desk over HTTP', () => {
     expect(body.signups[0]).toMatchObject({ steamid: P[2], sr: 1050, captainPref: 'want', note: 'note 2', role: 'pool', manual: false, abandons30d: 0, noShows30d: 0, problems: [] });
     expect(body.signups.slice(-6).map((s: { role: string }) => s.role)).toEqual(Array(6).fill('bench'));
     expect((await get(base(), P[5])).statusCode).toBe(403);
-    for (const [path, b] of [['teams', { teams: 4 }], ['captain', { steamid: P[0], captain: true }], ['swap', { pool: P[5], bench: P[20] }], ['publish', {}]] as const) {
+    for (const [path, b] of [['teams', { teams: 4 }], ['captain', { steamid: P[0], captain: true }], ['swap', { pool: P[5], bench: P[20] }], ['pick-captains', {}], ['publish', {}]] as const) {
       expect((await post(`${base()}/${path}`, MOD, b)).statusCode, path).toBe(403);
     }
     expect(E.getEvent(f.db, f.eventId)!.draft_teams).toBe(5);
+  });
+
+  it('picks captains for an admin only, audited', async () => {
+    const r = await post(`${base()}/pick-captains`, ADMIN);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ok: true, captains: [P[2], P[1], P[0]], short: 2 });
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'event_draft_pick_captains'").get() as { n: number }).n).toBe(1);
+    expect((await get(base(), ADMIN)).json().signups.filter((s: { role: string }) => s.role === 'captain')).toHaveLength(3);
   });
 
   it('runs the cut as an admin, audited, and refuses what the writer refuses', async () => {
