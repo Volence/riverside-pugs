@@ -686,9 +686,19 @@ export class ApiError extends Error {
     message: string,
     readonly nearestSlot?: string | null,
     readonly problems?: { steamid: string; name: string; problems: string[] }[],
+    /** The whole parsed error body, for refusals that carry more than `problems` (a refused cut). */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
+  }
+}
+
+/** A publish the server refused with cut_changed (409). */
+export class CutChangedError extends ApiError {
+  constructor(status: number, message: string, readonly cutBody: CutChangedBody) {
+    super(status, message, undefined, undefined, cutBody);
+    this.name = 'CutChangedError';
   }
 }
 
@@ -719,6 +729,7 @@ async function post<T = unknown>(path: string, body?: unknown): Promise<T> {
     throw new ApiError(
       res.status, msg, (parsed as { nearestSlot?: string | null }).nearestSlot,
       (parsed as { problems?: { steamid: string; name: string; problems: string[] }[] }).problems,
+      parsed,
     );
   }
   return parsed as T;
@@ -2407,6 +2418,27 @@ export interface AdminEventOptions {
   defaults: { eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster };
 }
 
+/** The desk's Draft panel (drafts plan D1). Mirrors src/events/draftFacts.ts
+ *  SignupFacts; `problems` are eligibility sentences, already worded. */
+export interface SignupFacts {
+  steamid: string; name: string; sr: number; captainPref: 'want' | 'willing' | 'no'; note: string | null; signedUpAt: string;
+  role: 'captain' | 'pool' | 'bench' | null; manual: boolean; abandons30d: number; noShows30d: number; problems: string[];
+}
+export type CutProblem = 'too_few_teams' | 'too_many_teams' | 'too_few_captains' | 'too_many_captains' | 'pool_size' | 'unassigned' | 'ineligible';
+/** GET /api/admin/events/:id/draft. */
+export interface AdminDraftView {
+  lockedAt: string | null; cutAt: string | null; teams: number | null; maxTeams: number; offersOn: boolean;
+  openOffer: { steamid: string; name: string; expiresAt: string } | null;
+  problems: CutProblem[]; signups: SignupFacts[];
+}
+/** The body of a refused publish (409 cut_changed). Unlike other refusals,
+ *  `problems` holds CutProblem codes, and `cut` the counts. */
+export interface CutChangedBody {
+  error: string; problems: CutProblem[];
+  cut: { teams: number | null; maxTeams: number; active: number; captains: number; pool: number; poolNeeded: number; bench: number; unassigned: number };
+  ineligible: { steamid: string; name: string; problems: string[] }[];
+}
+
 /** The Entries section of the desk (plan T1b Ruling 10). Mirrors
  *  src/events/views.ts AdminEntryView. */
 export interface AdminEntryView {
@@ -2534,6 +2566,23 @@ export const adminApi = {
   eventEntries: (id: number, signal?: AbortSignal) => get<{ lockedAt: string | null; entries: AdminEntryView[] }>(`/api/admin/events/${id}/entries`, signal),
   openEventCheckin: (id: number) => post(`/api/admin/events/${id}/open-checkin`),
   lockEventEntries: (id: number) => post(`/api/admin/events/${id}/lock-entries`),
+  eventDraft: (id: number, signal?: AbortSignal) => get<AdminDraftView>(`/api/admin/events/${id}/draft`, signal),
+  draftTeams: (id: number, teams: number) => post(`/api/admin/events/${id}/draft/teams`, { teams }),
+  draftCaptain: (id: number, steamid: string, captain: boolean) => post(`/api/admin/events/${id}/draft/captain`, { steamid, captain }),
+  draftSwap: (id: number, pool: string, bench: string) => post(`/api/admin/events/${id}/draft/swap`, { pool, bench }),
+  /** A refused cut throws a CutChangedError carrying the CutChangedBody. */
+  draftPublish: async (id: number) => {
+    try {
+      return await post<{ captains: number; pool: number; bench: number }>(`/api/admin/events/${id}/draft/publish`);
+    } catch (err) {
+      const body = err instanceof ApiError ? (err.body as Partial<CutChangedBody> | undefined) : undefined;
+      if (err instanceof ApiError && body?.cut && Array.isArray(body.problems)) throw new CutChangedError(err.status, err.message, body as CutChangedBody);
+      throw err;
+    }
+  },
+  draftOffers: (id: number, on: boolean) => post(`/api/admin/events/${id}/draft/offers`, { on }),
+  closeSignups: (id: number) => post(`/api/admin/events/${id}/close-signups`),
+  removeSignup: (id: number, steamid: string, reason: 'removed' | 'ineligible') => post(`/api/admin/events/${id}/signups/${steamid}/remove`, { reason }),
   reorderEventSeeds: (id: number, order: number[]) => post(`/api/admin/events/${id}/seeds`, { order }),
   setEventEntryRoster: (id: number, entryId: number, roster: EntryRoster) => post(`/api/admin/events/${id}/entries/${entryId}/roster`, { roster }),
   disqualifyEventEntry: (id: number, entryId: number, reason: string) => post(`/api/admin/events/${id}/entries/${entryId}/disqualify`, { reason }),
