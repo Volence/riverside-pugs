@@ -52,8 +52,7 @@ export function DraftSignupPanel({ slug, eventName, status, lockedAt, draft, vie
   const published = draft.cut !== null;
   // Signups close on the clock even before the tick stamps the lock.
   const open = status === 'registration' && lockedAt === null && Date.now() < Date.parse(draft.signupsCloseAt);
-  const notOpenYet = !open && status !== 'registration' && lockedAt === null && Date.now() < Date.parse(draft.signupsCloseAt)
-    && status !== 'live' && status !== 'finished' && status !== 'cancelled';
+  const notOpenYet = (status === 'announced' || status === 'draft') && lockedAt === null && Date.now() < Date.parse(draft.signupsCloseAt);
 
   if (!signup && !open && !offer && !notOpenYet) return null;
 
