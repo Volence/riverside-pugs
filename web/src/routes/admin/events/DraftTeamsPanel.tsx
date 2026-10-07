@@ -6,15 +6,20 @@ import { fmtTime, useAction } from '../useAction';
 /** The Make teams section of a draft-kind event on the desk (drafts plan
  *  D2a): choose the method, balance by SR, swap players by hand, read the
  *  fairness numbers and publish. Staff only: none of this reaches a player.
- *  A mod (canEdit false) reads it with no control. */
-export function DraftTeamsPanel({ eventId, canEdit, gen = 0, onChange }: {
-  eventId: number; canEdit: boolean; gen?: number; onChange?: () => void;
+ *  A mod (canEdit false) reads it with no control, and nobody gets one once
+ *  the event is cancelled or finished. startsAt lets the publish confirm warn
+ *  when the start time has already passed. */
+export function DraftTeamsPanel({ eventId, canEdit, status, startsAt, gen = 0, onChange }: {
+  eventId: number; canEdit: boolean; status: string; startsAt: string; gen?: number; onChange?: () => void;
 }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.draftTeamsView(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(() => { reload(); onChange?.(); });
   if (loadError) return <Panel><h3>Make teams</h3><p class="error">Could not load the teams.</p></Panel>;
   if (!data) return <Panel><h3>Make teams</h3></Panel>;
   const published = data.teamsMadeAt !== null;
+  const over = status === 'cancelled' || status === 'finished';
+  const write = canEdit && !over;
+  const startPassed = Date.parse(startsAt) <= Date.now();
   const teams = data.teams;
   const fair = data.fairness;
   const allPlayers = (teams ?? []).flatMap((t, ti) => t.players.map((p) => ({ ...p, ti })));
@@ -26,7 +31,7 @@ export function DraftTeamsPanel({ eventId, canEdit, gen = 0, onChange }: {
       {published && <p>Teams published {fmtTime(data.teamsMadeAt)}</p>}
       {!canEdit && !published && <p class="muted">Read only: admins run events.</p>}
       {error && <p class="error" role="alert">{error}</p>}
-      {!published && data.mode === null && canEdit && (
+      {!published && data.mode === null && write && (
         <div class="maketeams__modes">
           <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.draftMode(eventId, 'auto'))}>Auto-balance by SR</button>
           <button class="btn btn--ghost" disabled>Let captains pick</button>
@@ -34,7 +39,7 @@ export function DraftTeamsPanel({ eventId, canEdit, gen = 0, onChange }: {
         </div>
       )}
       {!published && data.mode === 'live' && <p class="muted">Coming soon: the live draft room</p>}
-      {!published && data.mode !== null && canEdit && (
+      {!published && data.mode !== null && write && (
         <div class="inlinerow">
           {data.mode === 'auto' && (teams === null
             ? <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.draftBalance(eventId))}>Balance teams</button>
@@ -55,7 +60,7 @@ export function DraftTeamsPanel({ eventId, canEdit, gen = 0, onChange }: {
                   {t.players.map((p) => (
                     <li key={p.steamid}>
                       <span>{p.name}</span> <span class="muted">{Math.round(p.sr)}</span>
-                      {canEdit && !published && (
+                      {write && !published && (
                         <select aria-label={`Swap ${p.name} with`} disabled={busy} value=""
                           onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) void run(() => adminApi.draftMove(eventId, p.steamid, v)); }}>
                           <option value="">Swap with...</option>
@@ -87,11 +92,12 @@ export function DraftTeamsPanel({ eventId, canEdit, gen = 0, onChange }: {
           <p class="muted">Unrated players count at the default SR here; the win forecast treats them as an unknown rating, so the two can disagree.</p>
         </div>
       )}
-      {!published && canEdit && teams !== null && (
+      {!published && write && teams !== null && (
         <div class="inlinerow">
           <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.draftPublishTeams(eventId), {
             title: 'Publish the teams?',
-            body: 'Entries are created, every player gets a DM with their team, and captains can name their team until the event starts. Teams cannot be changed afterwards.',
+            body: 'Entries are created, every player gets a DM with their team, and captains can name their team until the event starts. Teams cannot be changed afterwards.'
+              + (startPassed ? ' The start time has passed, so the event starts within a minute of publishing and team names lock then.' : ''),
           })}>Publish teams</button>
         </div>
       )}
