@@ -132,6 +132,11 @@ const PLAIN: [table: string, column: string][] = [
   ['event_entries', 'registered_by'],
   ['event_entries', 'checked_in_by'],
   ['event_entry_players', 'steamid'],
+  // Draft signups and captaincy offers (drafts plan D1, src/events/drafts.ts).
+  // Where both accounts hold an active signup for one event, the alt's is
+  // closed first (below), as for event_entry_players.
+  ['draft_signups', 'steamid'],
+  ['draft_captain_offers', 'steamid'],
   // Reschedule proposals (tournaments plan T4, src/events/schedule.ts): the
   // captain who proposed a time and the one who answered it, like event_log's
   // actor. responded_by has no foreign key (staff answer too) but follows the
@@ -381,6 +386,8 @@ export function mergePlayers(
       AND team_id IN (SELECT team_id FROM team_invites WHERE steamid = ? AND responded_at IS NULL)`).run(teamsNow, from, into);
     db.prepare(`UPDATE event_entry_players SET removed_at = ? WHERE steamid = ? AND removed_at IS NULL
       AND entry_id IN (SELECT entry_id FROM event_entry_players WHERE steamid = ? AND removed_at IS NULL)`).run(teamsNow, from, into);
+    db.prepare(`UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'removed' WHERE steamid = ? AND withdrawn_at IS NULL
+      AND event_id IN (SELECT event_id FROM draft_signups WHERE steamid = ? AND withdrawn_at IS NULL)`).run(teamsNow, from, into);
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);

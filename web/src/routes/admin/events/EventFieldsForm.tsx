@@ -41,6 +41,8 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
    *  untouched input sends that instant back, not a DST round-trip of it. */
   const [lockFrom, setLockFrom] = useState(fields.roster.lock.kind === 'at'
     ? { local: toLocalInput(fields.roster.lock.at), iso: fields.roster.lock.at } : null);
+  const [closeAt, setCloseAt] = useState(fields.draft ? toLocalInput(fields.draft.signupsCloseAt) : '');
+  const [draftAt, setDraftAt] = useState(fields.draft ? toLocalInput(fields.draft.draftAt) : '');
   const [typed, setTyped] = useState<Record<NumKey, string>>(() => typedOf(fields));
   const typeInto = (k: NumKey) => (e: Event) => { const v = val(e); setTyped((x) => ({ ...x, [k]: v })); };
   const uid = useId();
@@ -70,6 +72,15 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
     // sent back exactly as it came.
     const startsAt = start === toLocalInput(fields.startsAt) ? fields.startsAt : fromLocalInput(start);
     if (!startsAt) { setProblem('Pick a start time.'); return; }
+    // The two draft times follow the same untouched-input rule as startsAt.
+    let draft: EventFields['draft'] = null;
+    if (f.entryKind === 'draft') {
+      const close = fields.draft && closeAt === toLocalInput(fields.draft.signupsCloseAt) ? fields.draft.signupsCloseAt : fromLocalInput(closeAt);
+      const night = fields.draft && draftAt === toLocalInput(fields.draft.draftAt) ? fields.draft.draftAt : fromLocalInput(draftAt);
+      if (!close) { setProblem('Pick when signups close.'); return; }
+      if (!night) { setProblem('Pick the draft night.'); return; }
+      draft = { signupsCloseAt: close, draftAt: night };
+    }
     const used: NumKey[] = ['teamCap', 'minPugs', 'srFloor', 'srCeiling', 'maxSubs', 'maxAdditions',
       ...(f.checkin.enabled ? ['opensMinutes' as const, 'closesMinutes' as const] : []),
       ...(lock.kind === 'after_round' ? ['lockStage' as const, 'lockRound' as const] : [])];
@@ -91,7 +102,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
     }
     setProblem(null);
     onSave({
-      ...f, startsAt, teamCap: n.teamCap ?? null,
+      ...f, startsAt, draft, teamCap: n.teamCap ?? null,
       eligibility: { ...f.eligibility, minPugs: whole('minPugs'), srFloor: n.srFloor ?? null, srCeiling: n.srCeiling ?? null },
       checkin: f.checkin.enabled ? { ...f.checkin, opensMinutes: whole('opensMinutes'), closesMinutes: whole('closesMinutes') } : f.checkin,
       roster: { ...f.roster, maxSubs: whole('maxSubs'), maxAdditions: n.maxAdditions ?? null, lock: rosterLock },
@@ -113,6 +124,16 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
           <option value="draft">Draft (individual signups)</option>
         </select>
       </FormRow>
+      {f.entryKind === 'draft' && (
+        <>
+          <FormRow label="Signups close" help="When signups close and staff can run the cut." for={id('close')}>
+            <input id={id('close')} aria-label="Signups close" type="datetime-local" value={closeAt} onInput={(e) => setCloseAt(val(e))} />
+          </FormRow>
+          <FormRow label="Draft night" help="When the live draft runs (plan D2). Everyone gets this time in their role DM." for={id('draftat')}>
+            <input id={id('draftat')} aria-label="Draft night" type="datetime-local" value={draftAt} onInput={(e) => setDraftAt(val(e))} />
+          </FormRow>
+        </>
+      )}
       <ToggleRow label="Official event" help="A Riverside event, not a community one." checked={f.official} onChange={() => set({ official: !f.official })} />
       <FormRow label="Team cap" help="Most teams that can register. Blank for no cap." for={id('cap')}>
         <input id={id('cap')} aria-label="Team cap" type="number" min={2} max={256} value={typed.teamCap} onInput={typeInto('teamCap')} />

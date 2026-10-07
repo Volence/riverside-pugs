@@ -16,7 +16,7 @@ const FIELDS: EventFields = {
   name: 'Riverside Cup', startsAt: '2026-11-01T09:30:00.000Z', entryKind: 'team', official: true, teamCap: null, description: '',
   eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },
   checkin: { enabled: true, opensMinutes: 60, closesMinutes: 15 },
-  roster: { starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null },
+  roster: { starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null }, draft: null,
 };
 
 afterEach(cleanup);
@@ -28,6 +28,22 @@ describe('EventFieldsForm start time', () => {
     fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'New name' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ startsAt: FIELDS.startsAt }));
+  });
+
+  it('shows the two draft times only for a draft event, and sends them', () => {
+    const onSave = vi.fn();
+    const draftFields: EventFields = { ...FIELDS, entryKind: 'draft', draft: { signupsCloseAt: '2026-10-30T09:30:00.000Z', draftAt: '2026-10-31T09:30:00.000Z' } };
+    const { unmount } = render(<EventFieldsForm fields={FIELDS} status="draft" busy={false} onSave={onSave} />);
+    expect(screen.queryByLabelText('Signups close')).toBeNull();
+    expect(screen.queryByLabelText('Draft night')).toBeNull();
+    unmount();
+    render(<EventFieldsForm fields={draftFields} status="draft" busy={false} onSave={onSave} />);
+    fireEvent.input(screen.getByLabelText('Draft night'), { target: { value: '2026-10-31T12:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+    // The mocked fromLocalInput answers the touched Draft night; the untouched Signups close keeps its stored ISO.
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      draft: { signupsCloseAt: draftFields.draft!.signupsCloseAt, draftAt: '2026-11-01T08:30:00.000Z' },
+    }));
   });
 
   it('sends the new start time when the start input is changed', () => {

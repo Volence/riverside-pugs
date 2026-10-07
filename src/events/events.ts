@@ -26,6 +26,8 @@ export interface EventRow {
   created_at: string; updated_at: string; finished_at: string | null; cancelled_at: string | null; cancel_reason: string | null;
   locked_at: string | null;
   live_at: string | null;
+  /** Plan D1: { signupsCloseAt, draftAt } plus any keys later plans own. */
+  draft_json: string | null; draft_teams: number | null; cut_at: string | null; offers_on: number;
 }
 export interface StageRow {
   id: number; event_id: number; ordinal: number; type: V.StageType; config_json: string; ruleset_id: number;
@@ -63,7 +65,23 @@ export function fieldsOf(ev: EventRow): V.EventFields {
     eligibility: JSON.parse(ev.eligibility_json) as V.Eligibility,
     checkin: JSON.parse(ev.checkin_json) as V.Checkin,
     roster: JSON.parse(ev.roster_json) as V.RosterRules,
+    draft: draftOf(ev),
   };
+}
+
+function draftOf(ev: EventRow): V.DraftFields | null {
+  if (ev.entry_kind !== 'draft' || ev.draft_json === null) return null;
+  const d = JSON.parse(ev.draft_json) as Partial<V.DraftFields>;
+  return typeof d.signupsCloseAt === 'string' && typeof d.draftAt === 'string'
+    ? { signupsCloseAt: d.signupsCloseAt, draftAt: d.draftAt } : null;
+}
+
+/** The column value to write: the parsed times merged over the stored object,
+ *  so keys a later plan owns survive an edit. Null for a team event. */
+function draftJson(ev: EventRow | undefined, f: V.EventFields): string | null {
+  if (!f.draft) return null;
+  const old = ev?.draft_json ? JSON.parse(ev.draft_json) as Record<string, unknown> : {};
+  return JSON.stringify({ ...old, ...f.draft });
 }
 
 export function stageSettingsOf(s: StageRow): V.StageSettings {
@@ -195,10 +213,10 @@ export function createEvent(db: DB, o: { by: string; fields: unknown; now?: Date
   return db.transaction((): EventResult<EventRow> => {
     const id = Number(db.prepare(
       `INSERT INTO events (slug, name, organizer_steamid, official, entry_kind, starts_at, description,
-         eligibility_json, team_cap, checkin_json, roster_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         eligibility_json, team_cap, checkin_json, roster_json, draft_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(slugFor(db, f.name), f.name, o.by, f.official ? 1 : 0, f.entryKind, f.startsAt, f.description,
-      JSON.stringify(f.eligibility), f.teamCap, JSON.stringify(f.checkin), JSON.stringify(f.roster), at, at).lastInsertRowid);
+      JSON.stringify(f.eligibility), f.teamCap, JSON.stringify(f.checkin), JSON.stringify(f.roster), draftJson(undefined, f), at, at).lastInsertRowid);
     logEvent(db, id, o.by, 'created', at, { name: f.name, startsAt: f.startsAt, entryKind: f.entryKind });
     return V.ok(getEvent(db, id)!);
   })();
@@ -223,9 +241,9 @@ export function updateEvent(db: DB, o: { eventId: number; by: string; fields: un
     if (changed.length === 0) return V.ok(ev);
     db.prepare(
       `UPDATE events SET name = ?, official = ?, entry_kind = ?, starts_at = ?, description = ?, eligibility_json = ?,
-         team_cap = ?, checkin_json = ?, roster_json = ?, updated_at = ? WHERE id = ?`,
+         team_cap = ?, checkin_json = ?, roster_json = ?, draft_json = ?, updated_at = ? WHERE id = ?`,
     ).run(f.name, f.official ? 1 : 0, f.entryKind, f.startsAt, f.description, JSON.stringify(f.eligibility),
-      f.teamCap, JSON.stringify(f.checkin), JSON.stringify(f.roster), at, ev.id);
+      f.teamCap, JSON.stringify(f.checkin), JSON.stringify(f.roster), draftJson(ev, f), at, ev.id);
     logEvent(db, ev.id, o.by, 'edited', at, { changed });
     return V.ok(getEvent(db, ev.id)!);
   })();
@@ -361,14 +379,13 @@ export function publishEvent(db: DB, o: { eventId: number; by: string; now?: Dat
   })();
 }
 
-/** announced -> registration, team events only (Ruling 15). */
+/** announced -> registration. For a draft-kind event this opens signups (plan D1 Ruling 2). */
 export function openRegistration(db: DB, o: { eventId: number; by: string; now?: Date }): EventResult<EventRow> {
   const at = iso(o.now);
   return db.transaction((): EventResult<EventRow> => {
     const ev = getEvent(db, o.eventId);
     if (!ev) return V.fail('not_found');
     if (!V.nextStatusAllowed(ev.status, 'registration')) return V.fail('wrong_status');
-    if (ev.entry_kind === 'draft') return V.fail('draft_signups_later');
     if (ev.starts_at <= at) return V.fail('start_passed');
     const chain = chainOf(db, ev);
     if (!chain.ok) return chain;

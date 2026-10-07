@@ -146,7 +146,8 @@ describe('the Events desk routes', () => {
 
   it('lists every event, drafts included, newest start first', async () => {
     await call('POST', '/api/admin/events', ADMIN, { name: 'First Cup', startsAt: start(), entryKind: 'team' });
-    await call('POST', '/api/admin/events', ADMIN, { name: 'Later Cup', startsAt: new Date(Date.now() + 9 * 86_400_000).toISOString(), entryKind: 'draft' });
+    await call('POST', '/api/admin/events', ADMIN, { name: 'Later Cup', startsAt: new Date(Date.now() + 9 * 86_400_000).toISOString(), entryKind: 'draft',
+      draft: { signupsCloseAt: new Date(Date.now() + 8 * 86_400_000).toISOString(), draftAt: new Date(Date.now() + 8.5 * 86_400_000).toISOString() } });
     const list = (await call('GET', '/api/admin/events', ADMIN)).json().events;
     expect(list.map((e: { name: string; status: string; stages: number }) => [e.name, e.status, e.stages]))
       .toEqual([['Later Cup', 'draft', 0], ['First Cup', 'draft', 0]]);

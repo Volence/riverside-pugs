@@ -533,6 +533,27 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM event_entry_players WHERE steamid = ?').get(ALT)).toEqual({ n: 0 });
   });
 
+  it('moves draft signups and offers, keeping one active signup per event (plan D1)', () => {
+    const mk = (slug: string) => Number(db.prepare(
+      `INSERT INTO events (slug, name, organizer_steamid, entry_kind, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+       VALUES (?, 'Draft', ?, 'draft', '2026-10-10T20:00:00.000Z', '{}', '{}', '{}', 'x', 'x')`,
+    ).run(slug, MAIN).lastInsertRowid);
+    const both = mk('both');
+    const only = mk('only');
+    const sign = db.prepare("INSERT INTO draft_signups (event_id, steamid, captain_pref, created_at) VALUES (?, ?, 'willing', 'x')");
+    sign.run(both, ALT);
+    sign.run(both, MAIN);
+    sign.run(only, ALT);
+    db.prepare("INSERT INTO draft_captain_offers (event_id, steamid, offered_at, expires_at) VALUES (?, ?, 'x', 'y')").run(only, ALT);
+
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(db.prepare('SELECT event_id, steamid FROM draft_signups WHERE withdrawn_at IS NULL ORDER BY event_id').all())
+      .toEqual([{ event_id: both, steamid: MAIN }, { event_id: only, steamid: MAIN }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM draft_signups WHERE steamid = ?').get(ALT)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT steamid FROM draft_captain_offers').all()).toEqual([{ steamid: MAIN }]);
+  });
+
   it('moves reschedule proposals (proposer and responder) to the surviving account (plan T4)', () => {
     const ev = Number(db.prepare(
       `INSERT INTO events (slug, name, organizer_steamid, entry_kind, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)

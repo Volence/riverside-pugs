@@ -36,7 +36,7 @@ const OPTIONS: AdminEventOptions = {
 };
 const FIELDS: EventFields = {
   name: 'Riverside Cup', startsAt: '2026-10-10T20:00:00.000Z', entryKind: 'team', official: true, teamCap: null, description: '',
-  eligibility: OPTIONS.defaults.eligibility, checkin: OPTIONS.defaults.checkin, roster: OPTIONS.defaults.roster,
+  eligibility: OPTIONS.defaults.eligibility, checkin: OPTIONS.defaults.checkin, roster: OPTIONS.defaults.roster, draft: null,
 };
 const stage = (id: number, ordinal: number, swiss: boolean): AdminEventStage => ({
   id, ordinal, rulesSnapshotted: false,

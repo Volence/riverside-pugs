@@ -17,6 +17,8 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
   const [name, setName] = useState('');
   const [start, setStart] = useState('');
   const [kind, setKind] = useState<EntryKind>('team');
+  const [closeAt, setCloseAt] = useState('');
+  const [draftAt, setDraftAt] = useState('');
   const uid = useId();
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -24,9 +26,17 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
     e.preventDefault();
     const startsAt = fromLocalInput(start);
     if (!startsAt) { setProblem('Pick a start time.'); return; }
+    let draft: { signupsCloseAt: string; draftAt: string } | undefined;
+    if (kind === 'draft') {
+      const close = fromLocalInput(closeAt);
+      const night = fromLocalInput(draftAt);
+      if (!close) { setProblem('Pick when signups close.'); return; }
+      if (!night) { setProblem('Pick the draft night.'); return; }
+      draft = { signupsCloseAt: close, draftAt: night };
+    }
     setProblem(null);
     void run(async () => {
-      const r = await adminApi.createEvent({ name, startsAt, entryKind: kind });
+      const r = await adminApi.createEvent({ name, startsAt, entryKind: kind, ...(draft ? { draft } : {}) });
       route(eventAdminUrl(r.id));
     });
   };
@@ -51,6 +61,16 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
               <option value="draft">Draft (individual signups)</option>
             </select>
           </FormRow>
+          {kind === 'draft' && (
+            <>
+              <FormRow label="Signups close" help="When signups close and staff can run the cut." for={`${uid}-close`}>
+                <input id={`${uid}-close`} aria-label="Signups close" type="datetime-local" value={closeAt} onInput={(e) => setCloseAt((e.target as HTMLInputElement).value)} />
+              </FormRow>
+              <FormRow label="Draft night" help="When the live draft runs (plan D2). Everyone gets this time in their role DM." for={`${uid}-draftat`}>
+                <input id={`${uid}-draftat`} aria-label="Draft night" type="datetime-local" value={draftAt} onInput={(e) => setDraftAt((e.target as HTMLInputElement).value)} />
+              </FormRow>
+            </>
+          )}
           <div class="eventform__actions">
             <button class="btn" type="submit" disabled={busy || !name.trim()}>Create draft</button>
           </div>

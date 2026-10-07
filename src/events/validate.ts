@@ -67,6 +67,8 @@ export const EVENT_ERRORS = {
   wrong_status: { status: 409, text: 'The event is not at a step that allows that.' },
   stages_locked: { status: 409, text: 'Stages cannot change once the event is live.' },
   kind_locked: { status: 409, text: 'The entry kind can only change while the event is a draft.' },
+  bad_draft_times: { status: 400, text: 'A draft event needs a signup close time and a draft night.' },
+  draft_times_order: { status: 400, text: 'Signups must close before the draft, and the draft must not be after the event start.' },
   draft_signups_later: { status: 409, text: 'Signups for a draft event arrive with the draft plan.' },
   has_entries: { status: 409, text: 'This draft has entries, so it cannot be deleted.' },
   bad_entry_roster: { status: 400, text: 'A roster is exactly 4 starters, no more subs than the event allows and at most one coach, each player once.' },
@@ -188,9 +190,13 @@ export interface StageContext {
   campaigns: ReadonlySet<string>; rulesetIds: ReadonlySet<number>; pugRulesetId: number | null;
   gameConfigs: ReadonlySet<string>; defaultPool: string[];
 }
+/** A draft-kind event's two times (plan D1 Ruling 3), ISO UTC. */
+export interface DraftFields { signupsCloseAt: string; draftAt: string }
 export interface EventFields {
   name: string; startsAt: string; entryKind: EntryKind; official: boolean; teamCap: number | null; description: string;
   eligibility: Eligibility; checkin: Checkin; roster: RosterRules;
+  /** Null for a team event. */
+  draft: DraftFields | null;
 }
 
 export const SCORE_MAX = 100000;
@@ -334,7 +340,7 @@ export function parseEventFields(raw: unknown, base: EventFields | null): Checke
   if (!base && (!has('name') || !has('startsAt') || !has('entryKind'))) return fail('missing_fields');
   const out: EventFields = base ? { ...base } : {
     name: '', startsAt: '', entryKind: 'team', official: true, teamCap: null, description: '',
-    eligibility: defaultEligibility(), checkin: defaultCheckin(), roster: defaultRoster(),
+    eligibility: defaultEligibility(), checkin: defaultCheckin(), roster: defaultRoster(), draft: null,
   };
   if (has('name')) {
     const r = normalizeEventName(raw.name);
@@ -380,6 +386,19 @@ export function parseEventFields(raw: unknown, base: EventFields | null): Checke
     const r = parseRoster(raw.roster);
     if (!r.ok) return r;
     out.roster = r.value;
+  }
+  if (out.entryKind !== 'draft') {
+    out.draft = null;
+  } else {
+    if (has('draft')) {
+      const d = raw.draft;
+      const close = isObj(d) ? parseTime(d.signupsCloseAt) : null;
+      const at = isObj(d) ? parseTime(d.draftAt) : null;
+      if (!close || !at) return fail('bad_draft_times');
+      out.draft = { signupsCloseAt: close, draftAt: at };
+    }
+    if (!out.draft) return fail('bad_draft_times');
+    if (out.draft.signupsCloseAt > out.draft.draftAt || out.draft.draftAt > out.startsAt) return fail('draft_times_order');
   }
   return ok(out);
 }
