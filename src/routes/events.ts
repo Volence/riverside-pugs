@@ -161,7 +161,7 @@ export async function eventRoutes(
     if (!ev || !entry) return refuse(reply, { error: 'entry_not_found' });
     const body = (req.body ?? {}) as { name?: unknown; tag?: unknown };
     if ((body.name !== undefined && typeof body.name !== 'string') || (body.tag !== undefined && typeof body.tag !== 'string')) return refuse(reply, { error: 'bad_request' });
-    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: isStaff(me), name: body.name as string | undefined, tag: body.tag as string | undefined, now: new Date() });
+    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: false, name: body.name as string | undefined, tag: body.tag as string | undefined, now: new Date() });
     if (!r.ok) return refuse(reply, r);
     return {};
   });
@@ -174,9 +174,9 @@ export async function eventRoutes(
     const entry = ev && entryIn(ev, p.id);
     if (!ev || !entry) return refuse(reply, { error: 'entry_not_found' });
     // Judged before the file is stored, so a refused caller leaves nothing on the shelf.
-    if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return refuse(reply, { error: 'not_draft_entry' });
-    if (!isStaff(me) && entry.captain_steamid !== me) return refuse(reply, { error: 'not_captain' });
-    if (ev.status === 'live' || ev.status === 'finished' || ev.status === 'cancelled') return refuse(reply, { error: 'entries_locked' });
+    // Staff edit through the admin routes, so the audit sees it.
+    const refused = N.identityRefusal(ev, entry, me, false);
+    if (refused) return refuse(reply, { error: refused });
     const raw = ((req.body ?? {}) as { png?: unknown }).png;
     if (typeof raw !== 'string') return reply.code(400).send({ error: 'The logo is missing.' });
     const bytes = Buffer.from(raw, 'base64');
@@ -185,7 +185,7 @@ export async function eventRoutes(
     const store = opts.store();
     if (!(await store.canTake(bytes.length))) return reply.code(507).send({ error: 'The community shelf is full right now.' });
     const { name } = store.putLogo(bytes);
-    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: isStaff(me), logoKey: name, now: new Date() });
+    const r = N.setEntryIdentity(db, { eventId: ev.id, entryId: entry.id, steamid: me, staff: false, logoKey: name, now: new Date() });
     if (!r.ok) return refuse(reply, r);
     return { logoKey: name };
   });

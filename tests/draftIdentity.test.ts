@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -70,8 +70,8 @@ describe('setEntryIdentity', () => {
     const { f, entries } = made();
     const e = entries[0]!;
     const before = JSON.stringify(N.getEntry(f.db, e.id));
-    expect(err(ID(f, e.id, { steamid: capOf(e), name: 'ab' }))).toBe('bad_name');
-    expect(err(ID(f, e.id, { steamid: capOf(e), name: 'x'.repeat(25) }))).toBe('bad_name');
+    expect(err(ID(f, e.id, { steamid: capOf(e), name: 'ab' }))).toBe('bad_entry_name');
+    expect(err(ID(f, e.id, { steamid: capOf(e), name: 'x'.repeat(25) }))).toBe('bad_entry_name');
     expect(err(ID(f, e.id, { steamid: capOf(e), name: 'nigger' }))).toBe('name_not_allowed');
     expect(err(ID(f, e.id, { steamid: capOf(e), tag: 'a' }))).toBe('bad_tag');
     expect(err(ID(f, e.id, { steamid: capOf(e), tag: 'toolong' }))).toBe('bad_tag');
@@ -101,12 +101,14 @@ describe('setEntryIdentity', () => {
 });
 
 describe('identity over HTTP', () => {
-  let f: DraftFixture; let entries: N.EntryRow[]; let app: FastifyInstance;
+  let f: DraftFixture; let entries: N.EntryRow[]; let app: FastifyInstance; let communityDir: string;
   const cookies: Record<string, Record<string, string>> = {};
   beforeEach(async () => {
     ({ f, entries } = made());
+    communityDir = mkdtempSync(join(tmpdir(), 'identity-'));
+    mkdirSync(join(communityDir, 'logos'), { recursive: true });
     app = await buildServer({
-      config: { ...loadConfig({}), communityDir: mkdtempSync(join(tmpdir(), 'identity-')) }, db: f.db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
+      config: { ...loadConfig({}), communityDir }, db: f.db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
     });
     for (const s of [...P, ADMIN]) cookies[s] = authedCookie(app, f.db, s);
     f.db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
@@ -147,6 +149,23 @@ describe('identity over HTTP', () => {
     expect(N.getEntry(f.db, e.id)!.logo_key).toBeNull();
   });
 
+  it('refuses a mod who is not the captain on the player routes, and a dropped entry before any file is stored', async () => {
+    const e = entries[0]!;
+    const mod = P[0]!;
+    f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(mod);
+    expect(N.placesOf(f.db, e.id).some((p) => p.steamid === mod)).toBe(false);
+    const base = `/api/events/${f.slug}/entries/${e.id}`;
+    const a = await post(`${base}/identity`, mod, { name: 'Mod Edit' });
+    expect(a.statusCode).toBe(403);
+    expect((await post(`${base}/logo`, mod, { png: png256() })).statusCode).toBe(403);
+    expect(N.getEntry(f.db, e.id)!.name).toBe(e.name);
+    f.db.prepare("UPDATE event_entries SET status = 'dropped' WHERE id = ?").run(e.id);
+    const shelf = () => readdirSync(join(communityDir, 'logos')).length;
+    const before = shelf();
+    expect((await post(`${base}/logo`, capOf(e), { png: png256() })).statusCode).toBe(409);
+    expect(shelf()).toBe(before);
+  });
+
   it('gives staff the same from the desk, audited, and refuses it to a non-admin', async () => {
     const e = entries[1]!;
     const base = `/api/admin/events/${f.eventId}/entries/${e.id}`;
@@ -155,6 +174,7 @@ describe('identity over HTTP', () => {
     const up = await post(`${base}/logo`, ADMIN, { png: png256() });
     expect(up.statusCode).toBe(200);
     expect(N.getEntry(f.db, e.id)).toMatchObject({ name: 'Desk Name', tag: 'DSK', logo_key: up.json().logoKey });
+    expect(JSON.parse((f.db.prepare("SELECT detail FROM admin_actions WHERE action = 'event_entry_identity'").get() as { detail: string }).detail)).toMatchObject({ name: 'Desk Name', tag: 'DSK' });
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action IN ('event_entry_identity','event_entry_logo')").get()).toEqual({ n: 2 });
     expect((await post(`${base}/identity`, ADMIN, { name: entries[0]!.name })).statusCode).toBe(409);
   });

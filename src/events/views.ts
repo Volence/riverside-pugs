@@ -233,7 +233,7 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
     ? N.entriesOf(db, ev.id).find((e) => N.isActive(e) && e.captain_steamid === viewer)
     : undefined;
   const captainOf = cap
-    ? { entryId: cap.id, name: cap.name, tag: cap.tag, logoKey: cap.logo_key, editable: ev.status === 'registration' || ev.status === 'checkin' }
+    ? { entryId: cap.id, name: cap.name, tag: cap.tag, logoKey: cap.logo_key, editable: N.identityOpen(ev) }
     : null;
   return { entries, register, canRegister, signup: own ? signupView(ev, own) : null, offer, captainOf };
 }
