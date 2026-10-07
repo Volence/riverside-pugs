@@ -8,6 +8,7 @@ import { buildServer } from '../src/server.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as D from '../src/events/drafts.js';
 import * as N from '../src/events/entries.js';
+import * as E from '../src/events/events.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { P, cutDraft, type DraftFixture } from './draftFixture.js';
 import { png } from './pngFixture.js';
@@ -79,13 +80,14 @@ describe('setEntryIdentity', () => {
     expect(JSON.stringify(N.getEntry(f.db, e.id))).toBe(before);
   });
 
-  it('is entries_locked once the event is live, finished or cancelled', () => {
+  it('is identity_locked once the event is live, finished or cancelled', () => {
     for (const status of ['live', 'finished', 'cancelled']) {
       const { f, entries } = made();
       const e = entries[0]!;
       f.db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, f.eventId);
-      expect(err(ID(f, e.id, { steamid: capOf(e), name: 'Too Late' })), status).toBe('entries_locked');
-      expect(err(ID(f, e.id, { steamid: ADMIN, staff: true, name: 'Too Late' })), status).toBe('entries_locked');
+      expect(err(ID(f, e.id, { steamid: capOf(e), name: 'Too Late' })), status).toBe('identity_locked');
+      expect(err(ID(f, e.id, { steamid: ADMIN, staff: true, name: 'Too Late' })), status).toBe('identity_locked');
+      expect(N.identityRefusal(E.getEvent(f.db, f.eventId)!, N.getEntry(f.db, e.id)!, capOf(e), false), status).toBe('identity_locked');
       expect(N.getEntry(f.db, e.id)!.name).toBe(e.name);
     }
   });
@@ -144,8 +146,10 @@ describe('identity over HTTP', () => {
     expect((await post(`${base}/logo`, capOf(e), { png: png(100, 100).toString('base64') })).statusCode).toBe(400);
     expect((await post(`${base}/identity`, capOf(e), { name: entries[1]!.name })).statusCode).toBe(409);
     f.db.prepare("UPDATE events SET status = 'live' WHERE id = ?").run(f.eventId);
-    expect((await post(`${base}/identity`, capOf(e), { name: 'Late Name' })).statusCode).toBe(409);
-    expect((await post(`${base}/logo`, capOf(e), { png: png256() })).statusCode).toBe(409);
+    const late = await post(`${base}/identity`, capOf(e), { name: 'Late Name' });
+    expect([late.statusCode, late.json().error]).toEqual([409, 'Team names and logos are final once the event is live.']);
+    const lateLogo = await post(`${base}/logo`, capOf(e), { png: png256() });
+    expect([lateLogo.statusCode, lateLogo.json().error]).toEqual([409, 'Team names and logos are final once the event is live.']);
     expect(N.getEntry(f.db, e.id)!.logo_key).toBeNull();
   });
 

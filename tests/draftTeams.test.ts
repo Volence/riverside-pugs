@@ -15,6 +15,7 @@ import * as N from '../src/events/entries.js';
 import { balanceAroundCaptains } from '../src/events/draftBalance.js';
 import { draftFairness } from '../src/events/draftFairness.js';
 import { eventView } from '../src/events/views.js';
+import { EVENT_ERRORS } from '../src/events/validate.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { P, cutDraft, type DraftFixture } from './draftFixture.js';
 
@@ -361,6 +362,9 @@ describe('publishing the teams (createDraftEntries)', () => {
     const gBefore = snap(g);
     expect(err(publish(g))).toBe('teams_changed');
     expect(snap(g)).toBe(gBefore);
+    // A merge-withdrawn pool player cannot be fixed by rebalancing, so the
+    // sentence does not promise that it can.
+    expect(EVENT_ERRORS.teams_changed.text).toBe('The teams no longer match the published cut (a team is short or a player is missing). Rebalance if a pool player is unassigned; a missing player needs staff help.');
   });
 
   it('refuses before teams are made, twice, outside registration and checkin, and on a team event', () => {
