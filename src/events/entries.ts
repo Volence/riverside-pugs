@@ -4,7 +4,7 @@ import { currentSeasonId, getPlayer } from '../players.js';
 import { seasonSr } from '../rating.js';
 import { inGoodStanding } from '../standing.js';
 import { competitiveAccess } from '../teams/access.js';
-import { activeMembers, getTeam } from '../teams/teams.js';
+import { activeMembers, getTeam, normalizeName } from '../teams/teams.js';
 import * as E from './events.js';
 import * as D from './drafts.js';
 import * as R from './entryRules.js';
@@ -343,10 +343,24 @@ export function lockEntries(db: DB, o: { eventId: number; by: string | null; now
   })();
 }
 
+const NAME_MAX = 24;
+const cut = (s: string, n: number): string => Array.from(s).slice(0, n).join('').trimEnd();
+
 /** Ruling 6's default name: "Team <captain display name>", at most 24
- *  characters, cut on a character (never inside one) with no trailing space. */
-function draftEntryName(db: DB, captain: string): string {
-  return Array.from(`Team ${getPlayer(db, captain)?.name ?? captain}`).slice(0, 24).join('').trimEnd();
+ *  characters, cut on a character (never inside one) with no trailing space,
+ *  and passed through the team name rules (normalizeName, slur filter
+ *  included); a name that fails them falls back to "Team <seed>". It must
+ *  not clash with a name already taken in the event (Ruling 7), compared by
+ *  normalizeName's NFKC lower-case key: a clash appends " 2", " 3" and so on,
+ *  the base cut first so base and suffix fit 24 characters. */
+function draftEntryName(captainName: string, seed: number, taken: Set<string>): string {
+  const n = normalizeName(cut(`Team ${captainName}`, NAME_MAX));
+  const base = n.ok ? n.name : `Team ${seed}`;
+  const keyOf = (name: string) => name.normalize('NFKC').toLowerCase();
+  let name = base;
+  for (let k = 2; taken.has(keyOf(name)); k++) name = `${cut(base, NAME_MAX - ` ${k}`.length)} ${k}`;
+  taken.add(keyOf(name));
+  return name;
 }
 
 /**
@@ -375,22 +389,29 @@ export function createDraftEntries(db: DB, o: { eventId: number; actor: string; 
     const teams = D.draftTeamsOf(db, ev.id);
     if (!teams || teams.length < 2 || teams.length !== ev.draft_teams || teams.some((t) => t.players.length !== R.STARTERS - 1)) return V.fail('teams_changed');
     const checkedIn = E.fieldsOf(ev).checkin.enabled;
+    // Seeds first (seedOrder over average starter SR, as entrySr gives it,
+    // ties in captain order), so a name that falls back to "Team <seed>"
+    // can use its seed.
+    const season = currentSeasonId(db);
+    const fours = teams.map((t) => [t.captain.steamid, ...t.players.map((p) => p.steamid)]);
+    const order = R.seedOrder(fours.map((four, i) => ({ id: i, sr: R.averageSr(four.map((s) => seasonSr(db, s, season))), created_at: at })));
+    const seedOf = new Map(order.map((i, k) => [i, k + 1]));
+    const taken = new Set<string>();
     const insert = db.prepare(
-      `INSERT INTO event_entries (event_id, team_id, name, tag, logo_key, status, registered_by, created_at, checked_in_at, checked_in_by, captain_steamid)
-       VALUES (?, NULL, ?, '', NULL, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO event_entries (event_id, team_id, name, tag, logo_key, seed, status, registered_by, created_at, checked_in_at, checked_in_by, captain_steamid)
+       VALUES (?, NULL, ?, '', NULL, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    const entries = teams.map((t) => {
-      const captain = t.captain.steamid;
+    const entries = fours.map((four, i) => {
+      const captain = four[0]!;
+      const seed = seedOf.get(i)!;
+      const name = draftEntryName(getPlayer(db, captain)?.name ?? captain, seed, taken);
       const id = Number(insert.run(
-        ev.id, draftEntryName(db, captain), checkedIn ? 'checked_in' : 'registered', o.actor, at,
+        ev.id, name, seed, checkedIn ? 'checked_in' : 'registered', o.actor, at,
         checkedIn ? at : null, checkedIn ? o.actor : null, captain,
       ).lastInsertRowid);
-      for (const s of [captain, ...t.players.map((p) => p.steamid)]) addPlace(db, id, s, 'starter', at);
+      for (const s of four) addPlace(db, id, s, 'starter', at);
       return id;
     });
-    const order = R.seedOrder(entries.map((id) => ({ id, sr: entrySr(db, id), created_at: at })));
-    const seed = db.prepare('UPDATE event_entries SET seed = ? WHERE id = ?');
-    order.forEach((id, i) => seed.run(i + 1, id));
     db.prepare('UPDATE events SET teams_made_at = ?, updated_at = ? WHERE id = ?').run(at, at, ev.id);
     E.logEvent(db, ev.id, o.actor, 'draft_teams_published', at, { entries });
     return V.ok({ entries });

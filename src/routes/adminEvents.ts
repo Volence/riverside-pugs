@@ -25,6 +25,7 @@ import { deskOrder, signupFacts } from '../events/draftFacts.js';
 import { draftFairness } from '../events/draftFairness.js';
 import { seasonSr } from '../rating.js';
 import { maxTeams } from '../events/draftRules.js';
+import { STARTERS } from '../events/entryRules.js';
 import type { StaffAction } from '../events/messages.js';
 import { higherSide, openMatchRoom, type RoomClock } from '../events/roomClock.js';
 
@@ -444,7 +445,7 @@ export async function adminEventRoutes(
         players: t.players.map((p) => ({ steamid: p.steamid, name: nameOf(p.steamid), sr: seasonSr(db, p.steamid, season) })),
         // Fewer than 3 (a pool player left after balancing): publish refuses
         // with teams_changed, and the desk shows which team is short.
-        short: t.players.length < 3,
+        short: t.players.length < STARTERS - 1,
       })) ?? null,
       fairness: draftFairness(db, ev.id),
     };
