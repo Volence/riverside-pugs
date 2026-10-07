@@ -297,29 +297,36 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
     expect(snapshot(s)).toBe(before);
   });
 
-  for (const undone of [true, false]) {
-    it(`the box took it but the site then refused: the box is asked to undo it (${undone ? 'undone' : 'not undone'}), staff are told, nothing is written`, async () => {
+  for (const undo of ['undone', 'refused', 'no_answer'] as const) {
+    it(`the box took it but the site then refused: the box is asked to undo it (${undo}), staff are told, nothing is written`, async () => {
       s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
       await s.tick();
       s.goLive(s.gameOf(1).match_id!);
       const token = s.liveGameToken();
       const before = snapshot(s);
       const real = s.runner.send.bind(s.runner);
+      const asked: string[] = [];
       // Between the check and the commit the event leaves live (the commit is then refused as wrong_status).
       vi.spyOn(s.runner, 'send').mockImplementation(async (id, lines, what) => {
         const out = await real(id, lines, what);
         if (lines[0] === `sm_pug_sub ${token} ${A[3]} ${OUTSIDER}`) {
           s.db.prepare("UPDATE events SET status = 'finished' WHERE id = ?").run(s.eventId);
-          if (!undone) s.box.subOk = false;
+          if (undo === 'refused') s.box.subOk = false;
         }
+        if (undo === 'no_answer' && lines[0] === `sm_pug_sub ${token} ${OUTSIDER} ${A[3]}`) { asked.push(lines[0]); return null; }
         return out;
       });
       s.sent.length = 0;
       const r = await replace();
       expect(r.ok ? null : r.error).toBe('wrong_status');
-      expect(s.sent).toContain(`sm_pug_sub ${token} ${OUTSIDER} ${A[3]}`);
+      expect([...s.sent, ...asked]).toContain(`sm_pug_sub ${token} ${OUTSIDER} ${A[3]}`);
       const alert = s.alerts.find((a): a is Extract<typeof a, { kind: 'problem' }> => a.kind === 'problem' && a.text.includes('staff replace'))!;
-      expect(alert.text).toContain(undone ? 'the server undid it.' : 'it was NOT undone: the server has');
+      expect(alert.text).toContain({
+        undone: 'the server undid it.',
+        refused: `it was NOT undone: the server has p${A.length + BATS.length}, the site has p3.`,
+        no_answer: `could not confirm the server's state: it may have p${A.length + BATS.length} or p3. Check the live roster or use !sub.`,
+      }[undo]);
+      if (undo === 'no_answer') expect(alert.text).not.toContain('NOT undone');
       expect(snapshot(s)).toBe(before);
     });
   }
