@@ -1521,6 +1521,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   reschedule_min_ahead_minutes: '60',
   reschedule_autoaccept_min_ahead_hours: '48',
   reschedule_reminder_hours: '24',
+  // Drafts plan D1 Ruling 6: how long a captaincy offer waits for an answer.
+  draft_offer_minutes: '30',
   // Scrim board plan 1: campaigns the accepting captain may add on top of the
   // poster's list.
   scrim_accept_campaigns_max: '2',

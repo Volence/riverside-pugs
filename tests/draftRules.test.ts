@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cutProblems, defaultRoles, maxTeams } from '../src/events/draftRules.js';
+import { cutProblems, defaultRoles, maxTeams, nextOfferee } from '../src/events/draftRules.js';
 
 const ids = Array.from({ length: 21 }, (_, i) => `s${i}`);
 
@@ -46,5 +46,24 @@ describe('cutProblems', () => {
     expect(cutProblems({ ...good, ineligible: 2 })).toEqual(['ineligible']);
     expect(cutProblems({ teams: 6, active: 21, captains: 0, pool: 14, unassigned: 1, ineligible: 1 }))
       .toEqual(['too_many_teams', 'too_few_captains', 'pool_size', 'unassigned', 'ineligible']);
+  });
+});
+
+describe('nextOfferee', () => {
+  const row = (steamid: string, sr: number, o: Partial<{ captainPref: 'want' | 'willing' | 'no'; role: 'captain' | 'pool' | 'bench' | null; eligible: boolean }> = {}) =>
+    ({ steamid, sr, captainPref: o.captainPref ?? 'willing', role: o.role ?? 'pool', eligible: o.eligible ?? true });
+  it('is the highest SR willing signup, never a want, a no, a captain, an ineligible one or one offered before', () => {
+    const rows = [
+      row('a', 1200), row('b', 1900, { captainPref: 'no' }), row('c', 1800, { captainPref: 'want' }), row('d', 1700, { role: 'captain' }),
+      row('e', 1600, { eligible: false }), row('f', 1500), row('g', 1400, { role: 'bench' }),
+    ];
+    expect(nextOfferee(rows, new Set())).toBe('f');
+    expect(nextOfferee(rows, new Set(['f']))).toBe('g');
+    expect(nextOfferee(rows, new Set(['f', 'g']))).toBe('a');
+    expect(nextOfferee(rows, new Set(['f', 'g', 'a']))).toBeNull();
+  });
+  it('breaks an SR tie by signup order (input order)', () => {
+    expect(nextOfferee([row('x', 1500), row('y', 1500)], new Set())).toBe('x');
+    expect(nextOfferee([row('y', 1500), row('x', 1500)], new Set())).toBe('y');
   });
 });

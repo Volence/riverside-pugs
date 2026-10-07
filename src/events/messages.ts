@@ -20,7 +20,7 @@ import type { CutRole } from './draftRules.js';
  *  src/bookings/messages.ts. */
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
-  | 'draft_signup_removed' | 'draft_cut_role';
+  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -47,7 +47,7 @@ const REMOVAL_TEXT: Record<SignupRemoval, string> = { removed: 'an organizer rem
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -84,6 +84,10 @@ export function eventMessage(
           : `You are on the free-agent bench for ${event}. Captains can call on you as a stand-in, so keep the night free if you can: ${link}`;
       break;
     }
+    case 'draft_captain_offer':
+      if (!extra.expiresAt) return null;
+      content = `${event} needs another captain and you said you were willing. Accept or decline on the event page by ${discordTime(extra.expiresAt)}: ${publicUrl}/event/${ev.slug}`;
+      break;
     case 'event_match_connect':
     case 'event_match_result':
     case 'event_match_staff':

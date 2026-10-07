@@ -108,3 +108,10 @@ export function tellCutRole(d: NoticeDeps, eventId: number, cut: Record<'captain
   const groups: [CutRole, string[]][] = [['captain', cut.captains], ['pool', cut.pool], ['bench', cut.bench]];
   for (const [cutRole, to] of groups) tell(d, to, eventId, 'draft_cut_role', { cutRole });
 }
+/** A captaincy offer went out (drafts plan D1 Ruling 11): the event's open
+ *  offer, read after it committed, so the DM names its expiry. */
+export function tellCaptainOffer(d: NoticeDeps, eventId: number): void {
+  const o = d.db.prepare('SELECT steamid, expires_at FROM draft_captain_offers WHERE event_id = ? AND answer IS NULL').get(eventId) as
+    { steamid: string; expires_at: string } | undefined;
+  if (o) tell(d, [o.steamid], eventId, 'draft_captain_offer', { expiresAt: o.expires_at });
+}

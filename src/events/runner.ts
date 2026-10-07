@@ -6,7 +6,8 @@ import * as D from './drafts.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import { settleEvent, startEventFlow } from './flow.js';
-import { tellCheckinOpen, tellDropped } from './notices.js';
+import { tellCaptainOffer, tellCheckinOpen, tellDropped } from './notices.js';
+import { publishAdminEvent } from '../adminFeed.js';
 
 export const TICK_MS = 60_000;
 
@@ -96,6 +97,38 @@ export class EventRunner {
         console.error(`[events] closing signups of event ${ev.id} failed:`, err instanceof Error ? err.message : err);
       }
     }
+    // Drafts plan D1 Ruling 6: move each running captaincy offer chain along.
+    // Two mutations a tick: expire a due offer, then offer the next. Either
+    // refuses quietly when it has nothing to do, so a second tick in the same
+    // minute finds the offer open and makes none.
+    const offering = db.prepare(
+      "SELECT id, name FROM events WHERE entry_kind = 'draft' AND status IN ('registration','checkin') AND offers_on = 1 AND cut_at IS NULL ORDER BY id",
+    ).all() as { id: number; name: string }[];
+    for (const ev of offering) {
+      try {
+        this.stepOffers(ev, now);
+      } catch (err) {
+        console.error(`[events] captaincy offers of event ${ev.id} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  private stepOffers(ev: { id: number; name: string }, now: Date): void {
+    const { db } = this.deps;
+    D.expireDueOffer(db, { eventId: ev.id, now });
+    const r = D.offerNext(db, { eventId: ev.id, now, minutes: D.draftOfferMinutes(db) });
+    if (!r.ok) return;
+    if (r.value.offered) {
+      tellCaptainOffer(this.deps, ev.id);
+      return;
+    }
+    const row = E.getEvent(db, ev.id);
+    const captains = D.activeSignups(db, ev.id).filter((s) => s.role === 'captain').length;
+    publishAdminEvent({
+      kind: 'problem',
+      text: `Draft ${ev.name}: no more signups willing to captain; ${captains} of ${row?.draft_teams ?? 0} captains chosen.`,
+      link: { label: 'Open the draft desk', path: `/admin/events/${ev.id}` },
+    });
   }
 
   private stepEvent(ev: E.EventRow, now: Date): void {
