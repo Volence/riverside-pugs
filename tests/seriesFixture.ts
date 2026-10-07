@@ -98,6 +98,9 @@ export async function seriesFixture(o: {
       // pug-match 0.3.26's answer (plugin/pug-tourney.inc Cmd_PugForfeit).
       const ff = /^sm_pug_forfeit \S+ (a|b)$/.exec(c);
       if (ff) return box.forfeitOk ? `PUGOK forfeit team=${ff[1]}` : 'PUGERR no live match';
+      // pug-match 0.3.27's answer (plugin/pug-match.sp Cmd_Carry, plan T6).
+      const carry = /^sm_pug_carry \d+ (\d+) (\d+)$/.exec(c);
+      if (carry) return `PUGOK carry a=${carry[1]} b=${carry[2]}`;
       if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${box.type}" ( def. "" )`;
       if (c === 'l4d_booking_version') return '"l4d_booking_version" = "1.4.0" ( def. "1.0.0" )';
       if (c === 'l4d_booking_id') return `"l4d_booking_id" = "${box.marker}" ( def. "" )`;

@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.26"
+#define PLUGIN_VERSION "0.3.27"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -175,6 +175,13 @@ bool g_bSpecStaysWasOff;
 // first on the replayed map, applied once by SeedNewMapSides at the next map
 // start and then cleared.
 bool g_bResumed;
+// Plan T6: game 1's totals (pug-team order) that game 2 of a best of 2 starts
+// with, from sm_pug_carry. Added to every l4dscores seed and to the side-order
+// totals. g_iCarrySeedMaps is g_iMapCount at this instance's first go-live
+// (-1 before it): half-1 go-lives on that chapter re-seed l4dscores.
+int g_iCarryA;
+int g_iCarryB;
+int g_iCarrySeedMaps = -1;
 int g_iResumeFirst;
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
@@ -454,6 +461,7 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
 	RegServerCmd("sm_pug_resume", Cmd_Resume, "sm_pug_resume <matchid> <token> <firstmap> <a|b> <nextseq> - rebuild a match after a server restart");
 	RegServerCmd("sm_pug_resume_map", Cmd_ResumeMap, "sm_pug_resume_map <map> <a> <b> - a map the resumed match already finished");
+	RegServerCmd("sm_pug_carry", Cmd_Carry, "sm_pug_carry <matchid> <a> <b> - plan T6: game 1's totals that game 2 of a best of 2 starts with (tournament box)");
 	RegServerCmd("sm_pug_resume_commit", Cmd_ResumeCommit, "sm_pug_resume_commit - the resumed match is complete; seed sides at the next map start");
 	RegServerCmd("sm_pug_leave", Cmd_Leave, "sm_pug_leave <token> <steamid64> hold|release|add <seconds>|end");
 	RegServerCmd("sm_pug_endkick_now", Cmd_EndKickNow, "sm_pug_endkick_now - run the end-of-match kick now, before the backend restarts the box");
@@ -2114,6 +2122,30 @@ public Action Cmd_Roster(int args)
  *  map the site changelevels to (the replayed map, which may be map 3, not
  *  map 1), as it does for any self-started match waiting for its first
  *  go-live. The campaign check from then on compares against that map. */
+public Action Cmd_Carry(int args)
+{
+	if (args < 3) { PrintToServer("PUGERR usage: sm_pug_carry <matchid> <a> <b>"); return Plugin_Handled; }
+	if (!TourneyOn()) { PrintToServer("PUGERR not a tournament box"); return Plugin_Handled; }
+	char buf[16];
+	GetCmdArg(1, buf, sizeof(buf));
+	int id = StringToInt(buf);
+	GetCmdArg(2, buf, sizeof(buf));
+	int a = StringToInt(buf);
+	GetCmdArg(3, buf, sizeof(buf));
+	int b = StringToInt(buf);
+	// Only the match pushed just before (sm_pug_match or sm_pug_resume reset
+	// the state; this latches onto it), so a stale line never reaches the next game.
+	if (g_State != MS_Pending || id != g_iMatchId) { PrintToServer("PUGERR no pending match %d", id); return Plugin_Handled; }
+	if (a < 0 || b < 0 || a > 100000 || b > 100000) { PrintToServer("PUGERR bad carry"); return Plugin_Handled; }
+	g_iCarryA = a;
+	g_iCarryB = b;
+	PrintToServer("PUGOK carry a=%d b=%d", a, b);
+	LogMessage("[pug] match %d carries game 1's score: a=%d b=%d", id, a, b);
+	return Plugin_Handled;
+}
+
+bool HasCarry() { return g_iCarryA > 0 || g_iCarryB > 0; }
+
 public Action Cmd_Resume(int args)
 {
 	if (args < 5)
@@ -3097,6 +3129,9 @@ void ResetMatchState()
 	g_bSelfStarted = false;
 	g_bResumed = false;
 	g_iResumeFirst = 0;
+	g_iCarryA = 0;
+	g_iCarryB = 0;
+	g_iCarrySeedMaps = -1;
 	g_iEventSeq = 0;
 	g_iBoomerClient = 0;
 	g_bHasBoomLanded = false;
@@ -3694,6 +3729,9 @@ void SeedNewMapSides(int prevRound1Surv)
 		totA += g_iMapScoreA[i];
 		totB += g_iMapScoreB[i];
 	}
+	// Plan T6: game 1's carried totals count toward who survives first.
+	totA += g_iCarryA;
+	totB += g_iCarryB;
 	int first = (totA > totB) ? 1 : (totB > totA) ? 2 : prevRound1Surv;
 	// l4dscores is what actually places players at load-in, and its tally is
 	// the one !setscores rewrites, so when the two disagree follow it: seeding
@@ -4150,7 +4188,18 @@ public void OnRoundIsLive()
 		g_State = MS_Live;
 		SampleSkillDetect();
 		EmitPug("MATCH_START map=%s", g_sCurrentMap);
-		if (g_bResumed) SeedL4dscoresTally();
+	}
+
+	// Plan T6 Ruling 7: a map restart after go-live clears l4dscores' tally on
+	// a first map (L4D_OnClearTeamScores -> OnNewMission), so seed it again at
+	// every half-1 go-live of the first chapter this instance plays. Half 1
+	// only: l4dscores adds each half's round score to its tally at that half's
+	// round_end, so a seed at half 2's go-live would wipe half 1's score.
+	if (g_State == MS_Live && (g_bResumed || HasCarry()))
+	{
+		if (g_iCarrySeedMaps == -1) g_iCarrySeedMaps = g_iMapCount;
+		if (g_iMapCount == g_iCarrySeedMaps && !view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")))
+			SeedL4dscoresTally();
 	}
 
 	// readyup's go-live forward fires for every round on the box, PUG match or
@@ -4625,8 +4674,10 @@ void TotalScores(int &a, int &b)
 /** A resumed match goes live on a fresh srcds whose l4dscores tally is 0-0,
  *  and that tally decides who survives first on the next map. Seed it with
  *  the real totals of whichever pug team is on survivors right now (counted
- *  from the rostered players actually standing there). l4dscores 8.5.9-
- *  riverside3 has the command; an older one ignores it, logged. */
+ *  from the rostered players actually standing there). Game 2 of a best of 2
+ *  that carries the score (plan T6, sm_pug_carry) adds game 1's totals, so a
+ *  fresh game 2 is seeded the same way. l4dscores 8.5.9-riverside3 has the
+ *  command; an older one ignores it, logged. */
 void SeedL4dscoresTally()
 {
 	int onSurv[3];
@@ -4639,10 +4690,13 @@ void SeedL4dscoresTally()
 	int survPug = (onSurv[2] > onSurv[1]) ? 2 : 1;
 	int a, b;
 	TotalScores(a, b);
+	a += g_iCarryA;
+	b += g_iCarryB;
 	int surv = (survPug == 1) ? a : b;
 	int inf = (survPug == 1) ? b : a;
 	ServerCommand("sm_l4dscores_seed %d %d %d", surv, inf, g_iMapCount + 1);
-	LogMessage("[pug] resumed match %d live: l4dscores seeded survivors=%d infected=%d (pug team %s on survivors)", g_iMatchId, surv, inf, survPug == 1 ? "a" : "b");
+	LogMessage("[pug] %s match %d live: l4dscores seeded survivors=%d infected=%d (pug team %s on survivors, carry a=%d b=%d)",
+		g_bResumed ? "resumed" : "carried", g_iMatchId, surv, inf, survPug == 1 ? "a" : "b", g_iCarryA, g_iCarryB);
 }
 
 void WinnerOf(int a, int b, char[] out, int maxlen)
