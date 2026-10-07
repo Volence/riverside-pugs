@@ -8,7 +8,7 @@ import { STATUS_LABEL, whenText } from '../eventFormat';
 const OVER = new Set(['finished', 'cancelled']);
 
 function EventRow({ ev }: { ev: EventListItem }) {
-  const count = ev.entryKind === 'team' ? `${ev.entries} team${ev.entries === 1 ? '' : 's'}` : `${ev.entries} entr${ev.entries === 1 ? 'y' : 'ies'}`;
+  const count = ev.entryKind === 'draft' ? `${ev.entries} signup${ev.entries === 1 ? '' : 's'}` : ev.entryKind === 'team' ? `${ev.entries} team${ev.entries === 1 ? '' : 's'}` : `${ev.entries} entr${ev.entries === 1 ? 'y' : 'ies'}`;
   return (
     <li>
       <a class="eventrow" href={`/event/${ev.slug}`}>

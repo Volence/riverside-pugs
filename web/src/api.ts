@@ -2005,7 +2005,18 @@ export interface EventView {
   stages: EventStageView[]; entries: EventEntryView[]; play: StagePlayView[];
   finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
   lockedAt: string | null; checkinOpensAt: string | null; checkinClosesAt: string | null;
+  /** Draft-kind events only (drafts plan D1, mirrors src/events/views.ts): signup
+   *  count and names, never SR, notes or preferences. Optional so a team event omits it. */
+  draft?: EventDraftView | null;
 }
+export interface EventDraftView {
+  signupsCloseAt: string; draftAt: string; signups: number; names: string[];
+  /** The published cut, names in signup order; null before publish. */
+  cut: { captains: string[]; pool: string[]; bench: string[] } | null;
+}
+export type CaptainPref = 'want' | 'willing' | 'no';
+/** The viewer's own signup; role is null until the cut is published. */
+export interface MySignupView { captainPref: CaptainPref; note: string | null; role: 'captain' | 'pool' | 'bench' | null }
 
 export const bannerUrl = (key: string): string => `/api/events/banners/${key}`;
 /** The Events desk's own copy of an event's banner, staff only and not
@@ -2027,7 +2038,12 @@ export interface MyEntryView {
   canEditRoster: boolean; canCheckIn: boolean; canWithdraw: boolean; canLeave: boolean; leaveNeedsStaff: boolean; members: MemberOptionView[];
 }
 export interface RegisterOptionView { teamId: number; name: string; tag: string; logoKey: string | null; members: MemberOptionView[] }
-export interface MyEventView { entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean }
+export interface MyEventView {
+  entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean;
+  /** Draft-kind events: the viewer's active signup and their own open captaincy offer. Optional for team events. */
+  signup?: MySignupView | null;
+  offer?: { expiresAt: string } | null;
+}
 export const entryLogoUrl = (key: string): string => `/api/events/logos/${key}.png`;
 
 // ---------- the match room (tournaments plan T3a; mirrors src/events/roomViews.ts) ----------
@@ -2119,6 +2135,9 @@ export const eventsApi = {
   withdraw: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/withdraw`),
   checkIn: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/checkin`),
   leave: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/leave`),
+  signUp: (slug: string, body: { captainPref: CaptainPref; note: string }) => post<{ ok: true; signup: MySignupView }>(`/api/events/${enc(slug)}/signup`, body),
+  withdrawSignup: (slug: string) => post(`/api/events/${enc(slug)}/withdraw-signup`),
+  answerCaptainOffer: (slug: string, accept: boolean) => post(`/api/events/${enc(slug)}/captain-offer`, { accept }),
   /** The match room (plan T3a). */
   room: (slug: string, id: number, signal?: AbortSignal) => get<MatchRoomView>(`/api/events/${enc(slug)}/matches/${id}`, signal),
   ready: (slug: string, id: number) => post(`/api/events/${enc(slug)}/matches/${id}/ready`),

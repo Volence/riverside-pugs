@@ -42,7 +42,10 @@ export interface EventDraftView {
 
 const OVER: ReadonlySet<V.EventStatus> = new Set<V.EventStatus>(['finished', 'cancelled']);
 
+/** Team events count placed entries; a draft-kind event has none, so the
+ *  list shows its active signups instead (the web words it "signups"). */
 function entryCount(db: DB, ev: E.EventRow): number {
+  if (ev.entry_kind === 'draft') return D.activeSignups(db, ev.id).length;
   return N.placementOf(db, ev).placed.length;
 }
 

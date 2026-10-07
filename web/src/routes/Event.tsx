@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
-import { ApiError, bannerUrl, entryLogoUrl, eventsApi, type EventView, type MyEventView } from '../api';
+import { ApiError, bannerUrl, entryLogoUrl, eventsApi, type EventDraftView, type EventView, type MyEventView } from '../api';
 import { RichText } from '../components/RichText';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { STATUS_LABEL, placementText, untilText, whenText } from '../eventFormat';
+import { DraftSignupPanel } from './event/DraftSignupPanel';
 import { EntryPanel } from './event/EntryPanel';
 import { PrepPanel } from './event/PrepPanel';
 import { StagePlay } from './event/StagePlay';
@@ -38,6 +39,47 @@ function entryLines(ev: EventView): string[] {
     ? `Check-in opens ${ev.checkin.opensMinutes} minutes before the start and closes ${ev.checkin.closesMinutes} minutes before`
     : 'No check-in');
   return lines;
+}
+
+function NameChips({ names }: { names: string[] }) {
+  return <p class="eventpool">{names.map((n, i) => <span key={`${i}:${n}`} class="chip">{n}</span>)}</p>;
+}
+
+/** The public draft section (drafts plan D1 Ruling 9): the clock line, then
+ *  the signup count and names, or once the cut is published the three lists.
+ *  Names only, never SR, notes or preferences. */
+function DraftSection({ ev, draft, session }: { ev: EventView; draft: EventDraftView; session: Session }) {
+  const cut = draft.cut;
+  const closed = ev.lockedAt !== null || Date.now() >= Date.parse(draft.signupsCloseAt);
+  return (
+    <Panel>
+      <h3>Draft</h3>
+      <p class="muted">Signups close {whenText(draft.signupsCloseAt)} · Draft night {whenText(draft.draftAt)}</p>
+      {!cut && ev.status === 'registration' && !closed && session.kind === 'anonymous' && (
+        <p>
+          <a href={`/auth/steam?next=${encodeURIComponent(`/event/${ev.slug}`)}`} target="_top" rel="noopener">Sign in through Steam</a> to sign up.
+        </p>
+      )}
+      {!cut && ev.status === 'registration' && !closed && session.kind === 'pending' && (
+        <p class="muted">Your account is not active yet, so you cannot sign up.</p>
+      )}
+      {cut ? (
+        <>
+          {([['Captains', cut.captains], ['Pool', cut.pool], ['Bench', cut.bench]] as const).map(([label, names]) => (
+            <div key={label}>
+              <h4>{label}</h4>
+              {names.length === 0 ? <Empty>Nobody.</Empty> : <NameChips names={names} />}
+            </div>
+          ))}
+        </>
+      ) : (
+        <>
+          <p><strong>{draft.signups} signed up</strong></p>
+          {draft.names.length > 0 && <NameChips names={draft.names} />}
+        </>
+      )}
+    </Panel>
+  );
 }
 
 /** One event, read only (spec section 7, T1a part): status and countdown,
@@ -124,18 +166,21 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       ))}
       <Panel>
         <h3>Entry</h3>
-        {ev.entryKind === 'draft' && <p>Draft event: individual signups open later.</p>}
         <ul class="eventrules">{entryLines(ev).map((l) => <li key={l}>{l}</li>)}</ul>
         {ev.checkinOpensAt && BEFORE_START.has(ev.status) && (
           <p class="muted">Check-in {whenText(ev.checkinOpensAt)} to {whenText(ev.checkinClosesAt!)}</p>
         )}
         {ev.lockedAt && <p class="muted">The entry list is final.</p>}
       </Panel>
-      {mine && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
+      {ev.entryKind === 'draft' && ev.draft && <DraftSection ev={ev} draft={ev.draft} session={session} />}
+      {mine && ev.entryKind === 'draft' && ev.draft && (
+        <DraftSignupPanel slug={ev.slug} eventName={ev.name} status={ev.status} lockedAt={ev.lockedAt} draft={ev.draft} view={mine} onChange={bump} />
+      )}
+      {mine && ev.entryKind === 'team' && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
       {mine && ev.entryKind === 'team' && !['finished', 'cancelled'].includes(ev.status) && mine.entries
         .filter((e) => e.manage && (e.status === 'registered' || e.status === 'checked_in'))
         .map((e) => <PrepPanel key={e.id} slug={ev.slug} entryId={e.id} teamName={e.name} />)}
-      <Panel>
+      {ev.entryKind !== 'draft' && <Panel>
         <h3>{ev.entryKind === 'team' ? 'Teams' : 'Entries'}</h3>
         {ev.entries.length === 0
           ? <Empty>{ev.entryKind === 'team' ? 'No teams have entered yet.' : 'No entries yet.'}</Empty>
@@ -153,7 +198,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
               ))}
             </ul>
           )}
-      </Panel>
+      </Panel>}
     </main>
   );
 }

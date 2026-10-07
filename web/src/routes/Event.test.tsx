@@ -81,12 +81,37 @@ describe('EventPage', () => {
     expect((container.querySelector('img.eventbanner') as HTMLImageElement).getAttribute('src')).toBe(`/api/events/banners/${'c'.repeat(64)}`);
   });
 
-  it('a draft-kind event says its signups open later', async () => {
-    mockEvents.get.mockResolvedValue(view({ entryKind: 'draft' }));
-    render(<EventPage slug="riverside-cup" session={session} />);
-    expect(await screen.findByText('Draft event: individual signups open later.')).toBeTruthy();
-    expect(screen.getByText('No entries yet.')).toBeTruthy();
+  it('a draft-kind event shows the signup count and names before the cut, and never SR, notes or preferences', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft', status: 'registration',
+      draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 3, names: ['Alice', 'Bob', 'Cy'], cut: null },
+    }));
+    const { container } = render(<EventPage slug="riverside-cup" session={session} />);
+    expect(await screen.findByText('3 signed up')).toBeTruthy();
+    expect(screen.getByText(/Signups close/)).toBeTruthy();
+    expect(screen.getByText(/Draft night/)).toBeTruthy();
+    for (const n of ['Alice', 'Bob', 'Cy']) expect(screen.getByText(n)).toBeTruthy();
+    expect(screen.queryByText('Captains')).toBeNull();
+    expect(screen.queryByText('Draft event: individual signups open later.')).toBeNull();
+    expect(container.textContent).not.toMatch(/captainPref|willing|captain|prefer|note/i);
     expect(screen.queryByText('Up to 16 teams')).toBeNull();
+  });
+
+  it('a published cut shows Captains, Pool and Bench as names only', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft', status: 'registration',
+      draft: {
+        signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 5, names: ['Alice', 'Bob', 'Cy', 'Di', 'Ed'],
+        cut: { captains: ['Alice'], pool: ['Bob', 'Cy', 'Di'], bench: ['Ed'] },
+      },
+    }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    expect(await screen.findByText('Captains')).toBeTruthy();
+    expect(screen.getByText('Pool')).toBeTruthy();
+    expect(screen.getByText('Bench')).toBeTruthy();
+    expect(screen.getAllByText('Alice')).toHaveLength(1);
+    expect(screen.getByText('Ed')).toBeTruthy();
+    expect(screen.queryByText(/signed up/)).toBeNull();
   });
 
   it('a cancelled event says so, with the reason, and no countdown', async () => {
