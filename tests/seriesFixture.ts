@@ -212,3 +212,22 @@ export function driveLoserPicks(f: RoomFixture): void {
   ok(R.lockLineup(f.db, { matchId: f.matchId, steamid: A[0]!, steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
   ok(R.lockLineup(f.db, { matchId: f.matchId, steamid: BATS[0]!, steamids: BATS.slice(0, 4), timers: TIMERS, now: at(4) }));
 }
+
+/** The Bo2 home and away pool (plan T3b final review). */
+export const HA = ['no_mercy', 'dead_air', 'death_toll', 'blood_harvest'];
+/** Rats go second, Bats pick death_toll and Rats survive first, Rats pick
+ *  no_mercy and Bats take infected: Rats survive first in both. With
+ *  game2Bats 'survivors', Bats survive first in game 2 instead (plan T6). Use with
+ *  seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway }). */
+export function driveHomeAway(r: RoomFixture, game2Bats: 'infected' | 'survivors' = 'infected'): void {
+  const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+  const ok = <T>(x: { ok: true; value: T } | { ok: false; error: string }): T => { if (!x.ok) throw new Error(x.error); return x.value; };
+  ok(R.openRoom(r.db, { matchId: r.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+  for (const who of [A[0]!, BATS[0]!]) ok(R.readyUp(r.db, { matchId: r.matchId, steamid: who, timers: TIMERS, now: at(1) }));
+  const steps: [string, number, string, string | null][] = [
+    [A[0]!, 0, 'second', null], [BATS[0]!, 1, 'pick', 'death_toll'], [A[0]!, 2, 'survivors', null], [A[0]!, 3, 'pick', 'no_mercy'], [BATS[0]!, 4, game2Bats, null],
+  ];
+  for (const [who, step, action, campaign] of steps) ok(R.actVeto(r.db, { matchId: r.matchId, steamid: who, step, action, campaign, timers: TIMERS, now: at(2) }));
+  ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: A[0]!, steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
+  ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: BATS[0]!, steamids: BATS.slice(0, 4), timers: TIMERS, now: at(4) }));
+}
