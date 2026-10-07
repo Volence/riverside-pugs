@@ -100,7 +100,7 @@ describe('event fields', () => {
       ok: true,
       value: {
         name: 'Cup', startsAt: START, entryKind: 'team', official: true, teamCap: null, description: '',
-        eligibility: V.defaultEligibility(), checkin: V.defaultCheckin(), roster: V.defaultRoster(),
+        eligibility: V.defaultEligibility(), checkin: V.defaultCheckin(), roster: V.defaultRoster(), draft: null,
       },
     });
     expect(bad(V.parseEventFields({ name: 'Cup' }, null))).toBe('missing_fields');

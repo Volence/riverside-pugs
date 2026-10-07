@@ -455,6 +455,33 @@ CREATE TABLE IF NOT EXISTS event_log (
   detail   TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS event_log_event ON event_log (event_id, id);
+-- Drafts plan D1: individual signups for a draft-kind event, and the
+-- captaincy offers made down the SR list. role and role_manual are the
+-- working cut (src/events/drafts.ts owns every write). One active signup per
+-- player per event; withdrawing keeps the row and a new signup adds one.
+CREATE TABLE IF NOT EXISTS draft_signups (
+  id              INTEGER PRIMARY KEY,
+  event_id        INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  steamid         TEXT NOT NULL REFERENCES players(steamid),
+  captain_pref    TEXT NOT NULL CHECK (captain_pref IN ('want','willing','no')),
+  note            TEXT,
+  created_at      TEXT NOT NULL,
+  withdrawn_at    TEXT,
+  withdraw_reason TEXT CHECK (withdraw_reason IS NULL OR withdraw_reason IN ('withdrawn','removed','ineligible')),
+  role            TEXT CHECK (role IS NULL OR role IN ('captain','pool','bench')),
+  role_manual     INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS draft_signups_active ON draft_signups (event_id, steamid) WHERE withdrawn_at IS NULL;
+CREATE TABLE IF NOT EXISTS draft_captain_offers (
+  id          INTEGER PRIMARY KEY,
+  event_id    INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  steamid     TEXT NOT NULL REFERENCES players(steamid),
+  offered_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  answer      TEXT CHECK (answer IS NULL OR answer IN ('accept','decline','expired','stopped')),
+  answered_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS draft_offers_open ON draft_captain_offers (event_id) WHERE answer IS NULL;
 -- Tournament matches (spec part 2 section 4; plan T2). One row per pairing of
 -- a stage. Swiss and league rows are written by src/events/play.ts from
 -- src/events/swiss.ts and roundRobin.ts. Elimination and round robin rows
@@ -1888,6 +1915,13 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'event_stages', 'started_at', 'TEXT');
   ensureColumn(db, 'event_stages', 'finished_at', 'TEXT');
   ensureColumn(db, 'events', 'live_at', 'TEXT');
+  // Drafts plan D1: draft_json holds { signupsCloseAt, draftAt } (plus keys
+  // later plans add); draft_teams and cut_at are the cut; offers_on is the
+  // captaincy offer chain switch.
+  ensureColumn(db, 'events', 'draft_json', 'TEXT');
+  ensureColumn(db, 'events', 'draft_teams', 'INTEGER');
+  ensureColumn(db, 'events', 'cut_at', 'TEXT');
+  ensureColumn(db, 'events', 'offers_on', 'INTEGER NOT NULL DEFAULT 0');
   // Tournaments plan T3a: a stage's veto knobs (src/events/vetoConfig.ts).
   // Null on stages made before it; stageSettingsOf reads those from veto_type.
   ensureColumn(db, 'event_stages', 'veto_json', 'TEXT');

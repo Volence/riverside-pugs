@@ -1929,7 +1929,10 @@ export type { VetoConfig };
 export interface EventFields {
   name: string; startsAt: string; entryKind: EntryKind; official: boolean; teamCap: number | null; description: string;
   eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster;
+  /** Draft-kind events only; null on a team event. */
+  draft: EventDraft | null;
 }
+export interface EventDraft { signupsCloseAt: string; draftAt: string }
 export interface EventListItem {
   slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; startsAt: string; bannerKey: string | null;
   format: string[]; entries: number;
@@ -2513,7 +2516,7 @@ export const adminApi = {
   events: (signal?: AbortSignal) => get<{ events: AdminEventRow[] }>('/api/admin/events', signal),
   eventOptions: (signal?: AbortSignal) => get<AdminEventOptions>('/api/admin/events/options', signal),
   event: (id: number, signal?: AbortSignal) => get<AdminEventDetail>(`/api/admin/events/${id}`, signal),
-  createEvent: (body: { name: string; startsAt: string; entryKind: EntryKind }) => post<{ id: number; slug: string }>('/api/admin/events', body),
+  createEvent: (body: { name: string; startsAt: string; entryKind: EntryKind; draft?: EventDraft }) => post<{ id: number; slug: string }>('/api/admin/events', body),
   updateEvent: (id: number, fields: Partial<EventFields>) => post(`/api/admin/events/${id}`, fields),
   addStage: (id: number, stage: StageSettings) => post(`/api/admin/events/${id}/stages`, stage),
   updateStage: (id: number, stageId: number, stage: StageSettings) => post(`/api/admin/events/${id}/stages/${stageId}`, stage),

@@ -15,7 +15,7 @@ describe('createEvent', () => {
     expect(E.fieldsOf(ev).checkin).toEqual({ enabled: true, opensMinutes: 60, closesMinutes: 15 });
     const again = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'riverside cup', startsAt: START, entryKind: 'team' }, now: NOW }));
     expect(again.slug).toBe('riverside-cup-2');
-    const reserved = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'New', startsAt: START, entryKind: 'draft' }, now: NOW }));
+    const reserved = must(E.createEvent(f.db, { by: ADMIN, fields: { name: 'New', startsAt: START, entryKind: 'draft', draft: { signupsCloseAt: '2026-10-09T20:00:00.000Z', draftAt: '2026-10-10T18:00:00.000Z' } }, now: NOW }));
     expect(reserved.slug).toBe('new-2');
     expect(E.eventLog(f.db, again.id).map((l) => [l.action, l.actor])).toEqual([['created', ADMIN]]);
   });
@@ -48,7 +48,7 @@ describe('updateEvent', () => {
     const f = eventFixture();
     expect(err(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { startsAt: '2026-09-30T00:00:00.000Z' }, now: NOW }))).toBe('start_passed');
     must(E.publishEvent(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
-    expect(err(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { entryKind: 'draft' }, now: NOW }))).toBe('kind_locked');
+    expect(err(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { entryKind: 'draft', draft: { signupsCloseAt: '2026-10-09T20:00:00.000Z', draftAt: '2026-10-10T18:00:00.000Z' } }, now: NOW }))).toBe('kind_locked');
     expect(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { description: 'Bring snacks.' }, now: NOW }).ok).toBe(true);
   });
 
@@ -206,11 +206,11 @@ describe('openRegistration', () => {
     expect(actions(f).at(-1)).toBe('registration_opened');
   });
 
-  it('refuses a draft-kind event: its signups belong to the drafts plan', () => {
+  it('opens signups for a draft-kind event', () => {
     const f = eventFixture();
-    must(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { entryKind: 'draft' }, now: NOW }));
+    must(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { entryKind: 'draft', draft: { signupsCloseAt: '2026-10-09T20:00:00.000Z', draftAt: '2026-10-10T18:00:00.000Z' } }, now: NOW }));
     must(E.publishEvent(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
-    expect(err(E.openRegistration(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }))).toBe('draft_signups_later');
+    expect(must(E.openRegistration(f.db, { eventId: f.eventId, by: ADMIN, now: NOW })).status).toBe('registration');
   });
 });
 

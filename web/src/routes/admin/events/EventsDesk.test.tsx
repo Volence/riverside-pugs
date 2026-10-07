@@ -38,9 +38,12 @@ describe('EventsDesk', () => {
     fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Spring Cup' } });
     fireEvent.input(screen.getByLabelText('Starts at'), { target: { value: '2026-10-10T20:00' } });
     fireEvent.change(screen.getByLabelText('Entry kind'), { target: { value: 'draft' } });
+    fireEvent.input(screen.getByLabelText('Signups close'), { target: { value: '2026-10-09T20:00' } });
+    fireEvent.input(screen.getByLabelText('Draft night'), { target: { value: '2026-10-10T18:00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
     await waitFor(() => expect(mockAdmin.createEvent).toHaveBeenCalledWith({
       name: 'Spring Cup', startsAt: new Date('2026-10-10T20:00').toISOString(), entryKind: 'draft',
+      draft: { signupsCloseAt: new Date('2026-10-09T20:00').toISOString(), draftAt: new Date('2026-10-10T18:00').toISOString() },
     }));
     await waitFor(() => expect(location.pathname).toBe('/admin/events/7'));
   });
