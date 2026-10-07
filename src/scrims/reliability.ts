@@ -18,6 +18,8 @@ import { isLateCancel, iso, partyWhere, SHOWN_MIN, type Party } from '../booking
  * excused: excused marks (late cancels, no-shows, and short sides staff
  *   excused with no claim, bookings.ts shortSide), in neither count.
  * Early, staff and system cancels are in no count at all.
+ * Tournament bookings (purpose 'tournament') are in no count: the event
+ * handles a tournament no-show, not scrim standing (plan D2c Ruling 1).
  * The booking allowance (rules.ts allowance) moves only on claimed no-shows:
  * an unclaimed short side is often an idle end nobody joined or a scrim both
  * sides moved, so it lowers shown here but should not cost a booking slot.
@@ -29,7 +31,7 @@ export function reliability(db: DB, party: Party, nowMs: number = Date.now()): R
   const rows = db.prepare(
     `SELECT b.*, s.side AS my_side, s.peak_present AS my_peak, s.no_show_at AS my_no_show, s.excused_at AS my_excused
        FROM booking_sides s JOIN bookings b ON b.id = s.booking_id
-      WHERE ${w.sql} AND s.confirmed_at IS NOT NULL AND b.starts_at <= ? AND b.state IN ('ended','no_show','cancelled')`,
+      WHERE ${w.sql} AND b.purpose <> 'tournament' AND s.confirmed_at IS NOT NULL AND b.starts_at <= ? AND b.state IN ('ended','no_show','cancelled')`,
   ).all(w.arg, iso(nowMs)) as (BookingRow & { my_side: string; my_peak: number; my_no_show: string | null; my_excused: string | null })[];
   const out: Reliability = { shown: 0, booked: 0, noShows: 0, lateCancels: 0, excused: 0 };
   for (const r of rows) {
@@ -83,5 +85,5 @@ export function scrimRecordOf(db: DB, steamid: string, nowMs: number = Date.now(
 /** Whether this player has ever captained a pickup side on a booking, so
  *  their own Bookings page has a pickup record worth showing. */
 export function hasPickupBookings(db: DB, steamid: string): boolean {
-  return db.prepare('SELECT 1 FROM booking_sides WHERE team_id IS NULL AND captain_steamid = ? LIMIT 1').get(steamid) !== undefined;
+  return db.prepare("SELECT 1 FROM booking_sides s JOIN bookings b ON b.id = s.booking_id WHERE s.team_id IS NULL AND s.captain_steamid = ? AND b.purpose <> 'tournament' LIMIT 1").get(steamid) !== undefined;
 }

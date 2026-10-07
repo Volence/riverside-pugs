@@ -141,20 +141,21 @@ export function partyWhere(party: Party): { sql: string; arg: number | string } 
     : { sql: 's.team_id IS NULL AND s.captain_steamid = ?', arg: party.captain };
 }
 
-/** Open bookings the party is a confirmed side of. */
+/** Open scrim bookings the party is a confirmed side of (tournament bookings
+ *  do not count toward the booking limit). */
 export function upcomingCount(db: DB, party: Party): number {
   const w = partyWhere(party);
   return (db.prepare(
     `SELECT COUNT(DISTINCT b.id) AS n FROM bookings b JOIN booking_sides s ON s.booking_id = b.id
-      WHERE ${w.sql} AND s.confirmed_at IS NOT NULL AND b.state IN ${OPEN_STATES_SQL} AND b.ending_at IS NULL`,
+      WHERE ${w.sql} AND b.purpose <> 'tournament' AND s.confirmed_at IS NOT NULL AND b.state IN ${OPEN_STATES_SQL} AND b.ending_at IS NULL`,
   ).get(w.arg) as { n: number }).n;
 }
 
 export function recentNoShows(db: DB, party: Party, nowMs: number): number {
   const w = partyWhere(party);
   return (db.prepare(
-    `SELECT COUNT(*) AS n FROM booking_sides s
-      WHERE ${w.sql} AND s.no_show_at IS NOT NULL AND s.no_show_at > ? AND s.excused_at IS NULL`,
+    `SELECT COUNT(*) AS n FROM booking_sides s JOIN bookings b ON b.id = s.booking_id
+      WHERE ${w.sql} AND b.purpose <> 'tournament' AND s.no_show_at IS NOT NULL AND s.no_show_at > ? AND s.excused_at IS NULL`,
   ).get(w.arg, iso(nowMs - NO_SHOW_WINDOW_DAYS * 86_400_000)) as { n: number }).n;
 }
 
