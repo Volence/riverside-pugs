@@ -4,6 +4,7 @@ import * as N from './entries.js';
 import * as P from './play.js';
 import { eventMessage, type EventNotifyType, type RescheduleNotice, type SignupRemoval, type StaffAction } from './messages.js';
 import { getProposal } from './schedule.js';
+import type { CutRole } from './draftRules.js';
 
 /**
  * The event DMs (plan T1b Ruling 11), shared by the minute tick
@@ -100,4 +101,10 @@ export function tellTimeLocked(d: NoticeDeps, eventId: number, matchId: number, 
 /** Staff removed a draft signup (drafts plan D1 Ruling 11): that player, with why. */
 export function tellSignupRemoved(d: NoticeDeps, eventId: number, steamid: string, reason: SignupRemoval): void {
   tell(d, [steamid], eventId, 'draft_signup_removed', { removal: reason });
+}
+/** The cut is published (drafts plan D1 Ruling 11): every active signup,
+ *  told their role and the draft time. */
+export function tellCutRole(d: NoticeDeps, eventId: number, cut: Record<'captains' | 'pool' | 'bench', string[]>): void {
+  const groups: [CutRole, string[]][] = [['captain', cut.captains], ['pool', cut.pool], ['bench', cut.bench]];
+  for (const [cutRole, to] of groups) tell(d, to, eventId, 'draft_cut_role', { cutRole });
 }

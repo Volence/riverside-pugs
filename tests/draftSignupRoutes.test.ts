@@ -81,7 +81,7 @@ describe('draft signups over HTTP', () => {
     await post(`/api/events/${f.slug}/signup`, P[1], { captainPref: 'willing', note: 'flex' });
     const pub = await get(`/api/events/${f.slug}`, P[2]);
     expect(pub.statusCode).toBe(200);
-    expect(pub.json().draft).toEqual({ signupsCloseAt: f.closeAt, draftAt: f.draftAt, signups: 2, names: ['p900', 'p901'] });
+    expect(pub.json().draft).toEqual({ signupsCloseAt: f.closeAt, draftAt: f.draftAt, signups: 2, names: ['p900', 'p901'], cut: null });
     for (const key of ['"sr"', '"note"', '"captainPref"', 'prefer infected', 'flex']) expect(pub.body).not.toContain(key);
     const anon = await get(`/api/events/${f.slug}`);
     expect(anon.json().draft.names).toEqual(['p900', 'p901']);

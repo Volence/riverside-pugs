@@ -284,8 +284,19 @@ describe('event_log guard', () => {
       if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
       return r.value;
     };
-    const DRAFT_READS = new Set(['activeSignups', 'signupOf']);
+    const DRAFT_READS = new Set(['activeSignups', 'signupOf', 'cutState']);
     const signed = (f: DraftFixture) => must(D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }));
+    /** 12 signups, closed: 3 teams, 9 pool (DP[0..8]) and 3 bench (DP[9..11]). */
+    const cut = (f: DraftFixture) => {
+      for (const s of DP.slice(0, 12)) must(D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: NOW }));
+      must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+    };
+    /** 8 signups, 2 teams, both captains chosen: a publishable cut. */
+    const publishable = (f: DraftFixture) => {
+      for (const s of DP.slice(0, 8)) must(D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: NOW }));
+      must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+      for (const s of DP.slice(0, 2)) must(D.setCaptain(f.db, { eventId: f.eventId, steamid: s, captain: true, actor: ADMIN, now: NOW }));
+    };
     const DRAFT_MUTATIONS: Record<string, { action: string; setup?: (f: DraftFixture) => void; run: (f: DraftFixture) => V.Checked<unknown> }> = {
       signUp: { action: 'draft_signup', run: (f) => D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }) },
       withdrawSignup: { action: 'draft_withdraw', setup: signed, run: (f) => D.withdrawSignup(f.db, { eventId: f.eventId, steamid: DP[0], now: NOW }) },
@@ -294,6 +305,10 @@ describe('event_log guard', () => {
         run: (f) => D.removeSignup(f.db, { eventId: f.eventId, steamid: DP[0], reason: 'removed', actor: ADMIN, now: NOW }),
       },
       closeSignups: { action: 'draft_signups_closed', setup: signed, run: (f) => D.closeSignups(f.db, { eventId: f.eventId, actor: null, now: NOW }) },
+      setDraftTeams: { action: 'draft_teams_set', setup: cut, run: (f) => D.setDraftTeams(f.db, { eventId: f.eventId, teams: 2, actor: ADMIN, now: NOW }) },
+      setCaptain: { action: 'draft_captain_set', setup: cut, run: (f) => D.setCaptain(f.db, { eventId: f.eventId, steamid: DP[0], captain: true, actor: ADMIN, now: NOW }) },
+      swapPoolBench: { action: 'draft_swap', setup: cut, run: (f) => D.swapPoolBench(f.db, { eventId: f.eventId, poolSteamid: DP[0], benchSteamid: DP[11], actor: ADMIN, now: NOW }) },
+      publishCut: { action: 'draft_cut_published', setup: publishable, run: (f) => D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
     };
     const draftRows = (f: DraftFixture) => JSON.stringify([
       f.db.prepare('SELECT * FROM draft_signups ORDER BY id').all(),

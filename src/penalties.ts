@@ -38,6 +38,14 @@ export function recordPenalty(db: DB, steamid: string, kind: PenaltyKind, matchI
   publishAdminEvent({ kind: 'penalty', steamid, penalty: kind, matchId });
 }
 
+/** Uncleared no-shows since `since`, whether penalties are on or not: the
+ *  draft desk shows them as PUG reliability (drafts plan D1 Ruling 8). */
+export function noShowsSince(db: DB, steamid: string, since: Date): number {
+  return (db.prepare(
+    "SELECT COUNT(*) AS n FROM penalties WHERE player_id = ? AND kind = 'no_show' AND cleared_at IS NULL AND created_at >= ?",
+  ).get(steamid, since.toISOString()) as { n: number }).n;
+}
+
 export interface ActiveTimeout {
   until: Date;
   /** Offenses of `kind` in the window, the count that picked the rung. */

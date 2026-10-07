@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { DB } from '../db.js';
 import { findSlurs } from '../slurs.js';
-import { hasUnsafeChars } from '../profileFields.js';
+import { DEFAULT_IGNORABLE, hasUnsafeChars } from '../profileFields.js';
 import { settingNumber } from '../settings.js';
 import { inGoodStanding } from '../standing.js';
 import { getPlayer } from '../players.js';
@@ -71,13 +71,6 @@ export const fail = (error: TeamError): { ok: false; error: TeamError } => ({ ok
 export function membershipCap(db: DB): number {
   return settingNumber(db, 'team_membership_cap', 3, { integer: true, min: 1, max: 10 });
 }
-
-/** Any code point Unicode marks "default ignorable": invisible by design
- *  (joiners, variation selectors, Hangul filler and friends). hasUnsafeChars
- *  already refuses the bidi and zero-width characters most likely to be
- *  pasted by accident, but it does not cover this whole class, and a name
- *  built entirely from them looks blank while passing the length check. */
-const DEFAULT_IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
 
 export function normalizeName(raw: unknown): { ok: true; name: string; key: string } | { ok: false; error: TeamError } {
   if (typeof raw !== 'string') return fail('bad_name');

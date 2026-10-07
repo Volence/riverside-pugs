@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import * as E from './events.js';
 import { playerFacts } from './entries.js';
 import * as R from './entryRules.js';
-import { cleanNote } from './draftRules.js';
+import { cleanNote, cutProblems, defaultRoles, maxTeams, type CutProblem } from './draftRules.js';
 import * as V from './validate.js';
 
 /**
@@ -95,8 +95,13 @@ export function withdrawSignup(db: DB, o: { eventId: number; steamid: string; no
   })();
 }
 
+/** The statuses a draft-kind event sits in before the draft: staff work on
+ *  signups and the cut only then, never on a cancelled or finished event. */
+const CUT_STATUSES: ReadonlySet<string> = new Set(['registration', 'checkin']);
+
 /** Staff take a signup off, with a reason the player is told, until the cut
- *  is published (Ruling 4). Signups need not be open. */
+ *  is published (Ruling 4), and only while the event is before its draft.
+ *  Signups need not be open. */
 export function removeSignup(
   db: DB, o: { eventId: number; steamid: string; reason: 'removed' | 'ineligible'; actor: string; now: Date },
 ): V.Checked<null> {
@@ -106,6 +111,7 @@ export function removeSignup(
     if (!found.ok) return found;
     const ev = found.value;
     if (ev.cut_at !== null) return V.fail('cut_published');
+    if (!CUT_STATUSES.has(ev.status)) return V.fail('wrong_status');
     const s = signupOf(db, ev.id, o.steamid);
     if (!s) return V.fail('not_signed_up');
     db.prepare('UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = ? WHERE id = ?').run(at, o.reason, s.id);
@@ -115,7 +121,9 @@ export function removeSignup(
 }
 
 /** Signups close: by staff, or by the minute tick at signupsCloseAt (actor
- *  null). Sets locked_at; the event stays in registration. */
+ *  null). Sets locked_at; the event stays in registration. The desk opens on
+ *  the spec's default cut: floor(active / 4) teams, no captains, and pool and
+ *  bench by signup order (Ruling 5). */
 export function closeSignups(db: DB, o: { eventId: number; actor: string | null; now: Date }): V.Checked<null> {
   const at = o.now.toISOString();
   return db.transaction((): V.Checked<null> => {
@@ -123,8 +131,139 @@ export function closeSignups(db: DB, o: { eventId: number; actor: string | null;
     if (!found.ok) return found;
     const ev = found.value;
     if (ev.status !== 'registration' || ev.locked_at !== null) return V.fail('closed');
-    db.prepare('UPDATE events SET locked_at = ?, updated_at = ? WHERE id = ?').run(at, at, ev.id);
-    E.logEvent(db, ev.id, o.actor, 'draft_signups_closed', at, { by: o.actor ?? 'clock', signups: activeSignups(db, ev.id).length });
+    const n = activeSignups(db, ev.id).length;
+    db.prepare('UPDATE events SET locked_at = ?, draft_teams = ?, updated_at = ? WHERE id = ?').run(at, maxTeams(n), at, ev.id);
+    recompute(db, ev.id, maxTeams(n));
+    E.logEvent(db, ev.id, o.actor, 'draft_signups_closed', at, { by: o.actor ?? 'clock', signups: n });
     return V.ok(null);
+  })();
+}
+
+/**
+ * The cut (Rulings 4 and 5). The working cut is each active signup's role
+ * plus events.draft_teams; nobody but staff sees it until publishCut stamps
+ * cut_at. Changing the team count or a captain recomputes pool and bench from
+ * signup order and clears hand swaps; a swap marks both players role_manual.
+ */
+
+/** A closed, unpublished draft whose cut staff may work on. */
+function cutOpen(db: DB, eventId: number): V.Checked<E.EventRow> {
+  const found = draftEvent(db, eventId);
+  if (!found.ok) return found;
+  const ev = found.value;
+  if (ev.cut_at !== null) return V.fail('cut_published');
+  if (ev.locked_at === null) return V.fail('not_closed');
+  if (!CUT_STATUSES.has(ev.status)) return V.fail('wrong_status');
+  return V.ok(ev);
+}
+
+/** Ruling 5: defaultRoles over the active signups with the current captains
+ *  (role 'captain'), every role_manual back to 0. */
+function recompute(db: DB, eventId: number, teams: number): void {
+  const all = activeSignups(db, eventId);
+  const roles = defaultRoles(all, new Set(all.filter((s) => s.role === 'captain').map((s) => s.steamid)), teams);
+  const set = db.prepare('UPDATE draft_signups SET role = ?, role_manual = 0 WHERE id = ?');
+  for (const s of all) set.run(roles.get(s.steamid)!, s.id);
+}
+
+export function setDraftTeams(db: DB, o: { eventId: number; teams: number; actor: string; now: Date }): V.Checked<null> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<null> => {
+    const found = cutOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    if (!Number.isInteger(o.teams) || o.teams < 2 || o.teams > maxTeams(activeSignups(db, ev.id).length)) return V.fail('bad_team_count');
+    db.prepare('UPDATE events SET draft_teams = ?, updated_at = ? WHERE id = ?').run(o.teams, at, ev.id);
+    recompute(db, ev.id, o.teams);
+    E.logEvent(db, ev.id, o.actor, 'draft_teams_set', at, { teams: o.teams, from: ev.draft_teams });
+    return V.ok(null);
+  })();
+}
+
+/** Staff make a signup a captain or take it back (Ruling 1: anyone, whatever
+ *  their preference). */
+export function setCaptain(db: DB, o: { eventId: number; steamid: string; captain: boolean; actor: string; now: Date }): V.Checked<null> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<null> => {
+    const found = cutOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    const s = signupOf(db, ev.id, o.steamid);
+    if (!s) return V.fail('not_signed_up');
+    if (o.captain) db.prepare("UPDATE draft_signups SET role = 'captain' WHERE id = ?").run(s.id);
+    else if (s.role === 'captain') db.prepare('UPDATE draft_signups SET role = NULL WHERE id = ?').run(s.id);
+    recompute(db, ev.id, ev.draft_teams ?? 0);
+    E.logEvent(db, ev.id, o.actor, 'draft_captain_set', at, { steamid: o.steamid, captain: o.captain });
+    return V.ok(null);
+  })();
+}
+
+/** One pool player to the bench and one bench player into the pool, by hand.
+ *  It lasts until the next team-count or captain change (Ruling 5). */
+export function swapPoolBench(db: DB, o: { eventId: number; poolSteamid: string; benchSteamid: string; actor: string; now: Date }): V.Checked<null> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<null> => {
+    const found = cutOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    const out = signupOf(db, ev.id, o.poolSteamid);
+    const into = signupOf(db, ev.id, o.benchSteamid);
+    if (!out || !into) return V.fail('not_signed_up');
+    if (out.role !== 'pool' || into.role !== 'bench') return V.fail('bad_swap');
+    const set = db.prepare('UPDATE draft_signups SET role = ?, role_manual = 1 WHERE id = ?');
+    set.run('bench', out.id);
+    set.run('pool', into.id);
+    E.logEvent(db, ev.id, o.actor, 'draft_swap', at, { toBench: o.poolSteamid, toPool: o.benchSteamid });
+    return V.ok(null);
+  })();
+}
+
+/** The working cut's counts and what keeps it from publishing. Eligibility is
+ *  T1b's starter rule (Ruling 7), read fresh at `now`. */
+export interface CutState {
+  teams: number | null; maxTeams: number; active: number; captains: number; pool: number; poolNeeded: number; bench: number;
+  unassigned: number; ineligible: V.EntryProblem[]; problems: CutProblem[];
+}
+export function cutState(db: DB, eventId: number, now: Date): CutState {
+  const ev = E.getEvent(db, eventId);
+  if (!ev) throw new Error(`no event ${eventId}`);
+  const elig = E.fieldsOf(ev).eligibility;
+  const all = activeSignups(db, ev.id);
+  const count = (r: SignupRow['role']) => all.filter((s) => s.role === r).length;
+  const ineligible = all.flatMap((s): V.EntryProblem[] => {
+    const facts = playerFacts(db, s.steamid, now);
+    const p = R.problemsOf(elig, facts, 'starter');
+    return p.length > 0 ? [{ steamid: s.steamid, problems: p.map((k) => R.problemText(k, elig, facts)) }] : [];
+  });
+  const c = {
+    teams: ev.draft_teams, maxTeams: maxTeams(all.length), active: all.length,
+    captains: count('captain'), pool: count('pool'), poolNeeded: (ev.draft_teams ?? 0) * 3, bench: count('bench'), unassigned: count(null),
+  };
+  return { ...c, ineligible, problems: cutProblems({ ...c, ineligible: ineligible.length }) };
+}
+
+export interface PublishedCut { captains: string[]; pool: string[]; bench: string[] }
+/** publishCut's refusal when the cut is not publishable: the problems and
+ *  counts, re-derived inside its transaction (Review Focus 3). */
+export interface CutChanged { ok: false; error: 'cut_changed'; cut: CutState }
+
+/** Publish the cut once (Ruling 4): every check again inside the
+ *  transaction, then cut_at, the offer chain off and any open offer stopped.
+ *  The route DMs every signup their role after it commits. */
+export function publishCut(db: DB, o: { eventId: number; actor: string; now: Date }): V.Checked<PublishedCut> | CutChanged {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<PublishedCut> | CutChanged => {
+    const found = cutOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    const state = cutState(db, ev.id, o.now);
+    if (state.problems.length > 0) return { ok: false, error: 'cut_changed', cut: state };
+    const all = activeSignups(db, ev.id);
+    const of = (r: SignupRow['role']) => all.filter((s) => s.role === r).map((s) => s.steamid);
+    const cut = { captains: of('captain'), pool: of('pool'), bench: of('bench') };
+    db.prepare('UPDATE events SET cut_at = ?, offers_on = 0, updated_at = ? WHERE id = ?').run(at, at, ev.id);
+    db.prepare("UPDATE draft_captain_offers SET answer = 'stopped', answered_at = ? WHERE event_id = ? AND answer IS NULL").run(at, ev.id);
+    E.logEvent(db, ev.id, o.actor, 'draft_cut_published', at, { captains: cut.captains.length, pool: cut.pool.length, bench: cut.bench.length });
+    return V.ok(cut);
   })();
 }

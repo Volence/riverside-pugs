@@ -34,7 +34,11 @@ export interface EventView {
    *  signup order. Never SR, notes or captain preference. */
   draft: EventDraftView | null;
 }
-export interface EventDraftView { signupsCloseAt: string; draftAt: string; signups: number; names: string[] }
+export interface EventDraftView {
+  signupsCloseAt: string; draftAt: string; signups: number; names: string[];
+  /** The published cut as names in signup order (Ruling 9); null before publish. */
+  cut: { captains: string[]; pool: string[]; bench: string[] } | null;
+}
 
 const OVER: ReadonlySet<V.EventStatus> = new Set<V.EventStatus>(['finished', 'cancelled']);
 
@@ -119,8 +123,11 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
 
 function draftView(db: DB, ev: E.EventRow, f: V.EventFields): EventDraftView | null {
   if (ev.entry_kind !== 'draft' || !f.draft) return null;
-  const names = D.activeSignups(db, ev.id).map((s) => getPlayer(db, s.steamid)?.name ?? s.steamid);
-  return { signupsCloseAt: f.draft.signupsCloseAt, draftAt: f.draft.draftAt, signups: names.length, names };
+  const all = D.activeSignups(db, ev.id).map((s) => ({ role: s.role, name: getPlayer(db, s.steamid)?.name ?? s.steamid }));
+  const names = all.map((s) => s.name);
+  const of = (r: D.SignupRow['role']) => all.filter((s) => s.role === r).map((s) => s.name);
+  const cut = ev.cut_at !== null ? { captains: of('captain'), pool: of('pool'), bench: of('bench') } : null;
+  return { signupsCloseAt: f.draft.signupsCloseAt, draftAt: f.draft.draftAt, signups: names.length, names, cut };
 }
 
 /** The viewer's own signup (plan D1): their preference and note. The role

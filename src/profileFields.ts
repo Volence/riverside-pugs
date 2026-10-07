@@ -79,6 +79,15 @@ export function linkUrl(platform: string, handle: string): string | null {
   return BY_KEY.get(platform)?.url(handle) ?? null;
 }
 
+/** Any code point Unicode marks "default ignorable": invisible by design
+ *  (joiners, variation selectors, Hangul filler and friends). hasUnsafeChars
+ *  already refuses the bidi and zero-width characters most likely to be
+ *  pasted by accident, but it does not cover this whole class, and a name
+ *  built entirely from them looks blank while passing the length check.
+ *  Team names, event names and draft signup notes share this one pattern so
+ *  their filters cannot drift apart. */
+export const DEFAULT_IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
+
 /**
  * Text a player may not put anywhere: control characters, and the invisible
  * formatting and bidi overrides that let a string render as something other

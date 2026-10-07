@@ -1,5 +1,5 @@
 import { findSlurs } from '../slurs.js';
-import { hasUnsafeChars } from '../profileFields.js';
+import { DEFAULT_IGNORABLE, hasUnsafeChars } from '../profileFields.js';
 import { NOTE_MAX } from './draftRules.js';
 import { parseVetoConfig, presetConfig, vetoFamily, VETO_PRESETS, PRESET_MIN_POOL, type VetoConfig, type VetoPreset } from './vetoConfig.js';
 
@@ -79,6 +79,10 @@ export const EVENT_ERRORS = {
   bad_captain_pref: { status: 400, text: 'Captaincy is want, willing or no.' },
   ineligible: { status: 409, text: 'You do not meet the entry rules for this event.' },
   cut_published: { status: 409, text: 'The cut is published, so signups no longer change.' },
+  not_closed: { status: 409, text: 'Close signups before working on the cut.' },
+  bad_team_count: { status: 409, text: 'A draft has at least 2 teams and at most one team per 4 signups.' },
+  bad_swap: { status: 409, text: 'A swap moves one pool player to the bench and one bench player into the pool.' },
+  cut_changed: { status: 409, text: 'The cut is not ready to publish, or changed since it was built. See the problems listed.' },
   has_entries: { status: 409, text: 'This draft has entries, so it cannot be deleted.' },
   bad_entry_roster: { status: 400, text: 'A roster is exactly 4 starters, no more subs than the event allows and at most one coach, each player once.' },
   not_registration: { status: 409, text: 'Registration is not open for this event.' },
@@ -246,9 +250,6 @@ export function parseTime(v: unknown): string | null {
   const ms = Date.parse(v);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
-
-/** Invisible-by-design code points; see the same rule in src/teams/teams.ts. */
-const DEFAULT_IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
 
 export function normalizeEventName(raw: unknown): Checked<string> {
   if (typeof raw !== 'string') return fail('bad_name');
