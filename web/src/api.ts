@@ -1952,7 +1952,9 @@ export interface EventStageView {
   ordinal: number; type: StageType; summary: string; veto: string; chapters: string; scheduling: Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
 }
-export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null }
+export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null;
+  /** Draft entries only: current starters' names, captain first. */
+  players?: string[] }
 export interface PlayEntry { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; out: boolean }
 /** Mirrors src/events/playViews.ts's RoomPhase. */
 export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'connect' | 'live' | 'confirming' | 'hold' | 'done';
@@ -2163,7 +2165,7 @@ export const eventsApi = {
 };
 
 export interface TeamScrim {
-  bookingId: number; opponent: string; startsAt: string; state: string;
+  bookingId: number; purpose: 'scrim' | 'tournament'; opponent: string; startsAt: string; state: string;
   /** Whether the viewer may open the booking page (its people, managers
    *  and staff); every member may open the game links. */
   canView: boolean;

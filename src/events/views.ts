@@ -22,7 +22,9 @@ export interface EventStageView {
   ordinal: number; type: V.StageType; summary: string; veto: string; chapters: string; scheduling: V.Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
 }
-export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null }
+export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null;
+  /** Draft entries only (plan D2c Ruling 3): the current starters' display names, captain first. Never SR. */
+  players?: string[] }
 export interface EventView {
   slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; official: boolean; organizerName: string | null;
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
@@ -85,10 +87,12 @@ function entryViews(db: DB, ev: E.EventRow): EventEntryView[] {
   if (ev.locked_at !== null) rows.sort((a, b) => (a.seed ?? 1e9) - (b.seed ?? 1e9) || a.id - b.id);
   return rows.map((e) => {
     const w = place.waitlist.indexOf(e.id);
-    return {
+    const view: EventEntryView = {
       id: e.id, name: e.name, tag: e.tag, logoKey: e.logo_key, seed: ev.locked_at !== null ? e.seed : null, status: e.status,
       waitlist: w >= 0 ? w + 1 : null, placement: e.placement,
     };
+    if (ev.entry_kind === 'draft') view.players = N.rosterOf(db, e.id).starters.map((s) => getPlayer(db, s)?.name ?? s);
+    return view;
   });
 }
 
@@ -126,10 +130,14 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
 
 function draftView(db: DB, ev: E.EventRow, f: V.EventFields): EventDraftView | null {
   if (ev.entry_kind !== 'draft' || !f.draft) return null;
-  const all = D.activeSignups(db, ev.id).map((s) => ({ role: s.role, name: getPlayer(db, s.steamid)?.name ?? s.steamid }));
+  const all = D.activeSignups(db, ev.id).map((s) => ({ steamid: s.steamid, role: s.role, name: getPlayer(db, s.steamid)?.name ?? s.steamid }));
   const names = all.map((s) => s.name);
   const of = (r: D.SignupRow['role']) => all.filter((s) => s.role === r).map((s) => s.name);
-  const cut = ev.cut_at !== null ? { captains: of('captain'), pool: of('pool'), bench: of('bench') } : null;
+  // Anyone now a starter of an active entry has been placed (a staff replace
+  // can put a bench player on a team), so the bench no longer lists them.
+  const placed = new Set(N.entriesOf(db, ev.id).filter((e) => e.status !== 'dropped').flatMap((e) => N.rosterOf(db, e.id).starters));
+  const benchNames = all.filter((s) => s.role === 'bench' && !placed.has(s.steamid)).map((s) => s.name);
+  const cut = ev.cut_at !== null ? { captains: of('captain'), pool: of('pool'), bench: benchNames } : null;
   return { signupsCloseAt: f.draft.signupsCloseAt, draftAt: f.draft.draftAt, signups: names.length, names, cut };
 }
 

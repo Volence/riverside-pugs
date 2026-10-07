@@ -156,7 +156,7 @@ describe('Team', () => {
   });
 
   const scrim = (over: Partial<TeamScrim> = {}): TeamScrim => ({
-    bookingId: 42, opponent: 'Other Crew', startsAt: '2026-10-05T20:00:00.000Z', state: 'ended', canView: true,
+    bookingId: 42, purpose: 'scrim', opponent: 'Other Crew', startsAt: '2026-10-05T20:00:00.000Z', state: 'ended', canView: true,
     games: [{ matchId: 7, campaign: 'no_mercy', state: 'completed', us: 2, them: 1 }],
     ...over,
   });
@@ -175,6 +175,16 @@ describe('Team', () => {
     expect(matchLink.getAttribute('href')).toBe('/match/7');
     const bookingLink = screen.getByText('vs Other Crew').closest('a') as HTMLAnchorElement;
     expect(bookingLink.getAttribute('href')).toBe('/booking/42');
+  });
+
+  it('labels a tournament booking in the Scrims list, and a scrim has no label', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false } }));
+    mockTeams.scrims.mockResolvedValue({ scrims: [scrim({ bookingId: 1, opponent: 'Cup Foe', purpose: 'tournament' }), scrim({ bookingId: 2, opponent: 'Pals', purpose: 'scrim' })] });
+    render(<Team slug="rats" session={session('2')} />);
+    await screen.findByText('vs Cup Foe');
+    expect(screen.getAllByText('Tournament')).toHaveLength(1);
+    expect(screen.getByText('vs Cup Foe').closest('li')!.textContent).toContain('Tournament');
+    expect(screen.getByText('vs Pals').closest('li')!.textContent).not.toContain('Tournament');
   });
 
   it('a scrim whose booking page the viewer cannot open shows no booking link, but its game links stay', async () => {

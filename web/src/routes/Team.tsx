@@ -209,6 +209,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                         <span class="teamroster__meta">{day(s.startsAt)}</span>
                       </div>
                     )}
+                    {s.purpose === 'tournament' && <span class="teamchip">Tournament</span>}
                     <span class={`teamchip teamchip--${s.state}`}>{SCRIM_STATE_LABEL[s.state] ?? s.state}</span>
                   </div>
                   {s.games.length > 0 && (
