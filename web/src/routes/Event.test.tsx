@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/preact';
 import type { EventView } from '../api';
 
-const { mockEvents } = vi.hoisted(() => ({ mockEvents: { list: vi.fn(), get: vi.fn(), mine: vi.fn() } }));
+const { mockEvents } = vi.hoisted(() => ({ mockEvents: { list: vi.fn(), get: vi.fn(), mine: vi.fn(), prefs: vi.fn() } }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
   return { ...actual, eventsApi: mockEvents };
@@ -39,6 +39,8 @@ beforeEach(() => {
   mockEvents.get.mockReset();
   mockEvents.mine.mockReset();
   mockEvents.mine.mockResolvedValue({ entries: [], register: [], canRegister: false });
+  mockEvents.prefs.mockReset();
+  mockEvents.prefs.mockResolvedValue({ entryId: 1, defaultFour: null, side: null, roster: [], stages: [] });
 });
 
 describe('EventPage', () => {
@@ -162,6 +164,40 @@ describe('EventPage', () => {
     render(<EventPage slug="riverside-cup" session={{ kind: 'active' } as never} />);
     expect(await screen.findByRole('heading', { name: 'Your team' })).toBeTruthy();
     expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Team Ann');
+  });
+
+  it('shows a draft captain the match prep panel for the entry they run', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft', status: 'live',
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(-30), signups: 8, names: [], cut: { captains: ['Ann', 'Eve'], pool: [], bench: [] } },
+      entries: [{ id: 1, name: 'Team Ann', tag: '', logoKey: null, seed: 1, status: 'registered', waitlist: null, placement: null }],
+    }));
+    const entry = {
+      id: 1, name: 'Team Ann', tag: '', logoKey: null, status: 'registered', seed: 1, waitlist: null, checkedInAt: null, manage: true, onRoster: true, roster: [],
+      rosterLocked: false, additionsLeft: null, canEditRoster: false, canCheckIn: false, canWithdraw: false, canLeave: false, leaveNeedsStaff: false, members: [],
+    };
+    mockEvents.mine.mockResolvedValue({ entries: [entry], register: [], canRegister: false, signup: null, offer: null, captainOf: null });
+    render(<EventPage slug="riverside-cup" session={{ kind: 'active' } as never} />);
+    expect(await screen.findByRole('heading', { name: 'Match prep: Team Ann' })).toBeTruthy();
+    expect(mockEvents.prefs).toHaveBeenCalledWith('riverside-cup', 1, expect.anything());
+  });
+
+  it('a draft starter who does not run the entry sees no match prep panel', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft', status: 'live',
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(-30), signups: 8, names: [], cut: { captains: ['Ann', 'Eve'], pool: [], bench: [] } },
+      entries: [{ id: 1, name: 'Team Ann', tag: '', logoKey: null, seed: 1, status: 'registered', waitlist: null, placement: null }],
+    }));
+    const entry = {
+      id: 1, name: 'Team Ann', tag: '', logoKey: null, status: 'registered', seed: 1, waitlist: null, checkedInAt: null, manage: false, onRoster: true, roster: [],
+      rosterLocked: false, additionsLeft: null, canEditRoster: false, canCheckIn: false, canWithdraw: false, canLeave: false, leaveNeedsStaff: false, members: [],
+    };
+    mockEvents.mine.mockResolvedValue({ entries: [entry], register: [], canRegister: false, signup: null, offer: null, captainOf: null });
+    render(<EventPage slug="riverside-cup" session={{ kind: 'active' } as never} />);
+    await screen.findByText('Riverside Cup');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole('heading', { name: /Match prep/ })).toBeNull();
+    expect(mockEvents.prefs).not.toHaveBeenCalled();
   });
 
   it('a draft staff preview is marked as such', async () => {
