@@ -109,9 +109,9 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
                 Publish
               </button>
             )}
-            {ev.status === 'announced' && ev.fields.entryKind === 'team' && (
-              <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.openEventRegistration(id), 'Open registration?')}>
-                Open registration
+            {ev.status === 'announced' && (
+              <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.openEventRegistration(id), ev.fields.entryKind === 'draft' ? 'Open signups?' : 'Open registration?')}>
+                {ev.fields.entryKind === 'draft' ? 'Open signups' : 'Open registration'}
               </button>
             )}
             {ev.status === 'draft' && (
