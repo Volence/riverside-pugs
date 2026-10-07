@@ -20,7 +20,7 @@ import { adminEntryViews } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCheckinOpen, tellCutRole, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTimeLocked } from '../events/notices.js';
+import { tellCaptainOffer, tellCheckinOpen, tellCutRole, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTimeLocked } from '../events/notices.js';
 import { deskOrder, signupFacts } from '../events/draftFacts.js';
 import { maxTeams } from '../events/draftRules.js';
 import type { StaffAction } from '../events/messages.js';
@@ -422,6 +422,25 @@ export async function adminEventRoutes(
   draftPost('swap', 'event_draft_swap', ['pool', 'bench'], (ev, me, b) =>
     typeof b.pool !== 'string' || typeof b.bench !== 'string' ? null
       : D.swapPoolBench(db, { eventId: ev.id, poolSteamid: b.pool, benchSteamid: b.bench, actor: me, now: new Date() }));
+
+  /** Captaincy offers on or off (Ruling 6). On makes the first offer at once
+   *  and DMs it; the minute tick carries the chain on from there. */
+  app.post('/api/admin/events/:id/draft/offers', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const on = ((req.body ?? {}) as { on?: unknown }).on;
+    if (typeof on !== 'boolean') return refuse(reply, 'bad_request');
+    const now = new Date();
+    const r = on
+      ? D.startOffers(db, { eventId: ev.id, actor: me, now, minutes: D.draftOfferMinutes(db) })
+      : D.stopOffers(db, { eventId: ev.id, actor: me, now });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_draft_offers', ev.id, { slug: ev.slug, on });
+    if (r.value?.offered) tellCaptainOffer(opts, ev.id);
+    return on ? { offered: r.value?.offered ?? null } : {};
+  });
 
   app.post('/api/admin/events/:id/draft/publish', async (req, reply) => {
     const me = requireAdmin(req, reply);

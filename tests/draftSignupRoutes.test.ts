@@ -25,7 +25,7 @@ beforeEach(async () => {
     config: { ...loadConfig({}), communityDir: mkdtempSync(join(tmpdir(), 'draft-signups-')) },
     db: f.db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
   });
-  for (const s of [...P.slice(0, 4), ADMIN]) cookies[s] = authedCookie(app, f.db, s);
+  for (const s of [...P.slice(0, 8), ADMIN]) cookies[s] = authedCookie(app, f.db, s);
 });
 afterEach(async () => { await app.close(); });
 
@@ -108,6 +108,67 @@ describe('draft signups over HTTP', () => {
   });
 });
 
+/** P[0..7] signed up willing, closed: 2 teams, nobody captain yet. The
+ *  highest SR is P[7], then P[6]. */
+function eightClosed(): void {
+  for (const s of P.slice(0, 8)) {
+    const r = D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: new Date() });
+    if (!r.ok) throw new Error(r.error);
+  }
+  const c = D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: new Date() });
+  if (!c.ok) throw new Error(c.error);
+}
+
+describe('captaincy offers over HTTP', () => {
+  it('staff start offers; only the offered player sees and answers theirs, accept and decline', async () => {
+    eightClosed();
+    const MOD = P[3];
+    f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+    const desk = `/api/admin/events/${f.eventId}/draft/offers`;
+    expect((await post(desk, MOD, { on: true })).statusCode).toBe(403);
+    expect((await post(desk, ADMIN, { on: 'yes' })).statusCode).toBe(400);
+    const started = await post(desk, ADMIN, { on: true });
+    expect(started.statusCode).toBe(200);
+    expect(started.json()).toEqual({ offered: P[7] });
+    expect((await post(desk, ADMIN, { on: true })).json()).toEqual({ error: 'Captaincy offers are already running.' });
+
+    const mine = await get(`/api/events/${f.slug}/mine`, P[7]);
+    const expiresAt = (f.db.prepare('SELECT expires_at FROM draft_captain_offers WHERE answer IS NULL').get() as { expires_at: string }).expires_at;
+    expect(mine.json().offer).toEqual({ expiresAt });
+    const other = await get(`/api/events/${f.slug}/mine`, P[6]);
+    expect(other.json().offer).toBeNull();
+    expect(other.body).not.toContain(P[7]);
+    const pub = await get(`/api/events/${f.slug}`, P[6]);
+    expect(pub.body).not.toContain('expiresAt');
+    expect(pub.body).not.toContain('offer');
+
+    const url = `/api/events/${f.slug}/captain-offer`;
+    expect((await post(url, P[6], { accept: true })).json()).toEqual({ error: 'You have no open captaincy offer for this draft.' });
+    expect((await post(url, P[7], { accept: 'no' })).statusCode).toBe(400);
+    expect((await post(url, P[7], { accept: false })).statusCode).toBe(200);
+    expect((await get(`/api/events/${f.slug}/mine`, P[7])).json().offer).toBeNull();
+
+    const next = D.offerNext(f.db, { eventId: f.eventId, now: new Date(), minutes: 30 });
+    expect(next).toEqual({ ok: true, value: { offered: P[6] } });
+    expect((await post(url, P[6], { accept: true })).statusCode).toBe(200);
+    expect(D.signupOf(f.db, f.eventId, P[6])!.role).toBe('captain');
+    expect((await post(url, P[6], { accept: true })).statusCode).toBe(409);
+
+    expect((await post(desk, ADMIN, { on: false })).statusCode).toBe(200);
+    expect(E.getEvent(f.db, f.eventId)!.offers_on).toBe(0);
+    const actions = (f.db.prepare("SELECT action, detail FROM admin_actions WHERE action = 'event_draft_offers' ORDER BY id").all() as { action: string; detail: string }[])
+      .map((r) => JSON.parse(r.detail));
+    expect(actions).toEqual([{ slug: f.slug, on: true }, { slug: f.slug, on: false }]);
+  });
+
+  it('answers 404 for the switch closed and an unknown event', async () => {
+    eightClosed();
+    expect((await post(`/api/events/nope/captain-offer`, P[7], { accept: true })).statusCode).toBe(404);
+    f.db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
+    expect((await post(`/api/events/${f.slug}/captain-offer`, P[7], { accept: true })).statusCode).toBe(404);
+  });
+});
+
 describe('desk removal DM', () => {
   let desk: FastifyInstance;
   let send: ReturnType<typeof vi.fn>;
@@ -120,6 +181,17 @@ describe('desk removal DM', () => {
   });
   afterEach(async () => { await desk.close(); });
   const deskPost = (url: string, body: object = {}) => desk.inject({ method: 'POST', url, cookies: authedCookie(desk, f.db, ADMIN), payload: body });
+
+  it('DMs the first offeree when staff start offers', async () => {
+    eightClosed();
+    expect((await deskPost(`/api/admin/events/${f.eventId}/draft/offers`, { on: true })).statusCode).toBe(200);
+    const expiresAt = (f.db.prepare('SELECT expires_at FROM draft_captain_offers WHERE answer IS NULL').get() as { expires_at: string }).expires_at;
+    const calls = send.mock.calls.map(([to, type, payload]) => ({ to: [...(to as string[])], type, content: (payload as { content: string }).content }));
+    expect(calls).toEqual([{
+      to: [P[7]], type: 'draft_captain_offer',
+      content: `Draft Night needs another captain and you said you were willing. Accept or decline on the event page by <t:${Math.floor(Date.parse(expiresAt) / 1000)}:F>: https://x/event/${f.slug}`,
+    }]);
+  });
 
   it('tells the removed player why', async () => {
     D.signUp(f.db, { eventId: f.eventId, steamid: P[0], captainPref: 'want', note: null, now: new Date() });

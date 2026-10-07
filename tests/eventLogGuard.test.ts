@@ -284,7 +284,7 @@ describe('event_log guard', () => {
       if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
       return r.value;
     };
-    const DRAFT_READS = new Set(['activeSignups', 'signupOf', 'cutState']);
+    const DRAFT_READS = new Set(['activeSignups', 'signupOf', 'cutState', 'draftOfferMinutes']);
     const signed = (f: DraftFixture) => must(D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }));
     /** 12 signups, closed: 3 teams, 9 pool (DP[0..8]) and 3 bench (DP[9..11]). */
     const cut = (f: DraftFixture) => {
@@ -296,6 +296,24 @@ describe('event_log guard', () => {
       for (const s of DP.slice(0, 8)) must(D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: NOW }));
       must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
       for (const s of DP.slice(0, 2)) must(D.setCaptain(f.db, { eventId: f.eventId, steamid: s, captain: true, actor: ADMIN, now: NOW }));
+    };
+    /** Offers on, with DP[11]'s offer open until NOW + 30 minutes. */
+    const offering = (f: DraftFixture) => { cut(f); must(D.startOffers(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW, minutes: 30 })); };
+    const declined = (f: DraftFixture) => { offering(f); must(D.answerOffer(f.db, { eventId: f.eventId, steamid: DP[11], accept: false, now: NOW })); };
+    const LATE = new Date(NOW.getTime() + 31 * 60_000);
+    /** The two second paths of an offer mutation, each one row or nothing:
+     *  an answer after expires_at records the expiry (and refuses the
+     *  answer), and offerNext with nobody left turns offers off. */
+    const SECOND_PATHS: Record<string, { action: string; setup: (f: DraftFixture) => void; run: (f: DraftFixture) => V.Checked<unknown>; ok: boolean }> = {
+      'answerOffer after expires_at': {
+        action: 'draft_offer_expired', setup: offering, ok: false,
+        run: (f) => D.answerOffer(f.db, { eventId: f.eventId, steamid: DP[11], accept: true, now: LATE }),
+      },
+      'offerNext with nobody left': {
+        action: 'draft_offers_exhausted', ok: true,
+        setup: (f) => { declined(f); f.db.prepare("UPDATE draft_signups SET captain_pref = 'no'").run(); },
+        run: (f) => D.offerNext(f.db, { eventId: f.eventId, now: NOW, minutes: 30 }),
+      },
     };
     const DRAFT_MUTATIONS: Record<string, { action: string; setup?: (f: DraftFixture) => void; run: (f: DraftFixture) => V.Checked<unknown> }> = {
       signUp: { action: 'draft_signup', run: (f) => D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }) },
@@ -309,6 +327,13 @@ describe('event_log guard', () => {
       setCaptain: { action: 'draft_captain_set', setup: cut, run: (f) => D.setCaptain(f.db, { eventId: f.eventId, steamid: DP[0], captain: true, actor: ADMIN, now: NOW }) },
       swapPoolBench: { action: 'draft_swap', setup: cut, run: (f) => D.swapPoolBench(f.db, { eventId: f.eventId, poolSteamid: DP[0], benchSteamid: DP[11], actor: ADMIN, now: NOW }) },
       publishCut: { action: 'draft_cut_published', setup: publishable, run: (f) => D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
+      // Captaincy offers (Task 4). cut gives 12 willing signups, 3 teams and
+      // no captains, so the first offer goes to the highest SR, DP[11].
+      startOffers: { action: 'draft_offers_started', setup: cut, run: (f) => D.startOffers(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW, minutes: 30 }) },
+      stopOffers: { action: 'draft_offers_stopped', setup: offering, run: (f) => D.stopOffers(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
+      answerOffer: { action: 'draft_offer_answered', setup: offering, run: (f) => D.answerOffer(f.db, { eventId: f.eventId, steamid: DP[11], accept: true, now: NOW }) },
+      expireDueOffer: { action: 'draft_offer_expired', setup: offering, run: (f) => D.expireDueOffer(f.db, { eventId: f.eventId, now: LATE }) },
+      offerNext: { action: 'draft_offer_made', setup: declined, run: (f) => D.offerNext(f.db, { eventId: f.eventId, now: NOW, minutes: 30 }) },
     };
     const draftRows = (f: DraftFixture) => JSON.stringify([
       f.db.prepare('SELECT * FROM draft_signups ORDER BY id').all(),
@@ -349,6 +374,23 @@ describe('event_log guard', () => {
         expect(() => m.run(f)).toThrow(/audit down/);
         expect(draftRows(f)).toBe(before);
         expect(logCount(f)).toBe(logs);
+      });
+    }
+
+    for (const [name, m] of Object.entries(SECOND_PATHS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}, or nothing`, () => {
+        const f = draftFixture();
+        m.setup(f);
+        const before = logCount(f);
+        expect(m.run(f).ok).toBe(m.ok);
+        expect(logCount(f)).toBe(before + 1);
+        expect(f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action });
+        const g = draftFixture();
+        m.setup(g);
+        const rows = draftRows(g);
+        g.db.exec("CREATE TRIGGER draft_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+        expect(() => m.run(g)).toThrow(/audit down/);
+        expect(draftRows(g)).toBe(rows);
       });
     }
   });

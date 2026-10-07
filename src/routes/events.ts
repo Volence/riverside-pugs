@@ -192,6 +192,20 @@ export async function eventRoutes(
     return { ok: true };
   });
 
+  /** The offered player's answer to a captaincy offer (drafts plan D1
+   *  Ruling 6). Anyone else, or an offer gone, answers no_offer. */
+  app.post('/api/events/:slug/captain-offer', async (req, reply) => {
+    const me = allowedActive(req, reply);
+    if (!me) return;
+    const ev = visibleEvent((req.params as { slug: string }).slug, me);
+    if (!ev || ev.status === 'draft') return reply.code(404).send(NOT_FOUND);
+    const accept = ((req.body ?? {}) as { accept?: unknown }).accept;
+    if (typeof accept !== 'boolean') return refuse(reply, { error: 'bad_request' });
+    const r = D.answerOffer(db, { eventId: ev.id, steamid: me, accept, now: new Date() });
+    if (!r.ok) return refuse(reply, r);
+    return { ok: true };
+  });
+
   /** The match room (plan T3a). A match of another event answers like one
    *  that does not exist. Every write pushes the room to its two rosters. */
   const matchIn = (ev: E.EventRow, raw: string): P.MatchRow | undefined => {

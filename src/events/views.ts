@@ -157,6 +157,9 @@ export interface MyEventView {
   entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean;
   /** A draft-kind event: the viewer's active signup, or null. */
   signup: MySignupView | null;
+  /** A draft-kind event: the viewer's own open captaincy offer, or null.
+   *  Never anyone else's (Global Constraints, privacy). */
+  offer: { expiresAt: string } | null;
 }
 
 /** What one signed-in player can do on this event page: the entries they
@@ -216,7 +219,10 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
       .map((t) => ({ teamId: t.id, name: t.name, tag: t.tag, logoKey: t.logo_key, members: memberOptions(t.id, null) }))
     : [];
   const own = ev.entry_kind === 'draft' ? D.signupOf(db, ev.id, viewer) : null;
-  return { entries, register, canRegister, signup: own ? signupView(ev, own) : null };
+  const offer = ev.entry_kind === 'draft' && ev.cut_at === null
+    ? (db.prepare('SELECT expires_at FROM draft_captain_offers WHERE event_id = ? AND steamid = ? AND answer IS NULL').get(ev.id, viewer) as { expires_at: string } | undefined)
+    : undefined;
+  return { entries, register, canRegister, signup: own ? signupView(ev, own) : null, offer: offer ? { expiresAt: offer.expires_at } : null };
 }
 
 export interface AdminEntryView {

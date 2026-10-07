@@ -1,11 +1,11 @@
 import { findSlurs } from '../slurs.js';
 import { DEFAULT_IGNORABLE, hasUnsafeChars } from '../profileFields.js';
+import type { CaptainPref } from './drafts.js';
 
 /**
  * The draft rules that need no database (drafts plan D1): the signup note,
- * the team count, the default cut and publish validation (later tasks add
- * captain offer order). src/events/drafts.ts calls these
- * inside its transactions.
+ * the team count, the default cut, publish validation and captain offer
+ * order. src/events/drafts.ts calls these inside its transactions.
  */
 
 /** Ruling 10: a note is optional free text of 1 to 80 characters. */
@@ -61,4 +61,20 @@ export function cutProblems(o: { teams: number | null; active: number; captains:
   if (o.unassigned > 0) out.push('unassigned');
   if (o.ineligible > 0) out.push('ineligible');
   return out;
+}
+
+/** Ruling 6: who is offered captaincy next. The highest-SR signup who said
+ *  willing, is not a captain, is eligible and was never offered in this
+ *  event (a decline, an expiry or a stop all count); ties go to the earlier
+ *  signup, which is input order. null when nobody is left. */
+export function nextOfferee(
+  signups: { steamid: string; captainPref: CaptainPref; sr: number; role: string | null; eligible: boolean }[],
+  offered: ReadonlySet<string>,
+): string | null {
+  let best: { steamid: string; sr: number } | null = null;
+  for (const s of signups) {
+    if (s.captainPref !== 'willing' || s.role === 'captain' || !s.eligible || offered.has(s.steamid)) continue;
+    if (!best || s.sr > best.sr) best = s;
+  }
+  return best?.steamid ?? null;
 }
