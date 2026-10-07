@@ -21,7 +21,7 @@ function roleLine(role: 'captain' | 'pool' | 'bench', draftAt: string): string {
   const when = whenText(draftAt);
   if (role === 'captain') return `You are a captain. The draft is ${when}. Build your pick list before then.`;
   if (role === 'pool') return `You are in the draft pool. The draft is ${when}; captains pick you live.`;
-  return 'You are on the free-agent bench. Captains can call on you as a stand-in, so keep the night free if you can.';
+  return `You are on the free-agent bench. The draft is ${when}; captains can call on you as a stand-in, so keep the night free if you can.`;
 }
 
 /** The signed-in player's part of a draft event page (drafts plan D1, Task 6):

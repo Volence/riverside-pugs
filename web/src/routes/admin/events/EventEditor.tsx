@@ -211,7 +211,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
         <DraftPanel eventId={ev.id} canEdit={canEdit} signupsCloseAt={ev.fields.draft?.signupsCloseAt ?? null} gen={panelGen} onChange={panelsChanged} />
       )}
       {ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'team' && <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />}
-      {['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />}
+      {ev.fields.entryKind === 'team' && ['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />}
       <Panel>
         <h3>History</h3>
         <ul class="admin-list">

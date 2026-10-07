@@ -35,9 +35,12 @@ function entryLines(ev: EventView): string[] {
     lines.push(`4 starters and up to ${ev.roster.maxSubs} sub${ev.roster.maxSubs === 1 ? '' : 's'}`);
     if (ev.teamCap !== null) lines.push(`Up to ${ev.teamCap} teams`);
   }
-  lines.push(ev.checkin.enabled
-    ? `Check-in opens ${ev.checkin.opensMinutes} minutes before the start and closes ${ev.checkin.closesMinutes} minutes before`
-    : 'No check-in');
+  // Check-in is a team-event step; a draft has none until plan D2.
+  if (ev.entryKind === 'team') {
+    lines.push(ev.checkin.enabled
+      ? `Check-in opens ${ev.checkin.opensMinutes} minutes before the start and closes ${ev.checkin.closesMinutes} minutes before`
+      : 'No check-in');
+  }
   return lines;
 }
 
@@ -167,7 +170,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       <Panel>
         <h3>Entry</h3>
         <ul class="eventrules">{entryLines(ev).map((l) => <li key={l}>{l}</li>)}</ul>
-        {ev.checkinOpensAt && BEFORE_START.has(ev.status) && (
+        {ev.entryKind === 'team' && ev.checkinOpensAt && BEFORE_START.has(ev.status) && (
           <p class="muted">Check-in {whenText(ev.checkinOpensAt)} to {whenText(ev.checkinClosesAt!)}</p>
         )}
         {ev.lockedAt && <p class="muted">The entry list is final.</p>}
