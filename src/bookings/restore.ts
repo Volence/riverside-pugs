@@ -127,7 +127,10 @@ export function resumeLines(s: RestoreSnapshot): string[] {
   }
   return [
     `sm_pug_resume ${s.matchId} ${s.token} ${s.firstMap} ${s.firstSurv} ${s.nextSeq}`,
-    ...(s.carry ? [`sm_pug_carry ${s.matchId} ${Math.trunc(s.carry.a)} ${Math.trunc(s.carry.b)}`] : []),
+    // Only tournament games carry, and pug-match refuses sm_pug_carry off a
+    // tournament box. A recovered srcds has just restarted with the cvar at 0
+    // (the booking lines that set it come after this block), so it goes here.
+    ...(s.carry ? ['sm_pug_tournament 1', `sm_pug_carry ${s.matchId} ${Math.trunc(s.carry.a)} ${Math.trunc(s.carry.b)}`] : []),
     ...s.maps.map((x) => `sm_pug_resume_map ${x.map} ${Math.trunc(x.a)} ${Math.trunc(x.b)}`),
     // Quoted: Source's console tokenizer splits unquoted arguments on ':',
     // so an unquoted roster arg reaches the plugin as a bare steamid and is

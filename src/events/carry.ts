@@ -3,10 +3,10 @@ import { parseRules } from '../rulesets.js';
 import * as E from './events.js';
 import * as R from './room.js';
 
-/** Plan T6: game 2 of a best of 2 may start with game 1's totals in the
- *  box's l4dscores tally (ruleset series.carryScore). Only reads. */
+// Plan T6: game 2 of a best of 2 may start with game 1's totals in the
+// box's l4dscores tally (ruleset series.carryScore). This module only reads.
 
-/** Pug-team order: a is the game's pug team a (the entry on matches.booking_side_a). */
+/** Game 1's totals in pug-team order: a is the game's pug team a (the entry on matches.booking_side_a). */
 export interface Carry { a: number; b: number }
 
 interface GameCtx { eventMatchId: number; stageId: number; sideA: 'a' | 'b' | null; rulesJson: string | null }

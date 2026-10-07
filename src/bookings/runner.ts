@@ -100,6 +100,19 @@ const OWED_MATCH_SQL = `t.server_id IS NULL AND t.ending_at IS NULL AND (t.state
 const ordinal = (n: number): string => ({ 2: 'second', 3: 'third' } as Record<number, string>)[n] ?? `${n}th`;
 
 /** The refusal of `!nextmap` and `!stay` once the count is reached. */
+/** Plan T6: a carry pug-match refused (an older plugin, a box not in
+ *  tournament mode, a match id it does not hold) is only logged; the game
+ *  plays on with its own score. replies are one per command, as BoxRcon returns them. */
+export function warnCarryRefused(server: ServerRow, cmds: readonly string[], replies: readonly string[]): void {
+  cmds.forEach((c, i) => {
+    const m = /^sm_pug_carry (\d+) /.exec(c);
+    const reply = (Array.isArray(replies) ? replies[i] ?? '' : '').trim();
+    if (m && !reply.startsWith('PUGOK carry')) {
+      console.warn(`[booking] match ${m[1]}: ${server.name} did not take sm_pug_carry (${JSON.stringify(reply.slice(0, 120))}); game 2 plays without game 1's score in its tally`);
+    }
+  });
+}
+
 function allPlayedText(n: number): string {
   return n === 1 ? 'The booked campaign is played. !addcampaign for one more.' : `All ${n} campaigns are played. !addcampaign for one more.`;
 }
@@ -621,7 +634,8 @@ export class BookingRunner {
     // T3b Ruling 3: the game burst goes before the first changelevel, as the
     // orchestrator's queue path sends it; a throw here fails this setup try.
     const game = this.gameLinesFor(b, playlist[0]!);
-    await this.deps.rcon(server, [...lines, markerLine(b.id), ...game]);
+    const setupBurst = [...lines, markerLine(b.id), ...game];
+    warnCarryRefused(server, setupBurst, await this.deps.rcon(server, setupBurst));
     try {
       await this.deps.rcon(server, [`changelevel ${firstMap}`]);
     } catch {
@@ -1205,7 +1219,9 @@ export class BookingRunner {
     // What does is the plugin's state (sm_pug_resume leaves it Pending with a
     // match, which auto-track never adopts over) and the site guards
     // (selfStarted.ts leaves a recovering booking's game alone).
-    const replies = await this.deps.rcon(server, [...resume, ...lines]);
+    const burst = [...resume, ...lines];
+    const replies = await this.deps.rcon(server, burst);
+    warnCarryRefused(server, burst, replies);
     // The sm_pug_resume_commit reply is the last of the resume lines.
     const resumed = snap !== null && (replies[resume.length - 1] ?? '').trim().startsWith('PUGOK resumed');
     if (live && !resumed) {
@@ -1232,7 +1248,7 @@ export class BookingRunner {
     // before the playlist moves on (as loadNext), so a throw here leaves the
     // due load (next_campaign, next_map) for the retry.
     const game = loadedNext ? this.gameLinesFor(fresh, campaign) : [];
-    if (game.length > 0) await this.deps.rcon(server, game);
+    if (game.length > 0) warnCarryRefused(server, game, await this.deps.rcon(server, game));
     if (loadedNext) {
       const at = playlist.indexOf(campaign);
       advancePlaylist(this.db, b.id, at >= 0 ? at : fresh.playlist_pos, new Date(this.now()));
@@ -1573,6 +1589,7 @@ export class BookingRunner {
       await this.deps.rcon(server, [`sm_pug_abort ${snap.token}`]);
       step = 'resume';
       replies = await this.deps.rcon(server, resume);
+      warnCarryRefused(server, resume, replies);
     } catch (err) {
       const why = redactSecrets(err instanceof Error ? err.message : String(err), [server.log_secret, snap.token]);
       console.warn(`[booking] ${id}: the replay's ${step} on ${server.name} failed:`, why);
@@ -1654,7 +1671,8 @@ export class BookingRunner {
    *  and the minute re-push carries sv_password and tv_password) and never thrown. */
   private async push(id: number, server: ServerRow, lines: () => string[], what: string): Promise<void> {
     try {
-      await this.deps.rcon(server, lines());
+      const cmds = lines();
+      warnCarryRefused(server, cmds, await this.deps.rcon(server, cmds));
     } catch (err) {
       const b = getBooking(this.db, id);
       const secrets = [server.log_secret, b?.password ?? null, b?.tv_password ?? null];
