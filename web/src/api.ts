@@ -2040,6 +2040,8 @@ export interface MyEntryView {
 export interface RegisterOptionView { teamId: number; name: string; tag: string; logoKey: string | null; members: MemberOptionView[] }
 export interface MyEventView {
   entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean;
+  /** A draft captain's own entry identity (drafts plan D2a); null for anyone else. */
+  captainOf?: { entryId: number; name: string; tag: string; logoKey: string | null; editable: boolean } | null;
   /** Draft-kind events: the viewer's active signup and their own open captaincy offer. Optional for team events. */
   signup?: MySignupView | null;
   offer?: { expiresAt: string } | null;
@@ -2154,6 +2156,8 @@ export const eventsApi = {
    *  withdrawing an entry (a different route entirely). */
   withdrawProposal: (slug: string, id: number) => post(`/api/events/${enc(slug)}/matches/${id}/withdraw`),
   prefs: (slug: string, entryId: number, signal?: AbortSignal) => get<PrefsView>(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, signal),
+  setIdentity: (slug: string, entryId: number, body: { name?: string; tag?: string }) => post(`/api/events/${enc(slug)}/entries/${entryId}/identity`, body),
+  setLogo: (slug: string, entryId: number, png: string) => post<{ logoKey: string }>(`/api/events/${enc(slug)}/entries/${entryId}/logo`, { png }),
   savePrefs: (slug: string, entryId: number, body: { defaultFour: string[] | null; side: 'survivors' | 'infected' | null; campaigns: Record<string, string[]> }) =>
     post(`/api/events/${enc(slug)}/entries/${entryId}/prefs`, body),
 };
@@ -2427,6 +2431,8 @@ export interface AdminEventStage {
 export interface AdminEventDetail {
   id: number; slug: string; status: EventStatus; fields: EventFields; bannerKey: string | null;
   cancelReason: string | null; createdAt: string; updatedAt: string;
+  /** Draft-kind events: when the cut and the teams were published. */
+  cutAt: string | null; teamsMadeAt: string | null;
   stages: AdminEventStage[];
   log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
 }
@@ -2456,6 +2462,18 @@ export interface CutChangedBody {
   error: string; problems: CutProblem[];
   cut: { teams: number | null; maxTeams: number; active: number; captains: number; pool: number; poolNeeded: number; bench: number; unassigned: number };
   ineligible: { steamid: string; name: string; problems: string[] }[];
+}
+
+/** GET /api/admin/events/:id/draft/teams (drafts plan D2a). Staff only: SR and
+ *  the fairness readout never reach a player or public response. The numbers
+ *  are unrounded. */
+export interface DraftTeamView { captain: { steamid: string; name: string }; players: { steamid: string; name: string; sr: number }[]; short: boolean }
+export interface DraftFairnessView {
+  teams: { captain: string; captainName: string; names: string[]; avgSr: number; totalSr: number }[];
+  spread: number; forecasts: { a: number; b: number; winA: number }[];
+}
+export interface AdminDraftTeamsView {
+  mode: 'auto' | 'live' | null; teamsMadeAt: string | null; teams: DraftTeamView[] | null; fairness: DraftFairnessView | null;
 }
 
 /** The Entries section of the desk (plan T1b Ruling 10). Mirrors
@@ -2600,6 +2618,13 @@ export const adminApi = {
       throw err;
     }
   },
+  draftTeamsView: (id: number, signal?: AbortSignal) => get<AdminDraftTeamsView>(`/api/admin/events/${id}/draft/teams`, signal),
+  draftMode: (id: number, mode: 'auto' | 'live' | null) => post(`/api/admin/events/${id}/draft/mode`, { mode }),
+  draftBalance: (id: number) => post(`/api/admin/events/${id}/draft/balance`),
+  draftMove: (id: number, a: string, b: string) => post(`/api/admin/events/${id}/draft/move`, { a, b }),
+  draftPublishTeams: (id: number) => post<{ entries: unknown[] }>(`/api/admin/events/${id}/draft/publish-teams`),
+  setEntryIdentity: (id: number, entryId: number, body: { name?: string; tag?: string }) => post(`/api/admin/events/${id}/entries/${entryId}/identity`, body),
+  setEntryLogo: (id: number, entryId: number, png: string) => post<{ logoKey: string }>(`/api/admin/events/${id}/entries/${entryId}/logo`, { png }),
   draftOffers: (id: number, on: boolean) => post(`/api/admin/events/${id}/draft/offers`, { on }),
   closeSignups: (id: number) => post(`/api/admin/events/${id}/close-signups`),
   removeSignup: (id: number, steamid: string, reason: 'removed' | 'ineligible') => post(`/api/admin/events/${id}/signups/${steamid}/remove`, { reason }),

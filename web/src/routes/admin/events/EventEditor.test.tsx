@@ -9,7 +9,7 @@ const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
     event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
     reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
     setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(), eventEntries: vi.fn(), eventPlay: vi.fn(), startEvent: vi.fn(),
-    setRoundSchedule: vi.fn(), eventDraft: vi.fn(),
+    setRoundSchedule: vi.fn(), eventDraft: vi.fn(), draftTeamsView: vi.fn(),
   },
   mockConfirm: vi.fn(),
 }));
@@ -49,7 +49,7 @@ const stage = (id: number, ordinal: number, swiss: boolean): AdminEventStage => 
 });
 const detail = (over: Partial<AdminEventDetail> = {}): AdminEventDetail => ({
   id: 3, slug: 'riverside-cup', status: 'draft', fields: FIELDS, bannerKey: null, cancelReason: null,
-  createdAt: '2026-10-01T12:00:00.000Z', updatedAt: '2026-10-01T12:00:00.000Z',
+  createdAt: '2026-10-01T12:00:00.000Z', updatedAt: '2026-10-01T12:00:00.000Z', cutAt: null, teamsMadeAt: null,
   stages: [stage(10, 1, true), stage(11, 2, false)],
   log: [{ at: '2026-10-01T12:00:00.000Z', actorName: 'boss', action: 'created', detail: {} }],
   ...over,
@@ -154,6 +154,37 @@ describe('EventEditor', () => {
     render(<EventEditor id={3} canEdit />);
     expect(await screen.findByText('Nobody has signed up yet.')).toBeTruthy();
     expect(mockAdmin.eventPlay).not.toHaveBeenCalled();
+  });
+
+  describe('a draft-kind event after the cut', () => {
+    const DRAFT_FIELDS: EventFields = { ...FIELDS, entryKind: 'draft', draft: { signupsCloseAt: '2026-10-10T18:00:00.000Z', draftAt: '2026-10-10T19:00:00.000Z' } };
+    beforeEach(() => {
+      mockAdmin.eventDraft.mockResolvedValue({ lockedAt: 'x', cutAt: 'x', teams: 2, maxTeams: 2, offersOn: false, openOffer: null, problems: [], signups: [] });
+      mockAdmin.draftTeamsView.mockResolvedValue({ mode: null, teamsMadeAt: null, teams: null, fairness: null });
+    });
+
+    it('shows Make teams once the cut is published, and no Entries or Play yet', async () => {
+      mockAdmin.event.mockResolvedValue(detail({ status: 'registration', cutAt: '2026-10-06T00:00:00.000Z', fields: DRAFT_FIELDS }));
+      render(<EventEditor id={3} canEdit />);
+      expect(await screen.findByRole('heading', { name: 'Make teams' })).toBeTruthy();
+      expect(mockAdmin.eventPlay).not.toHaveBeenCalled();
+      expect(mockAdmin.eventEntries).not.toHaveBeenCalled();
+    });
+
+    it('has no Make teams panel before the cut', async () => {
+      mockAdmin.event.mockResolvedValue(detail({ status: 'registration', fields: DRAFT_FIELDS }));
+      render(<EventEditor id={3} canEdit />);
+      await screen.findByText('Nobody has signed up yet.').catch(() => screen.findByRole('heading', { name: 'Draft' }));
+      expect(screen.queryByRole('heading', { name: 'Make teams' })).toBeNull();
+    });
+
+    it('shows Entries and Play once the teams are made', async () => {
+      mockAdmin.event.mockResolvedValue(detail({ status: 'registration', cutAt: 'x', teamsMadeAt: '2026-10-07T20:00:00.000Z', fields: DRAFT_FIELDS }));
+      render(<EventEditor id={3} canEdit />);
+      expect(await screen.findByRole('heading', { name: 'Entries' })).toBeTruthy();
+      expect(await screen.findByRole('heading', { name: 'Play' })).toBeTruthy();
+      await waitFor(() => expect(mockAdmin.eventPlay).toHaveBeenCalled());
+    });
   });
 
   it('cancels with the reason typed, after asking', async () => {

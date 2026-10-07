@@ -42,6 +42,8 @@ export interface AdminEventStage {
 export interface AdminEventDetail {
   id: number; slug: string; status: V.EventStatus; fields: V.EventFields; bannerKey: string | null;
   cancelReason: string | null; createdAt: string; updatedAt: string;
+  /** Draft-kind events: when the cut and the teams were published (null before, and on a team event). */
+  cutAt: string | null; teamsMadeAt: string | null;
   stages: AdminEventStage[];
   log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
 }
@@ -56,7 +58,7 @@ export interface AdminEventOptions {
 export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
   return {
     id: ev.id, slug: ev.slug, status: ev.status, fields: E.fieldsOf(ev), bannerKey: ev.banner_key, cancelReason: ev.cancel_reason,
-    createdAt: ev.created_at, updatedAt: ev.updated_at,
+    createdAt: ev.created_at, updatedAt: ev.updated_at, cutAt: ev.cut_at, teamsMadeAt: ev.teams_made_at,
     stages: E.stagesOf(db, ev.id).map((s) => {
       const settings = E.stageSettingsOf(s);
       const ms = P.matchesOf(db, s.id);

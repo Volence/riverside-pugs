@@ -6,6 +6,7 @@ import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { STATUS_LABEL, placementText, untilText, whenText } from '../eventFormat';
 import { DraftSignupPanel } from './event/DraftSignupPanel';
+import { DraftIdentityPanel } from './event/DraftIdentityPanel';
 import { EntryPanel } from './event/EntryPanel';
 import { PrepPanel } from './event/PrepPanel';
 import { StagePlay } from './event/StagePlay';
@@ -179,12 +180,13 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       {mine && ev.entryKind === 'draft' && ev.draft && (
         <DraftSignupPanel slug={ev.slug} eventName={ev.name} status={ev.status} lockedAt={ev.lockedAt} draft={ev.draft} view={mine} onChange={bump} />
       )}
+      {mine?.captainOf && ev.entryKind === 'draft' && <DraftIdentityPanel slug={ev.slug} mine={mine.captainOf} onChange={bump} />}
       {mine && ev.entryKind === 'team' && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
       {mine && ev.entryKind === 'team' && !['finished', 'cancelled'].includes(ev.status) && mine.entries
         .filter((e) => e.manage && (e.status === 'registered' || e.status === 'checked_in'))
         .map((e) => <PrepPanel key={e.id} slug={ev.slug} entryId={e.id} teamName={e.name} />)}
-      {ev.entryKind !== 'draft' && <Panel>
-        <h3>{ev.entryKind === 'team' ? 'Teams' : 'Entries'}</h3>
+      {(ev.entryKind !== 'draft' || ev.entries.length > 0) && <Panel>
+        <h3>Teams</h3>
         {ev.entries.length === 0
           ? <Empty>{ev.entryKind === 'team' ? 'No teams have entered yet.' : 'No entries yet.'}</Empty>
           : (
@@ -193,7 +195,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
                 <li key={e.id} class="evententry">
                   {e.logoKey ? <img class="evententry__logo" src={entryLogoUrl(e.logoKey)} alt="" width={28} height={28} /> : <span class="evententry__logo evententry__logo--none" aria-hidden="true">{e.name.slice(0, 1).toUpperCase()}</span>}
                   <span class="evententry__name">{e.seed !== null && <span class="muted">#{e.seed} </span>}{e.name}{e.tag && <span class="muted"> [{e.tag}]</span>}</span>
-                  {e.status === 'checked_in' && <span class="chip chip--ok">Checked in</span>}
+                  {ev.entryKind === 'team' && e.status === 'checked_in' && <span class="chip chip--ok">Checked in</span>}
                   {e.waitlist !== null && <span class="chip">Waitlist {e.waitlist}</span>}
                   {e.status === 'disqualified' && <span class="chip chip--bad">Disqualified</span>}
                   {e.placement !== null && <span class="chip chip--ok">{placementText(e.placement)}</span>}

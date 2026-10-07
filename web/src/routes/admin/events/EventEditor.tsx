@@ -12,6 +12,7 @@ import { StageForm } from './StageForm';
 import { RoundScheduleForm } from './RoundScheduleForm';
 import { EntriesPanel } from './EntriesPanel';
 import { DraftPanel } from './DraftPanel';
+import { DraftTeamsPanel } from './DraftTeamsPanel';
 import { PlayPanel } from './PlayPanel';
 import { DESKS } from '../adminRoutes';
 
@@ -79,6 +80,8 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   if (!ev || !options) return <Panel><p class="muted">Loading...</p></Panel>;
 
   const stagesOpen = canEdit && !STAGES_LOCKED.includes(ev.status);
+  // A team event has entries from the start; a draft's exist once its teams are published.
+  const hasEntries = ev.fields.entryKind === 'team' || ev.teamsMadeAt !== null;
   const over = ev.status === 'finished' || ev.status === 'cancelled';
   const move = (i: number, by: -1 | 1) => {
     const ids = ev.stages.map((s) => s.id);
@@ -210,8 +213,13 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
       {ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'draft' && (
         <DraftPanel eventId={ev.id} canEdit={canEdit} signupsCloseAt={ev.fields.draft?.signupsCloseAt ?? null} gen={panelGen} onChange={panelsChanged} />
       )}
-      {ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'team' && <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />}
-      {ev.fields.entryKind === 'team' && ['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />}
+      {ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'draft' && ev.cutAt !== null && (
+        <DraftTeamsPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />
+      )}
+      {ev.status !== 'draft' && ev.status !== 'announced' && hasEntries && (
+        <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled && ev.fields.entryKind === 'team'} draft={ev.fields.entryKind === 'draft'} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />
+      )}
+      {hasEntries && ['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />}
       <Panel>
         <h3>History</h3>
         <ul class="admin-list">
