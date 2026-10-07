@@ -19,9 +19,13 @@ log on
 
 The rows run in order unless a row says otherwise.
 
+`sm_pug_carry` checks the tournament box first and the pending match second. The plugin counts a box as a tournament box only while `sm_pug_tournament` is 1 AND a match is configured (`TourneyOn()` in `plugin/pug-tourney.inc`), so with no match at all (row 1) the answer is `PUGERR not a tournament box`, not `PUGERR no pending match`.
+
+A resumed game re-seeds l4dscores (with the same totals) at every half-1 go-live of its first chapter, with or without a carry (plan Ruling 7, new in 0.3.27). So if you restart the map during row 9's resumed game, expect a second `[l4dscores] seeded` line with the same values; that is intended. Half-2 go-lives never seed.
+
 | # | Who types what | Expected in chat / console | Log line the site receives |
 |---|---|---|---|
-| 1 | console, no match configured: `sm_pug_carry 9101 500 300` | console: `PUGERR no pending match 9101` | none |
+| 1 | console, no match configured: `sm_pug_carry 9101 500 300` | console: `PUGERR not a tournament box` (no match is configured yet, so the plugin does not count the box as a tournament box even with `sm_pug_tournament 1`; the tournament check runs before the pending-match check) | none |
 | 2 | console: `sm_pug_match 9101 TOKEN1 hospital`, then `sm_pug_carry 9999 1 1` | console: `PUGOK match=9101`, then `PUGERR no pending match 9999` | none |
 | 3 | console: `sm_pug_carry 9101 500 300` | console: `PUGOK carry a=500 b=300`; SourceMod log: `[pug] match 9101 carries game 1's score: a=500 b=300` | none |
 | 4 | console: `sm_pug_roster "P1:a"`, `changelevel l4d_hospital01_apartment`; P1 joins survivors and readies up; half 1 goes live | SourceMod log, at go-live: `[l4dscores] seeded: survivors=500 infected=300 mapCounter=1` and `[pug] carried match 9101 live: l4dscores seeded survivors=500 infected=300 (pug team a on survivors, carry a=500 b=300)`. P1: `!scores` shows 500 for survivors and 300 for infected | `PUG TOKEN1 MATCH_START map=l4d_hospital01_apartment`, `PUG TOKEN1 ROUND_START map=l4d_hospital01_apartment half=1 ...` as today |

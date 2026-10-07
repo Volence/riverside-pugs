@@ -2111,17 +2111,9 @@ public Action Cmd_Roster(int args)
 	return Plugin_Handled;
 }
 
-/** Crash recovery (site plan 5). The backend rebuilds a booking game that
- *  srcds lost: same match id and token, the finished maps with their scores,
- *  the roster, and the next event seq. The match is self-started (it was
- *  adopted by auto-track), so the booking's password and the team-lock rules
- *  stay exactly as they were. The map it was on is replayed from its start.
- *
- *  The <firstmap> argument only holds until the next map start: the match is
- *  Pending and self-started, so OnMapStart overwrites g_sCampaign with the
- *  map the site changelevels to (the replayed map, which may be map 3, not
- *  map 1), as it does for any self-started match waiting for its first
- *  go-live. The campaign check from then on compares against that map. */
+/** Plan T6: game 1's totals (pug-team order) for game 2 of a best of 2 that
+ *  carries the score. Tournament boxes only; latches onto the match that
+ *  sm_pug_match or sm_pug_resume just set up. */
 public Action Cmd_Carry(int args)
 {
 	if (args < 3) { PrintToServer("PUGERR usage: sm_pug_carry <matchid> <a> <b>"); return Plugin_Handled; }
@@ -2146,6 +2138,17 @@ public Action Cmd_Carry(int args)
 
 bool HasCarry() { return g_iCarryA > 0 || g_iCarryB > 0; }
 
+/** Crash recovery (site plan 5). The backend rebuilds a booking game that
+ *  srcds lost: same match id and token, the finished maps with their scores,
+ *  the roster, and the next event seq. The match is self-started (it was
+ *  adopted by auto-track), so the booking's password and the team-lock rules
+ *  stay exactly as they were. The map it was on is replayed from its start.
+ *
+ *  The <firstmap> argument only holds until the next map start: the match is
+ *  Pending and self-started, so OnMapStart overwrites g_sCampaign with the
+ *  map the site changelevels to (the replayed map, which may be map 3, not
+ *  map 1), as it does for any self-started match waiting for its first
+ *  go-live. The campaign check from then on compares against that map. */
 public Action Cmd_Resume(int args)
 {
 	if (args < 5)
