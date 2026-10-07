@@ -300,7 +300,7 @@ export async function eventRoutes(
     const ev = visibleEvent(p.slug, me);
     const entry = ev && entryIn(ev, p.id);
     if (!ev || !entry) { refuse(reply, { error: 'entry_not_found' }); return null; }
-    if (!isStaff(me) && !N.managersOf(db, entry.team_id).includes(me)) { refuse(reply, { error: 'not_manager' }); return null; }
+    if (!isStaff(me) && !N.entryManagers(db, entry).includes(me)) { refuse(reply, { error: 'not_manager' }); return null; }
     return { me, ev, entry };
   };
 

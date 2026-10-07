@@ -192,9 +192,9 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
   const preFinal = ev.locked_at === null && (ev.status === 'registration' || ev.status === 'checkin');
 
   const mine = N.entriesOf(db, ev.id).filter(N.isActive).filter((e) =>
-    N.managersOf(db, e.team_id).includes(viewer) || N.placesOf(db, e.id).some((p) => p.steamid === viewer));
+    N.entryManagers(db, e).includes(viewer) || N.placesOf(db, e.id).some((p) => p.steamid === viewer));
   const entries: MyEntryView[] = mine.map((e) => {
-    const manage = N.managersOf(db, e.team_id).includes(viewer);
+    const manage = N.entryManagers(db, e).includes(viewer);
     const places = N.placesOf(db, e.id);
     const w = place.waitlist.indexOf(e.id);
     const mine = places.find((p) => p.steamid === viewer);
@@ -206,7 +206,7 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
       roster: places.map((p) => ({ steamid: p.steamid, ...person(p.steamid), role: p.role, problems: problems(p.steamid, p.role) })),
       rosterLocked: locked,
       additionsLeft: f.roster.maxAdditions === null ? null : Math.max(0, f.roster.maxAdditions - e.additions),
-      canEditRoster: manage && rosterOpen && !locked,
+      canEditRoster: manage && e.team_id !== null && rosterOpen && !locked,
       canCheckIn: manage && ev.status === 'checkin' && ev.locked_at === null && e.status === 'registered',
       canWithdraw: manage && preFinal,
       canLeave: leaveOpen && !starterLocked,

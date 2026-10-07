@@ -168,7 +168,7 @@ describe('event_log guard', () => {
     };
     const ENTRY_READS = new Set([
       'getEntry', 'entriesOf', 'placesOf', 'rosterOf', 'entryOfTeam', 'entryOfPlayer',
-      'placementOf', 'managersOf', 'playerFacts', 'entrySr', 'isActive', 'disqualifiedSlotHeld',
+      'placementOf', 'managersOf', 'entryManagers', 'playerFacts', 'entrySr', 'isActive', 'disqualifiedSlotHeld',
     ]);
     // Cached per fixture so a test that pre-registers to snapshot "after
     // setup, before the mutation" does not make the mutation's own internal

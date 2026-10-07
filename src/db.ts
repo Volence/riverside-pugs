@@ -1924,6 +1924,9 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'events', 'draft_teams', 'INTEGER');
   ensureColumn(db, 'events', 'cut_at', 'TEXT');
   ensureColumn(db, 'events', 'offers_on', 'INTEGER NOT NULL DEFAULT 0');
+  // Drafts plan D2a: a draft entry has no site team (team_id NULL); its
+  // captain runs it (src/events/entries.ts entryManagers). NULL on team entries.
+  ensureColumn(db, 'event_entries', 'captain_steamid', 'TEXT REFERENCES players(steamid)');
   // Tournaments plan T3a: a stage's veto knobs (src/events/vetoConfig.ts).
   // Null on stages made before it; stageSettingsOf reads those from veto_type.
   ensureColumn(db, 'event_stages', 'veto_json', 'TEXT');

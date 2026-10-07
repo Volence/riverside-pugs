@@ -28,14 +28,14 @@ function tell(d: NoticeDeps, to: string[], eventId: number, type: EventNotifyTyp
 
 /** Check-in opened: the captain and co-captains of every active entry. */
 export function tellCheckinOpen(d: NoticeDeps, eventId: number): void {
-  for (const e of N.entriesOf(d.db, eventId).filter(N.isActive)) tell(d, N.managersOf(d.db, e.team_id), eventId, 'event_checkin_open', { entryId: e.id });
+  for (const e of N.entriesOf(d.db, eventId).filter(N.isActive)) tell(d, N.entryManagers(d.db, e), eventId, 'event_checkin_open', { entryId: e.id });
 }
 
 /** The list went final: each dropped entry's managers, with its reason. */
 export function tellDropped(d: NoticeDeps, eventId: number, dropped: N.LockResult['dropped']): void {
   for (const x of dropped) {
     const entry = N.getEntry(d.db, x.entryId);
-    if (entry) tell(d, N.managersOf(d.db, entry.team_id), eventId, 'event_dropped', { entryId: x.entryId, reason: x.reason });
+    if (entry) tell(d, N.entryManagers(d.db, entry), eventId, 'event_dropped', { entryId: x.entryId, reason: x.reason });
   }
 }
 
@@ -91,7 +91,7 @@ export function tellReschedule(d: NoticeDeps, eventId: number, matchId: number, 
   const sides: ('a' | 'b')[] = what === 'withdrawn' ? ['a', 'b'] : [what === 'declined' ? p.side : p.side === 'a' ? 'b' : 'a'];
   const to = sides.flatMap((side) => {
     const entry = N.getEntry(d.db, side === 'a' ? m.entry_a! : m.entry_b!);
-    return entry ? N.managersOf(d.db, entry.team_id) : [];
+    return entry ? N.entryManagers(d.db, entry) : [];
   });
   tell(d, [...new Set(to)], eventId, 'event_reschedule', { matchId, what, proposalId });
 }

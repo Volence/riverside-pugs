@@ -105,7 +105,7 @@ export function sideOf(db: DB, m: P.MatchRow, steamid: string): Side | null {
   for (const side of ['a', 'b'] as const) {
     const id = side === 'a' ? m.entry_a : m.entry_b;
     const e = id !== null ? N.getEntry(db, id) : undefined;
-    if (e && N.managersOf(db, e.team_id).includes(steamid)) return side;
+    if (e && N.entryManagers(db, e).includes(steamid)) return side;
   }
   return null;
 }
@@ -541,7 +541,7 @@ export function subPlayer(
     if (!row) return V.fail('not_in_lineup');
     const side: Side = row.entry_id === m.entry_a ? 'a' : 'b';
     const entry = N.getEntry(db, row.entry_id)!;
-    if (!N.managersOf(db, entry.team_id).includes(o.by)) return V.fail('not_manager');
+    if (!N.entryManagers(db, entry).includes(o.by)) return V.fail('not_manager');
     const four = JSON.parse(row.steamids) as string[];
     if (!playableOf(db, entry.id).includes(o.inId) || four.includes(o.inId)) return V.fail('sub_not_member');
     const used = subsUsed(db, m, side);
@@ -860,7 +860,7 @@ export function savePrefs(db: DB, o: { entryId: number; by: string; staff: boole
     if (!entry) return V.fail('entry_not_found');
     const ev = E.getEvent(db, entry.event_id)!;
     if (!PREFS_OPEN.has(ev.status) || !N.isActive(entry)) return V.fail('entry_out');
-    if (!o.staff && !N.managersOf(db, entry.team_id).includes(o.by)) return V.fail('not_manager');
+    if (!o.staff && !N.entryManagers(db, entry).includes(o.by)) return V.fail('not_manager');
     const p = o.prefs as { defaultFour?: unknown; side?: unknown; campaigns?: unknown } | null;
     if (typeof p !== 'object' || p === null) return V.fail('bad_prefs');
     const four = p.defaultFour === null || p.defaultFour === undefined ? null : readFour(p.defaultFour, playableOf(db, entry.id));

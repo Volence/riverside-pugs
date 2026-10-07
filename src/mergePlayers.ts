@@ -131,6 +131,8 @@ const PLAIN: [table: string, column: string][] = [
   // entry, the alt's is closed first (below), as for team_members.
   ['event_entries', 'registered_by'],
   ['event_entries', 'checked_in_by'],
+  // A draft entry's captain (drafts plan D2a), like booking_sides' captain.
+  ['event_entries', 'captain_steamid'],
   ['event_entry_players', 'steamid'],
   // Draft signups and captaincy offers (drafts plan D1, src/events/drafts.ts).
   // Where both accounts hold an active signup for one event, the alt's is
