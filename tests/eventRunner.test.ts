@@ -12,6 +12,7 @@ import { NOW, START, ADMIN } from './eventFixture.js';
 import { A, B, entryFixture, rosterA, rosterB } from './entryFixture.js';
 import { playFixture, SWISS, SE } from './playFixture.js';
 import { windowFixture } from './roomFixture.js';
+import { cutDraft } from './draftFixture.js';
 
 const must = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -178,6 +179,21 @@ describe('EventRunner.play (plan T2)', () => {
     r.step(START_AT);
     await r.play(START_AT);
     expect(E.getEvent(f.db, f.eventId)!.status).toBe('live');
+  });
+
+  it('starts a draft event at its start time once its teams are made, and leaves one without teams waiting (plan D2a)', async () => {
+    const f = cutDraft({ balance: true });
+    const g = cutDraft({ balance: true });
+    must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+    const gLogs = E.eventLog(g.db, g.eventId).length;
+    await runner(f.db).play(new Date(START_AT.getTime() - 60_000));
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('registration');
+    await runner(f.db).play(START_AT);
+    expect(E.getEvent(f.db, f.eventId)!.status).toBe('live');
+    expect(E.eventLog(f.db, f.eventId).at(-1)).toMatchObject({ action: 'event_started', actor: null });
+    await runner(g.db).play(START_AT);
+    expect(E.getEvent(g.db, g.eventId)!.status).toBe('registration');
+    expect(E.eventLog(g.db, g.eventId)).toHaveLength(gLogs);
   });
 
   it('settles live events: a disqualification on the desk becomes a forfeit on the next tick, and a second tick changes nothing', async () => {

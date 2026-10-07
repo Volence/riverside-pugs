@@ -37,6 +37,9 @@ import { P as DP, draftFixture, type DraftFixture } from './draftFixture.js';
 const WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:events|event_stages|event_log)\b/gi;
 const ENTRY_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:event_entries|event_entry_players)\b/gi;
 const DRAFT_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:draft_signups|draft_captain_offers)\b|\bUPDATE\s+events\s+SET\b[^'"`;]*\bteam_mode\s*=/gi;
+/** events.teams_made_at is stamped by entries.ts alone (plan D2a Ruling 12),
+ *  in the same transaction that creates the draft's entries. */
+const TEAMS_MADE_WRITERS = /\bUPDATE\s+events\s+SET\b[^'"`;]*\bteams_made_at\s*=/gi;
 const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts', 'src/events/drafts.ts']);
 const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf', 'scheduleOf']);
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
@@ -243,10 +246,62 @@ describe('event_log guard', () => {
       f.db.prepare('SELECT * FROM event_entry_players ORDER BY id').all(),
     ]);
 
+    /** Plan D2a: the mutations that run on a draft-kind event, each with its
+     *  own setup over draftFixture. */
+    const balancedDraft = (f: DraftFixture) => {
+      for (const s of DP.slice(0, 8)) must(D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: NOW }));
+      must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+      for (const s of DP.slice(0, 2)) must(D.setCaptain(f.db, { eventId: f.eventId, steamid: s, captain: true, actor: ADMIN, now: NOW }));
+      must(D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+      must(D.chooseTeamMode(f.db, { eventId: f.eventId, mode: 'auto', actor: ADMIN, now: NOW }));
+      must(D.autoBalance(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+    };
+    const DRAFT_ENTRY_MUTATIONS: Record<string, { action: string; setup: (f: DraftFixture) => void; run: (f: DraftFixture) => V.Checked<unknown> }> = {
+      createDraftEntries: { action: 'draft_teams_published', setup: balancedDraft, run: (f) => N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
+    };
+
     it('every exported function of entries.ts is a known read or a guarded mutation', () => {
       const fns = Object.entries(N).filter(([, v]) => typeof v === 'function').map(([k]) => k);
-      expect(fns.filter((k) => !ENTRY_READS.has(k)).sort()).toEqual(Object.keys(ENTRY_MUTATIONS).sort());
+      expect(fns.filter((k) => !ENTRY_READS.has(k)).sort()).toEqual([...Object.keys(ENTRY_MUTATIONS), ...Object.keys(DRAFT_ENTRY_MUTATIONS)].sort());
     });
+
+    it('only src/events/entries.ts stamps events.teams_made_at', () => {
+      const offenders = walk('src')
+        .filter((f) => f !== 'src/events/entries.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(TEAMS_MADE_WRITERS) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+      expect((readFileSync(join(root, 'src/events/entries.ts'), 'utf8').match(TEAMS_MADE_WRITERS) ?? []).length).toBeGreaterThan(0);
+      expect('update events set locked_at = ?, teams_made_at = ? where id = ?'.match(TEAMS_MADE_WRITERS)).toHaveLength(1);
+      expect('SELECT teams_made_at FROM events WHERE teams_made_at IS NULL'.match(TEAMS_MADE_WRITERS)).toBeNull();
+    });
+
+    for (const [name, m] of Object.entries(DRAFT_ENTRY_MUTATIONS)) {
+      const rows = (f: DraftFixture) => JSON.stringify([
+        f.db.prepare('SELECT * FROM event_entries ORDER BY id').all(),
+        f.db.prepare('SELECT * FROM event_entry_players ORDER BY id').all(),
+        f.db.prepare('SELECT * FROM events ORDER BY id').all(),
+      ]);
+      it(`${name} writes exactly one event_log row, ${m.action}`, () => {
+        const f = draftFixture();
+        m.setup(f);
+        const before = logCount(f);
+        const r = m.run(f);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(f)).toBe(before + 1);
+        expect(f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, () => {
+        const f = draftFixture();
+        m.setup(f);
+        const before = rows(f);
+        const logs = logCount(f);
+        f.db.exec(`CREATE TRIGGER entry_log_down_${name} BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END`);
+        expect(() => m.run(f)).toThrow(/audit down/);
+        expect(rows(f)).toBe(before);
+        expect(logCount(f)).toBe(logs);
+      });
+    }
 
     for (const [name, m] of Object.entries(ENTRY_MUTATIONS)) {
       it(`${name} writes exactly one event_log row, ${m.action}`, () => {

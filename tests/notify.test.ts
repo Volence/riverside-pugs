@@ -54,6 +54,7 @@ describe('preferences', () => {
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_signup_removed')).toEqual({ type: 'draft_signup_removed', label: 'Draft: signup removed by staff' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_cut_role')).toEqual({ type: 'draft_cut_role', label: 'Draft: your role after the cut' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_captain_offer')).toEqual({ type: 'draft_captain_offer', label: 'Draft: captaincy offer' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_team_made')).toEqual({ type: 'draft_team_made', label: 'Draft: your team' });
   });
   it('lists the two reschedule DMs (plan T4)', () => {
     expect(NOTIFY_TYPES.filter((t) => t.type === 'event_reschedule' || t.type === 'event_match_time')).toEqual([

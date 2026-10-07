@@ -4,7 +4,7 @@ import { escapeName } from '../identity.js';
 import { getPlayer } from '../players.js';
 import { whenUtc } from '../bookings/messages.js';
 import * as E from './events.js';
-import { getEntry } from './entries.js';
+import { getEntry, rosterOf } from './entries.js';
 import * as R from './entryRules.js';
 import * as P from './play.js';
 import { gamesOf, roomTimers, seriesGames } from './room.js';
@@ -20,7 +20,7 @@ import type { CutRole } from './draftRules.js';
  *  src/bookings/messages.ts. */
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
-  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer';
+  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -47,7 +47,7 @@ const REMOVAL_TEXT: Record<SignupRemoval, string> = { removed: 'an organizer rem
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -82,6 +82,21 @@ export function eventMessage(
         : extra.cutRole === 'pool'
           ? `You are in the player pool for ${event}. Teams are made ${when}, by SR balance or a live captains' draft; you will get a DM with your team: ${link}`
           : `You are on the free-agent bench for ${event}. Teams are made ${when}; captains can call on you as a stand-in, so keep the night free if you can: ${link}`;
+      break;
+    }
+    case 'draft_team_made': {
+      // Plan D2a Ruling 6: the captain hears their three; the others hear
+      // the team and its captain. Read after the publish committed.
+      if (!entry || entry.captain_steamid === null) return null;
+      const link = `${publicUrl}/event/${ev.slug}`;
+      const nameOf = (s: string) => escapeName(getPlayer(db, s)?.name ?? s);
+      if (extra.captain) {
+        const others = rosterOf(db, entry.id).starters.filter((s) => s !== entry.captain_steamid).map(nameOf);
+        const names = others.length > 1 ? `${others.slice(0, -1).join(', ')} and ${others.at(-1)}` : others.join('');
+        content = `Your team in ${event} is set: ${names}. Name your team and upload a logo before the event starts: ${link}`;
+      } else {
+        content = `You are on ${team} in ${event}, captained by ${nameOf(entry.captain_steamid)}. Your captain can rename the team before the event starts: ${link}`;
+      }
       break;
     }
     case 'draft_captain_offer':

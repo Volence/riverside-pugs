@@ -1,6 +1,7 @@
 import { openDb, type DB } from '../src/db.js';
 import { activatePlayer, upsertPlayer } from '../src/players.js';
 import * as E from '../src/events/events.js';
+import * as D from '../src/events/drafts.js';
 import { ADMIN, NOW, START, must, stageBody } from './eventFixture.js';
 
 /** A draft-kind event open for signups (drafts plan D1), built the way
@@ -50,4 +51,23 @@ export function draftFixture(o: { startsAt?: string; publish?: boolean; open?: b
   if (o.publish !== false) must(E.publishEvent(db, { eventId: ev.id, by: ADMIN, now: NOW }));
   if (o.publish !== false && o.open !== false) must(E.openRegistration(db, { eventId: ev.id, by: ADMIN, now: NOW }));
   return { db, eventId: ev.id, slug: ev.slug, closeAt, draftAt, startsAt };
+}
+
+/** Plan D2a: all 21 players signed up a second apart in P order, signups
+ *  closed, 5 teams, captains picked by SR (P[16..20]) and, unless told not
+ *  to, the cut published (pool P[0..14], bench P[15]). With balance, Auto-balance
+ *  is then chosen and the teams balanced. */
+export function cutDraft(o: { publish?: boolean; balance?: boolean; startsAt?: string; now?: Date } = {}): DraftFixture {
+  const f = draftFixture(o.startsAt ? { startsAt: o.startsAt } : {});
+  const t0 = o.now ? o.now.getTime() - 60_000 : NOW.getTime();
+  const at = o.now ?? NOW;
+  P.forEach((s, i) => must(D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: new Date(t0 + i * 1000) })));
+  must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: at }));
+  must(D.pickCaptains(f.db, { eventId: f.eventId, actor: ADMIN, now: at }));
+  if (o.publish !== false) must(D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: at }));
+  if (o.balance) {
+    must(D.chooseTeamMode(f.db, { eventId: f.eventId, mode: 'auto', actor: ADMIN, now: at }));
+    must(D.autoBalance(f.db, { eventId: f.eventId, actor: ADMIN, now: at }));
+  }
+  return f;
 }

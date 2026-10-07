@@ -6,6 +6,7 @@ import { inGoodStanding } from '../standing.js';
 import { competitiveAccess } from '../teams/access.js';
 import { activeMembers, getTeam } from '../teams/teams.js';
 import * as E from './events.js';
+import * as D from './drafts.js';
 import * as R from './entryRules.js';
 import * as V from './validate.js';
 
@@ -339,6 +340,60 @@ export function lockEntries(db: DB, o: { eventId: number; by: string | null; now
     db.prepare('UPDATE events SET locked_at = ?, updated_at = ? WHERE id = ?').run(at, at, ev.id);
     E.logEvent(db, ev.id, o.by, 'entries_locked', at, { kept: kept.length, dropped });
     return V.ok({ kept, dropped });
+  })();
+}
+
+/** Ruling 6's default name: "Team <captain display name>", at most 24
+ *  characters, cut on a character (never inside one) with no trailing space. */
+function draftEntryName(db: DB, captain: string): string {
+  return Array.from(`Team ${getPlayer(db, captain)?.name ?? captain}`).slice(0, 24).join('').trimEnd();
+}
+
+/**
+ * Publish a draft's teams (drafts plan D2a Ruling 6): one entry per captain
+ * from the working assignment, in one transaction with one
+ * 'draft_teams_published' row. Each entry has no team, the default name, an
+ * empty tag and no logo, the captain in captain_steamid, and the captain
+ * plus their 3 as starters (no subs). The list is already final (closing
+ * signups set locked_at), so the entries take the status a team entry keeps
+ * through lockEntries: checked in when the event has check-in on, registered
+ * when it is off. Seeds come from average starter SR through seedOrder, as
+ * lockEntries gives them, and events.teams_made_at is stamped. A team short
+ * of a player, a pool player on no current captain's team, or a captain
+ * missing is teams_changed: publishing never makes a short entry. The bench
+ * stays a draft_signups bench.
+ */
+export function createDraftEntries(db: DB, o: { eventId: number; actor: string; now: Date }): V.Checked<{ entries: number[] }> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<{ entries: number[] }> => {
+    const ev = E.getEvent(db, o.eventId);
+    if (!ev || ev.status === 'draft') return V.fail('not_found');
+    if (ev.entry_kind !== 'draft') return V.fail('not_draft');
+    if (ev.teams_made_at !== null) return V.fail('teams_made');
+    if (ev.status !== 'registration' && ev.status !== 'checkin') return V.fail('wrong_status');
+    if (ev.cut_at === null) return V.fail('cut_not_published');
+    const teams = D.draftTeamsOf(db, ev.id);
+    if (!teams || teams.length < 2 || teams.length !== ev.draft_teams || teams.some((t) => t.players.length !== R.STARTERS - 1)) return V.fail('teams_changed');
+    const checkedIn = E.fieldsOf(ev).checkin.enabled;
+    const insert = db.prepare(
+      `INSERT INTO event_entries (event_id, team_id, name, tag, logo_key, status, registered_by, created_at, checked_in_at, checked_in_by, captain_steamid)
+       VALUES (?, NULL, ?, '', NULL, ?, ?, ?, ?, ?, ?)`,
+    );
+    const entries = teams.map((t) => {
+      const captain = t.captain.steamid;
+      const id = Number(insert.run(
+        ev.id, draftEntryName(db, captain), checkedIn ? 'checked_in' : 'registered', o.actor, at,
+        checkedIn ? at : null, checkedIn ? o.actor : null, captain,
+      ).lastInsertRowid);
+      for (const s of [captain, ...t.players.map((p) => p.steamid)]) addPlace(db, id, s, 'starter', at);
+      return id;
+    });
+    const order = R.seedOrder(entries.map((id) => ({ id, sr: entrySr(db, id), created_at: at })));
+    const seed = db.prepare('UPDATE event_entries SET seed = ? WHERE id = ?');
+    order.forEach((id, i) => seed.run(i + 1, id));
+    db.prepare('UPDATE events SET teams_made_at = ?, updated_at = ? WHERE id = ?').run(at, at, ev.id);
+    E.logEvent(db, ev.id, o.actor, 'draft_teams_published', at, { entries });
+    return V.ok({ entries });
   })();
 }
 

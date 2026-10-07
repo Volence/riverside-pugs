@@ -91,6 +91,7 @@ export const EVENT_ERRORS = {
   bad_team_mode: { status: 400, text: 'Teams are made by auto-balance or a live captains\' draft.' },
   live_draft_later: { status: 409, text: 'Coming soon: the live draft room. Use Auto-balance for now.' },
   not_auto_mode: { status: 409, text: 'Choose Auto-balance before balancing the teams.' },
+  teams_not_made: { status: 409, text: "Make and publish the draft's teams first." },
   teams_changed: { status: 409, text: 'The captains or the pool changed, so the teams no longer fit. Rebalance them.' },
   bad_move: { status: 409, text: 'A move swaps two pool players who are on different teams.' },
   offers_on: { status: 409, text: 'Captaincy offers are already running.' },

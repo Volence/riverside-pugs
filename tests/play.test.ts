@@ -7,6 +7,7 @@ import { repeatedRoundRobin } from '../src/events/league.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { LEAGUE, SE, SWISS, playFixture } from './playFixture.js';
 import { startEventFlow } from '../src/events/flow.js';
+import { cutDraft } from './draftFixture.js';
 
 const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -151,12 +152,28 @@ describe('play writer', () => {
     expect(snap()).toBe(before);
   });
 
-  it('startEvent refuses a draft-entry event', () => {
+  it('startEvent refuses a draft-entry event whose teams are not made, with teams_not_made', () => {
     const f = playFixture({ stages: [SWISS(2, 2), SE()], entries: 4 });
     f.db.prepare("UPDATE events SET entry_kind = 'draft' WHERE id = ?").run(f.eventId);
     expect(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: swissPlan(f.stages[0]!, f.entries), now: NOW }))
-      .toEqual({ ok: false, error: 'wrong_status' });
+      .toEqual({ ok: false, error: 'teams_not_made' });
     expect(E.getEvent(f.db, f.eventId)!.status).toBe('checkin');
+  });
+
+  it('a draft event starts like any tournament once its teams are made (plan D2a Ruling 10)', async () => {
+    const f = cutDraft({ balance: true });
+    const logs = E.eventLog(f.db, f.eventId).length;
+    expect(await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW })).toEqual({ ok: false, error: 'teams_not_made' });
+    expect(E.eventLog(f.db, f.eventId)).toHaveLength(logs);
+    const { entries } = ok(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+    ok(await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW }));
+    const ev = E.getEvent(f.db, f.eventId)!;
+    expect(ev.status).toBe('live');
+    const first = E.stagesOf(f.db, f.eventId)[0]!;
+    expect(first.status).toBe('live');
+    expect([...JSON.parse(first.entrants_json!)].sort()).toEqual([...entries].sort());
+    expect(JSON.parse(first.entrants_json!)).toEqual(P.activeSeeded(f.db, f.eventId));
+    expect(P.matchesOf(f.db, first.id).length).toBeGreaterThan(0);
   });
 
   it('recordResult refuses a winner who is out while the other side is in, and lets staff pick either side when both are out', () => {

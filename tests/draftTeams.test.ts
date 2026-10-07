@@ -1,17 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
+import { adminEventRoutes } from '../src/routes/adminEvents.js';
+import type { Notifier } from '../src/notify/notify.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 import * as D from '../src/events/drafts.js';
 import * as E from '../src/events/events.js';
+import * as N from '../src/events/entries.js';
 import { balanceAroundCaptains } from '../src/events/draftBalance.js';
 import { draftFairness } from '../src/events/draftFairness.js';
 import { ADMIN, NOW } from './eventFixture.js';
-import { P, draftFixture, type DraftFixture } from './draftFixture.js';
+import { P, cutDraft, type DraftFixture } from './draftFixture.js';
 
 const must = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
   if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
@@ -20,19 +24,7 @@ const must = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T =>
 const err = (r: { ok: boolean; error?: string }) => (r.ok ? null : r.error);
 const LATER = new Date(NOW.getTime() + 3_600_000);
 
-/** All 21 players signed up a second apart in P order, signups closed, 5
- *  teams, captains picked by SR (P[16..20]) and, unless told not to, the cut
- *  published: pool P[0..14], bench P[15]. */
-function cutFixture(o: { publish?: boolean; startsAt?: string; now?: Date } = {}): DraftFixture {
-  const f = draftFixture(o.startsAt ? { startsAt: o.startsAt } : {});
-  const t0 = o.now ? o.now.getTime() - 60_000 : NOW.getTime();
-  const at = o.now ?? NOW;
-  P.forEach((s, i) => must(D.signUp(f.db, { eventId: f.eventId, steamid: s, captainPref: 'willing', note: null, now: new Date(t0 + i * 1000) })));
-  must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: at }));
-  must(D.pickCaptains(f.db, { eventId: f.eventId, actor: ADMIN, now: at }));
-  if (o.publish !== false) must(D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: at }));
-  return f;
-}
+const cutFixture = (o: { publish?: boolean; startsAt?: string; now?: Date } = {}): DraftFixture => cutDraft(o);
 const CAPTAINS = P.slice(16, 21);
 const POOL = P.slice(0, 15);
 const BENCH = P[15]!;
@@ -275,5 +267,156 @@ describe('the Make teams desk over HTTP', () => {
     }
     expect((await post(`${base()}/mode`, ADMIN, { mode: null })).statusCode).toBe(200);
     expect((await get(`${base()}/teams`, ADMIN)).json()).toMatchObject({ mode: null, teams: null, fairness: null });
+  });
+});
+
+describe('publishing the teams (createDraftEntries)', () => {
+  const publish = (f: DraftFixture) => N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: LATER });
+  const sr = (s: string) => 1000 + 25 * P.indexOf(s);
+  /** Every row publishing could touch, to prove a refusal writes nothing. */
+  const snap = (f: DraftFixture) => JSON.stringify([
+    f.db.prepare('SELECT * FROM event_entries ORDER BY id').all(),
+    f.db.prepare('SELECT * FROM event_entry_players ORDER BY id').all(),
+    f.db.prepare('SELECT * FROM events ORDER BY id').all(),
+    f.db.prepare('SELECT * FROM event_log ORDER BY id').all(),
+  ]);
+
+  it('creates one entry per captain with its four starters, seeded by average SR, and stamps teams_made_at', () => {
+    const f = cutDraft({ balance: true });
+    const made = D.draftTeamsOf(f.db, f.eventId)!;
+    const { entries } = must(publish(f));
+    expect(entries).toHaveLength(5);
+    const rows = N.entriesOf(f.db, f.eventId);
+    expect(rows.map((e) => e.id)).toEqual(entries);
+    expect(rows.map((e) => e.captain_steamid)).toEqual(CAPTAINS);
+    for (const [i, e] of rows.entries()) {
+      const t = made[i]!;
+      expect(e).toMatchObject({
+        team_id: null, name: `Team d${P.indexOf(t.captain.steamid)}`, tag: '', logo_key: null, registered_by: ADMIN,
+        created_at: LATER.toISOString(), status: 'checked_in', checked_in_at: LATER.toISOString(), checked_in_by: ADMIN,
+      });
+      expect(N.rosterOf(f.db, e.id)).toEqual({ starters: [t.captain.steamid, ...t.players.map((p) => p.steamid)], subs: [], coach: null });
+    }
+    // Seeds 1 to 5 by average starter SR, highest first, ties in captain order.
+    const avg = (e: N.EntryRow) => N.rosterOf(f.db, e.id).starters.reduce((n, s) => n + sr(s), 0) / 4;
+    const want = [...rows].sort((a, b) => avg(b) - avg(a) || a.id - b.id).map((e) => e.id);
+    expect([...rows].sort((a, b) => a.seed! - b.seed!).map((e) => e.id)).toEqual(want);
+    expect(rows.map((e) => e.seed).sort()).toEqual([1, 2, 3, 4, 5]);
+    expect(E.getEvent(f.db, f.eventId)!.teams_made_at).toBe(LATER.toISOString());
+    expect(logs(f, 'draft_teams_published')).toEqual([{ actor: ADMIN, entries }]);
+    // The bench stays a draft_signups bench, on no entry.
+    expect(N.entryOfPlayer(f.db, f.eventId, BENCH)).toBeUndefined();
+    expect(D.signupOf(f.db, f.eventId, BENCH)!.role).toBe('bench');
+  });
+
+  it("gives a team event's final status: registered when check-in is off", () => {
+    const f = cutDraft({ balance: true });
+    f.db.prepare('UPDATE events SET checkin_json = ? WHERE id = ?').run(JSON.stringify({ enabled: false, opensMinutes: 60, closesMinutes: 15 }), f.eventId);
+    must(publish(f));
+    for (const e of N.entriesOf(f.db, f.eventId)) expect(e).toMatchObject({ status: 'registered', checked_in_at: null, checked_in_by: null });
+  });
+
+  it('cuts a long captain name to 24 characters, with no trailing space', () => {
+    const f = cutDraft({ balance: true });
+    f.db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('Abcdefghijklmnopqr stuv', CAPTAINS[0]);
+    f.db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('Abcdefghijklmnopqrstuvwxyz', CAPTAINS[1]);
+    must(publish(f));
+    expect(N.entriesOf(f.db, f.eventId).slice(0, 2).map((e) => e.name)).toEqual(['Team Abcdefghijklmnopqr', 'Team Abcdefghijklmnopqrs']);
+  });
+
+  it('refuses a pool short of a player, or a captain gone, with teams_changed, writing nothing', () => {
+    const f = cutDraft({ balance: true });
+    const made = D.draftTeamsOf(f.db, f.eventId)!;
+    f.db.prepare("UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'removed' WHERE event_id = ? AND steamid = ?")
+      .run(LATER.toISOString(), f.eventId, made[0]!.players[0]!.steamid);
+    const before = snap(f);
+    expect(err(publish(f))).toBe('teams_changed');
+    expect(snap(f)).toBe(before);
+    const g = cutDraft({ balance: true });
+    g.db.prepare("UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'removed' WHERE event_id = ? AND steamid = ?")
+      .run(LATER.toISOString(), g.eventId, CAPTAINS[0]);
+    const gBefore = snap(g);
+    expect(err(publish(g))).toBe('teams_changed');
+    expect(snap(g)).toBe(gBefore);
+  });
+
+  it('refuses before teams are made, twice, outside registration and checkin, and on a team event', () => {
+    const f = cutDraft();
+    expect(err(publish(f))).toBe('teams_changed');
+    expect(err(publish(cutDraft({ publish: false })))).toBe('cut_not_published');
+    must(mode(f, 'auto'));
+    must(balance(f));
+    must(publish(f));
+    const before = snap(f);
+    expect(err(publish(f))).toBe('teams_made');
+    expect(snap(f)).toBe(before);
+    const g = cutDraft({ balance: true });
+    g.db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(g.eventId);
+    expect(err(publish(g))).toBe('wrong_status');
+    const h = cutDraft({ balance: true });
+    h.db.prepare("UPDATE events SET entry_kind = 'team' WHERE id = ?").run(h.eventId);
+    expect(err(publish(h))).toBe('not_draft');
+    expect(N.entriesOf(g.db, g.eventId).length + N.entriesOf(h.db, h.eventId).length).toBe(0);
+  });
+});
+
+describe('publishing the teams over HTTP', () => {
+  let desk: FastifyInstance;
+  let send: ReturnType<typeof vi.fn>;
+  let f: DraftFixture;
+  const MOD = P[15]!;
+  beforeEach(async () => {
+    f = cutDraft({ balance: true, startsAt: new Date(Date.now() + 9 * 86_400_000).toISOString(), now: new Date() });
+    f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+    send = vi.fn(() => 1);
+    desk = Fastify();
+    await desk.register(cookie, { secret: 'x'.repeat(32) });
+    await desk.register(adminEventRoutes, { db: f.db, store: () => { throw new Error('no store'); }, notifier: { send } as unknown as Notifier, publicUrl: 'https://x' });
+    await desk.ready();
+  });
+  afterEach(async () => { await desk.close(); });
+  const post = (url: string, as: string) => desk.inject({ method: 'POST', url, cookies: authedCookie(desk, f.db, as), payload: {} });
+  const get = (url: string, as: string) => desk.inject({ method: 'GET', url, cookies: authedCookie(desk, f.db, as) });
+  const url = () => `/api/admin/events/${f.eventId}/draft/publish-teams`;
+
+  it('refuses a mod, publishes as an admin with an audit row, and DMs all 20 starters', async () => {
+    expect((await post(url(), MOD)).statusCode).toBe(403);
+    expect(send).not.toHaveBeenCalled();
+    const made = D.draftTeamsOf(f.db, f.eventId)!;
+    const res = await post(url(), ADMIN);
+    expect(res.statusCode).toBe(200);
+    const entries = N.entriesOf(f.db, f.eventId).map((e) => e.id);
+    expect(res.json()).toEqual({ entries });
+    expect((f.db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'event_draft_publish_teams'").get() as { n: number }).n).toBe(1);
+    const link = `https://x/event/${f.slug}`;
+    const name = (s: string) => `d${P.indexOf(s)}`;
+    const calls = send.mock.calls.map(([to, type, payload]) => ({ to: [...(to as string[])], type, content: (payload as { content: string }).content }));
+    expect(calls).toEqual(made.flatMap((t) => {
+      const others = t.players.map((p) => name(p.steamid));
+      const team = `Team ${name(t.captain.steamid)}`;
+      return [
+        { to: [t.captain.steamid], type: 'draft_team_made', content: `Your team in Draft Night is set: ${others[0]}, ${others[1]} and ${others[2]}. Name your team and upload a logo before the event starts: ${link}` },
+        { to: t.players.map((p) => p.steamid), type: 'draft_team_made', content: `You are on ${team} in Draft Night, captained by ${name(t.captain.steamid)}. Your captain can rename the team before the event starts: ${link}` },
+      ];
+    }));
+    expect(calls.flatMap((c) => c.to).sort()).toEqual([...CAPTAINS, ...POOL].sort());
+    expect((await get(`/api/admin/events/${f.eventId}/draft/teams`, MOD)).json().teamsMadeAt).not.toBeNull();
+  });
+
+  it('DMs nobody when publishing is refused', async () => {
+    f.db.prepare('UPDATE draft_signups SET withdrawn_at = ? WHERE event_id = ? AND steamid = ?').run(new Date().toISOString(), f.eventId, POOL[0]);
+    expect((await post(url(), ADMIN)).statusCode).toBe(409);
+    expect(send).not.toHaveBeenCalled();
+    expect(N.entriesOf(f.db, f.eventId)).toEqual([]);
+  });
+
+  it('marks a team short of a player on the desk, so staff see why publish refuses', async () => {
+    const before = (await get(`/api/admin/events/${f.eventId}/draft/teams`, MOD)).json();
+    expect(before.teams.map((t: { short: boolean }) => t.short)).toEqual([false, false, false, false, false]);
+    const made = D.draftTeamsOf(f.db, f.eventId)!;
+    f.db.prepare('UPDATE draft_signups SET withdrawn_at = ? WHERE event_id = ? AND steamid = ?').run(new Date().toISOString(), f.eventId, made[2]!.players[0]!.steamid);
+    const after = (await get(`/api/admin/events/${f.eventId}/draft/teams`, MOD)).json();
+    expect(after.teams.map((t: { short: boolean }) => t.short)).toEqual([false, false, true, false, false]);
+    expect(after.teams[2].players).toHaveLength(2);
   });
 });

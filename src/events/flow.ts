@@ -183,6 +183,9 @@ export function startEventFlow(db: DB, o: { eventId: number; by: string | null; 
     const ev = E.getEvent(db, o.eventId);
     if (!ev) return V.fail('not_found');
     if (!V.nextStatusAllowed(ev.status, 'live')) return V.fail('wrong_status');
+    // Before planning, so the desk hears why rather than a planner refusal
+    // over a draft with no entries yet (drafts plan D2a).
+    if (ev.entry_kind === 'draft' && ev.teams_made_at === null) return V.fail('teams_not_made');
     if (ev.locked_at === null) return V.fail('list_not_final');
     const first = E.stagesOf(db, ev.id)[0];
     if (!first) return V.fail('no_stages');

@@ -20,7 +20,7 @@ import { adminEntryViews } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCaptainOffer, tellCheckinOpen, tellCutRole, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTimeLocked } from '../events/notices.js';
+import { tellCaptainOffer, tellCheckinOpen, tellCutRole, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
 import { deskOrder, signupFacts } from '../events/draftFacts.js';
 import { draftFairness } from '../events/draftFairness.js';
 import { seasonSr } from '../rating.js';
@@ -442,6 +442,9 @@ export async function adminEventRoutes(
       teams: made?.map((t) => ({
         captain: { steamid: t.captain.steamid, name: nameOf(t.captain.steamid) },
         players: t.players.map((p) => ({ steamid: p.steamid, name: nameOf(p.steamid), sr: seasonSr(db, p.steamid, season) })),
+        // Fewer than 3 (a pool player left after balancing): publish refuses
+        // with teams_changed, and the desk shows which team is short.
+        short: t.players.length < 3,
       })) ?? null,
       fairness: draftFairness(db, ev.id),
     };
@@ -453,6 +456,20 @@ export async function adminEventRoutes(
   draftPost('move', 'event_draft_move', ['a', 'b'], (ev, me, b) =>
     typeof b.a !== 'string' || typeof b.b !== 'string' ? null
       : D.moveDraftPlayers(db, { eventId: ev.id, a: b.a, b: b.b, actor: me, now: new Date() }));
+
+  /** Publish the teams (Ruling 6): the entries in one transaction, then the
+   *  draft_team_made DM to every starter once it has committed. */
+  app.post('/api/admin/events/:id/draft/publish-teams', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = N.createDraftEntries(db, { eventId: ev.id, actor: me, now: new Date() });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'event_draft_publish_teams', ev.id, { slug: ev.slug, entries: r.value.entries.length });
+    tellTeamMade(opts, ev.id, r.value.entries);
+    return { entries: r.value.entries };
+  });
 
   /** The top-SR eligible volunteers become the captains (replacing the
    *  working set); the reply says how many captains are still missing. */
