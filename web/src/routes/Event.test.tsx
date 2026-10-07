@@ -85,9 +85,11 @@ describe('EventPage', () => {
     mockEvents.get.mockResolvedValue(view({
       entryKind: 'draft', status: 'registration',
       draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 3, names: ['Alice', 'Bob', 'Cy'], cut: null },
+      checkinOpensAt: inMinutes(150), checkinClosesAt: inMinutes(170),
     }));
     const { container } = render(<EventPage slug="riverside-cup" session={session} />);
     expect(await screen.findByText('3 signed up')).toBeTruthy();
+    expect(container.textContent).not.toMatch(/check-in/i);
     expect(screen.getByText(/Signups close/)).toBeTruthy();
     expect(screen.getByText(/Draft night/)).toBeTruthy();
     for (const n of ['Alice', 'Bob', 'Cy']) expect(screen.getByText(n)).toBeTruthy();

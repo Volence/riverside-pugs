@@ -9,7 +9,7 @@ const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
     event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
     reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
     setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(), eventEntries: vi.fn(), eventPlay: vi.fn(), startEvent: vi.fn(),
-    setRoundSchedule: vi.fn(),
+    setRoundSchedule: vi.fn(), eventDraft: vi.fn(),
   },
   mockConfirm: vi.fn(),
 }));
@@ -146,6 +146,14 @@ describe('EventEditor', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open signups' }));
     await waitFor(() => expect(mockAdmin.openEventRegistration).toHaveBeenCalledWith(3));
     expect(screen.queryByRole('button', { name: 'Open registration' })).toBeNull();
+  });
+
+  it('a draft-kind event in registration shows the Draft panel and no Play panel', async () => {
+    mockAdmin.event.mockResolvedValue(detail({ status: 'registration', fields: { ...FIELDS, entryKind: 'draft', draft: { signupsCloseAt: '2026-10-10T18:00:00.000Z', draftAt: '2026-10-10T19:00:00.000Z' } } }));
+    mockAdmin.eventDraft.mockResolvedValue({ lockedAt: null, cutAt: null, teams: null, maxTeams: 0, offersOn: false, openOffer: null, problems: [], signups: [] });
+    render(<EventEditor id={3} canEdit />);
+    expect(await screen.findByText('Nobody has signed up yet.')).toBeTruthy();
+    expect(mockAdmin.eventPlay).not.toHaveBeenCalled();
   });
 
   it('cancels with the reason typed, after asking', async () => {

@@ -12,10 +12,13 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 /** One sentence per CutProblem code. The counts the codes do not carry come
  *  in `o`: from the table for the live list, from the server's own `cut`
  *  for a refused publish (the table may be stale by then). */
-function problemText(code: CutProblem, o: { teams: number | null; maxTeams: number; captains: number; ineligible: number }): string {
+function problemText(code: CutProblem, o: { teams: number | null; maxTeams: number; captains: number; ineligible: number; active: number }): string {
   const teams = o.teams ?? 0;
   switch (code) {
-    case 'too_few_teams': return 'Set at least 2 teams.';
+    // Fewer than 8 signups: no team count can fix it, so the event is cancelled.
+    case 'too_few_teams': return o.maxTeams < 2
+      ? `A draft needs at least 8 signups; this one has ${o.active}. Cancel the event.`
+      : 'Set at least 2 teams.';
     case 'too_many_teams': return `There are too many teams for the signups (most ${o.maxTeams}).`;
     case 'too_few_captains': return `Choose ${plural(Math.max(teams - o.captains, 0), 'more captain', 'more captains')}.`;
     case 'too_many_captains': return `There are ${plural(Math.max(o.captains - teams, 0), 'captain', 'captains')} too many. Remove ${o.captains - teams === 1 ? 'one' : 'some'}.`;
@@ -48,7 +51,7 @@ function SignupRow({ s, canAct, busy, others, onCaptain, onSwap, onRemove }: {
       <td>
         {s.role && <span class="chip">{ROLE[s.role]}</span>}
         {s.manual && <span class="muted"> (moved by hand)</span>}
-        {s.role === 'captain' && s.captainPref === 'no' && <span class="muted"> (did not volunteer)</span>}
+        {s.role === 'captain' && s.captainPref !== 'want' && <span class="muted"> (did not volunteer)</span>}
       </td>
       {canAct && (
         <td>
@@ -92,7 +95,7 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
   const n = data.signups.length;
   const captains = data.signups.filter((s) => s.role === 'captain').length;
   const ineligible = data.signups.filter((s) => s.problems.length > 0).length;
-  const sentence = (c: CutProblem) => problemText(c, { teams: data.teams, maxTeams: data.maxTeams, captains, ineligible });
+  const sentence = (c: CutProblem) => problemText(c, { teams: data.teams, maxTeams: data.maxTeams, captains, ineligible, active: n });
   const canAct = canEdit && !published;
   const teamValue = teams !== '' ? teams : String(data.teams ?? data.maxTeams);
 
@@ -108,7 +111,7 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
       if (!(err instanceof CutChangedError)) throw err;
       const b = err.cutBody;
       const ine = b.ineligible.length;
-      setRefused(b.problems.map((c) => problemText(c, { teams: b.cut.teams, maxTeams: b.cut.maxTeams, captains: b.cut.captains, ineligible: ine })));
+      setRefused(b.problems.map((c) => problemText(c, { teams: b.cut.teams, maxTeams: b.cut.maxTeams, captains: b.cut.captains, ineligible: ine, active: b.cut.active })));
     }
   }, {
     title: 'Publish the cut?',
@@ -126,7 +129,7 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
           })}>Close signups</button>
         </div>
       )}
-      {locked && !published && canEdit && (
+      {locked && !published && canEdit && data.maxTeams >= 2 && (
         <div class="inlinerow">
           <input type="number" aria-label="Team count" min={2} max={Math.max(data.maxTeams, 2)} value={teamValue}
             onInput={(e) => setTeams((e.target as HTMLInputElement).value)} />

@@ -47,6 +47,26 @@ describe('DraftPanel', () => {
     expect(screen.getAllByText('late start', { selector: 'td' })).toHaveLength(2);
   });
 
+  it('marks a captain made by hand as not volunteering when they only said willing', async () => {
+    mockAdmin.eventDraft.mockResolvedValue(view({
+      signups: [su({ steamid: '1', name: 'Ann', role: 'captain', captainPref: 'willing' }), su({ steamid: '2', name: 'Bob', role: 'captain', captainPref: 'want' })],
+    }));
+    render(<DraftPanel eventId={9} canEdit />);
+    await screen.findByText('Bob', { selector: 'td' });
+    expect(screen.getAllByText(/\(did not volunteer\)/)).toHaveLength(1);
+  });
+
+  it('with fewer than 8 signups tells staff to cancel and offers no team count', async () => {
+    mockAdmin.eventDraft.mockResolvedValue(view({
+      teams: 1, maxTeams: 1, problems: ['too_few_teams'],
+      signups: Array.from({ length: 7 }, (_, i) => su({ steamid: String(i), name: `P${i}`, role: 'pool' })),
+    }));
+    render(<DraftPanel eventId={9} canEdit />);
+    expect(await screen.findByText('A draft needs at least 8 signups; this one has 7. Cancel the event.')).toBeTruthy();
+    expect(screen.queryByText('Set at least 2 teams.')).toBeNull();
+    expect(screen.queryByLabelText('Team count')).toBeNull();
+  });
+
   it('shows the open header before close', async () => {
     mockAdmin.eventDraft.mockResolvedValue(view({ lockedAt: null }));
     render(<DraftPanel eventId={9} canEdit signupsCloseAt="2026-10-08T12:00:00.000Z" />);
