@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import { isMapName } from '../campaigns.js';
+import { carryFor, type Carry } from '../events/carry.js';
 import { matchPlayersRoster, tournamentRoster } from './tournamentGames.js';
 
 /**
@@ -24,6 +25,8 @@ export interface RestoreSnapshot {
   map: string;
   /** Which match team survives first on `map`: the higher total, a tie keeps the previous map's half-1 order, and team a on map 1. */
   firstSurv: 'a' | 'b';
+  /** A carried tournament game 2: game 1's totals in pug-team order, else null (plan T6). */
+  carry: Carry | null;
   roster: { steamid: string; team: 'a' | 'b'; joinedMap: number }[];
   /** One above the highest event seq the site holds for this game. */
   nextSeq: number;
@@ -79,8 +82,13 @@ export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: nu
   // plugin's finale backstop. A game lost on its finale is aborted instead.
   if (map === entry.maps.at(-1)) return null;
 
-  const totA = maps.reduce((n, x) => n + x.a, 0);
-  const totB = maps.reduce((n, x) => n + x.b, 0);
+  // Plan T6: a carried game 2's tally starts with game 1, so the sides order
+  // by totals plus the carry. Map 1 stays team a (the veto decided it and the
+  // plugin seeds the tally itself).
+  const carry = carryFor(db, matchId);
+  const carried = maps.length > 0 ? carry : null;
+  const totA = maps.reduce((n, x) => n + x.a, 0) + (carried?.a ?? 0);
+  const totB = maps.reduce((n, x) => n + x.b, 0) + (carried?.b ?? 0);
   const prev = done.at(-1)?.half1Surv ?? null;
   // L4D1 (verified on 906 of 910 map starts): the higher total survives
   // first; a tie keeps the previous map's order; map 1 is team a.
@@ -95,7 +103,7 @@ export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: nu
     .map((r) => ({ ...r, joinedMap: opts.replayFrom !== undefined ? Math.min(r.joinedMap, maps.length) : r.joinedMap }));
   const maxSeq = (db.prepare('SELECT MAX(seq) AS s FROM match_live_events WHERE match_id = ?').get(matchId) as { s: number | null }).s ?? 0;
 
-  return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, roster, nextSeq: maxSeq + 1 };
+  return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, carry, roster, nextSeq: maxSeq + 1 };
 }
 
 /** The chapters of a live game that may be replayed from their start
@@ -119,6 +127,7 @@ export function resumeLines(s: RestoreSnapshot): string[] {
   }
   return [
     `sm_pug_resume ${s.matchId} ${s.token} ${s.firstMap} ${s.firstSurv} ${s.nextSeq}`,
+    ...(s.carry ? [`sm_pug_carry ${s.matchId} ${Math.trunc(s.carry.a)} ${Math.trunc(s.carry.b)}`] : []),
     ...s.maps.map((x) => `sm_pug_resume_map ${x.map} ${Math.trunc(x.a)} ${Math.trunc(x.b)}`),
     // Quoted: Source's console tokenizer splits unquoted arguments on ':',
     // so an unquoted roster arg reaches the plugin as a bare steamid and is
