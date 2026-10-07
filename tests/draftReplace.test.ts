@@ -225,6 +225,42 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
     expect(R.lineupFour(s.db, s.matchId, s.entryA)).toEqual(A.slice(0, 4));
   });
 
+  it('no answer from the box: it may have taken the sub, so the reverse sub is sent, staff are told, and the replace is refused with nothing written', async () => {
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    await s.tick();
+    s.goLive(s.gameOf(1).match_id!);
+    const token = s.liveGameToken();
+    const before = snapshot(s);
+    const real = s.runner.send.bind(s.runner);
+    vi.spyOn(s.runner, 'send').mockImplementation(async (id, lines, what) => {
+      if (lines[0] === `sm_pug_sub ${token} ${A[3]} ${OUTSIDER}`) return null;
+      return real(id, lines, what);
+    });
+    s.sent.length = 0;
+    const r = await replace();
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toBe('replace_in_game');
+    expect(!r.ok && r.detail).toEqual([{ steamid: A[3], problems: ['The server did not answer.'] }]);
+    expect(s.sent).toContain(`sm_pug_sub ${token} ${OUTSIDER} ${A[3]}`);
+    const alert = s.alerts.find((a): a is Extract<typeof a, { kind: 'problem' }> => a.kind === 'problem' && a.text.includes('staff replace'))!;
+    expect(alert.text).toContain('got no answer from the server');
+    expect(alert.text).toContain('the server undid it.');
+    expect(snapshot(s)).toBe(before);
+  });
+
+  it('a room state refusal unrelated to the box is replace_not_possible with the room\'s reason, and nothing is written', async () => {
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    await s.tick();
+    s.db.prepare("UPDATE event_matches SET status = 'veto' WHERE id = ?").run(s.matchId);
+    const before = snapshot(s);
+    const r = await replace();
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toBe('replace_not_possible');
+    expect(!r.ok && r.detail).toEqual([{ steamid: A[3], problems: [`The match room refused it: ${EVENT_ERRORS.not_live_phase.text}`] }]);
+    expect(EVENT_ERRORS.replace_not_possible.status).toBe(409);
+    expect(snapshot(s)).toBe(before);
+  });
+
   for (const undone of [true, false]) {
     it(`the box took it but the site then refused: the box is asked to undo it (${undone ? 'undone' : 'not undone'}), staff are told, nothing is written`, async () => {
       s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });

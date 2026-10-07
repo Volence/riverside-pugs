@@ -878,9 +878,15 @@ export class SeriesEngine {
       const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${o.out} ${o.in}`], 'the staff replace');
       const reply = parseSubReply(replies?.[0], o.out, o.in);
       if (!reply || !reply.ok) {
-        const kept = await this.undoBoxSubs(took, o.out, o.in);
-        const km = kept[0] ? P.getMatch(this.db, kept[0].matchId) : undefined;
-        if (km) this.alert(km, `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} was taken by one server and refused by another, and it was NOT undone: the server has ${this.playerName(o.in)}, the site has ${this.playerName(o.out)}.`);
+        // No answer is a possible take (the reply may be all that was lost), so that box is asked to undo it too.
+        const kept = await this.undoBoxSubs(reply ? took : [...took, g], o.out, o.in);
+        const km = kept[0] ? P.getMatch(this.db, kept[0].matchId) : reply ? undefined : P.getMatch(this.db, g.matchId);
+        if (km) {
+          const what = `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} ${reply ? 'was taken by one server and refused by another' : 'got no answer from the server'}`;
+          this.alert(km, kept.length === 0
+            ? `${what}; it was asked to undo it and the server undid it.`
+            : `${what}, and it was NOT undone: the server has ${this.playerName(o.in)}, the site has ${this.playerName(o.out)}.`);
+        }
         console.log(`[series] match ${g.matchId}: the box refused the staff replace of ${o.out} by ${o.in} (${reply ? reply.error : 'no answer'})`);
         return V.fail('replace_in_game', [{ steamid: o.out, problems: [reply ? `The server said: ${reply.error}.` : 'The server did not answer.'] }]);
       }

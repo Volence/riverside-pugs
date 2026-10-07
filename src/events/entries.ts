@@ -572,7 +572,12 @@ export function replaceDraftPlayer(db: DB, o: {
         const gameId = live ? Room.gamesOf(db, m.matchId).find((g) => g.match_id === live.gameMatchId)?.id ?? null : null;
         const s = Room.subPlayer(db, { matchId: m.matchId, by: o.actor, outId: o.out, inId: o.in, limit: 0, gameId, staff: true, now: o.now });
         const inGame = (why: string) => new Refused(V.fail('replace_in_game', [{ steamid: o.out, problems: [why] }]));
-        if (!s.ok) throw inGame(`The match room refused it: ${V.EVENT_ERRORS[s.error].text}`);
+        if (!s.ok) {
+          const why = `The match room refused it: ${V.EVENT_ERRORS[s.error].text}`;
+          // A room state refusal has nothing to do with the box; anything else keeps the in-game label.
+          if (s.error === 'entry_out' || s.error === 'not_live' || s.error === 'not_live_phase') throw new Refused(V.fail('replace_not_possible', [{ steamid: o.out, problems: [why] }]));
+          throw inGame(why);
+        }
         if (m.bookingId !== null) {
           const b = B.getBooking(db, m.bookingId);
           if (b && B.isOpen(b)) {

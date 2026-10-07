@@ -184,6 +184,7 @@ export const EVENT_ERRORS = {
   emergency_off: { status: 409, text: 'Emergency subs are off in this event: subs are made between chapters.' },
   captain_replace: { status: 409, text: 'That player is the team\'s captain. Make another player captain first.' },
   replace_in_game: { status: 409, text: 'That player is in a game on a server and the server did not take the change. Use the in-game tools first (the staff freeze, !sub), or try again between chapters.' },
+  replace_not_possible: { status: 409, text: 'The match is not in a state where a player can be swapped right now; the detail says why.' },
   replace_not_starter: { status: 409, text: 'That player is not a starter of this team.' },
   replace_ineligible: { status: 409, text: 'The replacement does not meet this event\'s entry rules.' },
   replace_bad_note: { status: 400, text: `A staff note is at most ${REPLACE_NOTE_MAX} characters of plain text, on one line.` },
