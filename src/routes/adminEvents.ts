@@ -622,6 +622,8 @@ export async function adminEventRoutes(
     if (!r.ok) return refuseWith(reply, r);
     logAdmin(db, me, 'event_entry_captain', ev.id, { entryId: entry.id, from: r.value.from, to: r.value.to });
     tellCaptainSet(opts, ev.id, entry.id, r.value.from, r.value.to);
+    // Open room pages of this entry refresh to show who runs it now.
+    for (const m of roomMatches(ev.id)) if (m.entry_a === entry.id || m.entry_b === entry.id) opts.rooms?.pushChange(m.id);
     return r.value;
   });
 

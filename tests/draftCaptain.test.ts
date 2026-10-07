@@ -70,6 +70,16 @@ describe('setDraftCaptain', () => {
     expect(logs(f, 'entry_captain_set')).toEqual([{ actor: ADMIN, entryId, from: old, to: next }]);
   });
 
+  it('refuses an entry that is out (entry_out), writing nothing', () => {
+    const f = published();
+    const entryId = f.entries[0]!;
+    f.db.prepare("UPDATE event_entries SET status = 'disqualified' WHERE id = ?").run(entryId);
+    const before = snapshot(f);
+    const r = N.setDraftCaptain(f.db, { eventId: f.eventId, entryId, steamid: starters(f, entryId)[1]!, actor: ADMIN, now: LATER });
+    expect(r.ok ? null : r.error).toBe('entry_out');
+    expect(snapshot(f)).toBe(before);
+  });
+
   it('refuses a non-starter, the captain, an unknown entry, a team entry, and outside the window, writing nothing', () => {
     const f = published();
     const [e0, e1] = f.entries as [number, number];
@@ -146,6 +156,26 @@ describe('a captain change during a booked series', () => {
   });
 });
 
+describe('a captain change on entry_b during a booked series', () => {
+  let s: SeriesFixture;
+  afterEach(() => { s?.close(); });
+  it('moves booking side b\'s captain and leaves side a alone', async () => {
+    s = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
+    await s.tick();
+    const b = s.booking();
+    expect(s.match().entry_b).toBe(s.entryB);
+    const sideA = B.sideRow(s.db, b.id, 'a')!;
+    const sideB = B.sideRow(s.db, b.id, 'b')!;
+    expect(sideB.captain_steamid).toBe(BATS[0]);
+    must(N.setDraftCaptain(s.db, { eventId: s.eventId, entryId: s.entryB, steamid: BATS[1]!, actor: ADMIN, now: new Date(s.t.t) }));
+    const after = B.sideRow(s.db, b.id, 'b')!;
+    expect(after.captain_steamid).toBe(BATS[1]);
+    expect(B.sideName(s.db, after)).toBe(B.sideName(s.db, sideB));
+    expect(B.sideRow(s.db, b.id, 'a')).toEqual(sideA);
+    expect(B.actingSides(s.db, b.id, BATS[1]!)).toEqual(['b']);
+  });
+});
+
 describe('setSideCaptain', () => {
   let s: SeriesFixture;
   afterEach(() => { s?.close(); });
@@ -211,6 +241,25 @@ describe('the captain route', () => {
     expect((await post(ADMIN, { steamid: 5 })).statusCode).toBe(400);
     expect(send).not.toHaveBeenCalled();
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'event_entry_captain'").get()).toEqual({ n: 0 });
+  });
+});
+
+describe('the captain route with an open room', () => {
+  it('pushes each open room of the entry after the change, so room pages refresh', async () => {
+    const f = await roomFixture();
+    asDraft(f);
+    must(R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
+    const pushChange = vi.fn();
+    const desk = Fastify();
+    await desk.register(cookie, { secret: 'x'.repeat(32) });
+    await desk.register(adminEventRoutes, { db: f.db, store: () => { throw new Error('no store'); }, notifier: { send: vi.fn(() => 1) } as unknown as Notifier, publicUrl: 'https://x', rooms: { pushChange } as never });
+    await desk.ready();
+    const res = await desk.inject({
+      method: 'POST', url: `/api/admin/events/${f.eventId}/entries/${f.entryA}/captain`, cookies: authedCookie(desk, f.db, ADMIN), payload: { steamid: A[1] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(pushChange.mock.calls).toEqual([[f.matchId]]);
+    await desk.close();
   });
 });
 

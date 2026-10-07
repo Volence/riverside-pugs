@@ -899,9 +899,12 @@ export class SeriesEngine {
       const m = took[0] ? P.getMatch(this.db, took[0].matchId) : undefined;
       if (m) {
         const what = `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} was taken by the server but then refused on the site (${r.error})`;
+        // A refused undo leaves the box with the sub; an unanswered one leaves its state unknown.
         this.alert(m, kept.length === 0
           ? `${what}; the server undid it.`
-          : `${what}, and it was NOT undone: the server has ${this.playerName(o.in)}, the site has ${this.playerName(o.out)}. Put ${this.playerName(o.out)} back in game (!sub) or replace again on the Events desk.`);
+          : kept.some((k) => k.undo === 'no_answer')
+            ? `${what}; the site could not confirm the server's state: it may have ${this.playerName(o.in)} or ${this.playerName(o.out)}. Check the live roster or use !sub.`
+            : `${what}, and it was NOT undone: the server has ${this.playerName(o.in)}, the site has ${this.playerName(o.out)}. Put ${this.playerName(o.out)} back in game (!sub) or replace again on the Events desk.`);
       }
       return r;
     }
@@ -921,13 +924,13 @@ export class SeriesEngine {
 
   /** The reverse sub on each box that took a staff replace the site then did
    *  not make; the games whose box did not confirm the undo (parseSubReply). */
-  private async undoBoxSubs(games: N.BoxGame[], out: string, inn: string): Promise<N.BoxGame[]> {
-    const kept: N.BoxGame[] = [];
+  private async undoBoxSubs(games: N.BoxGame[], out: string, inn: string): Promise<(N.BoxGame & { undo: 'refused' | 'no_answer' })[]> {
+    const kept: (N.BoxGame & { undo: 'refused' | 'no_answer' })[] = [];
     for (const g of games) {
       const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${inn} ${out}`], 'undoing the staff replace');
       const reply = parseSubReply(replies?.[0], inn, out);
       if (!reply || !reply.ok) {
-        kept.push(g);
+        kept.push({ ...g, undo: reply ? 'refused' : 'no_answer' });
         console.error(`[series] match ${g.matchId}: undoing the staff replace of ${out} by ${inn} on the box failed (${reply ? reply.error : 'no answer'})`);
       }
     }
