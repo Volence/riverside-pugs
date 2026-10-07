@@ -13,13 +13,14 @@ import { bookingRules, getBooking } from '../bookings/bookings.js';
 import { getServer } from '../serverPool.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 import { getProposal, scheduleRules } from './schedule.js';
+import type { CutRole } from './draftRules.js';
 
 /** The event DMs (plan T1b Ruling 11, and the two match room DMs of plan
  *  T3a Ruling 2). Every player-chosen name goes through escapeName, as in
  *  src/bookings/messages.ts. */
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
-  | 'draft_signup_removed';
+  | 'draft_signup_removed' | 'draft_cut_role';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -46,7 +47,7 @@ const REMOVAL_TEXT: Record<SignupRemoval, string> = { removed: 'an organizer rem
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -71,6 +72,18 @@ export function eventMessage(
     case 'draft_signup_removed':
       content = `Staff removed your signup for ${event}: ${REMOVAL_TEXT[extra.removal ?? 'removed']}.`;
       break;
+    case 'draft_cut_role': {
+      const draftAt = E.fieldsOf(ev).draft?.draftAt;
+      if (!draftAt || !extra.cutRole) return null;
+      const link = `${publicUrl}/event/${ev.slug}`;
+      const when = discordTime(draftAt);
+      content = extra.cutRole === 'captain'
+        ? `You are a captain in ${event}. The draft is ${when}. Build your pick list before then: ${link}`
+        : extra.cutRole === 'pool'
+          ? `You are in the draft pool for ${event}. The draft is ${when}; captains pick you live: ${link}`
+          : `You are on the free-agent bench for ${event}. Captains can call on you as a stand-in, so keep the night free if you can: ${link}`;
+      break;
+    }
     case 'event_match_connect':
     case 'event_match_result':
     case 'event_match_staff':

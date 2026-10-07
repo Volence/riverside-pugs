@@ -20,7 +20,9 @@ import { adminEntryViews } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCheckinOpen, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTimeLocked } from '../events/notices.js';
+import { tellCheckinOpen, tellCutRole, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTimeLocked } from '../events/notices.js';
+import { deskOrder, signupFacts } from '../events/draftFacts.js';
+import { maxTeams } from '../events/draftRules.js';
 import type { StaffAction } from '../events/messages.js';
 import { higherSide, openMatchRoom, type RoomClock } from '../events/roomClock.js';
 
@@ -372,6 +374,73 @@ export async function adminEventRoutes(
     logAdmin(db, me, 'event_signup_remove', ev.id, { steamid: p.steamid, reason });
     tellSignupRemoved(opts, ev.id, p.steamid, reason);
     return {};
+  });
+
+  /**
+   * The cut (drafts plan D1 Rulings 4 to 8): staff read the working cut with
+   * SR, the private preference and note, reliability and problems beside each
+   * signup; admins set the team count and the captains, swap pool against
+   * bench, and publish, which DMs every signup their role.
+   */
+  app.get('/api/admin/events/:id/draft', async (req, reply) => {
+    if (!requireStaff(req, reply)) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    if (ev.entry_kind !== 'draft') return refuse(reply, 'not_draft');
+    const now = new Date();
+    const offer = db.prepare('SELECT steamid, expires_at FROM draft_captain_offers WHERE event_id = ? AND answer IS NULL').get(ev.id) as
+      { steamid: string; expires_at: string } | undefined;
+    const signups = signupFacts(db, ev.id, now);
+    return {
+      lockedAt: ev.locked_at, cutAt: ev.cut_at, teams: ev.draft_teams, maxTeams: maxTeams(signups.length), offersOn: ev.offers_on === 1,
+      openOffer: offer ? { steamid: offer.steamid, name: getPlayer(db, offer.steamid)?.name ?? offer.steamid, expiresAt: offer.expires_at } : null,
+      problems: D.cutState(db, ev.id, now).problems,
+      signups: deskOrder(signups),
+    };
+  });
+
+  /** One cut step: a malformed body is bad_request, a refusal maps as usual,
+   *  and the audit row keeps only the step's own fields. */
+  const draftPost = (path: string, action: string, keys: string[], run: (ev: E.EventRow, me: string, body: Record<string, unknown>) => V.Checked<unknown> | null) =>
+    app.post(`/api/admin/events/:id/draft/${path}`, async (req, reply) => {
+      const me = requireAdmin(req, reply);
+      if (!me) return;
+      const ev = eventOf((req.params as { id: string }).id);
+      if (!ev) return refuse(reply, 'not_found');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const r = run(ev, me, body);
+      if (r === null) return refuse(reply, 'bad_request');
+      if (!r.ok) return refuse(reply, r.error);
+      logAdmin(db, me, action, ev.id, { slug: ev.slug, ...Object.fromEntries(keys.map((k) => [k, body[k]])) });
+      return {};
+    });
+  draftPost('teams', 'event_draft_teams', ['teams'], (ev, me, b) =>
+    typeof b.teams !== 'number' ? null : D.setDraftTeams(db, { eventId: ev.id, teams: b.teams, actor: me, now: new Date() }));
+  draftPost('captain', 'event_draft_captain', ['steamid', 'captain'], (ev, me, b) =>
+    typeof b.steamid !== 'string' || typeof b.captain !== 'boolean' ? null
+      : D.setCaptain(db, { eventId: ev.id, steamid: b.steamid, captain: b.captain, actor: me, now: new Date() }));
+  draftPost('swap', 'event_draft_swap', ['pool', 'bench'], (ev, me, b) =>
+    typeof b.pool !== 'string' || typeof b.bench !== 'string' ? null
+      : D.swapPoolBench(db, { eventId: ev.id, poolSteamid: b.pool, benchSteamid: b.bench, actor: me, now: new Date() }));
+
+  app.post('/api/admin/events/:id/draft/publish', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const r = D.publishCut(db, { eventId: ev.id, actor: me, now: new Date() });
+    if (!r.ok) {
+      if (!('cut' in r)) return refuse(reply, r.error);
+      const { problems, ineligible, ...counts } = r.cut;
+      return reply.code(V.EVENT_ERRORS.cut_changed.status).send({
+        error: V.EVENT_ERRORS.cut_changed.text, problems, cut: counts,
+        ineligible: ineligible.map((p) => ({ steamid: p.steamid, name: getPlayer(db, p.steamid)?.name ?? p.steamid, problems: p.problems })),
+      });
+    }
+    const counts = { captains: r.value.captains.length, pool: r.value.pool.length, bench: r.value.bench.length };
+    logAdmin(db, me, 'event_draft_publish', ev.id, { slug: ev.slug, ...counts });
+    tellCutRole(opts, ev.id, r.value);
+    return counts;
   });
 
   app.post('/api/admin/events/:id/entries/:entryId/:action', async (req, reply) => {

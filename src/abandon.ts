@@ -21,13 +21,19 @@ const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
  * run out, since that one was served in full.
  */
 export function abandonBanMinutes(db: DB, steamid: string, now = new Date()): number {
-  const since = new Date(now.getTime() - WINDOW_MS).toISOString();
-  const { n } = db.prepare(
+  const n = abandonsSince(db, steamid, new Date(now.getTime() - WINDOW_MS));
+  return LADDER_MINUTES[Math.min(n, LADDER_MINUTES.length - 1)];
+}
+
+/** Abandon bans on record since `since`, counted as abandonBanMinutes counts
+ *  them: a ban staff lifted by hand before it ran out does not count. The
+ *  draft desk shows it as PUG reliability (drafts plan D1 Ruling 8). */
+export function abandonsSince(db: DB, steamid: string, since: Date): number {
+  return (db.prepare(
     `SELECT COUNT(*) AS n FROM bans
      WHERE player_id = ? AND reason LIKE 'Abandoned match #%' AND created_at >= ?
        AND (lifted_at IS NULL OR lifted_by = 'system' OR (expires_at IS NOT NULL AND lifted_at >= expires_at))`,
-  ).get(steamid, since) as { n: number };
-  return LADDER_MINUTES[Math.min(n, LADDER_MINUTES.length - 1)];
+  ).get(steamid, since.toISOString()) as { n: number }).n;
 }
 
 export interface AbandonDeps {
