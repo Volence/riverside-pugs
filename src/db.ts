@@ -2456,6 +2456,10 @@ export function openDb(path: string): DB {
   // present_now is who was on the box at the last minute watch, per side.
   ensureColumn(db, 'bookings', 'next_map', 'TEXT');
   ensureColumn(db, 'booking_sides', 'present_now', 'INTEGER NOT NULL DEFAULT 0');
+  // Drafts plan D2a: a tournament side for a draft entry (no site team) books
+  // with the entry's name, snapshotted here; NULL on every other side, which
+  // sideName names from its team or captain as before.
+  ensureColumn(db, 'booking_sides', 'name', 'TEXT');
   db.prepare('UPDATE bookings SET games_allowed = json_array_length(playlist_json) WHERE games_allowed = 0').run();
   // Rulesets editor: the ruleset a copy was made from (null for the three
   // templates and for rows from before the editor), and the ruleset a booking

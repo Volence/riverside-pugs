@@ -6,6 +6,7 @@ import * as N from '../src/events/entries.js';
 import * as R from '../src/events/room.js';
 import * as PL from '../src/events/play.js';
 import * as B from '../src/bookings/bookings.js';
+import { bookingLines } from '../src/bookings/runner.js';
 import * as E from '../src/events/events.js';
 import { tellCheckinOpen } from '../src/events/notices.js';
 import { myEventView } from '../src/events/views.js';
@@ -135,13 +136,24 @@ describe('booking a series between two draft entries', () => {
   let s: SeriesFixture;
   afterEach(() => { vi.restoreAllMocks(); s?.close(); });
 
-  it('books sides with team_id NULL, the captain and the four starters', async () => {
+  it('names a team side from its team, as before, and leaves its name column empty', async () => {
+    s = await seriesFixture();
+    await s.tick();
+    const b = s.booking();
+    const sides = B.sidesOf(s.db, b.id);
+    expect(sides.map((x) => x.name)).toEqual([null, null]);
+    expect(sides.map((x) => B.sideName(s.db, x)).sort()).toEqual(['Bats', 'Rats']);
+  });
+
+  it('books sides with team_id NULL, the captain, the four starters and the entry name', async () => {
     // The room fixture's two entries turned into draft entries before the
     // room runs (test setup only): no site team, a captain each.
     s = await seriesFixture({
       drive: (f) => {
         f.db.prepare('UPDATE event_entries SET team_id = NULL, captain_steamid = CASE id WHEN ? THEN ? ELSE ? END WHERE id IN (?, ?)')
           .run(f.entryA, A[0], BATS[0], f.entryA, f.entryB);
+        f.db.prepare("UPDATE event_entries SET name = CASE id WHEN ? THEN 'Team Alpha' ELSE 'Team Beta' END WHERE id IN (?, ?)")
+          .run(f.entryA, f.entryA, f.entryB);
         driveToBooking(f);
       },
     });
@@ -151,6 +163,11 @@ describe('booking a series between two draft entries', () => {
     expect(s.db.prepare('SELECT side, team_id, captain_steamid FROM booking_sides WHERE booking_id = ? ORDER BY side').all(b.id)).toEqual([
       { side: 'a', team_id: null, captain_steamid: A[0] }, { side: 'b', team_id: null, captain_steamid: BATS[0] },
     ]);
+    // The draft entry's name, not "<captain>'s group", wherever a side is named.
+    const sides = B.sidesOf(s.db, b.id);
+    expect(sides.map((x) => B.sideName(s.db, x))).toEqual(['Team Alpha', 'Team Beta']);
+    expect(B.bookingView(s.db, b.id, { steamid: A[0]!, staff: true })?.sides.map((x) => x.name)).toEqual(['Team Alpha', 'Team Beta']);
+    expect(bookingLines(s.db, b).find((l) => l.startsWith('l4d_booking_notice '))).toContain('Booked: Team Alpha vs Team Beta');
     expect(B.peopleOf(s.db, b.id).map((p) => [p.side, p.steamid, p.role])).toEqual([
       ...A.slice(0, 4).map((x) => ['a', x, 'player']), ['a', A[4], 'spectator'], ...BATS.slice(0, 4).map((x) => ['b', x, 'player']),
     ]);
