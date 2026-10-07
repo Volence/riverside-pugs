@@ -324,6 +324,28 @@ describe('publishing the teams (createDraftEntries)', () => {
     expect(N.entriesOf(f.db, f.eventId).slice(0, 2).map((e) => e.name)).toEqual(['Team Abcdefghijklmnopqr', 'Team Abcdefghijklmnopqrs']);
   });
 
+  it('keeps default names unique in the event by their team-name key, suffixing a clash within 24 characters', () => {
+    const f = cutDraft({ balance: true });
+    const name = f.db.prepare('UPDATE players SET name = ? WHERE steamid = ?');
+    name.run('Same', CAPTAINS[0]);
+    name.run('Same', CAPTAINS[1]);
+    name.run('SAME', CAPTAINS[2]);
+    name.run('Abcdefghijklmnopqrstuvwxyz', CAPTAINS[3]);
+    name.run('Abcdefghijklmnopqrstuvwxyz', CAPTAINS[4]);
+    must(publish(f));
+    expect(N.entriesOf(f.db, f.eventId).map((e) => e.name))
+      .toEqual(['Team Same', 'Team Same 2', 'Team SAME 3', 'Team Abcdefghijklmnopqrs', 'Team Abcdefghijklmnopq 2']);
+  });
+
+  it('falls back to "Team <seed>" when the default name fails the team name rules (slur filter)', () => {
+    const f = cutDraft({ balance: true });
+    f.db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run('faggot', CAPTAINS[1]);
+    must(publish(f));
+    const e = N.entriesOf(f.db, f.eventId)[1]!;
+    expect(e.captain_steamid).toBe(CAPTAINS[1]);
+    expect(e.name).toBe(`Team ${e.seed}`);
+  });
+
   it('refuses a pool short of a player, or a captain gone, with teams_changed, writing nothing', () => {
     const f = cutDraft({ balance: true });
     const made = D.draftTeamsOf(f.db, f.eventId)!;
