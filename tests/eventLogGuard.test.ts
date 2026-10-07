@@ -284,7 +284,7 @@ describe('event_log guard', () => {
       if (!r.ok) throw new Error(`expected ok, got ${r.error}`);
       return r.value;
     };
-    const DRAFT_READS = new Set(['activeSignups', 'signupOf', 'cutState', 'draftOfferMinutes']);
+    const DRAFT_READS = new Set(['activeSignups', 'signupOf', 'cutState', 'draftOfferMinutes', 'openOffer']);
     const signed = (f: DraftFixture) => must(D.signUp(f.db, { eventId: f.eventId, steamid: DP[0], captainPref: 'want', note: 'n', now: NOW }));
     /** 12 signups, closed: 3 teams, 9 pool (DP[0..8]) and 3 bench (DP[9..11]). */
     const cut = (f: DraftFixture) => {
@@ -308,6 +308,11 @@ describe('event_log guard', () => {
       'answerOffer after expires_at': {
         action: 'draft_offer_expired', setup: offering, ok: false,
         run: (f) => D.answerOffer(f.db, { eventId: f.eventId, steamid: DP[11], accept: true, now: LATE }),
+      },
+      'offerNext with the count met': {
+        action: 'draft_offers_met', ok: true,
+        setup: (f) => { offering(f); for (const s of [DP[0], DP[1], DP[2]]) must(D.setCaptain(f.db, { eventId: f.eventId, steamid: s, captain: true, actor: ADMIN, now: NOW })); must(D.stopOffers(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); f.db.prepare('UPDATE events SET offers_on = 1').run(); },
+        run: (f) => D.offerNext(f.db, { eventId: f.eventId, now: NOW, minutes: 30 }),
       },
       'offerNext with nobody left': {
         action: 'draft_offers_exhausted', ok: true,

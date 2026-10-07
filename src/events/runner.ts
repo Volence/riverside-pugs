@@ -122,6 +122,7 @@ export class EventRunner {
       tellCaptainOffer(this.deps, ev.id);
       return;
     }
+    if (r.value.stopped !== 'exhausted') return;
     const row = E.getEvent(db, ev.id);
     const captains = D.activeSignups(db, ev.id).filter((s) => s.role === 'captain').length;
     publishAdminEvent({
