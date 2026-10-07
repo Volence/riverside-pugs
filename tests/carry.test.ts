@@ -1,6 +1,11 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 import * as R from '../src/events/room.js';
 import { presetConfig } from '../src/events/vetoConfig.js';
+import { restoreSnapshot, resumeLines } from '../src/bookings/restore.js';
 import { carryEntries, carryFor } from '../src/events/carry.js';
 import { POOL7, TIMERS } from './roomFixture.js';
 import { A, B as BATS } from './entryFixture.js';
@@ -128,5 +133,93 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
     const pug = Number(f.db.prepare("INSERT INTO matches (season_id, state, campaign, origin) VALUES ((SELECT id FROM seasons LIMIT 1), 'live', 'no_mercy', 'queue')").run().lastInsertRowid);
     expect(carryFor(f.db, pug)).toBeNull();
     expect(carryFor(f.db, 999999)).toBeNull();
+  });
+});
+
+describe('crash recovery and chapter replay of a carried game 2 (plan T6)', () => {
+  let f: SeriesFixture;
+  // A restore needs the campaign's chapter list (the base game's missions file).
+  const NO_MERCY = `"mission"
+{
+  "Name" "hospital"
+  "modes"
+  {
+    "versus"
+    {
+      "1" { "Map" "l4d_vs_hospital01_apartment" }
+      "2" { "Map" "l4d_vs_hospital02_subway" }
+      "3" { "Map" "l4d_vs_hospital03_sewers" }
+      "4" { "Map" "l4d_vs_hospital04_interior" }
+      "5" { "Map" "l4d_vs_hospital05_rooftop" }
+    }
+  }
+}
+`;
+  let missionsDir = '';
+  beforeEach(() => {
+    missionsDir = mkdtempSync(join(tmpdir(), 'missions-'));
+    writeFileSync(join(missionsDir, 'hospital.txt'), NO_MERCY);
+    setMissionsDirs([missionsDir]);
+    invalidateCampaignCache();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks(); f?.close();
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    rmSync(missionsDir, { recursive: true, force: true });
+  });
+
+  const liveGame2 = async () => {
+    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    carryOn(f);
+    const { g2 } = await toGame2(f);
+    f.goLive(g2);
+    return g2;
+  };
+  // One finished chapter: pug a 100, pug b 150 (a is survivor-side on both halves' scoring rows).
+  const finishChapter = (g2: number) => {
+    const round = f.db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
+    round.run(g2, 0, 1, 'a', 100); round.run(g2, 0, 2, 'b', 150);
+  };
+
+  it('orders the sides by totals plus the carry and returns the carry', async () => {
+    const g2 = await liveGame2();
+    finishChapter(g2);
+    const snap = restoreSnapshot(f.db, g2)!;
+    expect(snap.maps).toHaveLength(1);
+    expect(snap.maps[0]).toMatchObject({ a: 100, b: 150 });
+    expect(snap.carry).toEqual({ a: 500, b: 400 });
+    expect(snap.firstSurv).toBe('a');
+  });
+
+  it('before any chapter finished, team a survives first on map 1', async () => {
+    const g2 = await liveGame2();
+    const snap = restoreSnapshot(f.db, g2)!;
+    expect(snap.maps).toHaveLength(0);
+    expect(snap.firstSurv).toBe('a');
+    expect(snap.carry).toEqual({ a: 500, b: 400 });
+  });
+
+  it('resume lines put sm_pug_carry right after sm_pug_resume, and omit it when carry is null', async () => {
+    const g2 = await liveGame2();
+    finishChapter(g2);
+    const snap = restoreSnapshot(f.db, g2)!;
+    const lines = resumeLines(snap);
+    expect(lines[0]).toMatch(new RegExp(`^sm_pug_resume ${g2} `));
+    expect(lines[1]).toBe(`sm_pug_carry ${g2} 500 400`);
+    expect(lines[2]).toMatch(/^sm_pug_resume_map /);
+    expect(lines.at(-1)).toBe('sm_pug_resume_commit');
+    expect(resumeLines({ ...snap, carry: null }).some((l) => l.startsWith('sm_pug_carry'))).toBe(false);
+    expect(resumeLines({ ...snap, carry: null })).toEqual(lines.filter((l) => !l.startsWith('sm_pug_carry')));
+  });
+
+  it('a chapter replay (replayFrom) of a carried game 2 carries too; from chapter 0 team a survives first', async () => {
+    const g2 = await liveGame2();
+    finishChapter(g2);
+    const snap = restoreSnapshot(f.db, g2, { replayFrom: 0 })!;
+    expect(snap.maps).toHaveLength(0);
+    expect(snap.firstSurv).toBe('a');
+    expect(snap.carry).toEqual({ a: 500, b: 400 });
+    expect(resumeLines(snap)).toContain(`sm_pug_carry ${g2} 500 400`);
   });
 });
