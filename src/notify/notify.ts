@@ -18,7 +18,8 @@ export type NotifyType =
   | 'scrim_review'
   | 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
-  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made';
+  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
+  | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed';
 
 export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_invite', label: 'Someone invites me to a booked server' },
@@ -49,6 +50,9 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'draft_cut_role', label: 'Draft: your role after the cut' },
   { type: 'draft_captain_offer', label: 'Draft: captaincy offer' },
   { type: 'draft_team_made', label: 'Draft: your team' },
+  { type: 'draft_player_removed', label: 'Draft: removed from your team by staff' },
+  { type: 'draft_player_added', label: 'Draft: put on a team by staff' },
+  { type: 'draft_roster_changed', label: 'Draft: a player on your team was replaced' },
 ];
 
 export function isNotifyType(v: unknown): v is NotifyType {

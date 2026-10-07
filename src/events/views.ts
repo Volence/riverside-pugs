@@ -128,16 +128,22 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
   };
 }
 
+/** The bench as it stands (plan D2c): active bench signups not placed on a
+ *  team. Anyone now a starter of an entry that is not dropped has been
+ *  placed (a staff replace can put a bench player on a team), so the bench
+ *  no longer lists them. The public view and the desk's replace dialog read it. */
+export function draftBench(db: DB, eventId: number): { steamid: string; name: string }[] {
+  const placed = new Set(N.entriesOf(db, eventId).filter((e) => e.status !== 'dropped').flatMap((e) => N.rosterOf(db, e.id).starters));
+  return D.activeSignups(db, eventId).filter((s) => s.role === 'bench' && !placed.has(s.steamid))
+    .map((s) => ({ steamid: s.steamid, name: getPlayer(db, s.steamid)?.name ?? s.steamid }));
+}
+
 function draftView(db: DB, ev: E.EventRow, f: V.EventFields): EventDraftView | null {
   if (ev.entry_kind !== 'draft' || !f.draft) return null;
   const all = D.activeSignups(db, ev.id).map((s) => ({ steamid: s.steamid, role: s.role, name: getPlayer(db, s.steamid)?.name ?? s.steamid }));
   const names = all.map((s) => s.name);
   const of = (r: D.SignupRow['role']) => all.filter((s) => s.role === r).map((s) => s.name);
-  // Anyone now a starter of an active entry has been placed (a staff replace
-  // can put a bench player on a team), so the bench no longer lists them.
-  const placed = new Set(N.entriesOf(db, ev.id).filter((e) => e.status !== 'dropped').flatMap((e) => N.rosterOf(db, e.id).starters));
-  const benchNames = all.filter((s) => s.role === 'bench' && !placed.has(s.steamid)).map((s) => s.name);
-  const cut = ev.cut_at !== null ? { captains: of('captain'), pool: of('pool'), bench: benchNames } : null;
+  const cut = ev.cut_at !== null ? { captains: of('captain'), pool: of('pool'), bench: draftBench(db, ev.id).map((s) => s.name) } : null;
   return { signupsCloseAt: f.draft.signupsCloseAt, draftAt: f.draft.draftAt, signups: names.length, names, cut };
 }
 
@@ -249,6 +255,8 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
 export interface AdminEntryView {
   id: number; teamSlug: string | null; name: string; tag: string; status: string; dropReason: string | null; seed: number | null;
   waitlist: number | null; sr: number; checkedInAt: string | null; createdAt: string; registeredByName: string; roster: RosterPlaceView[];
+  /** A draft entry's captain (plan D2c: the desk offers Replace on the other starters); null on a team entry. */
+  captainSteamid: string | null;
 }
 
 /** The desk's list (Ruling 10): every entry, dropped and disqualified ones
@@ -263,7 +271,7 @@ export function adminEntryViews(db: DB, ev: E.EventRow): AdminEntryView[] {
     return {
       id: e.id, teamSlug: e.team_id !== null ? getTeam(db, e.team_id)?.slug ?? null : null, name: e.name, tag: e.tag, status: e.status,
       dropReason: e.drop_reason, seed: e.seed, waitlist: w >= 0 ? w + 1 : null, sr: N.entrySr(db, e.id), checkedInAt: e.checked_in_at,
-      createdAt: e.created_at, registeredByName: getPlayer(db, e.registered_by)?.name ?? e.registered_by,
+      createdAt: e.created_at, registeredByName: getPlayer(db, e.registered_by)?.name ?? e.registered_by, captainSteamid: e.captain_steamid,
       roster: N.placesOf(db, e.id).map((p) => {
         const facts = N.playerFacts(db, p.steamid);
         const pl = getPlayer(db, p.steamid);

@@ -16,11 +16,13 @@ import * as S from '../events/schedule.js';
 import * as V from '../events/validate.js';
 import { recordResultFlow, settleEvent, startEventFlow } from '../events/flow.js';
 import { stageSummary } from '../events/format.js';
-import { adminEntryViews } from '../events/views.js';
+import { adminEntryViews, draftBench } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCaptainOffer, tellCheckinOpen, tellCutRole, tellDropped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
+import { tellCaptainOffer, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
+import { REPLACE_TEXT } from '../events/messages.js';
+import { addNote } from '../admin/players.js';
 import { deskOrder, signupFacts } from '../events/draftFacts.js';
 import { draftFairness } from '../events/draftFairness.js';
 import { seasonSr } from '../rating.js';
@@ -109,6 +111,8 @@ export async function adminEventRoutes(
       reopenVeto(matchId: number, by: string): V.Checked<unknown>;
       /** Plan T5 Ruling 12: a warning, or a forfeit of the game sent to the box first. */
       techPenalty(matchId: number, by: string, pauseId: unknown, penalty: unknown, note: unknown): Promise<V.Checked<unknown>>;
+      /** Drafts plan D2c Ruling 5: a staff replace, asking a box running the player's game first. */
+      staffReplace(o: Parameters<typeof N.replaceDraftPlayer>[1]): Promise<V.Checked<{ subbedInMatch: number | null }>>;
     };
   },
 ): Promise<void> {
@@ -315,7 +319,8 @@ export async function adminEventRoutes(
     if (!requireStaff(req, reply)) return;
     const ev = eventOf((req.params as { id: string }).id);
     if (!ev) return refuse(reply, 'not_found');
-    return { lockedAt: ev.locked_at, entries: adminEntryViews(db, ev) };
+    // A draft's bench once its teams are made: the replace dialog's first choices (plan D2c).
+    return { lockedAt: ev.locked_at, entries: adminEntryViews(db, ev), ...(ev.entry_kind === 'draft' && ev.teams_made_at !== null ? { bench: draftBench(db, ev.id) } : {}) };
   });
 
   app.post('/api/admin/events/:id/open-checkin', async (req, reply) => {
@@ -564,6 +569,39 @@ export async function adminEventRoutes(
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, 'event_entry_logo', ev.id, { entryId: entry.id, logoKey: name });
     return { logoKey: name };
+  });
+
+  /** Drafts plan D2c Rulings 4 to 6: staff take a starter off a draft entry
+   *  and put a replacement in, through the series engine when there is one
+   *  (it asks a box running the player's game first). After the commit: the
+   *  admin audit (the only place besides the staff note that keeps the
+   *  note), a staff note on the removed player's file, and the three DMs. */
+  app.post('/api/admin/events/:id/entries/:entryId/replace', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const p = req.params as { id: string; entryId: string };
+    const ev = eventOf(p.id);
+    const entry = ev && entryOf(ev, p.entryId);
+    if (!ev || !entry) return refuse(reply, 'entry_not_found');
+    const body = (req.body ?? {}) as { out?: unknown; in?: unknown; reason?: unknown; note?: unknown };
+    if (typeof body.out !== 'string' || typeof body.in !== 'string' || (body.note !== undefined && body.note !== null && typeof body.note !== 'string')) {
+      return refuse(reply, 'bad_request');
+    }
+    if (typeof body.reason !== 'string' || !N.REPLACE_REASONS.includes(body.reason as N.ReplaceReason)) return refuse(reply, 'bad_reason');
+    const note = typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
+    const o = { eventId: ev.id, entryId: entry.id, out: body.out, in: body.in, reason: body.reason as N.ReplaceReason, note, actor: me, now: new Date() };
+    const r = opts.series ? await opts.series.staffReplace(o) : N.replaceDraftPlayer(db, o);
+    if (!r.ok) return refuseWith(reply, r);
+    logAdmin(db, me, 'event_entry_replace', ev.id, { entryId: entry.id, out: o.out, in: o.in, reason: o.reason, note });
+    const team = N.getEntry(db, entry.id)?.name ?? entry.name;
+    try {
+      addNote(db, o.out, me, `Removed from ${team} in ${ev.name} by staff (${REPLACE_TEXT[o.reason]})${note ? `: ${note}` : ''}`);
+    } catch (err) {
+      console.error(`[events] the staff note for a replace in event ${ev.id} failed:`, err instanceof Error ? err.message : err);
+    }
+    tellPlayerReplaced(opts, ev.id, entry.id, o.out, o.in, o.reason);
+    if (r.value.subbedInMatch !== null) opts.rooms?.pushChange(r.value.subbedInMatch);
+    return { subbedInMatch: r.value.subbedInMatch };
   });
 
   app.post('/api/admin/events/:id/entries/:entryId/:action', async (req, reply) => {

@@ -40,8 +40,10 @@ export interface LineupRow { id: number; event_match_id: number; game: number; e
 const iso = (now?: Date): string => (now ?? new Date()).toISOString();
 const plus = (now: Date, ms: number): string => new Date(now.getTime() + ms).toISOString();
 /** Statuses where an entry counts as busy for opening another room, built
- *  from P.ROOM_OPEN so the two cannot drift apart. */
-const BUSY_SQL = `(${[...P.ROOM_OPEN].map((s) => `'${s}'`).join(',')})`;
+ *  from P.ROOM_OPEN so the two cannot drift apart. Built on first use, not at
+ *  load: entries.ts imports this module (a staff replace, plan D2c), so
+ *  play.ts may not have run yet when this one loads. */
+const busySql = (): string => `(${[...P.ROOM_OPEN].map((s) => `'${s}'`).join(',')})`;
 
 /** A WHERE fragment over event_matches aliased m: its event and its stage
  *  are both live. Every query the room's clock runs over rooms uses it, so a
@@ -123,7 +125,7 @@ export function isParticipant(db: DB, m: P.MatchRow, steamid: string): boolean {
   });
 }
 export function busyEntries(db: DB, eventId: number): Set<number> {
-  const rows = db.prepare(`SELECT entry_a, entry_b FROM event_matches WHERE event_id = ? AND status IN ${BUSY_SQL}`).all(eventId) as
+  const rows = db.prepare(`SELECT entry_a, entry_b FROM event_matches WHERE event_id = ? AND status IN ${busySql()}`).all(eventId) as
     { entry_a: number | null; entry_b: number | null }[];
   return new Set(rows.flatMap((r) => [r.entry_a, r.entry_b]).filter((x): x is number => x !== null));
 }
@@ -510,48 +512,67 @@ const BOX_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['connect'
 const inBoxPhase = (m: P.MatchRow): boolean => SUB_PHASES.has(m.status) || (m.status === 'admin_hold' && m.hold_from !== null && SUB_PHASES.has(m.hold_from));
 const REOPENABLE: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['veto', 'lineup', 'booking']);
 
+/** A player_subbed row a staff replace wrote (plan D2c Ruling 5). It never
+ *  counts as one of the side's subs and is never undone as one. */
+export const NOT_STAFF_SUB_SQL = "json_extract(detail, '$.staff') IS NULL";
+
 /** Subs a side has made in this match (Ruling 4): its player_subbed log
- *  rows less the ones the box refused (sub_reverted, plan T3c Task 6). */
+ *  rows less the ones the box refused (sub_reverted, plan T3c Task 6). A
+ *  staff replace's row is not one of them (plan D2c Ruling 5). */
 export function subsUsed(db: DB, m: P.MatchRow, side: Side): number {
   return (db.prepare(
     `SELECT COALESCE(SUM(CASE action WHEN 'player_subbed' THEN 1 ELSE -1 END), 0) AS n FROM event_log
-      WHERE event_id = ? AND action IN ('player_subbed', 'sub_reverted')
+      WHERE event_id = ? AND action IN ('player_subbed', 'sub_reverted') AND ${NOT_STAFF_SUB_SQL}
         AND json_extract(detail, '$.matchId') = ? AND json_extract(detail, '$.side') = ?`,
   ).get(m.event_id, m.id, side) as { n: number }).n;
 }
 
+/** Plan D2c Ruling 5: where a staff replace may rewrite a locked lineup. A
+ *  lineup row exists from the lineup phase on; the confirm window and a hold
+ *  are included, so a replay, a move or a later game after a hold use the
+ *  new player too. */
+const STAFF_SUB_PHASES: ReadonlySet<P.MatchStatus> = new Set<P.MatchStatus>(['lineup', 'booking', 'connect', 'live', 'confirming', 'admin_hold']);
+
 /** Ruling 5: a captain or co-captain swaps one of their locked four for a
  *  starter or sub of the entry, within `limit`; the game-1 lineup row is
  *  rewritten so every later game follows. The engine does the booking,
- *  matches and plugin halves around this. */
+ *  matches and plugin halves around this.
+ *
+ *  With `staff` (drafts plan D2c Ruling 5, a staff replace from
+ *  entries.ts, inside its transaction): `by` is the admin, there is no
+ *  manager check and no limit, the match may be anywhere from a locked
+ *  lineup to the confirm window or a hold, and the row is marked staff so
+ *  subsUsed never counts it. */
 export function subPlayer(
   db: DB, o: {
     matchId: number; by: string; outId: string; inId: string; limit: number; gameId: number | null; now?: Date;
     /** Plan T5: made mid-chapter under the event's emergency rule (marked in the log only). */
     emergency?: boolean;
+    staff?: boolean;
   },
 ): V.Checked<{ m: P.MatchRow; side: Side; entryId: number; four: string[]; used: number }> {
   const at = iso(o.now);
+  const staff = o.staff === true;
   return db.transaction((): V.Checked<{ m: P.MatchRow; side: Side; entryId: number; four: string[]; used: number }> => {
     const c = liveMatch(db, o.matchId);
     if (!c.ok) return c;
     const { m, ev } = c.value;
-    if (!SUB_PHASES.has(m.status)) return V.fail('not_live_phase');
+    if (!(staff ? STAFF_SUB_PHASES : SUB_PHASES).has(m.status)) return V.fail('not_live_phase');
     const row = lineupsOf(db, m.id).find((l) => l.game === 1 && (JSON.parse(l.steamids) as string[]).includes(o.outId));
     if (!row) return V.fail('not_in_lineup');
     const side: Side = row.entry_id === m.entry_a ? 'a' : 'b';
     const entry = N.getEntry(db, row.entry_id)!;
-    if (!N.entryManagers(db, entry).includes(o.by)) return V.fail('not_manager');
+    if (!staff && !N.entryManagers(db, entry).includes(o.by)) return V.fail('not_manager');
     const four = JSON.parse(row.steamids) as string[];
     if (!playableOf(db, entry.id).includes(o.inId) || four.includes(o.inId)) return V.fail('sub_not_member');
     const used = subsUsed(db, m, side);
-    if (used >= o.limit) return V.fail('sub_limit');
+    if (!staff && used >= o.limit) return V.fail('sub_limit');
     const next = four.map((s) => (s === o.outId ? o.inId : s));
     db.prepare('UPDATE event_lineups SET steamids = ? WHERE id = ?').run(JSON.stringify(next), row.id);
-    E.logEvent(db, ev.id, o.by, 'player_subbed', at, {
-      matchId: m.id, side, out: o.outId, in: o.inId, gameId: o.gameId, used: used + 1, limit: o.limit, ...(o.emergency ? { emergency: true } : {}),
-    });
-    return V.ok({ m: P.getMatch(db, m.id)!, side, entryId: entry.id, four: next, used: used + 1 });
+    E.logEvent(db, ev.id, o.by, 'player_subbed', at, staff
+      ? { matchId: m.id, side, out: o.outId, in: o.inId, gameId: o.gameId, staff: true }
+      : { matchId: m.id, side, out: o.outId, in: o.inId, gameId: o.gameId, used: used + 1, limit: o.limit, ...(o.emergency ? { emergency: true } : {}) });
+    return V.ok({ m: P.getMatch(db, m.id)!, side, entryId: entry.id, four: next, used: staff ? used : used + 1 });
   })();
 }
 
@@ -571,7 +592,7 @@ export function revertSub(db: DB, o: { matchId: number; outId: string; inId: str
     const side: Side = row.entry_id === m.entry_a ? 'a' : 'b';
     const last = db.prepare(
       `SELECT action, json_extract(detail, '$.out') AS out, json_extract(detail, '$.in') AS inn FROM event_log
-        WHERE event_id = ? AND action IN ('player_subbed', 'sub_reverted') AND json_extract(detail, '$.matchId') = ? AND json_extract(detail, '$.side') = ?
+        WHERE event_id = ? AND action IN ('player_subbed', 'sub_reverted') AND ${NOT_STAFF_SUB_SQL} AND json_extract(detail, '$.matchId') = ? AND json_extract(detail, '$.side') = ?
         ORDER BY id DESC LIMIT 1`,
     ).get(ev.id, m.id, side) as { action: string; out: string; inn: string } | undefined;
     if (!last || last.action !== 'player_subbed' || last.out !== o.outId || last.inn !== o.inId) return V.fail('changed');

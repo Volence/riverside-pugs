@@ -433,6 +433,23 @@ describe('subs (plan T3c)', () => {
     expect(ok(sub(A[0]!, A[4]!, A[3]!, 2)).used).toBe(2);
   });
 
+  it('takes a staff sub (plan D2c) from an admin, past the limit and on a hold, never counting it or undoing it as a sub', async () => {
+    const f = await live();
+    const sub = (o: { outId: string; inId: string; staff?: boolean }) =>
+      R.subPlayer(f.db, { matchId: f.matchId, by: ADMIN, limit: 0, gameId: null, now: at(20), ...o });
+    // Live: a staff sub is never one the box's refusal undoes (revertSub reads captains' subs only).
+    const r = ok(sub({ outId: A[3]!, inId: A[4]!, staff: true }));
+    expect(r).toMatchObject({ side: 'a', four: [A[0], A[1], A[2], A[4]], used: 0 });
+    expect(lastAction(f)).toEqual({ action: 'player_subbed', actor: ADMIN });
+    expect(R.subsUsed(f.db, P.getMatch(f.db, f.matchId)!, 'a')).toBe(0);
+    expect(R.revertSub(f.db, { matchId: f.matchId, outId: A[3]!, inId: A[4]!, now: at(21) })).toEqual({ ok: false, error: 'changed' });
+    // On a hold: a captain's sub is refused, a staff sub is taken.
+    ok(R.holdMatch(f.db, { matchId: f.matchId, by: ADMIN, reason: 'Checking a report', now: at(22) }));
+    expect(R.subPlayer(f.db, { matchId: f.matchId, by: A[0]!, outId: A[4]!, inId: A[3]!, limit: 2, gameId: null, now: at(23) })).toEqual({ ok: false, error: 'not_live_phase' });
+    expect(ok(sub({ outId: A[4]!, inId: A[3]!, staff: true })).four).toEqual(A.slice(0, 4));
+    expect(R.subsUsed(f.db, P.getMatch(f.db, f.matchId)!, 'a')).toBe(0);
+  });
+
   it('freezes and unfreezes a live match once each way, from a call or staff', async () => {
     const f = await live();
     expect(R.setAdminPause(f.db, { matchId: f.matchId, on: false, by: null, cause: 'staff', now: at(8) })).toEqual({ ok: false, error: 'not_frozen' });

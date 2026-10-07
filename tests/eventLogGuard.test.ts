@@ -263,6 +263,15 @@ describe('event_log guard', () => {
         setup: (f) => { balancedDraft(f); must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); },
         run: (f) => N.setEntryIdentity(f.db, { eventId: f.eventId, entryId: (f.db.prepare('SELECT id FROM event_entries ORDER BY id LIMIT 1').get() as { id: number }).id, steamid: ADMIN, staff: true, name: 'Night Owls', tag: 'OWL', now: NOW }),
       },
+      // Plan D2c Task 3: a non-captain starter of the first team out, a player on no entry in.
+      replaceDraftPlayer: {
+        action: 'entry_player_replaced',
+        setup: (f) => { balancedDraft(f); must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); },
+        run: (f) => {
+          const entryId = (f.db.prepare('SELECT id FROM event_entries ORDER BY id LIMIT 1').get() as { id: number }).id;
+          return N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId, out: N.rosterOf(f.db, entryId).starters[1]!, in: DP[8]!, reason: 'conduct', note: null, actor: ADMIN, now: NOW });
+        },
+      },
     };
 
     it('every exported function of entries.ts is a known read or a guarded mutation', () => {

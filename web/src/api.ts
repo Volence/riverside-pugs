@@ -2483,7 +2483,11 @@ export interface AdminDraftTeamsView {
 export interface AdminEntryView {
   id: number; teamSlug: string | null; name: string; tag: string; status: string; dropReason: string | null; seed: number | null;
   waitlist: number | null; sr: number; checkedInAt: string | null; createdAt: string; registeredByName: string; roster: RosterPlaceView[];
+  /** A draft entry's captain; null on a team entry (plan D2c). */
+  captainSteamid: string | null;
 }
+/** Why staff replace a draft player (plan D2c Ruling 4), src/events/entries.ts ReplaceReason. */
+export type ReplaceReason = 'conduct' | 'cheating' | 'no_show' | 'left' | 'other';
 
 /** A ruleset a picker offers, with its one-line summary (src/events/format.ts rulesSummary). */
 export interface RulesetOption { id: number; name: string; summary: string }
@@ -2602,7 +2606,9 @@ export const adminApi = {
   /** Drafts only: a draft is deleted, never cancelled. */
   deleteEvent: (id: number) => post(`/api/admin/events/${id}/delete`),
   /** The Entries section (plan T1b Ruling 10). */
-  eventEntries: (id: number, signal?: AbortSignal) => get<{ lockedAt: string | null; entries: AdminEntryView[] }>(`/api/admin/events/${id}/entries`, signal),
+  /** bench: a draft's bench once its teams are made (plan D2c), for the replace dialog. */
+  eventEntries: (id: number, signal?: AbortSignal) =>
+    get<{ lockedAt: string | null; entries: AdminEntryView[]; bench?: { steamid: string; name: string }[] }>(`/api/admin/events/${id}/entries`, signal),
   openEventCheckin: (id: number) => post(`/api/admin/events/${id}/open-checkin`),
   lockEventEntries: (id: number) => post(`/api/admin/events/${id}/lock-entries`),
   eventDraft: (id: number, signal?: AbortSignal) => get<AdminDraftView>(`/api/admin/events/${id}/draft`, signal),
@@ -2634,6 +2640,9 @@ export const adminApi = {
   setEventEntryRoster: (id: number, entryId: number, roster: EntryRoster) => post(`/api/admin/events/${id}/entries/${entryId}/roster`, { roster }),
   disqualifyEventEntry: (id: number, entryId: number, reason: string) => post(`/api/admin/events/${id}/entries/${entryId}/disqualify`, { reason }),
   restoreEventEntry: (id: number, entryId: number) => post(`/api/admin/events/${id}/entries/${entryId}/restore`),
+  /** Plan D2c: staff take a starter off a draft entry and put a replacement in. */
+  replaceEntryPlayer: (id: number, entryId: number, body: { out: string; in: string; reason: ReplaceReason; note: string | null }) =>
+    post<{ subbedInMatch: number | null }>(`/api/admin/events/${id}/entries/${entryId}/replace`, body),
   /** The Play section (plan T2 Ruling 17). */
   eventPlay: (id: number, signal?: AbortSignal) => get<AdminEventPlay>(`/api/admin/events/${id}/play`, signal),
   startEvent: (id: number) => post(`/api/admin/events/${id}/start`),

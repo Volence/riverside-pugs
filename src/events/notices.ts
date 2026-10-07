@@ -5,6 +5,7 @@ import * as P from './play.js';
 import { eventMessage, type EventNotifyType, type RescheduleNotice, type SignupRemoval, type StaffAction } from './messages.js';
 import { getProposal } from './schedule.js';
 import type { CutRole } from './draftRules.js';
+import type { ReplaceReason } from './entries.js';
 import { openOffer } from './drafts.js';
 
 /**
@@ -114,6 +115,16 @@ export function tellCutRole(d: NoticeDeps, eventId: number, cut: Record<'captain
 export function tellCaptainOffer(d: NoticeDeps, eventId: number): void {
   const o = openOffer(d.db, eventId);
   if (o) tell(d, [o.steamid], eventId, 'draft_captain_offer', { expiresAt: o.expires_at });
+}
+/** Staff replaced a draft player (drafts plan D2c Ruling 6): the removed
+ *  player (the reason in a few words, never the note), the replacement (the
+ *  team, its captain and the event link) and the captain (who for whom). */
+export function tellPlayerReplaced(d: NoticeDeps, eventId: number, entryId: number, out: string, inn: string, reason: ReplaceReason): void {
+  const entry = N.getEntry(d.db, entryId);
+  if (!entry || entry.captain_steamid === null) return;
+  tell(d, [out], eventId, 'draft_player_removed', { entryId, replaceReason: reason });
+  tell(d, [inn], eventId, 'draft_player_added', { entryId });
+  tell(d, [entry.captain_steamid], eventId, 'draft_roster_changed', { entryId, out, in: inn });
 }
 /** A draft's teams are published (drafts plan D2a Ruling 6): every starter
  *  of each new entry, the captain with their three named, the rest with the
