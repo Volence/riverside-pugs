@@ -63,7 +63,7 @@ describe('rules lines', () => {
 describe('rules lines (plan T6)', () => {
   it('names the score carry-over only when it is on', () => {
     const r = parseRules(JSON.stringify(TEMPLATES['Standard Cup']));
-    expect(rulesLines(r).some((l) => l.includes('carries'))).toBe(false);
+    expect(rulesLines(r)).not.toContain("Best of 2: game 2 starts with game 1's score, so later chapters follow the running total");
     const on = { ...r, series: { ...r.series, carryScore: true } };
     expect(rulesLines(on)).toContain("Best of 2: game 2 starts with game 1's score, so later chapters follow the running total");
   });
