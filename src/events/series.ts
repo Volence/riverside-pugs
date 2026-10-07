@@ -294,12 +294,16 @@ export class SeriesEngine {
     const side = (k: Side): B.TournamentSide | null => {
       const entryId = R.entryOn(m, k);
       const entry = N.getEntry(this.db, entryId);
-      const team = entry && entry.team_id !== null ? getTeam(this.db, entry.team_id) : undefined;
       const four = R.lineupFour(this.db, m.id, entryId);
-      if (!entry || !team || !four) return null;
+      if (!entry || !four) return null;
+      // A team entry books as its site team and that team's captain; a draft
+      // entry (drafts plan D2a) has no site team and books as its captain.
+      const team = entry.team_id !== null ? getTeam(this.db, entry.team_id) : undefined;
+      const captain = entry.team_id !== null ? team?.captain_steamid : entry.captain_steamid;
+      if (!captain) return null;
       const r = N.rosterOf(this.db, entryId);
       const rest = [...r.starters, ...r.subs, ...(r.coach ? [r.coach] : [])].filter((x) => !four.includes(x));
-      return { teamId: team.id, captain: team.captain_steamid, players: four, spectators: rest };
+      return { teamId: team ? team.id : null, captain, players: four, spectators: rest };
     };
     const a = side('a');
     const b = side('b');
@@ -796,7 +800,7 @@ export class SeriesEngine {
       // A re-send is still the room's decision (Task 6 ledger): the match in a
       // sub phase and the asker a manager of that side, as subPlayer checks.
       const refusal: V.EventError | null = !R.SUB_PHASES.has(m.status) ? 'not_live_phase'
-        : !N.managersOf(this.db, N.getEntry(this.db, R.entryOn(m, side))?.team_id ?? null).includes(by) ? 'not_manager' : null;
+        : !N.entryManagers(this.db, N.getEntry(this.db, R.entryOn(m, side)) ?? { team_id: null, captain_steamid: null }).includes(by) ? 'not_manager' : null;
       if (refusal) {
         say(`Sub refused: ${V.EVENT_ERRORS[refusal].text}`);
         return;

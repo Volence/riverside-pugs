@@ -26,6 +26,8 @@ export interface EntryRow {
   id: number; event_id: number; team_id: number | null; name: string; tag: string; logo_key: string | null; seed: number | null;
   status: EntryStatus; placement: number | null; registered_by: string; created_at: string;
   checked_in_at: string | null; checked_in_by: string | null; dropped_at: string | null; drop_reason: R.DropReason | null; additions: number;
+  /** A draft entry's captain (drafts plan D2a); NULL on a team entry. */
+  captain_steamid: string | null;
 }
 export interface PlaceRow { id: number; entry_id: number; steamid: string; role: R.Role; added_at: string; removed_at: string | null }
 export type Added = { steamid: string; role: R.Role }[];
@@ -89,6 +91,16 @@ export function placementOf(db: DB, ev: E.EventRow): R.Placement {
 export function managersOf(db: DB, teamId: number | null): string[] {
   if (teamId === null) return [];
   return activeMembers(db, teamId).filter((m) => m.role === 'captain' || m.role === 'cocaptain').map((m) => m.steamid);
+}
+/** Who runs this entry (drafts plan D2a Ruling 8): a team entry's team
+ *  managers right now, exactly as managersOf gives them, or a draft entry's
+ *  captain (team_id NULL). The match room, the series pick, prep, check-in,
+ *  withdrawal, the notices and the views ask it, so a draft captain is a full
+ *  captain there. setEntryRoster alone stays team-only: a draft entry's four
+ *  are made by staff, so its captain does not edit the roster. */
+export function entryManagers(db: DB, entry: { team_id: number | null; captain_steamid: string | null }): string[] {
+  if (entry.team_id !== null) return managersOf(db, entry.team_id);
+  return entry.captain_steamid !== null ? [entry.captain_steamid] : [];
 }
 
 export function playerFacts(db: DB, steamid: string, now = new Date()): R.PlayerFacts {
@@ -193,6 +205,8 @@ export function setEntryRoster(
     const ev = E.getEvent(db, entry.event_id)!;
     if (!ROSTER_OPEN.has(ev.status)) return V.fail('wrong_status');
     const f = E.fieldsOf(ev);
+    // Team managers only (managersOf gives a draft entry nobody): a draft
+    // entry's roster is staff's to change (drafts plan D2a).
     if (!staff && !managersOf(db, entry.team_id).includes(o.by)) return V.fail('not_manager');
     if (!staff && R.rosterLocked(f.roster.lock, at)) return V.fail('roster_locked');
     const parsed = R.parseEntryRoster(o.roster, f.roster);
@@ -252,7 +266,7 @@ export function withdrawEntry(db: DB, o: { entryId: number; by: string; now?: Da
     const entry = getEntry(db, o.entryId);
     if (!entry) return V.fail('entry_not_found');
     if (!isActive(entry)) return V.fail('entry_out');
-    if (!managersOf(db, entry.team_id).includes(o.by)) return V.fail('not_manager');
+    if (!entryManagers(db, entry).includes(o.by)) return V.fail('not_manager');
     const ev = E.getEvent(db, entry.event_id)!;
     if (ev.locked_at !== null) return V.fail('entries_locked');
     if (ev.status !== 'registration' && ev.status !== 'checkin') return V.fail('wrong_status');
@@ -271,7 +285,7 @@ export function checkInEntry(db: DB, o: { entryId: number; by: string; now?: Dat
     const entry = getEntry(db, o.entryId);
     if (!entry) return V.fail('entry_not_found');
     if (!isActive(entry)) return V.fail('entry_out');
-    if (!managersOf(db, entry.team_id).includes(o.by)) return V.fail('not_manager');
+    if (!entryManagers(db, entry).includes(o.by)) return V.fail('not_manager');
     const ev = E.getEvent(db, entry.event_id)!;
     if (ev.status !== 'checkin' || ev.locked_at !== null) return V.fail('not_checkin');
     if (entry.status === 'checked_in') return V.ok(entry);
