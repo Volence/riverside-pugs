@@ -66,7 +66,7 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
               <FormRow label="Signups close" help="When signups close and staff can run the cut." for={`${uid}-close`}>
                 <input id={`${uid}-close`} aria-label="Signups close" type="datetime-local" value={closeAt} onInput={(e) => setCloseAt((e.target as HTMLInputElement).value)} />
               </FormRow>
-              <FormRow label="Draft night" help="When the live draft runs (plan D2). Everyone gets this time in their role DM." for={`${uid}-draftat`}>
+              <FormRow label="Draft night" help="When teams are made, by SR balance or a live captains' draft. Everyone gets this time in their role DM." for={`${uid}-draftat`}>
                 <input id={`${uid}-draftat`} aria-label="Draft night" type="datetime-local" value={draftAt} onInput={(e) => setDraftAt((e.target as HTMLInputElement).value)} />
               </FormRow>
             </>

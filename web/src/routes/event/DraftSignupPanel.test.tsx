@@ -80,9 +80,9 @@ describe('DraftSignupPanel', () => {
   });
 
   it.each([
-    ['captain', 'Your role: Captain', /You are a captain/],
-    ['pool', 'Your role: Pool', /You are in the draft pool/],
-    ['bench', 'Your role: Bench', /You are on the free-agent bench\. The draft is .+; captains can call on you as a stand-in/],
+    ['captain', 'Your role: Captain', /You are a captain\. Teams are made .+: staff either balance them by SR or you pick your players live, and you will hear which\./],
+    ['pool', 'Your role: Pool', /You are in the player pool\. Teams are made .+, by SR balance or a live captains' draft; you will get a DM with your team\./],
+    ['bench', 'Your role: Bench', /You are on the free-agent bench\. Teams are made .+; captains can call on you as a stand-in/],
   ] as const)('after publish a %s sees their role', (role, head, line) => {
     render(<DraftSignupPanel {...base} lockedAt={future(-5)} draft={draft({ cut: { captains: [], pool: [], bench: [] } })}
       view={mine({ signup: { captainPref: 'want', note: null, role } })} />);

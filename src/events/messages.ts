@@ -78,10 +78,10 @@ export function eventMessage(
       const link = `${publicUrl}/event/${ev.slug}`;
       const when = discordTime(draftAt);
       content = extra.cutRole === 'captain'
-        ? `You are a captain in ${event}. The draft is ${when}. Build your pick list before then: ${link}`
+        ? `You are a captain in ${event}. Teams are made ${when}: staff either balance them by SR or you pick your players live, and you will hear which. Keep the time free: ${link}`
         : extra.cutRole === 'pool'
-          ? `You are in the draft pool for ${event}. The draft is ${when}; captains pick you live: ${link}`
-          : `You are on the free-agent bench for ${event}. The draft is ${when}; captains can call on you as a stand-in, so keep the night free if you can: ${link}`;
+          ? `You are in the player pool for ${event}. Teams are made ${when}, by SR balance or a live captains' draft; you will get a DM with your team: ${link}`
+          : `You are on the free-agent bench for ${event}. Teams are made ${when}; captains can call on you as a stand-in, so keep the night free if you can: ${link}`;
       break;
     }
     case 'draft_captain_offer':

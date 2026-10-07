@@ -129,7 +129,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
           <FormRow label="Signups close" help="When signups close and staff can run the cut." for={id('close')}>
             <input id={id('close')} aria-label="Signups close" type="datetime-local" value={closeAt} onInput={(e) => setCloseAt(val(e))} />
           </FormRow>
-          <FormRow label="Draft night" help="When the live draft runs (plan D2). Everyone gets this time in their role DM." for={id('draftat')}>
+          <FormRow label="Draft night" help="When teams are made, by SR balance or a live captains' draft. Everyone gets this time in their role DM." for={id('draftat')}>
             <input id={id('draftat')} aria-label="Draft night" type="datetime-local" value={draftAt} onInput={(e) => setDraftAt(val(e))} />
           </FormRow>
         </>

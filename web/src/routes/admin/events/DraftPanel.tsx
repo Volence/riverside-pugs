@@ -88,6 +88,7 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
   const { busy, error, run } = useAction(() => { reload(); onChange?.(); });
   const [teams, setTeams] = useState('');
   const [refused, setRefused] = useState<string[]>([]);
+  const [short, setShort] = useState(0);
   if (loadError) return <Panel><h3>Draft</h3><p class="error">Could not load the draft.</p></Panel>;
   if (!data) return <Panel><h3>Draft</h3></Panel>;
   const locked = data.lockedAt !== null;
@@ -149,6 +150,17 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
       )}
       {locked && !published && (
         <>
+          {canEdit && (
+            <div class="inlinerow">
+              <button class="btn btn--ghost" disabled={busy} onClick={() => run(async () => {
+                setShort((await adminApi.draftPickCaptains(eventId)).short);
+              }, {
+                title: 'Pick captains?',
+                body: `The highest-SR signups who want to captain become the ${data.teams ?? 0} captains. This replaces the current captains and resets the pool and bench.`,
+              })}>Pick captains</button>
+            </div>
+          )}
+          {short > 0 && <p>{short} more {short === 1 ? 'captain' : 'captains'} needed. Offer captaincy to willing signups, or make someone captain by hand.</p>}
           {canEdit && (
             <div class="inlinerow">
               <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.draftOffers(eventId, !data.offersOn))}>
