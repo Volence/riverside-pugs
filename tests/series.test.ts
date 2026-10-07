@@ -19,7 +19,7 @@ import { authedCookie } from './helpers.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { A, B as BATS } from './entryFixture.js';
 import { POOL7, TIMERS, type RoomFixture } from './roomFixture.js';
-import { MIN, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
+import { HA, MIN, driveHomeAway, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
 import { ServerReleaser } from '../src/serverRelease.js';
 import { reapOrphanedMatches } from '../src/liveView.js';
 import { claimIdle, claimableServers } from '../src/serverPool.js';
@@ -749,21 +749,6 @@ describe('SeriesEngine: a staff hold while a game runs (T3b final review)', () =
 });
 
 describe('SeriesEngine: a Bo2 home and away (T3b final review)', () => {
-  const HA = ['no_mercy', 'dead_air', 'death_toll', 'blood_harvest'];
-  /** Rats go second, Bats pick death_toll and Rats survive first, Rats pick no_mercy and Bats take infected: Rats survive first in both. */
-  const driveHomeAway = (r: RoomFixture): void => {
-    const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
-    const ok = <T>(x: { ok: true; value: T } | { ok: false; error: string }): T => { if (!x.ok) throw new Error(x.error); return x.value; };
-    ok(R.openRoom(r.db, { matchId: r.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW }));
-    for (const who of [A[0]!, BATS[0]!]) ok(R.readyUp(r.db, { matchId: r.matchId, steamid: who, timers: TIMERS, now: at(1) }));
-    const steps: [string, number, string, string | null][] = [
-      [A[0]!, 0, 'second', null], [BATS[0]!, 1, 'pick', 'death_toll'], [A[0]!, 2, 'survivors', null], [A[0]!, 3, 'pick', 'no_mercy'], [BATS[0]!, 4, 'infected', null],
-    ];
-    for (const [who, step, action, campaign] of steps) ok(R.actVeto(r.db, { matchId: r.matchId, steamid: who, step, action, campaign, timers: TIMERS, now: at(2) }));
-    ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: A[0]!, steamids: A.slice(0, 4), timers: TIMERS, now: at(4) }));
-    ok(R.lockLineup(r.db, { matchId: r.matchId, steamid: BATS[0]!, steamids: BATS.slice(0, 4), timers: TIMERS, now: at(4) }));
-  };
-
   it('says why a forfeit ended the series: a !gg, the reconnect time, or a staff ruling (plan T5 Ruling 9)', async () => {
     const how = { gg: 'typed !gg', disconnect: 'ran out of reconnect time', staff: 'forfeited by staff ruling' } as const;
     for (const why of ['gg', 'disconnect', 'staff'] as const) {

@@ -22,6 +22,7 @@ import * as N from './entries.js';
 import * as P from './play.js';
 import * as R from './room.js';
 import * as V from './validate.js';
+import { carryEntries } from './carry.js';
 import { autoResultFlow, forfeitMatch } from './flow.js';
 import { tellConnect, tellReadyForfeit, tellSeriesResult, tellStaffAction } from './notices.js';
 import { gameNumberOf, playOrder, seriesResult, seriesVerdict, tiebreakFirstSurvivors, winsLine } from './seriesRules.js';
@@ -349,11 +350,15 @@ export class SeriesEngine {
     const stop = g.tiebreak_of !== null ? g.map : this.stopMapFor(stage, g.campaign);
     return gameLinesOf(this.db, { matchId: gameMatchId, stopAfterMap: stop, notice: `${ev.name}: ${this.name(m, 'a')} vs ${this.name(m, 'b')}, ${this.gameLabel(m, g)}` });
   }
-  private startText(m: P.MatchRow, g: R.GameRow): string {
+  /** gameMatchId is passed in: the caller's row was read before linkGame set its match_id. */
+  private startText(m: P.MatchRow, g: R.GameRow, gameMatchId: number): string {
     const first = this.sideOfEntry(m, g.first_survivors);
     const label = this.gameLabel(m, g);
     const what = `${label.charAt(0).toUpperCase()}${label.slice(1)}: ${campaignDisplayName(this.db, g.campaign)}${g.tiebreak_of !== null ? ', one chapter' : ''}.`;
-    return `${what} ${first ? `${this.name(m, first)} start as survivors. ` : ''}Ready up when both teams are in.`;
+    // Plan T6: in entry order (event scores are entry_a/entry_b).
+    const e = carryEntries(this.db, gameMatchId);
+    const carried = e ? `Game 1's score carries over: ${this.name(m, 'a')} ${e.entryA}, ${this.name(m, 'b')} ${e.entryB}. ` : '';
+    return `${what} ${carried}${first ? `${this.name(m, first)} start as survivors. ` : ''}Ready up when both teams are in.`;
   }
 
   /** Ruling 3: the burst for the game due on this campaign, creating its
@@ -387,7 +392,7 @@ export class SeriesEngine {
     try { this.deps.registerToken?.(g.token); } catch (err) { console.error(`[series] registering the token of game ${g.matchId} failed:`, err); }
     console.log(`[series] match ${m.id}: game ${due.ordinal} is match ${g.matchId} on ${campaign}`);
     this.push(m.id);
-    return [...this.linesFor(m, due, g.matchId), `say [Match] ${this.startText(m, due)}`];
+    return [...this.linesFor(m, due, g.matchId), `say [Match] ${this.startText(m, due, g.matchId)}`];
   }
 
   /** A game pushed but not heard from yet: its burst again (no chat line). */
