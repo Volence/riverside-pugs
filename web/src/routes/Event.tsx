@@ -182,7 +182,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       )}
       {mine?.captainOf && ev.entryKind === 'draft' && <DraftIdentityPanel slug={ev.slug} mine={mine.captainOf} onChange={bump} />}
       {mine && ev.entryKind === 'team' && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
-      {mine && ev.entryKind === 'team' && !['finished', 'cancelled'].includes(ev.status) && mine.entries
+      {mine && !['finished', 'cancelled'].includes(ev.status) && mine.entries
         .filter((e) => e.manage && (e.status === 'registered' || e.status === 'checked_in'))
         .map((e) => <PrepPanel key={e.id} slug={ev.slug} entryId={e.id} teamName={e.name} />)}
       {(ev.entryKind !== 'draft' || ev.entries.length > 0) && <Panel>
