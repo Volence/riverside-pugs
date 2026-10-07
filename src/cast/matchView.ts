@@ -218,8 +218,11 @@ export function buildMatchView(
       if (s) {
         name = sideName(db, s);
         const team = s.team_id !== null ? getTeam(db, s.team_id) : undefined;
-        tag = team?.tag ?? tagFrom(name);
-        if (team?.logo_key) logoUrl = `${team.logo_key}.png`;
+        // A draft side has no site team: its tag and logo were snapshotted
+        // from the entry at booking (NULL on a team side).
+        tag = s.tag ?? team?.tag ?? tagFrom(name);
+        const logo = s.logo_key ?? team?.logo_key;
+        if (logo) logoUrl = `${logo}.png`;
         // Roles: the team's own, else a pickup side's captain.
         if (team) for (const mem of activeMembers(db, team.id)) roles.set(mem.steamid, mem.role);
         else roles.set(s.captain_steamid, 'captain');

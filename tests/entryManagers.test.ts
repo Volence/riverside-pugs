@@ -18,6 +18,13 @@ import { A, B as BATS, entryFixture, rosterA, rosterB } from './entryFixture.js'
 import { draftFixture, P } from './draftFixture.js';
 import { TIMERS, driveToBooking, roomFixture } from './roomFixture.js';
 import { seriesFixture, type SeriesFixture } from './seriesFixture.js';
+import { buildMatchView } from '../src/cast/matchView.js';
+import { currentSeasonId } from '../src/players.js';
+
+/** A cast match on a booking, as the runner links one (test setup only). */
+const castOn = (db: DB, bookingId: number) => buildMatchView(db, Number(db.prepare(
+  "INSERT INTO matches (season_id, state, campaign, kind, booking_id, booking_side_a) VALUES (?, 'live', 'no_mercy', 'tournament', ?, 'a')",
+).run(currentSeasonId(db), bookingId).lastInsertRowid), { overrides: { a: {}, b: {} } });
 
 const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
 const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => { if (!r.ok) throw new Error(r.error); return r.value; };
@@ -143,6 +150,13 @@ describe('booking a series between two draft entries', () => {
     const sides = B.sidesOf(s.db, b.id);
     expect(sides.map((x) => x.name)).toEqual([null, null]);
     expect(sides.map((x) => B.sideName(s.db, x)).sort()).toEqual(['Bats', 'Rats']);
+    // The cast overlay still reads a team side's tag and logo from its team.
+    expect(sides.map((x) => [x.tag, x.logo_key])).toEqual([[null, null], [null, null]]);
+    const logo = 'c'.repeat(64);
+    s.db.prepare("UPDATE teams SET logo_key = ? WHERE name = 'Rats'").run(logo);
+    const v = castOn(s.db, b.id)!;
+    const byName = Object.fromEntries([v.teams.a, v.teams.b].map((t) => [t.name, [t.tag, t.logoUrl]]));
+    expect(byName).toEqual({ Rats: ['RAT', `${logo}.png`], Bats: ['BAT', null] });
   });
 
   it('books sides with team_id NULL, the captain, the four starters and the entry name', async () => {
@@ -171,5 +185,25 @@ describe('booking a series between two draft entries', () => {
     expect(B.peopleOf(s.db, b.id).map((p) => [p.side, p.steamid, p.role])).toEqual([
       ...A.slice(0, 4).map((x) => ['a', x, 'player']), ['a', A[4], 'spectator'], ...BATS.slice(0, 4).map((x) => ['b', x, 'player']),
     ]);
+  });
+
+  it('snapshots a draft entry\'s tag and logo on its side, and the cast overlay shows them', async () => {
+    const logo = 'd'.repeat(64);
+    s = await seriesFixture({
+      drive: (f) => {
+        f.db.prepare('UPDATE event_entries SET team_id = NULL, captain_steamid = CASE id WHEN ? THEN ? ELSE ? END WHERE id IN (?, ?)')
+          .run(f.entryA, A[0], BATS[0], f.entryA, f.entryB);
+        f.db.prepare("UPDATE event_entries SET name = 'Team Alpha', tag = 'ALF', logo_key = ? WHERE id = ?").run(logo, f.entryA);
+        f.db.prepare("UPDATE event_entries SET name = 'Team Beta', tag = '', logo_key = NULL WHERE id = ?").run(f.entryB);
+        driveToBooking(f);
+      },
+    });
+    await s.tick();
+    const b = s.booking();
+    expect(B.sidesOf(s.db, b.id).map((x) => [x.side, x.tag, x.logo_key])).toEqual([['a', 'ALF', logo], ['b', null, null]]);
+    const v = castOn(s.db, b.id)!;
+    expect([v.teams.a.name, v.teams.a.tag, v.teams.a.logoUrl]).toEqual(['Team Alpha', 'ALF', `${logo}.png`]);
+    // No tag and no logo: the tag comes from the name, as for a pickup side.
+    expect([v.teams.b.name, v.teams.b.tag, v.teams.b.logoUrl]).toEqual(['Team Beta', 'TB', null]);
   });
 });

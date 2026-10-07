@@ -2467,6 +2467,11 @@ export function openDb(path: string): DB {
   // with the entry's name, snapshotted here; NULL on every other side, which
   // sideName names from its team or captain as before.
   ensureColumn(db, 'booking_sides', 'name', 'TEXT');
+  // Drafts plan D2a review: the draft entry's tag and logo, snapshotted with
+  // the name so the cast overlay shows them; NULL on a team side (it reads
+  // its team) and when the entry has none.
+  ensureColumn(db, 'booking_sides', 'tag', 'TEXT');
+  ensureColumn(db, 'booking_sides', 'logo_key', 'TEXT');
   db.prepare('UPDATE bookings SET games_allowed = json_array_length(playlist_json) WHERE games_allowed = 0').run();
   // Rulesets editor: the ruleset a copy was made from (null for the three
   // templates and for rows from before the editor), and the ruleset a booking
