@@ -15,9 +15,25 @@ export const UNRATED_SR = displaySr(rating().mu, rating().sigma);
 /** A player's display SR in a season, read without writing a rating row.
  *  Scrim sides and event seeding both use it. */
 export function seasonSr(db: DB, steamid: string, seasonId: number): number {
+  const r = seasonRating(db, steamid, seasonId);
+  return displaySr(r.mu, r.sigma);
+}
+
+/** A player's { mu, sigma } in a season, read without writing a rating row:
+ *  openskill's defaults (what ensureRating would write) when unrated. */
+export function seasonRating(db: DB, steamid: string, seasonId: number): { mu: number; sigma: number } {
   const row = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?')
     .get(steamid, seasonId) as { mu: number; sigma: number } | undefined;
-  return row ? displaySr(row.mu, row.sigma) : UNRATED_SR;
+  if (row) return { mu: row.mu, sigma: row.sigma };
+  const fresh = rating();
+  return { mu: fresh.mu, sigma: fresh.sigma };
+}
+
+/** Each side's chance to win, from the OpenSkill model that rates them
+ *  (predictWin over each player's { mu, sigma }). matchForecast and the draft
+ *  fairness readout both read it. */
+export function winChances(sides: { mu: number; sigma: number }[][]): number[] {
+  return predictWin(sides.map((side) => side.map((r) => rating({ mu: r.mu, sigma: r.sigma }))));
 }
 
 interface MpRow { player_id: string; team: 'a' | 'b'; joined_map: number }
@@ -123,10 +139,7 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
   const srA = meanSr(a);
   const srB = meanSr(b);
 
-  const [winProbA, winProbB] = predictWin([
-    a.map((r) => rating(r)),
-    b.map((r) => rating(r)),
-  ]);
+  const [winProbA, winProbB] = winChances([a, b]) as [number, number];
 
   const muA = meanMu(a);
   const muB = meanMu(b);

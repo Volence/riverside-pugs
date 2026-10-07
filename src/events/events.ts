@@ -28,6 +28,8 @@ export interface EventRow {
   live_at: string | null;
   /** Plan D1: { signupsCloseAt, draftAt } plus any keys later plans own. */
   draft_json: string | null; draft_teams: number | null; cut_at: string | null; offers_on: number;
+  /** Plan D2a: how the teams are made ('auto' or, in D2b, 'live'), and when they were published. */
+  team_mode: 'auto' | 'live' | null; teams_made_at: string | null;
 }
 export interface StageRow {
   id: number; event_id: number; ordinal: number; type: V.StageType; config_json: string; ruleset_id: number;
