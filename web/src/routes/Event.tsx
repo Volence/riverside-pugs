@@ -52,7 +52,7 @@ function DraftSection({ ev, draft, session }: { ev: EventView; draft: EventDraft
   const cut = draft.cut;
   const closed = ev.lockedAt !== null || Date.now() >= Date.parse(draft.signupsCloseAt);
   return (
-    <Panel>
+    <Panel class="draftsection">
       <h3>Draft</h3>
       <p class="muted">Signups close {whenText(draft.signupsCloseAt)} · Draft night {whenText(draft.draftAt)}</p>
       {!cut && ev.status === 'registration' && !closed && session.kind === 'anonymous' && (
