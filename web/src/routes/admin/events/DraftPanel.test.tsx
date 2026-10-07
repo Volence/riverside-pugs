@@ -4,7 +4,7 @@ import type { AdminDraftView, SignupFacts } from '../../../api';
 
 const { mockAdmin, confirmMock } = vi.hoisted(() => ({
   mockAdmin: {
-    eventDraft: vi.fn(), draftTeams: vi.fn(), draftCaptain: vi.fn(), draftSwap: vi.fn(), draftOffers: vi.fn(),
+    eventDraft: vi.fn(), draftTeams: vi.fn(), draftCaptain: vi.fn(), draftSwap: vi.fn(), draftOffers: vi.fn(), draftPickCaptains: vi.fn(),
     closeSignups: vi.fn(), removeSignup: vi.fn(), draftPublishRaw: vi.fn(),
   },
   confirmMock: vi.fn(async () => true),
@@ -172,6 +172,54 @@ describe('DraftPanel', () => {
     fireEvent.input(await screen.findByLabelText('Team count'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Set' }));
     await waitFor(() => expect(mockAdmin.draftTeams).toHaveBeenCalledWith(9, 3));
+  });
+
+  it('Pick captains asks first, calls the API, and says how many captains are still needed', async () => {
+    mockAdmin.eventDraft.mockResolvedValue(view());
+    mockAdmin.draftPickCaptains.mockResolvedValue({ ok: true, captains: ['1'], short: 1 });
+    render(<DraftPanel eventId={9} canEdit />);
+    confirmMock.mockResolvedValueOnce(false);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick captains' }));
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(mockAdmin.draftPickCaptains).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Pick captains' }));
+    await waitFor(() => expect(mockAdmin.draftPickCaptains).toHaveBeenCalledWith(9));
+    expect(confirmMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      title: 'Pick captains?',
+      body: 'The highest-SR signups who want to captain become the 2 captains. This replaces the current captains and resets the pool and bench.',
+    }));
+    expect(await screen.findByText('1 more captain needed. Offer captaincy to willing signups, or make someone captain by hand.')).toBeTruthy();
+  });
+
+  it('says captains in the plural when more than one is short, and nothing when none is', async () => {
+    mockAdmin.eventDraft.mockResolvedValue(view());
+    mockAdmin.draftPickCaptains.mockResolvedValue({ ok: true, captains: [], short: 2 });
+    render(<DraftPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick captains' }));
+    expect(await screen.findByText(/^2 more captains needed\./)).toBeTruthy();
+    cleanup();
+    mockAdmin.draftPickCaptains.mockResolvedValue({ ok: true, captains: ['1', '2'], short: 0 });
+    render(<DraftPanel eventId={9} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick captains' }));
+    await waitFor(() => expect(mockAdmin.draftPickCaptains).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/captains? needed/)).toBeNull();
+  });
+
+  it('shows no Pick captains button before close, after publish, or to a mod', async () => {
+    mockAdmin.eventDraft.mockResolvedValue(view({ lockedAt: null }));
+    render(<DraftPanel eventId={9} canEdit />);
+    await screen.findByText('Bob', { selector: 'td' });
+    expect(screen.queryByRole('button', { name: 'Pick captains' })).toBeNull();
+    cleanup();
+    mockAdmin.eventDraft.mockResolvedValue(view({ cutAt: '2026-10-07T00:00:00.000Z' }));
+    render(<DraftPanel eventId={9} canEdit />);
+    await screen.findByText('Bob', { selector: 'td' });
+    expect(screen.queryByRole('button', { name: 'Pick captains' })).toBeNull();
+    cleanup();
+    mockAdmin.eventDraft.mockResolvedValue(view());
+    render(<DraftPanel eventId={9} canEdit={false} />);
+    await screen.findByText('Bob', { selector: 'td' });
+    expect(screen.queryByRole('button', { name: 'Pick captains' })).toBeNull();
   });
 
   it('gives a mod no buttons at all', async () => {

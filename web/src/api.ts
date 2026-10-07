@@ -2588,6 +2588,7 @@ export const adminApi = {
   eventDraft: (id: number, signal?: AbortSignal) => get<AdminDraftView>(`/api/admin/events/${id}/draft`, signal),
   draftTeams: (id: number, teams: number) => post(`/api/admin/events/${id}/draft/teams`, { teams }),
   draftCaptain: (id: number, steamid: string, captain: boolean) => post(`/api/admin/events/${id}/draft/captain`, { steamid, captain }),
+  draftPickCaptains: (id: number) => post<{ ok: true; captains: string[]; short: number }>(`/api/admin/events/${id}/draft/pick-captains`),
   draftSwap: (id: number, pool: string, bench: string) => post(`/api/admin/events/${id}/draft/swap`, { pool, bench }),
   /** A refused cut throws a CutChangedError carrying the CutChangedBody. */
   draftPublish: async (id: number) => {

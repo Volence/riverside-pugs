@@ -155,9 +155,9 @@ describe('the cut DMs', () => {
     const when = `<t:${Math.floor(Date.parse(f.draftAt) / 1000)}:F>`;
     const calls = send.mock.calls.map(([to, type, payload]) => ({ to: [...(to as string[])], type, content: (payload as { content: string }).content }));
     expect(calls).toEqual([
-      { to: P.slice(0, 5), type: 'draft_cut_role', content: `You are a captain in Draft Night. The draft is ${when}. Build your pick list before then: https://x/event/${f.slug}` },
-      { to: P.slice(5, 20), type: 'draft_cut_role', content: `You are in the draft pool for Draft Night. The draft is ${when}; captains pick you live: https://x/event/${f.slug}` },
-      { to: [P[20]], type: 'draft_cut_role', content: `You are on the free-agent bench for Draft Night. The draft is ${when}; captains can call on you as a stand-in, so keep the night free if you can: https://x/event/${f.slug}` },
+      { to: P.slice(0, 5), type: 'draft_cut_role', content: `You are a captain in Draft Night. Teams are made ${when}: staff either balance them by SR or you pick your players live, and you will hear which. Keep the time free: https://x/event/${f.slug}` },
+      { to: P.slice(5, 20), type: 'draft_cut_role', content: `You are in the player pool for Draft Night. Teams are made ${when}, by SR balance or a live captains' draft; you will get a DM with your team: https://x/event/${f.slug}` },
+      { to: [P[20]], type: 'draft_cut_role', content: `You are on the free-agent bench for Draft Night. Teams are made ${when}; captains can call on you as a stand-in, so keep the night free if you can: https://x/event/${f.slug}` },
     ]);
   });
 
