@@ -1,5 +1,6 @@
 import { findSlurs } from '../slurs.js';
 import { hasUnsafeChars } from '../profileFields.js';
+import { NOTE_MAX } from './draftRules.js';
 import { parseVetoConfig, presetConfig, vetoFamily, VETO_PRESETS, PRESET_MIN_POOL, type VetoConfig, type VetoPreset } from './vetoConfig.js';
 
 /**
@@ -70,6 +71,14 @@ export const EVENT_ERRORS = {
   bad_draft_times: { status: 400, text: 'A draft event needs a signup close time and a draft night.' },
   draft_times_order: { status: 400, text: 'Signups must close before the draft, and the draft must not be after the event start.' },
   draft_signups_later: { status: 409, text: 'Signups for a draft event arrive with the draft plan.' },
+  not_draft: { status: 409, text: 'This event takes team entries, not draft signups.' },
+  closed: { status: 409, text: 'Signups for this draft are closed.' },
+  already_signed_up: { status: 409, text: 'You are already signed up for this draft.' },
+  not_signed_up: { status: 409, text: 'There is no active signup for this draft to change.' },
+  bad_note: { status: 400, text: `A note is at most ${NOTE_MAX} characters of plain text, on one line.` },
+  bad_captain_pref: { status: 400, text: 'Captaincy is want, willing or no.' },
+  ineligible: { status: 409, text: 'You do not meet the entry rules for this event.' },
+  cut_published: { status: 409, text: 'The cut is published, so signups no longer change.' },
   has_entries: { status: 409, text: 'This draft has entries, so it cannot be deleted.' },
   bad_entry_roster: { status: 400, text: 'A roster is exactly 4 starters, no more subs than the event allows and at most one coach, each player once.' },
   not_registration: { status: 409, text: 'Registration is not open for this event.' },

@@ -4,6 +4,7 @@ import { campaignDisplayName } from '../campaignRegistry.js';
 import { parseRules, rulesForKind, type MatchRules } from '../rulesets.js';
 import { activeMembers, getTeam, myTeams } from '../teams/teams.js';
 import * as E from './events.js';
+import * as D from './drafts.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import type * as V from './validate.js';
@@ -29,7 +30,11 @@ export interface EventView {
   stages: EventStageView[]; entries: EventEntryView[]; play: StagePlayView[];
   finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
   lockedAt: string | null; checkinOpensAt: string | null; checkinClosesAt: string | null;
+  /** Draft-kind events only (plan D1 Ruling 9): the signup count and names in
+   *  signup order. Never SR, notes or captain preference. */
+  draft: EventDraftView | null;
 }
+export interface EventDraftView { signupsCloseAt: string; draftAt: string; signups: number; names: string[] }
 
 const OVER: ReadonlySet<V.EventStatus> = new Set<V.EventStatus>(['finished', 'cancelled']);
 
@@ -108,7 +113,21 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
     ...(f.checkin.enabled
       ? (() => { const t = R.checkinTimes(ev.starts_at, f.checkin); return { checkinOpensAt: t.opensAt, checkinClosesAt: t.closesAt }; })()
       : { checkinOpensAt: null, checkinClosesAt: null }),
+    draft: draftView(db, ev, f),
   };
+}
+
+function draftView(db: DB, ev: E.EventRow, f: V.EventFields): EventDraftView | null {
+  if (ev.entry_kind !== 'draft' || !f.draft) return null;
+  const names = D.activeSignups(db, ev.id).map((s) => getPlayer(db, s.steamid)?.name ?? s.steamid);
+  return { signupsCloseAt: f.draft.signupsCloseAt, draftAt: f.draft.draftAt, signups: names.length, names };
+}
+
+/** The viewer's own signup (plan D1): their preference and note. The role
+ *  shows only once the cut is published. */
+export interface MySignupView { captainPref: D.CaptainPref; note: string | null; role: D.SignupRow['role'] }
+export function signupView(ev: E.EventRow, s: D.SignupRow): MySignupView {
+  return { captainPref: s.captain_pref, note: s.note, role: ev.cut_at !== null ? s.role : null };
 }
 
 export interface RosterPlaceView { steamid: string; name: string; avatar: string | null; role: R.Role; problems: string[] }
@@ -127,7 +146,11 @@ export interface MyEntryView {
   members: MemberOptionView[];
 }
 export interface RegisterOptionView { teamId: number; name: string; tag: string; logoKey: string | null; members: MemberOptionView[] }
-export interface MyEventView { entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean }
+export interface MyEventView {
+  entries: MyEntryView[]; register: RegisterOptionView[]; canRegister: boolean;
+  /** A draft-kind event: the viewer's active signup, or null. */
+  signup: MySignupView | null;
+}
 
 /** What one signed-in player can do on this event page: the entries they
  *  manage or are on, and the teams they could register. Problems are the
@@ -185,7 +208,8 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
       && !N.entryOfTeam(db, ev.id, t.id) && !N.disqualifiedSlotHeld(db, ev.id, t.id, null))
       .map((t) => ({ teamId: t.id, name: t.name, tag: t.tag, logoKey: t.logo_key, members: memberOptions(t.id, null) }))
     : [];
-  return { entries, register, canRegister };
+  const own = ev.entry_kind === 'draft' ? D.signupOf(db, ev.id, viewer) : null;
+  return { entries, register, canRegister, signup: own ? signupView(ev, own) : null };
 }
 
 export interface AdminEntryView {

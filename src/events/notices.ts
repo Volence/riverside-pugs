@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
 import * as N from './entries.js';
 import * as P from './play.js';
-import { eventMessage, type EventNotifyType, type RescheduleNotice, type StaffAction } from './messages.js';
+import { eventMessage, type EventNotifyType, type RescheduleNotice, type SignupRemoval, type StaffAction } from './messages.js';
 import { getProposal } from './schedule.js';
 
 /**
@@ -96,4 +96,8 @@ export function tellReschedule(d: NoticeDeps, eventId: number, matchId: number, 
 /** A time locked (accepted, auto-accepted or set by staff): both rosters. */
 export function tellTimeLocked(d: NoticeDeps, eventId: number, matchId: number, staff = false): void {
   tell(d, rostersOf(d, matchId), eventId, 'event_match_time', { matchId, ...(staff ? { what: 'staff' as const } : {}) });
+}
+/** Staff removed a draft signup (drafts plan D1 Ruling 11): that player, with why. */
+export function tellSignupRemoved(d: NoticeDeps, eventId: number, steamid: string, reason: SignupRemoval): void {
+  tell(d, [steamid], eventId, 'draft_signup_removed', { removal: reason });
 }
