@@ -4,7 +4,7 @@ import { currentSeasonId, getPlayer } from '../players.js';
 import { seasonSr } from '../rating.js';
 import { inGoodStanding } from '../standing.js';
 import { competitiveAccess } from '../teams/access.js';
-import { activeMembers, getTeam, normalizeName } from '../teams/teams.js';
+import { activeMembers, getTeam, normalizeName, normalizeTag } from '../teams/teams.js';
 import * as E from './events.js';
 import * as D from './drafts.js';
 import * as R from './entryRules.js';
@@ -344,6 +344,8 @@ export function lockEntries(db: DB, o: { eventId: number; by: string | null; now
 }
 
 const NAME_MAX = 24;
+/** The one comparison for a draft entry's name within an event: normalizeName's NFKC lower-case key. */
+const keyOf = (name: string): string => name.normalize('NFKC').toLowerCase();
 const cut = (s: string, n: number): string => Array.from(s).slice(0, n).join('').trimEnd();
 
 /** Ruling 6's default name: "Team <captain display name>", at most 24
@@ -356,7 +358,6 @@ const cut = (s: string, n: number): string => Array.from(s).slice(0, n).join('')
 function draftEntryName(captainName: string, seed: number, taken: Set<string>): string {
   const n = normalizeName(cut(`Team ${captainName}`, NAME_MAX));
   const base = n.ok ? n.name : `Team ${seed}`;
-  const keyOf = (name: string) => name.normalize('NFKC').toLowerCase();
   let name = base;
   for (let k = 2; taken.has(keyOf(name)); k++) name = `${cut(base, NAME_MAX - ` ${k}`.length)} ${k}`;
   taken.add(keyOf(name));
@@ -415,6 +416,48 @@ export function createDraftEntries(db: DB, o: { eventId: number; actor: string; 
     db.prepare('UPDATE events SET teams_made_at = ?, updated_at = ? WHERE id = ?').run(at, at, ev.id);
     E.logEvent(db, ev.id, o.actor, 'draft_teams_published', at, { entries });
     return V.ok({ entries });
+  })();
+}
+
+/**
+ * A draft entry's identity (drafts plan D2a Ruling 7): its name, tag and
+ * logo, set by its captain (or staff) until the event goes live. The name
+ * passes normalizeName and must be unique among the event's active entries by
+ * the same key the default names use (an entry's own current name is not a
+ * clash); the tag passes normalizeTag, or '' clears it. A field left out is
+ * unchanged. One 'entry_identity_set' row.
+ */
+export function setEntryIdentity(
+  db: DB,
+  o: { eventId: number; entryId: number; steamid: string; staff: boolean; name?: string; tag?: string; logoKey?: string | null; now: Date },
+): V.Checked<null> {
+  const at = o.now.toISOString();
+  const n = o.name === undefined ? null : normalizeName(o.name);
+  if (n && !n.ok) return V.fail(n.error === 'name_not_allowed' ? 'name_not_allowed' : 'bad_name');
+  const t = o.tag === undefined || o.tag === '' ? null : normalizeTag(o.tag);
+  if (t && !t.ok) return V.fail(t.error === 'tag_not_allowed' ? 'tag_not_allowed' : 'bad_tag');
+  if (o.name === undefined && o.tag === undefined && o.logoKey === undefined) return V.fail('bad_request');
+  return db.transaction((): V.Checked<null> => {
+    const ev = E.getEvent(db, o.eventId);
+    const entry = getEntry(db, o.entryId);
+    if (!ev || ev.status === 'draft') return V.fail('not_found');
+    if (!entry || entry.event_id !== ev.id) return V.fail('entry_not_found');
+    if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return V.fail('not_draft_entry');
+    if (!o.staff && entry.captain_steamid !== o.steamid) return V.fail('not_captain');
+    if (ev.status === 'live' || ev.status === 'finished' || ev.status === 'cancelled') return V.fail('entries_locked');
+    if (!isActive(entry)) return V.fail('entry_out');
+    if (n && n.ok) {
+      const clash = entriesOf(db, ev.id).some((x) => x.id !== entry.id && isActive(x) && keyOf(x.name) === n.key);
+      if (clash) return V.fail('name_taken');
+    }
+    const name = n && n.ok ? n.name : entry.name;
+    const tag = o.tag === undefined ? entry.tag : t && t.ok ? t.tag : '';
+    const logoKey = o.logoKey === undefined ? entry.logo_key : o.logoKey;
+    db.prepare('UPDATE event_entries SET name = ?, tag = ?, logo_key = ? WHERE id = ?').run(name, tag, logoKey, entry.id);
+    E.logEvent(db, ev.id, o.steamid, 'entry_identity_set', at, {
+      entryId: entry.id, staff: o.staff, from: { name: entry.name, tag: entry.tag, logoKey: entry.logo_key }, to: { name, tag, logoKey },
+    });
+    return V.ok(null);
   })();
 }
 
