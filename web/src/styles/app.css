@@ -3506,6 +3506,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .rosterpick__why { grid-column: 1 / -1; color: var(--loss); font-size: var(--fs-dense); }
 .evententry { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-1) 0; }
 .evententry__logo { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.evententry__players { flex: 1 0 100%; font-size: var(--fs-dense); overflow-wrap: anywhere; }
 .evententry__name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .evententry__logo--none {
   display: inline-flex; align-items: center; justify-content: center;

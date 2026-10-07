@@ -199,6 +199,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
                   {e.waitlist !== null && <span class="chip">Waitlist {e.waitlist}</span>}
                   {e.status === 'disqualified' && <span class="chip chip--bad">Disqualified</span>}
                   {e.placement !== null && <span class="chip chip--ok">{placementText(e.placement)}</span>}
+                  {e.players && e.players.length > 0 && <span class="evententry__players muted">{e.players.join(', ')}</span>}
                 </li>
               ))}
             </ul>

@@ -245,4 +245,17 @@ describe('EventPage', () => {
     expect(await screen.findByText(/Stage 1: bracket/)).toBeTruthy();
     expect(screen.getByText('1st')).toBeTruthy();
   });
+
+  it('lists a draft team\'s players under it, and shows nothing for a team entry', async () => {
+    const entry = { id: 1, name: 'Team d20', tag: '', logoKey: null, seed: null, status: 'checked_in', waitlist: null, placement: null };
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft',
+      entries: [{ ...entry, players: ['d20', 'd3', 'd4', 'd5'] }, { ...entry, id: 2, name: 'Team d19' }],
+    }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    await screen.findByText('Team d20');
+    const li = screen.getByText('Team d20').closest('li')!;
+    expect(li.textContent).toContain('d20, d3, d4, d5');
+    expect(screen.getByText('Team d19').closest('li')!.querySelector('.evententry__players')).toBeNull();
+  });
 });

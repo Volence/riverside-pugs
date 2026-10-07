@@ -87,7 +87,7 @@ export function liveBookingGame(db: DB, bookingId: number): { id: number; token:
 }
 
 export interface TeamScrim {
-  bookingId: number; opponent: string; startsAt: string; state: string;
+  bookingId: number; purpose: 'scrim' | 'tournament'; opponent: string; startsAt: string; state: string;
   games: { matchId: number; campaign: string; state: string; us: number; them: number }[];
 }
 
@@ -98,14 +98,14 @@ export interface TeamScrim {
  *  adoption, so two games of the same booking can disagree). */
 export function teamScrims(db: DB, teamId: number): TeamScrim[] {
   const rows = db.prepare(
-    `SELECT b.id, b.state, b.starts_at, s.side
+    `SELECT b.id, b.purpose, b.state, b.starts_at, s.side
        FROM bookings b JOIN booking_sides s ON s.booking_id = b.id AND s.team_id = ?
        ORDER BY b.starts_at DESC, b.id DESC LIMIT 50`,
-  ).all(teamId) as { id: number; state: string; starts_at: string; side: Side }[];
+  ).all(teamId) as { id: number; purpose: 'scrim' | 'tournament'; state: string; starts_at: string; side: Side }[];
   return rows.map((r) => {
     const other = sidesOf(db, r.id).find((s) => s.side !== r.side)!;
     return {
-      bookingId: r.id, opponent: sideName(db, other), startsAt: r.starts_at, state: r.state,
+      bookingId: r.id, purpose: r.purpose, opponent: sideName(db, other), startsAt: r.starts_at, state: r.state,
       games: bookingGames(db, r.id).map((g) => ({
         matchId: g.matchId, campaign: g.campaign, state: g.state,
         us: g.sideA === r.side ? g.scoreA : g.scoreB,
