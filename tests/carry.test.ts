@@ -200,17 +200,73 @@ describe('crash recovery and chapter replay of a carried game 2 (plan T6)', () =
     expect(snap.carry).toEqual({ a: 500, b: 400 });
   });
 
-  it('resume lines put sm_pug_carry right after sm_pug_resume, and omit it when carry is null', async () => {
+  it('resume lines put sm_pug_tournament 1 and sm_pug_carry right after sm_pug_resume, and omit both when carry is null', async () => {
     const g2 = await liveGame2();
     finishChapter(g2);
     const snap = restoreSnapshot(f.db, g2)!;
     const lines = resumeLines(snap);
     expect(lines[0]).toMatch(new RegExp(`^sm_pug_resume ${g2} `));
-    expect(lines[1]).toBe(`sm_pug_carry ${g2} 500 400`);
-    expect(lines[2]).toMatch(/^sm_pug_resume_map /);
+    // A recovered srcds restarted with sm_pug_tournament 0, and pug-match refuses a carry off a tournament box.
+    expect(lines[1]).toBe('sm_pug_tournament 1');
+    expect(lines[2]).toBe(`sm_pug_carry ${g2} 500 400`);
+    expect(lines[3]).toMatch(/^sm_pug_resume_map /);
     expect(lines.at(-1)).toBe('sm_pug_resume_commit');
-    expect(resumeLines({ ...snap, carry: null }).some((l) => l.startsWith('sm_pug_carry'))).toBe(false);
-    expect(resumeLines({ ...snap, carry: null })).toEqual(lines.filter((l) => !l.startsWith('sm_pug_carry')));
+    const bare = resumeLines({ ...snap, carry: null });
+    expect(bare.some((l) => l.startsWith('sm_pug_carry') || l.startsWith('sm_pug_tournament'))).toBe(false);
+    expect(bare).toEqual(lines.filter((l) => !l.startsWith('sm_pug_carry') && !l.startsWith('sm_pug_tournament')));
+  });
+
+  it('crash recovery of a carried game 2 on a restarted srcds: the box takes the carry, ahead of the booking lines', async () => {
+    const g2 = await liveGame2();
+    finishChapter(g2);
+    const warn = vi.spyOn(console, 'warn');
+    f.box.resumeOk = true;
+    // The srcds crashed and came back: no marker, no match, sm_pug_tournament back at 0.
+    f.box.marker = ''; f.box.map = 'l4d_vs_hospital01_apartment'; f.box.pug = { state: 'none', match: 0 }; f.box.tournament = false;
+    f.sent.length = 0;
+    const replies: [string, string][] = [];
+    const rcon = f.runner['deps'].rcon;
+    f.runner['deps'].rcon = async (s, cmds) => { const r = await rcon(s, cmds); cmds.forEach((c, i) => replies.push([c, r[i] ?? ''])); return r; };
+    f.t.t += MIN;
+    await f.tick();
+    await f.runner.idle();
+    expect(f.booking().recovering_at).toBeNull();
+    expect(f.db.prepare('SELECT state FROM matches WHERE id = ?').get(g2)).toEqual({ state: 'live' });
+    const resume = f.sent.findIndex((c) => c.startsWith(`sm_pug_resume ${g2} `));
+    const on = f.sent.indexOf('sm_pug_tournament 1', resume);
+    const carry = f.sent.indexOf(`sm_pug_carry ${g2} 500 400`);
+    expect(resume).toBeGreaterThanOrEqual(0);
+    expect(on).toBe(resume + 1);
+    expect(carry).toBe(on + 1);
+    expect(carry).toBeLessThan(f.sent.indexOf('sm_pug_resume_commit'));
+    expect(replies.find(([c]) => c === `sm_pug_carry ${g2} 500 400`)?.[1]).toBe('PUGOK carry a=500 b=400');
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('sm_pug_carry'))).toBe(false);
+  });
+
+  it('a desk chapter replay of a carried game 2 sends the extra line and the box takes the carry', async () => {
+    const g2 = await liveGame2();
+    finishChapter(g2);
+    f.box.resumeOk = true;
+    f.sent.length = 0;
+    const snap = restoreSnapshot(f.db, g2, { replayFrom: 0 })!;
+    expect(await f.runner.replayGame(f.booking().id, g2, snap)).toBe('ok');
+    const carry = f.sent.indexOf(`sm_pug_carry ${g2} 500 400`);
+    expect(f.sent[carry - 1]).toBe('sm_pug_tournament 1');
+    expect(f.box.tournament).toBe(true);
+  });
+
+  it('logs a carry the box refused, naming the match', async () => {
+    const { warnCarryRefused } = await import('../src/bookings/runner.js');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const server = { name: 'box' } as Parameters<typeof warnCarryRefused>[0];
+    warnCarryRefused(server, ['sm_pug_resume 7 x', 'sm_pug_carry 7 500 400'], ['PUGOK resume=7', 'PUGOK carry a=500 b=400']);
+    expect(warn).not.toHaveBeenCalled();
+    warnCarryRefused(server, ['sm_pug_carry 7 500 400'], ['PUGERR not a tournament box']);
+    warnCarryRefused(server, ['sm_pug_carry 8 1 1'], []);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(String(warn.mock.calls[0]![0])).toContain('match 7');
+    expect(String(warn.mock.calls[0]![0])).toContain('PUGERR not a tournament box');
+    expect(String(warn.mock.calls[1]![0])).toContain('match 8');
   });
 
   it('a chapter replay (replayFrom) of a carried game 2 carries too; from chapter 0 team a survives first', async () => {

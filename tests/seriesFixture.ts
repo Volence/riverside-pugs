@@ -30,8 +30,9 @@ export interface SeriesFixture extends RoomFixture {
    *  failOn: an rcon burst with a command starting with this throws (the connection dropped on it), as `down` does for every burst.
    *  failLeft: when set, failOn throws only this many more times, then clears itself.
    *  onFailsDone: called once failLeft runs out.
-   *  gate: when set, every rcon burst waits on it before answering (holds tracked work mid-flight). */
-  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; forfeitOk: boolean; failOn: string | null; failLeft: number | null; onFailsDone: (() => void) | null; gate: Promise<void> | null; marker: string; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
+   *  gate: when set, every rcon burst waits on it before answering (holds tracked work mid-flight).
+   *  tournament: sm_pug_tournament as the box holds it; a restart (or a test's crash) clears it, and sm_pug_carry is refused without it. */
+  box: { map: string; humans: string[]; down: boolean; resumeOk: boolean; subOk: boolean; subErr: string; freezeOk: boolean; forfeitOk: boolean; failOn: string | null; failLeft: number | null; onFailsDone: (() => void) | null; gate: Promise<void> | null; marker: string; tournament: boolean; pug: { state: string; match: number } }; send: MockInstance; alerts: AdminEvent[]; pushes: number[];
   /** The room clock (which ticks the series engine), then the runner's
    *  minute pass, then any tracked work. */
   tick(): Promise<void>;
@@ -67,7 +68,7 @@ export async function seriesFixture(o: {
   f.db.prepare("UPDATE servers SET status = 'idle', has_dlc4 = 1 WHERE id = ?").run(serverId);
   const t = { t: NOW.getTime() + 10 * MIN };
   const sent: string[] = [];
-  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, forfeitOk: true, failOn: null as string | null, failLeft: null as number | null, onFailsDone: null as (() => void) | null, gate: null as Promise<void> | null, marker: '', type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
+  const box = { map: 'l4d_vs_hospital01_apartment', humans: [] as string[], down: false, resumeOk: false, subOk: true, subErr: 'not rostered', freezeOk: true, forfeitOk: true, failOn: null as string | null, failLeft: null as number | null, onFailsDone: null as (() => void) | null, gate: null as Promise<void> | null, marker: '', tournament: false, type: 'Rotoblin Pub VS', pug: { state: 'none', match: 0 } };
   const status = () => [
     'hostname: test', `map     : ${box.map} at: 0 x, 0 y, 0 z`, `players : ${box.humans.length} humans, 0 bots (31 max)`,
     '# userid name uniqueid connected ping loss state rate adr',
@@ -99,8 +100,11 @@ export async function seriesFixture(o: {
       const ff = /^sm_pug_forfeit \S+ (a|b)$/.exec(c);
       if (ff) return box.forfeitOk ? `PUGOK forfeit team=${ff[1]}` : 'PUGERR no live match';
       // pug-match 0.3.27's answer (plugin/pug-match.sp Cmd_Carry, plan T6).
+      // Refused off a tournament box (TourneyOn: sm_pug_tournament 1, which a restart clears).
       const carry = /^sm_pug_carry \d+ (\d+) (\d+)$/.exec(c);
-      if (carry) return `PUGOK carry a=${carry[1]} b=${carry[2]}`;
+      if (carry) return box.tournament ? `PUGOK carry a=${carry[1]} b=${carry[2]}` : 'PUGERR not a tournament box';
+      const tm = /^sm_pug_tournament ([01])$/.exec(c);
+      if (tm) box.tournament = tm[1] === '1';
       if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${box.type}" ( def. "" )`;
       if (c === 'l4d_booking_version') return '"l4d_booking_version" = "1.4.0" ( def. "1.0.0" )';
       if (c === 'l4d_booking_id') return `"l4d_booking_id" = "${box.marker}" ( def. "" )`;
@@ -135,7 +139,7 @@ export async function seriesFixture(o: {
         return true;
       },
     ...(releaser ? { releasing: (id: number) => releaser.isRestarting(id) } : {}),
-    restart: async () => { box.map = 'l4d_vs_hospital01_apartment'; box.marker = ''; box.type = 'Rotoblin Pub VS'; box.pug = { state: 'none', match: 0 }; return true; },
+    restart: async () => { box.map = 'l4d_vs_hospital01_apartment'; box.marker = ''; box.tournament = false; box.type = 'Rotoblin Pub VS'; box.pug = { state: 'none', match: 0 }; return true; },
     notifier, preempt: () => {}, sleep: async () => {}, now: () => t.t, tournament: lateHooks(() => series),
   });
   releaser?.onFreed(() => runner.allocate());
