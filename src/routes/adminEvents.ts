@@ -587,7 +587,7 @@ export async function adminEventRoutes(
     if (typeof body.out !== 'string' || typeof body.in !== 'string' || (body.note !== undefined && body.note !== null && typeof body.note !== 'string')) {
       return refuse(reply, 'bad_request');
     }
-    if (typeof body.reason !== 'string' || !N.REPLACE_REASONS.includes(body.reason as N.ReplaceReason)) return refuse(reply, 'bad_reason');
+    if (typeof body.reason !== 'string' || !N.REPLACE_REASONS.includes(body.reason as N.ReplaceReason)) return refuse(reply, 'replace_bad_reason');
     const note = typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null;
     const o = { eventId: ev.id, entryId: entry.id, out: body.out, in: body.in, reason: body.reason as N.ReplaceReason, note, actor: me, now: new Date() };
     const r = opts.series ? await opts.series.staffReplace(o) : N.replaceDraftPlayer(db, o);
@@ -600,7 +600,8 @@ export async function adminEventRoutes(
       console.error(`[events] the staff note for a replace in event ${ev.id} failed:`, err instanceof Error ? err.message : err);
     }
     tellPlayerReplaced(opts, ev.id, entry.id, o.out, o.in, o.reason);
-    if (r.value.subbedInMatch !== null) opts.rooms?.pushChange(r.value.subbedInMatch);
+    // Without the engine (tests), the room is pushed here; staffReplace pushes it itself.
+    if (!opts.series && r.value.subbedInMatch !== null) opts.rooms?.pushChange(r.value.subbedInMatch);
     return { subbedInMatch: r.value.subbedInMatch };
   });
 

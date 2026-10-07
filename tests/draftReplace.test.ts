@@ -78,7 +78,7 @@ describe('replaceDraftPlayer', () => {
     // OUTSIDER has no PUGs and the draft asks for some: refused with the problem named.
     const r0 = N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId, out, in: OUTSIDER, reason: 'left', note: null, actor: ADMIN, now: LATER });
     expect(r0.ok).toBe(false);
-    expect(!r0.ok && r0.error).toBe('ineligible');
+    expect(!r0.ok && r0.error).toBe('replace_ineligible');
     expect(!r0.ok && r0.detail?.[0]?.steamid).toBe(OUTSIDER);
     f.db.prepare("UPDATE events SET eligibility_json = json_set(eligibility_json, '$.minPugs', 0) WHERE id = ?").run(f.eventId);
     expect(must(N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId, out, in: OUTSIDER, reason: 'left', note: null, actor: ADMIN, now: LATER }))).toEqual({ subbedInMatch: null });
@@ -98,28 +98,37 @@ describe('replaceDraftPlayer', () => {
     const err = (r: ReturnType<typeof go>) => (r.ok ? null : r.error);
     expect(err(go({ out: captain! }))).toBe('captain_replace');
     expect(EVENT_ERRORS.captain_replace.text).toContain('Make another player captain first.');
-    expect(err(go({ out: other }))).toBe('not_on_entry');
-    expect(err(go({ out: BENCH, in: OUTSIDER }))).toBe('not_on_entry');
+    expect(err(go({ out: other }))).toBe('replace_not_starter');
+    expect(err(go({ out: BENCH, in: OUTSIDER }))).toBe('replace_not_starter');
     // Review Focus 3: the one-entry-per-player rule.
     expect(err(go({ in: other }))).toBe('player_entered');
-    expect(err(go({ in: OUTSIDER }))).toBe('ineligible');
-    expect(err(go({ reason: 'rude' as never }))).toBe('bad_reason');
-    expect(err(go({ note: 'x'.repeat(201) }))).toBe('bad_note');
-    expect(err(go({ note: 'two\nlines' }))).toBe('bad_note');
+    expect(err(go({ in: OUTSIDER }))).toBe('replace_ineligible');
+    expect(err(go({ reason: 'rude' as never }))).toBe('replace_bad_reason');
+    expect(err(go({ note: 'x'.repeat(201) }))).toBe('replace_bad_note');
+    expect(err(go({ note: 'two\nlines' }))).toBe('replace_bad_note');
+    expect(EVENT_ERRORS.replace_bad_note.text).toBe('A staff note is at most 200 characters of plain text, on one line.');
     expect(err(go({ entryId: 999_999 }))).toBe('entry_not_found');
     f.db.prepare("UPDATE events SET status = 'finished' WHERE id = ?").run(f.eventId);
     expect(err(go({}))).toBe('wrong_status');
     expect(snapshot(f)).toBe(before);
   });
 
-  it('refuses before teams are made, and on a team entry', () => {
-    const f = cutDraft({ balance: true });
-    const r = N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId: 1, out: P[0]!, in: BENCH, reason: 'conduct', note: null, actor: ADMIN, now: LATER });
-    expect(r.ok ? null : r.error).toBe('entry_not_found');
+  it('takes a staff note of exactly 200 characters', () => {
+    const f = published();
+    const out = starters(f, f.entries[0]!)[1]!;
+    expect(N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId: f.entries[0]!, out, in: BENCH, reason: 'other', note: 'n'.repeat(200), actor: ADMIN, now: LATER }).ok).toBe(true);
+  });
+
+  it('refuses while the event has no teams made (wrong_status), and on a team entry', () => {
+    const f = published();
+    // Test setup only: the stamp cleared on an event whose entries exist.
+    f.db.prepare('UPDATE events SET teams_made_at = NULL WHERE id = ?').run(f.eventId);
+    const r = N.replaceDraftPlayer(f.db, { eventId: f.eventId, entryId: f.entries[0]!, out: starters(f, f.entries[0]!)[1]!, in: BENCH, reason: 'conduct', note: null, actor: ADMIN, now: LATER });
+    expect(r.ok ? null : r.error).toBe('wrong_status');
     const t = entryFixture();
     const entryId = must(N.registerEntry(t.db, { eventId: t.eventId, teamId: t.teamA, by: A[0]!, roster: rosterA(), now: NOW })).entry.id;
     const r2 = N.replaceDraftPlayer(t.db, { eventId: t.eventId, entryId, out: A[2]!, in: OUTSIDER, reason: 'conduct', note: null, actor: ADMIN, now: NOW });
-    expect(r2.ok ? null : r2.error).toBe('not_draft_entry');
+    expect(r2.ok ? null : r2.error).toBe('replace_not_draft');
   });
 });
 
@@ -161,6 +170,11 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
     expect(people.find((p) => p[0] === A[3])).toBeUndefined();
     expect(logs(s, 'entry_player_replaced')).toEqual([{ actor: ADMIN, entryId: s.entryA, out: A[3], in: OUTSIDER, reason: 'cheating', matchId: s.matchId }]);
     expect(s.pushes).toContain(s.matchId);
+    // Item 9: the box's allow list goes at once, with the new player and without the removed one.
+    const allow = s.sent.filter((c) => c.startsWith('sm_booking_allow_add ')).join(' ');
+    expect(s.sent).toContain('sm_booking_allow_begin');
+    expect(allow).toContain(OUTSIDER);
+    expect(allow).not.toContain(A[3]!);
     // Bats pick, Rats choose survivors: game 2's burst rosters the new player.
     must(R.actVeto(s.db, { matchId: s.matchId, steamid: BATS[0]!, step: 7, action: 'pick', campaign: POOL7[4]!, timers: TIMERS, now: new Date(s.t.t) }));
     s.series.afterPick(s.matchId);
@@ -184,8 +198,12 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
     s.goLive(g1);
     const token = s.liveGameToken();
     s.sent.length = 0;
+    const firstLog = (s.db.prepare('SELECT COALESCE(MAX(id), 0) AS n FROM event_log').get() as { n: number }).n;
     expect(await replace()).toEqual({ ok: true, value: { subbedInMatch: s.matchId } });
     expect(s.sent).toContain(`sm_pug_sub ${token} ${A[3]} ${OUTSIDER}`);
+    // Exactly the room's own row (marked staff) and the replace's row.
+    expect(s.db.prepare('SELECT action, json_extract(detail, \'$.staff\') AS staff FROM event_log WHERE id > ? ORDER BY id').all(firstLog))
+      .toEqual([{ action: 'player_subbed', staff: 1 }, { action: 'entry_player_replaced', staff: null }]);
     expect(R.lineupFour(s.db, s.matchId, s.entryA)).toEqual([A[0], A[1], A[2], OUTSIDER]);
     expect(R.subsUsed(s.db, s.match(), 'a')).toBe(0);
     // Rats are match team b on game 1 (Bats survive first).
@@ -206,6 +224,33 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
     expect(snapshot(s)).toBe(before);
     expect(R.lineupFour(s.db, s.matchId, s.entryA)).toEqual(A.slice(0, 4));
   });
+
+  for (const undone of [true, false]) {
+    it(`the box took it but the site then refused: the box is asked to undo it (${undone ? 'undone' : 'not undone'}), staff are told, nothing is written`, async () => {
+      s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+      await s.tick();
+      s.goLive(s.gameOf(1).match_id!);
+      const token = s.liveGameToken();
+      const before = snapshot(s);
+      const real = s.runner.send.bind(s.runner);
+      // Between the check and the commit the event leaves live (the commit is then refused as wrong_status).
+      vi.spyOn(s.runner, 'send').mockImplementation(async (id, lines, what) => {
+        const out = await real(id, lines, what);
+        if (lines[0] === `sm_pug_sub ${token} ${A[3]} ${OUTSIDER}`) {
+          s.db.prepare("UPDATE events SET status = 'finished' WHERE id = ?").run(s.eventId);
+          if (!undone) s.box.subOk = false;
+        }
+        return out;
+      });
+      s.sent.length = 0;
+      const r = await replace();
+      expect(r.ok ? null : r.error).toBe('wrong_status');
+      expect(s.sent).toContain(`sm_pug_sub ${token} ${OUTSIDER} ${A[3]}`);
+      const alert = s.alerts.find((a): a is Extract<typeof a, { kind: 'problem' }> => a.kind === 'problem' && a.text.includes('staff replace'))!;
+      expect(alert.text).toContain(undone ? 'the server undid it.' : 'it was NOT undone: the server has');
+      expect(snapshot(s)).toBe(before);
+    });
+  }
 
   it('refuses without the series engine when a game is on a box, and writes nothing', async () => {
     s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
@@ -263,7 +308,9 @@ describe('the replace route', () => {
     ]);
     expect(JSON.stringify(calls)).not.toContain('Aim snaps');
     // A second try is refused: the player is no longer on the entry.
-    expect((await post(ADMIN, body)).statusCode).toBe(400);
+    const again = await post(ADMIN, body);
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe(EVENT_ERRORS.replace_not_starter.text);
   });
 
   it('refuses with the sentence and the problems, and sends nothing', async () => {

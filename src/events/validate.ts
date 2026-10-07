@@ -30,6 +30,8 @@ export const CANCEL_REASON_MAX = 300;
 export const POOL_MAX = 12;
 export const LEAGUE_MATCHES_MAX = 40;
 export const STAGES_MAX = 5;
+/** The staff-only note on a draft replace (drafts plan D2c Ruling 4). */
+export const REPLACE_NOTE_MAX = 200;
 /** Words the routes use for themselves, or may later. */
 export const RESERVED_EVENT_SLUGS: ReadonlySet<string> = new Set(['new', 'edit', 'mine', 'admin', 'logos', 'banners', 'options']);
 
@@ -181,7 +183,12 @@ export const EVENT_ERRORS = {
   bad_penalty: { status: 400, text: 'A penalty is a warning or a forfeit of the game.' },
   emergency_off: { status: 409, text: 'Emergency subs are off in this event: subs are made between chapters.' },
   captain_replace: { status: 409, text: 'That player is the team\'s captain. Make another player captain first.' },
-  replace_in_game: { status: 409, text: 'That player is in a game on a server and the server did not take the change (a chapter is being played). Use the in-game tools first (the staff freeze, !sub), or try again between chapters.' },
+  replace_in_game: { status: 409, text: 'That player is in a game on a server and the server did not take the change. Use the in-game tools first (the staff freeze, !sub), or try again between chapters.' },
+  replace_not_starter: { status: 409, text: 'That player is not a starter of this team.' },
+  replace_ineligible: { status: 409, text: 'The replacement does not meet this event\'s entry rules.' },
+  replace_bad_note: { status: 400, text: `A staff note is at most ${REPLACE_NOTE_MAX} characters of plain text, on one line.` },
+  replace_not_draft: { status: 409, text: 'Only a player on a draft team can be replaced.' },
+  replace_bad_reason: { status: 400, text: 'A reason is one of: conduct, cheating, no-show, left the event, other.' },
   bad_schedule: { status: 400, text: 'A round schedule lists rounds, each with a default time and, on a window stage, a window that starts before it ends and holds the default time; a rolling stage takes a date only.' },
   schedule_locked: { status: 409, text: 'The schedule of a finished stage or event cannot change.' },
   not_schedulable: { status: 409, text: 'This match cannot be rescheduled now: it is not waiting in a window stage with a scheduling window, or its window has passed.' },

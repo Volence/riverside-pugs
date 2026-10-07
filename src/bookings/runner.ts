@@ -1519,6 +1519,16 @@ export class BookingRunner {
     }
   }
 
+  /** The allow list to a running box now, not at the next minute re-push
+   *  (drafts plan D2c: a player staff took off a draft team leaves the
+   *  booking, and must not stay on the box until then). */
+  async pushAllowList(bookingId: number): Promise<void> {
+    const b = this.running(bookingId);
+    const server = b ? getServer(this.db, b.server_id!) : undefined;
+    if (!b || !server) return;
+    await this.push(b.id, server, () => allowLines(this.db, b), 'the allowlist after a staff replace');
+  }
+
   /** Staff replay a chapter of a live tournament game (plan T3c Ruling 12),
    *  on the same box, through the plugin's restore: the match is dropped and
    *  rebuilt from the snapshot, then the chapter loads from its start. The
