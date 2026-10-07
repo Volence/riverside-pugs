@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { adminApi, peopleApi, type AdminEntryView, type ReplaceReason } from '../../../api';
+import { adminApi, ApiError, peopleApi, type AdminEntryView, type ReplaceReason } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
 import { fileUrl } from '../adminRoutes';
@@ -36,6 +36,8 @@ function ReplaceForm({ eventId, e, out, bench, busy, run, onClose }: {
   const [q, setQ] = useState('');
   const [found, setFound] = useState<Person[] | null>(null);
   const [searchError, setSearchError] = useState('');
+  /** Why the server refused the last try, player by player (the server's reason, the entry rules missed, another roster). */
+  const [problems, setProblems] = useState<{ steamid: string; name: string; problems: string[] }[]>([]);
   const known = [...bench, ...(found ?? []).filter((p) => !bench.some((b) => b.steamid === p.steamid))];
   const chosen = known.find((p) => p.steamid === pick);
   const search = async () => {
@@ -50,7 +52,14 @@ function ReplaceForm({ eventId, e, out, bench, busy, run, onClose }: {
   const submit = () => {
     if (!chosen || !reason) return;
     void run(async () => {
-      await adminApi.replaceEntryPlayer(eventId, e.id, { out: out.steamid, in: chosen.steamid, reason, note: note.trim() === '' ? null : note.trim() });
+      setProblems([]);
+      try {
+        await adminApi.replaceEntryPlayer(eventId, e.id, { out: out.steamid, in: chosen.steamid, reason, note: note.trim() === '' ? null : note.trim() });
+      } catch (err) {
+        // The details stay under the form; run still shows the sentence.
+        if (err instanceof ApiError && err.problems) setProblems(err.problems);
+        throw err;
+      }
       onClose();
     }, {
       title: `Replace ${out.name} with ${chosen.name}?`,
@@ -82,6 +91,11 @@ function ReplaceForm({ eventId, e, out, bench, busy, run, onClose }: {
         </select>
         <input type="text" aria-label="Staff note" placeholder="Note for staff (optional)" maxLength={NOTE_MAX} value={note} onInput={(ev) => setNote((ev.target as HTMLInputElement).value)} />
       </div>
+      {problems.length > 0 && (
+        <ul class="replaceform__problems" role="alert">
+          {problems.map((p) => <li key={p.steamid}><strong>{p.name}</strong>: {p.problems.join(' ')}</li>)}
+        </ul>
+      )}
       <p class="muted">The note stays with staff and is never sent to the player. This is not a ban: <a href={fileUrl(out.steamid)}>open {out.name}'s file</a> for the ban tools.</p>
       <div class="inlinerow">
         <button class="btn btn--sm" disabled={busy || !chosen || !reason} onClick={submit}>Replace</button>

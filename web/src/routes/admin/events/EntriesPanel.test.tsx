@@ -175,6 +175,20 @@ describe('EntriesPanel', () => {
       await waitFor(() => expect(screen.queryByRole('group', { name: 'Replace s2' })).toBeNull());
     });
 
+    it('shows the server\'s refusal and its details under the form, and keeps the form open', async () => {
+      const { ApiError } = await import('../../../api');
+      mockAdmin.replaceEntryPlayer.mockRejectedValue(new ApiError(409, 'That player is in a game on a server and the server did not take the change.', undefined,
+        [{ steamid: 's2', name: 's2', problems: ['The server said: not between chapters.'] }]));
+      await open();
+      fireEvent.click(screen.getByRole('button', { name: 'Replace player s2' }));
+      fireEvent.change(screen.getByLabelText('Replacement'), { target: { value: 'b1' } });
+      fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'cheating' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Replace' }));
+      expect(await screen.findByText(/The server said: not between chapters\./)).toBeTruthy();
+      expect(screen.getByText('That player is in a game on a server and the server did not take the change.')).toBeTruthy();
+      expect(screen.getByRole('group', { name: 'Replace s2' })).toBeTruthy();
+    });
+
     it('finds another player by the People search, leaving out the team\'s own players', async () => {
       mockAdmin.replaceEntryPlayer.mockResolvedValue({ subbedInMatch: null });
       mockPeople.people.mockResolvedValue({ players: [{ steamid: 's1', name: 's1' }, { steamid: 'x9', name: 'outsider' }] });

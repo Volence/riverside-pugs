@@ -67,6 +67,8 @@ export interface SeriesRunner {
   onCancelled(bookingId: number, by: string | null, reason: string | null): void;
   /** Plan T3c: one burst with the replies, a chapter replay, a move. */
   send(bookingId: number, lines: string[], what: string): Promise<string[] | null>;
+  /** Drafts plan D2c: the allow list to a running box at once. */
+  pushAllowList(bookingId: number): Promise<void>;
   replayGame(bookingId: number, gameMatchId: number, snap: RestoreSnapshot): Promise<'ok' | 'refused' | 'busy' | 'error' | 'dropped'>;
   moveBooking(bookingId: number): Promise<number | null>;
 }
@@ -876,7 +878,9 @@ export class SeriesEngine {
       const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${o.out} ${o.in}`], 'the staff replace');
       const reply = parseSubReply(replies?.[0], o.out, o.in);
       if (!reply || !reply.ok) {
-        await this.undoBoxSubs(took, o.out, o.in);
+        const kept = await this.undoBoxSubs(took, o.out, o.in);
+        const km = kept[0] ? P.getMatch(this.db, kept[0].matchId) : undefined;
+        if (km) this.alert(km, `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} was taken by one server and refused by another, and it was NOT undone: the server has ${this.playerName(o.in)}, the site has ${this.playerName(o.out)}.`);
         console.log(`[series] match ${g.matchId}: the box refused the staff replace of ${o.out} by ${o.in} (${reply ? reply.error : 'no answer'})`);
         return V.fail('replace_in_game', [{ steamid: o.out, problems: [reply ? `The server said: ${reply.error}.` : 'The server did not answer.'] }]);
       }
@@ -884,9 +888,14 @@ export class SeriesEngine {
     }
     const r = N.replaceDraftPlayer(this.db, { ...o, now: at(), boxTook: took.map((g) => g.gameMatchId) });
     if (!r.ok) {
-      await this.undoBoxSubs(took, o.out, o.in);
+      const kept = await this.undoBoxSubs(took, o.out, o.in);
       const m = took[0] ? P.getMatch(this.db, took[0].matchId) : undefined;
-      if (m) this.alert(m, `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} was taken by the server but then refused on the site (${r.error}); the server was asked to undo it. Check the game on the Events desk.`);
+      if (m) {
+        const what = `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} was taken by the server but then refused on the site (${r.error})`;
+        this.alert(m, kept.length === 0
+          ? `${what}; the server undid it.`
+          : `${what}, and it was NOT undone: the server has ${this.playerName(o.in)}, the site has ${this.playerName(o.out)}. Put ${this.playerName(o.out)} back in game (!sub) or replace again on the Events desk.`);
+      }
       return r;
     }
     if (r.value.subbedInMatch !== null) {
@@ -894,6 +903,8 @@ export class SeriesEngine {
       const b = m?.booking_id != null ? B.getBooking(this.db, m.booking_id) : undefined;
       if (m && b && B.isOpen(b) && b.server_id !== null) {
         const side = this.sideOfEntry(m, o.entryId);
+        // The removed player left the booking: the box's allow list now, not at the minute re-push.
+        await this.deps.runner.pushAllowList(b.id);
         this.deps.runner.announce(b.id, `Staff replaced ${this.playerName(o.out)} with ${this.playerName(o.in)}${side ? ` (${this.name(m, side)})` : ''}.`);
       }
       this.push(r.value.subbedInMatch);
@@ -901,15 +912,19 @@ export class SeriesEngine {
     return { ok: true, value: { subbedInMatch: r.value.subbedInMatch } };
   }
 
-  /** The reverse sub on each box that took a staff replace the site then did not make. */
-  private async undoBoxSubs(games: N.BoxGame[], out: string, inn: string): Promise<void> {
+  /** The reverse sub on each box that took a staff replace the site then did
+   *  not make; the games whose box did not confirm the undo (parseSubReply). */
+  private async undoBoxSubs(games: N.BoxGame[], out: string, inn: string): Promise<N.BoxGame[]> {
+    const kept: N.BoxGame[] = [];
     for (const g of games) {
-      try {
-        await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${inn} ${out}`], 'undoing the staff replace');
-      } catch (err) {
-        console.error(`[series] undoing the staff replace on booking ${g.bookingId} failed:`, err instanceof Error ? err.message : err);
+      const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${inn} ${out}`], 'undoing the staff replace');
+      const reply = parseSubReply(replies?.[0], inn, out);
+      if (!reply || !reply.ok) {
+        kept.push(g);
+        console.error(`[series] match ${g.matchId}: undoing the staff replace of ${out} by ${inn} on the box failed (${reply ? reply.error : 'no answer'})`);
       }
     }
+    return kept;
   }
 
   /** A reset line (the plugin dropping its match, which lifts any freeze)

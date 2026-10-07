@@ -484,7 +484,7 @@ export function setEntryIdentity(
 export type ReplaceReason = 'conduct' | 'cheating' | 'no_show' | 'left' | 'other';
 export const REPLACE_REASONS: readonly ReplaceReason[] = ['conduct', 'cheating', 'no_show', 'left', 'other'];
 /** The staff-only note on a replace (plan D2c Ruling 4). */
-export const REPLACE_NOTE_MAX = 200;
+export const REPLACE_NOTE_MAX = V.REPLACE_NOTE_MAX;
 /** A game of one of the entry's matches on a box right now, with the
  *  removed player on its roster: the box takes the sub before the site does
  *  (plan D2c Ruling 5). */
@@ -538,26 +538,26 @@ export function replaceDraftPlayer(db: DB, o: {
   check?: boolean; boxTook?: number[];
 }): V.Checked<{ subbedInMatch: number | null; onBox?: BoxGame[] }> {
   const at = o.now.toISOString();
-  if (!REPLACE_REASONS.includes(o.reason)) return V.fail('bad_reason');
-  if (o.note !== null && (typeof o.note !== 'string' || o.note.length > REPLACE_NOTE_MAX || /[\r\n]/.test(o.note) || hasUnsafeChars(o.note))) return V.fail('bad_note');
+  if (!REPLACE_REASONS.includes(o.reason)) return V.fail('replace_bad_reason');
+  if (o.note !== null && (typeof o.note !== 'string' || o.note.length > REPLACE_NOTE_MAX || /[\r\n]/.test(o.note) || hasUnsafeChars(o.note))) return V.fail('replace_bad_note');
   try {
     return db.transaction((): V.Checked<{ subbedInMatch: number | null; onBox?: BoxGame[] }> => {
       const ev = E.getEvent(db, o.eventId);
       if (!ev || ev.status === 'draft') return V.fail('not_found');
       const entry = getEntry(db, o.entryId);
       if (!entry || entry.event_id !== ev.id) return V.fail('entry_not_found');
-      if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return V.fail('not_draft_entry');
+      if (ev.entry_kind !== 'draft' || entry.captain_steamid === null) return V.fail('replace_not_draft');
       if (ev.teams_made_at === null || !ROSTER_OPEN.has(ev.status)) return V.fail('wrong_status');
       if (!isActive(entry)) return V.fail('entry_out');
       if (o.out === entry.captain_steamid) return V.fail('captain_replace');
       const place = placesOf(db, entry.id).find((p) => p.steamid === o.out && p.role === 'starter');
-      if (!place) return V.fail('not_on_entry');
+      if (!place) return V.fail('replace_not_starter');
       const other = entryOfPlayer(db, ev.id, o.in);
       if (other) return V.fail('player_entered', [{ steamid: o.in, problems: [`Already on ${other.name}'s roster`] }]);
       const elig = E.fieldsOf(ev).eligibility;
       const facts = playerFacts(db, o.in, o.now);
       const problems = R.problemsOf(elig, facts, 'starter');
-      if (problems.length > 0) return V.fail('ineligible', [{ steamid: o.in, problems: problems.map((k) => R.problemText(k, elig, facts)) }]);
+      if (problems.length > 0) return V.fail('replace_ineligible', [{ steamid: o.in, problems: problems.map((k) => R.problemText(k, elig, facts)) }]);
       const matches = lineupMatches(db, ev.id, entry.id, o.out);
       const onBox = matches.flatMap((m) => m.onBox);
       const subbedInMatch = matches[0]?.matchId ?? null;
@@ -571,12 +571,18 @@ export function replaceDraftPlayer(db: DB, o: {
         const live = m.onBox[0];
         const gameId = live ? Room.gamesOf(db, m.matchId).find((g) => g.match_id === live.gameMatchId)?.id ?? null : null;
         const s = Room.subPlayer(db, { matchId: m.matchId, by: o.actor, outId: o.out, inId: o.in, limit: 0, gameId, staff: true, now: o.now });
-        if (!s.ok) throw new Refused(V.fail('replace_in_game', [{ steamid: o.out, problems: [V.EVENT_ERRORS[s.error].text] }]));
+        const inGame = (why: string) => new Refused(V.fail('replace_in_game', [{ steamid: o.out, problems: [why] }]));
+        if (!s.ok) throw inGame(`The match room refused it: ${V.EVENT_ERRORS[s.error].text}`);
         if (m.bookingId !== null) {
           const b = B.getBooking(db, m.bookingId);
-          if (b && B.isOpen(b)) B.replacePlayer(db, { bookingId: b.id, side: s.value.side, outId: o.out, inId: o.in, by: o.actor, now: o.now });
+          if (b && B.isOpen(b)) {
+            const swapped = B.replacePlayer(db, { bookingId: b.id, side: s.value.side, outId: o.out, inId: o.in, by: o.actor, now: o.now });
+            if (!swapped.ok) throw inGame(`The booking refused it (${swapped.error}).`);
+          }
         }
-        for (const g of m.onBox) addTournamentSub(db, { matchId: g.gameMatchId, inId: o.in, team: g.team, now: o.now });
+        for (const g of m.onBox) {
+          if (!addTournamentSub(db, { matchId: g.gameMatchId, inId: o.in, team: g.team, now: o.now })) throw inGame(`Game ${g.gameMatchId} is not a tournament game.`);
+        }
       }
       E.logEvent(db, ev.id, o.actor, 'entry_player_replaced', at, {
         entryId: entry.id, out: o.out, in: o.in, reason: o.reason, ...(subbedInMatch !== null ? { matchId: subbedInMatch } : {}),
