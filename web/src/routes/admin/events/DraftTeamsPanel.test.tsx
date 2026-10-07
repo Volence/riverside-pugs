@@ -30,13 +30,16 @@ const made = (over: Partial<AdminDraftTeamsView> = {}): AdminDraftTeamsView => (
   ...over,
 });
 
+const SOON = new Date(Date.now() + 3_600_000).toISOString();
+const AGO = new Date(Date.now() - 60_000).toISOString();
+
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('DraftTeamsPanel', () => {
   it('offers the two methods before one is chosen, the live one disabled', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue({ mode: null, teamsMadeAt: null, teams: null, fairness: null });
     mockAdmin.draftMode.mockResolvedValue({});
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     expect(await screen.findByRole('heading', { name: 'Make teams' })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Let captains pick' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('Coming soon: the live draft room')).toBeTruthy();
@@ -47,7 +50,7 @@ describe('DraftTeamsPanel', () => {
   it('balances with no confirm the first time, and Rebalance asks first', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue({ mode: 'auto', teamsMadeAt: null, teams: null, fairness: null });
     mockAdmin.draftBalance.mockResolvedValue({});
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Balance teams' }));
     await waitFor(() => expect(mockAdmin.draftBalance).toHaveBeenCalledWith(9));
     expect(confirmMock).not.toHaveBeenCalled();
@@ -55,7 +58,7 @@ describe('DraftTeamsPanel', () => {
     cleanup();
     mockAdmin.draftBalance.mockClear();
     mockAdmin.draftTeamsView.mockResolvedValue(made());
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Rebalance' }));
     await waitFor(() => expect(mockAdmin.draftBalance).toHaveBeenCalledWith(9));
     expect(confirmMock).toHaveBeenCalledWith('Rebalance from scratch? Hand moves are lost.');
@@ -63,7 +66,7 @@ describe('DraftTeamsPanel', () => {
 
   it('shows team cards with rounded SR and the fairness readout', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue(made());
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     expect(await screen.findByText('Bob', { selector: 'span' })).toBeTruthy();
     expect(screen.getByText('1200')).toBeTruthy();
     expect(screen.getByText('1000')).toBeTruthy();
@@ -77,7 +80,7 @@ describe('DraftTeamsPanel', () => {
   it('swaps a pool player with one from another team', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue(made());
     mockAdmin.draftMove.mockResolvedValue({});
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     const sel = await screen.findByLabelText('Swap Bob with');
     fireEvent.change(sel, { target: { value: '6' } });
     await waitFor(() => expect(mockAdmin.draftMove).toHaveBeenCalledWith(9, '2', '6'));
@@ -90,7 +93,7 @@ describe('DraftTeamsPanel', () => {
     v.teams![1]!.players.pop();
     v.teams![1]!.short = true;
     mockAdmin.draftTeamsView.mockResolvedValue(v);
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     expect(await screen.findByText('This team is short a player; publishing will be refused until it has 4.')).toBeTruthy();
     expect(screen.getAllByText('This team is short a player; publishing will be refused until it has 4.')).toHaveLength(1);
   });
@@ -98,7 +101,7 @@ describe('DraftTeamsPanel', () => {
   it('publishes after confirming with the exact title and body, and shows the refusal sentence', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue(made());
     mockAdmin.draftPublishTeams.mockRejectedValue(new ApiError(409, 'The teams changed since they were balanced.'));
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Publish teams' }));
     await waitFor(() => expect(mockAdmin.draftPublishTeams).toHaveBeenCalledWith(9));
     expect(confirmMock).toHaveBeenCalledWith({
@@ -111,7 +114,7 @@ describe('DraftTeamsPanel', () => {
   it('Change method asks, then clears the mode', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue(made());
     mockAdmin.draftMode.mockResolvedValue({});
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Change method' }));
     await waitFor(() => expect(mockAdmin.draftMode).toHaveBeenCalledWith(9, null));
     expect(confirmMock).toHaveBeenCalled();
@@ -119,7 +122,7 @@ describe('DraftTeamsPanel', () => {
 
   it('after publishing shows when, with no controls', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue(made({ teamsMadeAt: '2026-10-07T20:00:00.000Z' }));
-    render(<DraftTeamsPanel eventId={9} canEdit />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
     expect(await screen.findByText(/^Teams published /)).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByLabelText('Swap Bob with')).toBeNull();
@@ -127,9 +130,40 @@ describe('DraftTeamsPanel', () => {
 
   it('a mod sees the teams and no buttons or swap selects', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue(made());
-    render(<DraftTeamsPanel eventId={9} canEdit={false} />);
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit={false} />);
     expect(await screen.findByText('Bob', { selector: 'span' })).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByLabelText('Swap Bob with')).toBeNull();
   });
+
+  it('warns in the publish confirm when the start time has passed', async () => {
+    mockAdmin.draftTeamsView.mockResolvedValue(made());
+    mockAdmin.draftPublishTeams.mockResolvedValue({});
+    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={AGO} canEdit />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish teams' }));
+    await waitFor(() => expect(mockAdmin.draftPublishTeams).toHaveBeenCalledWith(9));
+    expect(confirmMock).toHaveBeenCalledWith({
+      title: 'Publish the teams?',
+      body: 'Entries are created, every player gets a DM with their team, and captains can name their team until the event starts. Teams cannot be changed afterwards.'
+        + ' The start time has passed, so the event starts within a minute of publishing and team names lock then.',
+    });
+  });
+
+  for (const status of ['cancelled', 'finished']) {
+    it(`an admin gets no write controls once the event is ${status}`, async () => {
+      mockAdmin.draftTeamsView.mockResolvedValue(made());
+      render(<DraftTeamsPanel eventId={9} status={status} startsAt={AGO} canEdit />);
+      expect(await screen.findByText('Bob', { selector: 'span' })).toBeTruthy();
+      expect(screen.queryByRole('button')).toBeNull();
+      expect(screen.queryByLabelText('Swap Bob with')).toBeNull();
+      expect(screen.queryByText('Read only: admins run events.')).toBeNull();
+    });
+
+    it(`an admin gets no method buttons on a ${status} event with no method chosen`, async () => {
+      mockAdmin.draftTeamsView.mockResolvedValue({ mode: null, teamsMadeAt: null, teams: null, fairness: null });
+      render(<DraftTeamsPanel eventId={9} status={status} startsAt={AGO} canEdit />);
+      expect(await screen.findByRole('heading', { name: 'Make teams' })).toBeTruthy();
+      expect(screen.queryByRole('button')).toBeNull();
+    });
+  }
 });
