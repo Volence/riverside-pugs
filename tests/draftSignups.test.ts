@@ -171,3 +171,17 @@ describe('the runner closes signups on the clock', () => {
     expect(logs(f.db, 'entries_locked')).toHaveLength(0);
   });
 });
+
+describe('the events list count of a draft-kind event', () => {
+  it('counts the active signups, not team entries, and a withdrawn signup drops out', async () => {
+    const { eventListItems } = await import('../src/events/views.js');
+    const f = draftFixture();
+    must(sign(f, P[0]));
+    must(sign(f, P[1]));
+    must(sign(f, P[2]));
+    must(D.withdrawSignup(f.db, { eventId: f.eventId, steamid: P[2], now: NOW }));
+    const item = eventListItems(f.db, { staff: true }).find((e) => e.slug === f.slug)!;
+    expect(item.entryKind).toBe('draft');
+    expect(item.entries).toBe(2);
+  });
+});

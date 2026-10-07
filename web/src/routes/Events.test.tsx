@@ -35,6 +35,17 @@ describe('Events', () => {
     expect(screen.getByText('Cancelled')).toBeTruthy();
   });
 
+  it('counts a draft-kind event in signups, singular and plural', async () => {
+    mockEvents.list.mockResolvedValue({ events: [
+      item({ slug: 'draft-night', name: 'Draft Night', status: 'registration', entryKind: 'draft', entries: 12 }),
+      item({ slug: 'draft-one', name: 'Draft One', status: 'registration', entryKind: 'draft', entries: 1 }),
+    ] });
+    render(<Events session={session} />);
+    expect(await screen.findByText(/12 signups/)).toBeTruthy();
+    expect(screen.getByText(/ 1 signup$/)).toBeTruthy();
+    expect(screen.queryByText(/entries/)).toBeNull();
+  });
+
   it('shows a banner thumbnail on a row that has one', async () => {
     mockEvents.list.mockResolvedValue({ events: [item({ name: 'Spring Cup', bannerKey: 'd'.repeat(64) }), item({ slug: 'plain', name: 'Plain Cup' })] });
     const { container } = render(<Events session={session} />);
