@@ -19,7 +19,8 @@ import { P as DP, draftFixture, type DraftFixture } from './draftFixture.js';
 import * as DR from '../src/events/draftRoom.js';
 import { ALL, CAPTAINS, POOL, T0, at, drive, liveDraft, startedDraft } from './draftRoomFixture.js';
 import * as ST from '../src/events/standins.js';
-import { standinFixture, type StandinFixture } from './standinFixture.js';
+import { finishedDraft, standinFixture, type StandinFixture } from './standinFixture.js';
+import * as K from '../src/events/keepTeam.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -691,6 +692,78 @@ describe('event_log guard', () => {
         x.f.db.exec("CREATE TRIGGER standin_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
         expect(() => m.run(x as Setup)).toThrow(/audit down/);
         expect(standinRows(x.f)).toBe(before);
+        expect(logCount(x.f)).toBe(logs);
+      });
+    }
+  });
+
+  /** Drafts plan D3b: src/events/keepTeam.ts is the only writer of the keep
+   *  tables; each mutation adds one event_log row or, when that row cannot be
+   *  written, nothing (a team it would have made included). */
+  describe('keep guard (src/events/keepTeam.ts)', () => {
+    const KEEP_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:draft_keeps|draft_keep_answers)\b/gi;
+    const KEEP_READS = new Set(['keepOf', 'keepOfEntry', 'keepsOf', 'openKeeps', 'answersOf', 'playersOf', 'keptFrom', 'myKeepView']);
+    const must = <T>(r: V.Checked<T>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
+    const LATER = new Date('2026-10-12T23:00:00.000Z');
+    type Keep = { f: ReturnType<typeof finishedDraft>; keepId: number; four: string[] };
+    const offered = (): Keep => {
+      const f = finishedDraft();
+      const { keepId } = must(K.offerKeep(f.db, { entryId: f.entries[0]!, now: LATER }));
+      return { f, keepId, four: K.playersOf(K.keepOf(f.db, keepId)!) };
+    };
+    const voting = (): Keep => {
+      const x = offered();
+      must(K.startKeep(x.f.db, { entryId: x.f.entries[0]!, steamid: x.four[0]!, name: 'Night Owls', tag: 'OWL', now: LATER }));
+      return x;
+    };
+    const ready = (): Keep => {
+      const x = voting();
+      for (const s of x.four.slice(1, 3)) must(K.answerKeep(x.f.db, { keepId: x.keepId, steamid: s, accept: true, now: LATER }));
+      return x;
+    };
+    const KEEP_MUTATIONS: Record<string, { action: string; setup: () => Keep | { f: ReturnType<typeof finishedDraft> }; run: (x: Keep) => V.Checked<unknown> }> = {
+      offerKeep: { action: 'keep_offered', setup: () => ({ f: finishedDraft() }), run: ({ f }) => K.offerKeep(f.db, { entryId: f.entries[0]!, now: LATER }) },
+      startKeep: { action: 'keep_started', setup: offered, run: (x) => K.startKeep(x.f.db, { entryId: x.f.entries[0]!, steamid: x.four[0]!, name: 'Night Owls', tag: 'OWL', now: LATER }) },
+      answerKeep: { action: 'keep_answered', setup: voting, run: (x) => K.answerKeep(x.f.db, { keepId: x.keepId, steamid: x.four[1]!, accept: true, now: LATER }) },
+      settleKeep: { action: 'keep_team_made', setup: ready, run: (x) => K.settleKeep(x.f.db, { keepId: x.keepId, now: LATER }) },
+      closeKeep: { action: 'keep_closed', setup: offered, run: (x) => K.closeKeep(x.f.db, { keepId: x.keepId, now: new Date('2026-10-30T00:00:00.000Z') }) },
+    };
+    const keepRows = (x: { f: ReturnType<typeof finishedDraft> }) => JSON.stringify([
+      x.f.db.prepare('SELECT * FROM draft_keeps ORDER BY id').all(),
+      x.f.db.prepare('SELECT * FROM draft_keep_answers ORDER BY keep_id, steamid').all(),
+      x.f.db.prepare('SELECT * FROM teams ORDER BY id').all(),
+      x.f.db.prepare('SELECT * FROM team_members ORDER BY id').all(),
+    ]);
+
+    it('only src/events/keepTeam.ts writes the keep tables', () => {
+      const offenders = walk('src')
+        .filter((f) => f !== 'src/events/keepTeam.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(KEEP_WRITERS) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+    });
+
+    it('every exported function of keepTeam.ts is a known read or a guarded mutation', () => {
+      const fns = Object.entries(K).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !KEEP_READS.has(k)).sort()).toEqual(Object.keys(KEEP_MUTATIONS).sort());
+    });
+
+    for (const [name, m] of Object.entries(KEEP_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, () => {
+        const x = m.setup() as Keep;
+        const before = logCount(x.f);
+        const r = m.run(x);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(x.f)).toBe(before + 1);
+        expect(x.f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, () => {
+        const x = m.setup() as Keep;
+        const before = keepRows(x);
+        const logs = logCount(x.f);
+        x.f.db.exec("CREATE TRIGGER keep_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+        expect(() => m.run(x)).toThrow(/audit down/);
+        expect(keepRows(x)).toBe(before);
         expect(logCount(x.f)).toBe(logs);
       });
     }
