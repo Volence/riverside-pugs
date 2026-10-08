@@ -3529,6 +3529,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftboard__team { padding: var(--sp-3); border: 1px solid var(--border); background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
 .draftboard__team.is-up { border-color: var(--accent); }
 .draftboard__team h4 { margin: 0 0 var(--sp-2); }
+.draftboard__here, .draftboard__away { display: inline-flex; margin-bottom: var(--sp-2); pointer-events: none; }
 .draftboard__slots { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
 /* A phone's panel is narrower than two 160px tracks, so two columns there rather than five stacked teams. */
 @media (max-width: 480px) { .draftboard { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -3896,4 +3897,5 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .draftcontrols p { margin: 0; }
 .draftcontrols label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .draftcontrols input[type='number'] { width: 6rem; }
+.draftcontrols__presence { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
 .draftcontrols__delegates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }

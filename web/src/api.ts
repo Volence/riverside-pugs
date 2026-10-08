@@ -2511,6 +2511,8 @@ export interface DraftRoomView {
   me: { role: 'captain' | 'delegate' | null; team: string | null; onClock: boolean; list: string[] | null; chemistry: Record<string, PairChemistryView> | null };
   lists: Record<string, string[]> | null;
   staff: boolean;
+  /** Captains whose team is in the room (the captain or that team's delegate is there). */
+  present: string[];
 }
 export interface DraftCardsView { cards: PlayerCardView[]; notes: Record<string, string>; chemistry: Record<string, PairChemistryView> | null }
 

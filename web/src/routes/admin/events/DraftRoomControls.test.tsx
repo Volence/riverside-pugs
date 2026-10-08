@@ -19,7 +19,7 @@ const room = (over: Partial<DraftRoomView> = {}): DraftRoomView => ({
   settings: { firstPick: 'lowest_sr', pickSeconds: 75 }, serverNow: new Date().toISOString(), deadlineAt: null, pausedLeftMs: null, totalPicks: 6,
   order: [{ steamid: 'c1', name: 'Ann' }, { steamid: 'c2', name: 'Eve' }], onClock: null, picks: [], delegates: {},
   teams: [{ captain: { steamid: 'c1', name: 'Ann' }, players: [] }, { captain: { steamid: 'c2', name: 'Eve' }, players: [] }],
-  pool: [], notes: null, me: { role: null, team: null, onClock: false, list: null, chemistry: null }, lists: { c1: [], c2: [] }, staff: true,
+  pool: [], notes: null, me: { role: null, team: null, onClock: false, list: null, chemistry: null }, lists: { c1: [], c2: [] }, staff: true, present: ['c1'],
   ...over,
 });
 const running = (over: Partial<DraftRoomView> = {}) => room({
@@ -48,6 +48,37 @@ describe('DraftRoomControls', () => {
     expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'Start the live draft?' }));
     fireEvent.click(screen.getByRole('button', { name: 'Change method' }));
     await waitFor(() => expect(mockAdmin.draftMode).toHaveBeenCalledWith(9, null));
+  });
+
+  it('holds Start while the settings form has unsaved edits, and frees it once they are saved or put back', async () => {
+    mockAdmin.draftRoom.mockResolvedValue(room());
+    mockAdmin.draftRoomSettings.mockResolvedValue({});
+    render(<DraftRoomControls eventId={9} slug="night" canEdit />);
+    const startBtn = await screen.findByRole('button', { name: 'Start draft' }) as HTMLButtonElement;
+    expect(startBtn.disabled).toBe(false);
+    fireEvent.input(screen.getByLabelText('Pick clock (seconds)'), { target: { value: '60' } });
+    expect((screen.getByRole('button', { name: 'Start draft' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Save the settings first: Start uses the saved ones.')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Pick clock (seconds)'), { target: { value: '75' } });
+    expect((screen.getByRole('button', { name: 'Start draft' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText('First pick'), { target: { value: 'random' } });
+    expect((screen.getByRole('button', { name: 'Start draft' }) as HTMLButtonElement).disabled).toBe(true);
+    mockAdmin.draftRoom.mockResolvedValue(room({ settings: { firstPick: 'random', pickSeconds: 75 } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Start draft' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText('Save the settings first: Start uses the saved ones.')).toBeNull();
+  });
+
+  it('shows which captains are in the room, before and during the draft', async () => {
+    mockAdmin.draftRoom.mockResolvedValue(room());
+    render(<DraftRoomControls eventId={9} slug="night" canEdit={false} />);
+    expect(await screen.findByText('Ann: In the room')).toBeTruthy();
+    expect(screen.getByText('Eve: Away')).toBeTruthy();
+    cleanup();
+    mockAdmin.draftRoom.mockResolvedValue(running({ present: ['c2'] }));
+    render(<DraftRoomControls eventId={9} slug="night" canEdit />);
+    expect(await screen.findByText('Ann: Away')).toBeTruthy();
+    expect(screen.getByText('Eve: In the room')).toBeTruthy();
   });
 
   it('while running: says who is up, pauses, undoes with a confirm and hands a team to its first pick', async () => {
