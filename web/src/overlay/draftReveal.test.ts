@@ -78,6 +78,9 @@ describe('pick reveal queue', () => {
   });
 
   it('shows nothing with no draft on air', () => {
-    expect(stepReveal(emptyReveal(), null, T).showing).toBeNull();
+    let q = stepReveal(emptyReveal(), draft([]), T);
+    q = stepReveal(q, draft([pick(1, 'a', T + 100)]), T + 1000);
+    expect(q.showing).not.toBeNull();
+    expect(stepReveal(q, null, T + 1500).showing).toBeNull();
   });
 });
