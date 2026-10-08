@@ -551,6 +551,32 @@ CREATE TABLE IF NOT EXISTS draft_standin_offers (
   answered_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS draft_standin_offers_open ON draft_standin_offers (request_id) WHERE answer IS NULL;
+-- Drafts plan D3b: Keep this team. src/events/keepTeam.ts owns every write.
+-- One row per draft entry of a finished draft event; players_json is the four
+-- at the offer, captain first. team_id is the site team once made.
+CREATE TABLE IF NOT EXISTS draft_keeps (
+  id              INTEGER PRIMARY KEY,
+  event_id        INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  entry_id        INTEGER NOT NULL UNIQUE,
+  captain_steamid TEXT NOT NULL,
+  players_json    TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK (status IN ('offered','voting','made','lapsed')),
+  name            TEXT,
+  tag             TEXT,
+  offered_at      TEXT NOT NULL,
+  started_at      TEXT,
+  expires_at      TEXT NOT NULL,
+  team_id         INTEGER REFERENCES teams(id),
+  closed_at       TEXT
+);
+CREATE TABLE IF NOT EXISTS draft_keep_answers (
+  keep_id     INTEGER NOT NULL REFERENCES draft_keeps(id) ON DELETE CASCADE,
+  steamid     TEXT NOT NULL,
+  answer      TEXT NOT NULL CHECK (answer IN ('accept','decline')),
+  answered_at TEXT NOT NULL,
+  joined      INTEGER NOT NULL DEFAULT 0 CHECK (joined IN (0,1)),
+  PRIMARY KEY (keep_id, steamid)
+);
 -- Tournament matches (spec part 2 section 4; plan T2). One row per pairing of
 -- a stage. Swiss and league rows are written by src/events/play.ts from
 -- src/events/swiss.ts and roundRobin.ts. Elimination and round robin rows

@@ -61,6 +61,7 @@ export const TEAM_ERRORS = {
   kicked: { status: 403, text: 'You were removed from this team. Ask the captain for an invite.' },
   is_captain: { status: 400, text: 'Hand the captaincy over first.' },
   bad_role: { status: 400, text: 'A role is cocaptain or member.' },
+  keep_short: { status: 409, text: 'Fewer than three of the drafted players can join a team right now.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type TeamError = keyof typeof TEAM_ERRORS;
 
@@ -202,6 +203,78 @@ export function createTeam(
     ).run(n.name, n.key, t.tag, t.key, slug, o.creator, o.creator, now).lastInsertRowid);
     db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'captain', ?)").run(id, o.creator, now);
     return ok({ id, slug });
+  })();
+}
+
+/** A free name: the name, then "name 2", "name 3" with the base cut so the
+ *  suffix fits NAME_MAX (drafts plan D3b Ruling 4). Null when none of the
+ *  first 99 is free. */
+function freeName(db: DB, name: string): { name: string; key: string } | null {
+  for (let k = 1; k <= 99; k++) {
+    const suffix = k === 1 ? '' : ` ${k}`;
+    const base = Array.from(name).slice(0, NAME_MAX - suffix.length).join('').trimEnd();
+    const n = normalizeName(`${base}${suffix}`);
+    if (n.ok && !nameTaken(db, n.key)) return { name: n.name, key: n.key };
+  }
+  return null;
+}
+
+/** A free tag: the tag, then its first 4 characters and a digit 2 to 9. */
+function freeTag(db: DB, tag: string): { tag: string; key: string } | null {
+  for (let k = 1; k <= 9; k++) {
+    const t = normalizeTag(k === 1 ? tag : `${tag.slice(0, 4)}${k}`);
+    if (t.ok && !tagTaken(db, t.key)) return { tag: t.tag, key: t.key };
+  }
+  return null;
+}
+
+/**
+ * A draft team kept after its event (drafts plan D3b, spec part 3 section 7),
+ * in one transaction: origin 'draft', origin_ref the event id, the captain as
+ * captain and creator, every other accepter under the membership cap as a
+ * member (one at the cap, or not in good standing, is left out), the entry's logo key. The captain must
+ * be under both caps. At least `min` players in all, or keep_short. A taken
+ * name or tag takes the next free one (freeName, freeTag).
+ */
+export function createDraftTeam(
+  db: DB, o: { captain: string; members: string[]; name: string; tag: string; logoKey: string | null; eventId: number; min: number; now: Date },
+): Result<{ id: number; slug: string; name: string; tag: string; joined: string[]; left: string[] }> {
+  const at = o.now.toISOString();
+  return db.transaction((): Result<{ id: number; slug: string; name: string; tag: string; joined: string[]; left: string[] }> => {
+    const cap = membershipCap(db);
+    if (activeMembershipCount(db, o.captain) >= cap) return fail('your_cap');
+    if (createdCount(db, o.captain) >= cap) return fail('created_cap');
+    const others = [...new Set(o.members)].filter((s) => s !== o.captain);
+    const joined = others.filter((s) => inGoodStanding(db, s, o.now) && activeMembershipCount(db, s) < cap);
+    const left = others.filter((s) => !joined.includes(s));
+    if (1 + joined.length < o.min) return fail('keep_short');
+    const name = freeName(db, o.name);
+    if (!name) return fail('name_taken');
+    const tag = freeTag(db, o.tag);
+    if (!tag) return fail('tag_taken');
+    const slug = slugFor(db, name.name);
+    const id = Number(db.prepare(
+      `INSERT INTO teams (name, name_key, tag, tag_key, slug, logo_key, captain_steamid, created_by, origin, origin_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+    ).run(name.name, name.key, tag.tag, tag.key, slug, o.logoKey, o.captain, o.captain, String(o.eventId), at).lastInsertRowid);
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'captain', ?)").run(id, o.captain, at);
+    const member = db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'member', ?)");
+    for (const s of joined) member.run(id, s, at);
+    return ok({ id, slug, name: name.name, tag: tag.tag, joined: [o.captain, ...joined], left });
+  })();
+}
+
+/** A drafted player who accepts after their kept team was made (plan D3b Ruling 2). */
+export function addDraftMember(db: DB, o: { teamId: number; steamid: string; now: Date }): Result<null> {
+  return db.transaction((): Result<null> => {
+    const team = getTeam(db, o.teamId);
+    if (!team || team.disbanded_at !== null || team.origin !== 'draft') return fail('not_found');
+    if (roleOf(db, team.id, o.steamid) !== null) return fail('already_member');
+    if (!getPlayer(db, o.steamid) || !inGoodStanding(db, o.steamid, o.now)) return fail('not_player');
+    if (activeMembershipCount(db, o.steamid) >= membershipCap(db)) return fail('their_cap');
+    if (rosterSize(db, team.id) >= ROSTER_MAX) return fail('roster_full');
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'member', ?)").run(team.id, o.steamid, o.now.toISOString());
+    return ok(null);
   })();
 }
 

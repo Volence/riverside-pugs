@@ -208,3 +208,14 @@ export function cleanPickList(raw: unknown, pool: ReadonlySet<string>): string[]
   }
   return out;
 }
+
+// ---------- Keep this team (plan D3b) ----------
+
+/** Ruling 2: offers are made within this many days of the event finishing. */
+export const KEEP_OFFER_DAYS = 7;
+/** Ruling 2: voting runs this long from the captain's Keep. */
+export const KEEP_VOTE_HOURS = 48;
+/** Ruling 3 (spec): 3 of the 4. */
+export const KEEP_MAJORITY = 3;
+/** Discord custom id prefix of the keep buttons (src/discord/keepButtons.ts). */
+export const KEEP_BUTTON_PREFIX = 'dk:';
