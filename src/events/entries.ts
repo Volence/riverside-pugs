@@ -13,6 +13,7 @@ import * as D from './drafts.js';
 import { roomOf } from './draftRoom.js';
 import * as R from './entryRules.js';
 import * as Room from './room.js';
+import * as S from './standins.js';
 import * as V from './validate.js';
 
 /**
@@ -518,6 +519,42 @@ function lineupMatches(db: DB, eventId: number, entryId: number, out: string): {
   }));
 }
 
+/** A sentence for a game on a box that was not asked to take the change. */
+const BOX_NOT_ASKED = 'A game with this player is on a server, and the server was not asked to take the change.';
+/** A game on a box that rosters the player and did not take the sub. */
+const boxMissing = (onBox: BoxGame[], took: number[] | undefined): boolean => onBox.some((g) => !(took ?? []).includes(g.gameMatchId));
+
+/** The room, booking and game halves of swapping `out` for `in` in these
+ *  matches (plan D2c Ruling 5; plan D3a reuses it for a stand-in): the room's
+ *  staff substitution (never counted against the side's subs), the open
+ *  booking's people, and every game on a box. Inside the caller's
+ *  transaction, after `in` holds a place on the entry; a refusal throws
+ *  Refused so the whole transaction rolls back. */
+function swapIntoLineups(db: DB, matches: ReturnType<typeof lineupMatches>, o: { out: string; in: string; actor: string; now: Date }): void {
+  for (const m of matches) {
+    const live = m.onBox[0];
+    const gameId = live ? Room.gamesOf(db, m.matchId).find((g) => g.match_id === live.gameMatchId)?.id ?? null : null;
+    const s = Room.subPlayer(db, { matchId: m.matchId, by: o.actor, outId: o.out, inId: o.in, limit: 0, gameId, staff: true, now: o.now });
+    const inGame = (why: string) => new Refused(V.fail('replace_in_game', [{ steamid: o.out, problems: [why] }]));
+    if (!s.ok) {
+      const why = `The match room refused it: ${V.EVENT_ERRORS[s.error].text}`;
+      // A room state refusal has nothing to do with the box; anything else keeps the in-game label.
+      if (s.error === 'entry_out' || s.error === 'not_live' || s.error === 'not_live_phase') throw new Refused(V.fail('replace_not_possible', [{ steamid: o.out, problems: [why] }]));
+      throw inGame(why);
+    }
+    if (m.bookingId !== null) {
+      const b = B.getBooking(db, m.bookingId);
+      if (b && B.isOpen(b)) {
+        const swapped = B.replacePlayer(db, { bookingId: b.id, side: s.value.side, outId: o.out, inId: o.in, by: o.actor, now: o.now });
+        if (!swapped.ok) throw inGame(`The booking refused it (${swapped.error}).`);
+      }
+    }
+    for (const g of m.onBox) {
+      if (!addTournamentSub(db, { matchId: g.gameMatchId, inId: o.in, team: g.team, now: o.now })) throw inGame(`Game ${g.gameMatchId} is not a tournament game.`);
+    }
+  }
+}
+
 /**
  * Staff remove a draft player and put a replacement in (drafts plan D2c
  * Rulings 4 and 5), in one transaction with one 'entry_player_replaced' row
@@ -565,33 +602,10 @@ export function replaceDraftPlayer(db: DB, o: {
       const onBox = matches.flatMap((m) => m.onBox);
       const subbedInMatch = matches[0]?.matchId ?? null;
       if (o.check) return V.ok({ subbedInMatch, onBox });
-      if (onBox.some((g) => !(o.boxTook ?? []).includes(g.gameMatchId))) {
-        return V.fail('replace_in_game', [{ steamid: o.out, problems: ['A game with this player is on a server, and the server was not asked to take the change.'] }]);
-      }
+      if (boxMissing(onBox, o.boxTook)) return V.fail('replace_in_game', [{ steamid: o.out, problems: [BOX_NOT_ASKED] }]);
       db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id = ?').run(at, place.id);
       addPlace(db, entry.id, o.in, 'starter', at);
-      for (const m of matches) {
-        const live = m.onBox[0];
-        const gameId = live ? Room.gamesOf(db, m.matchId).find((g) => g.match_id === live.gameMatchId)?.id ?? null : null;
-        const s = Room.subPlayer(db, { matchId: m.matchId, by: o.actor, outId: o.out, inId: o.in, limit: 0, gameId, staff: true, now: o.now });
-        const inGame = (why: string) => new Refused(V.fail('replace_in_game', [{ steamid: o.out, problems: [why] }]));
-        if (!s.ok) {
-          const why = `The match room refused it: ${V.EVENT_ERRORS[s.error].text}`;
-          // A room state refusal has nothing to do with the box; anything else keeps the in-game label.
-          if (s.error === 'entry_out' || s.error === 'not_live' || s.error === 'not_live_phase') throw new Refused(V.fail('replace_not_possible', [{ steamid: o.out, problems: [why] }]));
-          throw inGame(why);
-        }
-        if (m.bookingId !== null) {
-          const b = B.getBooking(db, m.bookingId);
-          if (b && B.isOpen(b)) {
-            const swapped = B.replacePlayer(db, { bookingId: b.id, side: s.value.side, outId: o.out, inId: o.in, by: o.actor, now: o.now });
-            if (!swapped.ok) throw inGame(`The booking refused it (${swapped.error}).`);
-          }
-        }
-        for (const g of m.onBox) {
-          if (!addTournamentSub(db, { matchId: g.gameMatchId, inId: o.in, team: g.team, now: o.now })) throw inGame(`Game ${g.gameMatchId} is not a tournament game.`);
-        }
-      }
+      swapIntoLineups(db, matches, { out: o.out, in: o.in, actor: o.actor, now: o.now });
       E.logEvent(db, ev.id, o.actor, 'entry_player_replaced', at, {
         entryId: entry.id, out: o.out, in: o.in, reason: o.reason, ...(subbedInMatch !== null ? { matchId: subbedInMatch } : {}),
       });
@@ -646,6 +660,97 @@ export function setDraftCaptain(db: DB, o: { eventId: number; entryId: number; s
     if (err instanceof Refused) return err.r;
     throw err;
   }
+}
+
+export interface StandinPlaced {
+  subbedInMatch: number | null; onBox?: BoxGame[]; requestId: number; entryId: number; out: string; in: string; scope: S.StandinScope; matchId: number | null;
+}
+export interface StandinPlaceInput {
+  eventId: number; requestId: number; offerId: number; steamid: string;
+  /** When the player pressed Accept: the window is judged at this time (plan D3a Review Focus 1). */
+  acceptedAt: Date; now: Date; check?: boolean; boxTook?: number[];
+}
+
+/**
+ * A bench player accepts a stand-in offer (drafts plan D3a Rulings 6 and 7),
+ * in one transaction with one 'standin_placed' row. The offer must be theirs,
+ * open, and pressed inside its window; the request open and still standing.
+ * They must hold no place in the event and pass its starter eligibility now.
+ * 'event': the missing starter's place closes and the stand-in becomes a
+ * starter, carried into every locked lineup of an unfinished match of the
+ * team that has the missing player (as replaceDraftPlayer). 'match': the
+ * stand-in becomes a sub of the team, swapped into the target match's lineup
+ * if it is locked with the missing player in it. The swap uses the room's
+ * staff path, so it never counts against the side's subs. A game on a box
+ * takes the sub first, exactly as replaceDraftPlayer: the series engine calls
+ * this with `check`, asks the box, then calls it with `boxTook`.
+ */
+export function placeStandin(db: DB, o: StandinPlaceInput): V.Checked<StandinPlaced> {
+  const at = o.now.toISOString();
+  try {
+    return db.transaction((): V.Checked<StandinPlaced> => {
+      const req = S.requestOf(db, o.requestId);
+      const offer = S.offerOf(db, o.offerId);
+      if (!req || req.event_id !== o.eventId || !offer || offer.request_id !== req.id || offer.steamid !== o.steamid || offer.answer !== null) {
+        return V.fail('standin_offer_gone');
+      }
+      if (o.acceptedAt.getTime() >= Date.parse(offer.expires_at)) return V.fail('standin_offer_expired');
+      if (req.status !== 'open') return V.fail('standin_closed');
+      const ev = E.getEvent(db, req.event_id)!;
+      const entry = getEntry(db, req.entry_id)!;
+      if (ev.teams_made_at === null || !ROSTER_OPEN.has(ev.status)) return V.fail('wrong_status');
+      if (!isActive(entry)) return V.fail('entry_out');
+      const place = placesOf(db, entry.id).find((p) => p.steamid === req.out_steamid && p.role === 'starter');
+      if (!place) return V.fail('replace_not_starter');
+      if (req.scope === 'match') {
+        const m = db.prepare('SELECT status FROM event_matches WHERE id = ?').get(req.match_id) as { status: string } | undefined;
+        if (!m || m.status === 'done' || m.status === 'forfeit' || m.status === 'bye') return V.fail('standin_match_over');
+      }
+      const other = entryOfPlayer(db, ev.id, o.steamid);
+      if (other) return V.fail('player_entered', [{ steamid: o.steamid, problems: [`Already on ${other.name}'s roster`] }]);
+      const elig = E.fieldsOf(ev).eligibility;
+      const facts = playerFacts(db, o.steamid, o.now);
+      const problems = R.problemsOf(elig, facts, 'starter');
+      if (problems.length > 0) return V.fail('replace_ineligible', [{ steamid: o.steamid, problems: problems.map((k) => R.problemText(k, elig, facts)) }]);
+      const matches = lineupMatches(db, ev.id, entry.id, req.out_steamid).filter((m) => req.scope === 'event' || m.matchId === req.match_id);
+      const onBox = matches.flatMap((m) => m.onBox);
+      const value: StandinPlaced = {
+        subbedInMatch: matches[0]?.matchId ?? null, requestId: req.id, entryId: entry.id, out: req.out_steamid, in: o.steamid, scope: req.scope, matchId: req.match_id,
+      };
+      if (o.check) return V.ok({ ...value, onBox });
+      if (boxMissing(onBox, o.boxTook)) return V.fail('replace_in_game', [{ steamid: req.out_steamid, problems: [BOX_NOT_ASKED] }]);
+      if (req.scope === 'event') db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id = ?').run(at, place.id);
+      addPlace(db, entry.id, o.steamid, req.scope === 'event' ? 'starter' : 'sub', at);
+      swapIntoLineups(db, matches, { out: req.out_steamid, in: o.steamid, actor: o.steamid, now: o.now });
+      S.markPlaced(db, { requestId: req.id, offerId: offer.id, steamid: o.steamid, at });
+      E.logEvent(db, ev.id, o.steamid, 'standin_placed', at, {
+        requestId: req.id, entryId: entry.id, out: req.out_steamid, in: o.steamid, scope: req.scope,
+        ...(value.subbedInMatch !== null ? { matchId: value.subbedInMatch } : {}),
+      });
+      return V.ok(value);
+    })();
+  } catch (err) {
+    if (err instanceof Refused) return err.r;
+    throw err;
+  }
+}
+
+/** A match stand-in's match is done, forfeit or bye, or its event ended
+ *  (plan D3a Ruling 7): their sub place closes and the request ends, in one
+ *  transaction with one 'standin_ended' row. A starter place they hold since
+ *  (a later replace) is left alone. */
+export function endStandin(db: DB, o: { requestId: number; now: Date }): V.Checked<{ entryId: number; steamid: string }> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<{ entryId: number; steamid: string }> => {
+    const req = S.requestOf(db, o.requestId);
+    if (!req || req.status !== 'filled' || req.scope !== 'match' || req.filled_by === null) return V.fail('standin_closed');
+    if (!S.endableStandins(db).some((x) => x.id === req.id)) return V.fail('standin_running');
+    db.prepare("UPDATE event_entry_players SET removed_at = ? WHERE entry_id = ? AND steamid = ? AND role = 'sub' AND removed_at IS NULL")
+      .run(at, req.entry_id, req.filled_by);
+    S.markEnded(db, { requestId: req.id, at });
+    E.logEvent(db, req.event_id, null, 'standin_ended', at, { requestId: req.id, entryId: req.entry_id, steamid: req.filled_by });
+    return V.ok({ entryId: req.entry_id, steamid: req.filled_by });
+  })();
 }
 
 /** Ruling 9: the tick drops an entry whose team was disbanded, until the list is final. */
