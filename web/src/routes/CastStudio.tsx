@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { ApiError, castApi, studioApi, type CastMatch, type PrepSheet, type StudioPanel } from '../api';
+import { ApiError, castApi, studioApi, type CastMatch, type PrepSheet, type StudioPanel, type StudioPickDraft } from '../api';
 import { CastConnect } from './Cast';
 import { PageHeader } from '../components/PageHeader';
 import { Empty } from '../components/bits';
@@ -119,8 +119,9 @@ export default function CastStudio() {
       setError(null);
       setFeed((f) => (f ? { ...f, studio: r.studio } : f));
     } catch (e) {
-      setError(e instanceof ApiError && e.message === 'not_castable'
-        ? 'You cannot put that match on air any more.' : 'Could not save. Check your connection.');
+      setError(e instanceof ApiError && e.message === 'not_castable' ? 'You cannot put that match on air any more.'
+        : e instanceof ApiError && e.message === 'not_castable_draft' ? 'You cannot put that draft on air any more.'
+        : 'Could not save. Check your connection.');
     }
   }, []);
 
@@ -221,6 +222,7 @@ export default function CastStudio() {
       <div class="studio__grid">
         <div class="studio__col">
           <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
+          <DraftOnAir drafts={panel.drafts ?? []} state={state} update={update} />
           <ScenePad state={state} goScene={goScene} obsProgram={obsProgram} obsScenes={panel.obsScenes} />
           <Highlights state={state} match={match} update={update} onFire={async (c) => {
             try {
@@ -245,7 +247,7 @@ export default function CastStudio() {
             <h3>Program preview</h3>
             <PreviewFrame feed={feed} state={state} overlayKey={panel.key} />
             <p class="muted studio__hint">
-              {match ? 'What the Program overlay shows right now. Transparent parts show as checkerboard.'
+              {match || feed?.draft ? 'What the Program overlay shows right now. Transparent parts show as checkerboard.'
                 : 'Nothing is on air, so this is a made-up sample match. OBS shows nothing on the gameplay scene until you pick a match.'}
             </p>
           </section>
@@ -373,6 +375,44 @@ function OnAir({ panel, state, update, onAirId, connects }: {
           <div class="studio__picks">{recent.map(row)}</div>
         </>
       )}
+    </section>
+  );
+}
+
+const DRAFT_STATUS_LABEL: Record<StudioPickDraft['status'], string> = { ready: 'Not started', running: 'Picking', paused: 'Paused', done: 'Done' };
+const DRAFT_STATUS_CLASS: Record<StudioPickDraft['status'], string> = { ready: 'configuring', running: 'live', paused: 'configuring', done: 'completed' };
+
+/** The live draft the overlays follow (drafts plan D2b2 Ruling 1): separate
+ *  from the match on air, so a show can cut between the two. */
+export function DraftOnAir({ drafts, state, update }: { drafts: StudioPickDraft[]; state: StudioState; update: Update }) {
+  const pick = (id: number | null) => update((s) => ({ ...s, draftEventId: id }), true);
+  return (
+    <section class="panel">
+      <h3>Draft on air</h3>
+      {drafts.length === 0 ? (
+        <p class="muted">No live draft to follow. A draft shows here once its cut is published and staff choose Let captains pick.</p>
+      ) : (
+        <div class="studio__picks">
+          {drafts.map((d) => {
+            const on = state.draftEventId === d.id;
+            return (
+              <button key={d.id} type="button" class={`studio__pick${on ? ' is-on' : ''}`} onClick={() => pick(on ? null : d.id)} aria-pressed={on}>
+                <span class="studio__pick-head">
+                  <b>{d.name}</b>
+                  <span class={`studio__state studio__state--${DRAFT_STATUS_CLASS[d.status]}`}>{DRAFT_STATUS_LABEL[d.status]}</span>
+                </span>
+                <span class="studio__pick-teams"><span>{`${d.picks} of ${d.totalPicks} picks`}</span></span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <label class="studio__toggle">
+        <input type="checkbox" checked={state.draftStrip}
+          onChange={(e) => { const v = e.currentTarget.checked; update((s) => ({ ...s, draftStrip: v }), true); }} />
+        <span>Announce each pick with a strip over the other scenes (Program link)</span>
+      </label>
+      <p class="muted studio__hint">Cut to Draft board (B) or On the clock (C). Each new pick is revealed with a card on those two scenes by itself.</p>
     </section>
   );
 }
@@ -715,14 +755,15 @@ function PreviewFrame({ feed, state, overlayKey }: { feed: OverlayFeed | null; s
   useEffect(() => { setOverlayKey(overlayKey); }, [overlayKey]);
   // Nothing on air: a labelled sample, with the panel's own state, so every
   // scene can be set up before a match exists.
-  const sample = !feed?.match;
+  // Ruling 12: the sample only when neither a match nor a draft is on air.
+  const sample = !feed?.match && !feed?.draft;
   const shown = sample ? sampleFeed(state, now) : feed;
   return (
     <div class="studio__frame" ref={box}>
       <div class="studio__stage" style={{ transform: `scale(${scale})` }}>
         {shown && <Overlay which="program" feed={shown} now={sample ? now : now + (shown.serverNow - feedAt(shown))} />}
       </div>
-      {sample && <span class="studio__sample">Sample: no match on air</span>}
+      {sample && <span class="studio__sample">Sample: nothing on air</span>}
     </div>
   );
 }

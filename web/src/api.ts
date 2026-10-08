@@ -1832,12 +1832,17 @@ export interface StudioPickMatch {
 export interface StudioPickBooking {
   id: number; purpose: string; state: string; startsAt: string; sideA: string; sideB: string; latestMatchId: number | null;
 }
+/** A live draft the caster may follow (drafts plan D2b2, src/cast/access.ts pickableDrafts). */
+export interface StudioPickDraft {
+  id: number; name: string; slug: string; status: 'ready' | 'running' | 'paused' | 'done'; picks: number; totalPicks: number;
+}
 export interface StudioPanel {
   studio: StudioState;
   rev: number;
   key: string;
   matches: StudioPickMatch[];
   bookings: StudioPickBooking[];
+  drafts: StudioPickDraft[];
   obsScenes: Record<string, string>;
 }
 export interface PrepSheet {
