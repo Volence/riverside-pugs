@@ -65,6 +65,11 @@ describe('preferences', () => {
     // Plan D2b1 Task 6: the room is open.
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_room_open')).toEqual({ type: 'draft_room_open', label: 'Draft: the live draft room opened' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_delegate_set')).toEqual({ type: 'draft_delegate_set', label: 'Draft: staff handed your team\'s picking to you' });
+    // Plan D3a: bench stand-ins.
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_standin_offer')).toEqual({ type: 'draft_standin_offer', label: 'Draft: a bench stand-in place is offered to me' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_standin_placed')).toEqual({ type: 'draft_standin_placed', label: 'Draft: I am placed on a team as a stand-in' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_standin_filled')).toEqual({ type: 'draft_standin_filled', label: 'Draft: a stand-in was found for a player on my team' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_standin_none')).toEqual({ type: 'draft_standin_none', label: 'Draft: nobody on the bench took a stand-in my team asked for' });
   });
   it('lists the two reschedule DMs (plan T4)', () => {
     expect(NOTIFY_TYPES.filter((t) => t.type === 'event_reschedule' || t.type === 'event_match_time')).toEqual([

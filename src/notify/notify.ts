@@ -20,7 +20,8 @@ export type NotifyType =
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
-  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set';
+  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set'
+  | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none';
 
 export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_invite', label: 'Someone invites me to a booked server' },
@@ -58,6 +59,10 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'draft_captain_set_old', label: 'Draft: your team has a new captain' },
   { type: 'draft_room_open', label: 'Draft: the live draft room opened' },
   { type: 'draft_delegate_set', label: 'Draft: staff handed your team\'s picking to you' },
+  { type: 'draft_standin_offer', label: 'Draft: a bench stand-in place is offered to me' },
+  { type: 'draft_standin_placed', label: 'Draft: I am placed on a team as a stand-in' },
+  { type: 'draft_standin_filled', label: 'Draft: a stand-in was found for a player on my team' },
+  { type: 'draft_standin_none', label: 'Draft: nobody on the bench took a stand-in my team asked for' },
 ];
 
 export function isNotifyType(v: unknown): v is NotifyType {

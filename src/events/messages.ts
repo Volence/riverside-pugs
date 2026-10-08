@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import type { MessagePayload } from '../discord/transport.js';
+import type { ActionRow, MessagePayload } from '../discord/transport.js';
 import { escapeName } from '../identity.js';
 import { getPlayer } from '../players.js';
 import { whenUtc } from '../bookings/messages.js';
@@ -13,8 +13,9 @@ import { bookingRules, getBooking } from '../bookings/bookings.js';
 import { getServer } from '../serverPool.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 import { getProposal, scheduleRules } from './schedule.js';
-import type { CutRole } from './draftRules.js';
+import { STANDIN_BUTTON_PREFIX, type CutRole } from './draftRules.js';
 import type { ReplaceReason } from './entries.js';
+import { offerOf, requestOf, type StandinRow } from './standins.js';
 
 /** The event DMs (plan T1b Ruling 11, and the two match room DMs of plan
  *  T3a Ruling 2). Every player-chosen name goes through escapeName, as in
@@ -23,7 +24,8 @@ export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_ro
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
-  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set';
+  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set'
+  | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -52,9 +54,23 @@ export const REPLACE_TEXT: Record<ReplaceReason, string> = {
   conduct: 'conduct', cheating: 'cheating', no_show: 'did not show', left: 'left the event', other: 'a staff decision',
 };
 
+/** A player's name as Discord shows it, escaped. */
+const nameIn = (db: DB, steamid: string): string => escapeName(getPlayer(db, steamid)?.name ?? steamid);
+/** A Discord button label: plain text, at most 80 characters. */
+const buttonLabel = (s: string): string => Array.from(s).slice(0, 80).join('');
+
+/** Plan D3a: what the stand-in is for, with the opponent when the match has one. */
+function standinScopeText(db: DB, req: StandinRow): string {
+  if (req.scope === 'event') return 'for the rest of the event';
+  const m = req.match_id !== null ? P.getMatch(db, req.match_id) : undefined;
+  const otherId = m ? (m.entry_a === req.entry_id ? m.entry_b : m.entry_a) : null;
+  const other = otherId !== null && otherId !== undefined ? getEntry(db, otherId)?.name : undefined;
+  return other ? `for their next match, against ${escapeName(other)}` : 'for their next match';
+}
+
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason; forCaptain?: string } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason; forCaptain?: string; offerId?: number; requestId?: number } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -62,6 +78,7 @@ export function eventMessage(
   const event = escapeName(ev.name);
   const team = escapeName(entry?.name ?? 'Your team');
   let content: string;
+  let rows: ActionRow[] = [];
   switch (type) {
     case 'event_checkin_open': {
       const { closesAt } = R.checkinTimes(ev.starts_at, E.fieldsOf(ev).checkin);
@@ -96,13 +113,15 @@ export function eventMessage(
       // the team and its captain. Read after the publish committed.
       if (!entry || entry.captain_steamid === null) return null;
       const link = `${publicUrl}/event/${ev.slug}`;
-      const nameOf = (s: string) => escapeName(getPlayer(db, s)?.name ?? s);
       if (extra.captain) {
-        const others = rosterOf(db, entry.id).starters.filter((s) => s !== entry.captain_steamid).map(nameOf);
+        const ids = rosterOf(db, entry.id).starters.filter((s) => s !== entry.captain_steamid);
+        const others = ids.map((s) => nameIn(db, s));
         const names = others.length > 1 ? `${others.slice(0, -1).join(', ')} and ${others.at(-1)}` : others.join('');
-        content = `Your team in ${event} is set: ${names}. Name your team and upload a logo before the event starts: ${link}`;
+        content = `Your team in ${event} is set: ${names}. Name your team and upload a logo before the event starts: ${link} If one of them cannot make a match, press their stand-in button below and the bench is asked.`;
+        // Plan D3a Ruling 2: one button per player, a stand-in for the team's next match.
+        rows = [ids.map((s) => ({ kind: 'button' as const, customId: `${STANDIN_BUTTON_PREFIX}r:${entry.id}:${s}`, label: buttonLabel(`Stand-in for ${getPlayer(db, s)?.name ?? s}`), style: 'secondary' as const }))];
       } else {
-        content = `You are on ${team} in ${event}, captained by ${nameOf(entry.captain_steamid)}. Your captain can rename the team before the event starts: ${link}`;
+        content = `You are on ${team} in ${event}, captained by ${nameIn(db, entry.captain_steamid)}. Your captain can rename the team before the event starts: ${link}`;
       }
       break;
     }
@@ -118,8 +137,7 @@ export function eventMessage(
     }
     case 'draft_roster_changed': {
       if (!extra.out || !extra.in) return null;
-      const nameOf = (s: string) => escapeName(getPlayer(db, s)?.name ?? s);
-      content = `${nameOf(extra.out)} was replaced by ${nameOf(extra.in)} on your team in ${event}.`;
+      content = `${nameIn(db, extra.out)} was replaced by ${nameIn(db, extra.in)} on your team in ${event}.`;
       break;
     }
     case 'draft_captain_set_new':
@@ -140,6 +158,44 @@ export function eventMessage(
       if (!extra.forCaptain) return null;
       content = `Staff handed the picking for ${escapeName(getPlayer(db, extra.forCaptain)?.name ?? extra.forCaptain)}'s team in ${event} to you: you pick for the team when its turn comes. Join the draft room: ${publicUrl}/event/${ev.slug}/draft`;
       break;
+    case 'draft_standin_offer': {
+      // Plan D3a Ruling 5: Accept and Decline on the DM itself.
+      const offer = extra.offerId !== undefined ? offerOf(db, extra.offerId) : undefined;
+      const req = offer ? requestOf(db, offer.request_id) : undefined;
+      const e = req ? getEntry(db, req.entry_id) : undefined;
+      if (!offer || !req || !e) return null;
+      return {
+        content: `${escapeName(e.name)} in ${event} needs a stand-in for ${nameIn(db, req.out_steamid)} ${standinScopeText(db, req)}. You are on the bench and the closest in SR who is free. Accept by ${discordTime(offer.expires_at)}, or it goes to the next player.`,
+        embeds: [],
+        components: [[
+          { kind: 'button', customId: `${STANDIN_BUTTON_PREFIX}a:${offer.id}`, label: 'Accept', style: 'success' },
+          { kind: 'button', customId: `${STANDIN_BUTTON_PREFIX}d:${offer.id}`, label: 'Decline', style: 'secondary' },
+          { kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' },
+        ]],
+        mentionUserIds: [],
+      };
+    }
+    case 'draft_standin_placed': {
+      const req = extra.requestId !== undefined ? requestOf(db, extra.requestId) : undefined;
+      if (!req || !entry || entry.captain_steamid === null) return null;
+      const captain = nameIn(db, entry.captain_steamid);
+      content = req.scope === 'match'
+        ? `You are standing in for ${nameIn(db, req.out_steamid)} on ${team} in ${event} ${standinScopeText(db, req)}. Your captain is ${captain}; the match room DMs you when it opens: ${publicUrl}/event/${ev.slug}`
+        : `You are now on ${team} in ${event} for the rest of the event, in place of ${nameIn(db, req.out_steamid)}. Your captain is ${captain}: ${publicUrl}/event/${ev.slug}`;
+      break;
+    }
+    case 'draft_standin_filled': {
+      const req = extra.requestId !== undefined ? requestOf(db, extra.requestId) : undefined;
+      if (!req || req.filled_by === null) return null;
+      content = `${nameIn(db, req.filled_by)} is standing in for ${nameIn(db, req.out_steamid)} on ${team} in ${event} ${standinScopeText(db, req)}.`;
+      break;
+    }
+    case 'draft_standin_none': {
+      const req = extra.requestId !== undefined ? requestOf(db, extra.requestId) : undefined;
+      if (!req) return null;
+      content = `Nobody on the bench took the stand-in for ${nameIn(db, req.out_steamid)} on ${team} in ${event} (${req.scope === 'match' ? 'next match' : 'rest of the event'}). Staff were told and will help: a delay, a wider search, or a forfeit if it comes to that.`;
+      break;
+    }
     case 'draft_captain_offer':
       if (!extra.expiresAt) return null;
       content = `${event} needs another captain and you said you were willing. Accept or decline on the event page by ${discordTime(extra.expiresAt)}: ${publicUrl}/event/${ev.slug}`;
@@ -230,7 +286,7 @@ export function eventMessage(
   return {
     content,
     embeds: [],
-    components: [[{ kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' }]],
+    components: [...rows, [{ kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' }]],
     mentionUserIds: [],
   };
 }

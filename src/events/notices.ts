@@ -7,6 +7,7 @@ import { getProposal } from './schedule.js';
 import type { CutRole } from './draftRules.js';
 import type { ReplaceReason } from './entries.js';
 import { openOffer } from './drafts.js';
+import { offerOf, requestOf } from './standins.js';
 
 /**
  * The event DMs (plan T1b Ruling 11), shared by the minute tick
@@ -155,4 +156,25 @@ export function tellDraftRoomOpen(d: NoticeDeps, eventId: number, captains: stri
  *  D2b1 Ruling 16): the delegate, with the room link. */
 export function tellDelegateSet(d: NoticeDeps, eventId: number, captain: string, delegate: string): void {
   tell(d, [delegate], eventId, 'draft_delegate_set', { forCaptain: captain });
+}
+
+/** A stand-in offer went out (drafts plan D3a Ruling 5): the bench player, with Accept and Decline. */
+export function tellStandinOffer(d: NoticeDeps, eventId: number, offerId: number): void {
+  const o = offerOf(d.db, offerId);
+  if (o) tell(d, [o.steamid], eventId, 'draft_standin_offer', { offerId });
+}
+/** A stand-in was placed: the stand-in (where and for how long), and the captain and the missing player (who). */
+export function tellStandinFilled(d: NoticeDeps, eventId: number, requestId: number): void {
+  const r = requestOf(d.db, requestId);
+  const entry = r ? N.getEntry(d.db, r.entry_id) : undefined;
+  if (!r || !entry || entry.captain_steamid === null || r.filled_by === null) return;
+  tell(d, [r.filled_by], eventId, 'draft_standin_placed', { requestId, entryId: entry.id });
+  tell(d, [entry.captain_steamid, r.out_steamid], eventId, 'draft_standin_filled', { requestId, entryId: entry.id });
+}
+/** Nobody took it (Ruling 11): the captain. Staff hear it on the admin feed. */
+export function tellStandinUnfilled(d: NoticeDeps, eventId: number, requestId: number): void {
+  const r = requestOf(d.db, requestId);
+  const entry = r ? N.getEntry(d.db, r.entry_id) : undefined;
+  if (!r || !entry || entry.captain_steamid === null) return;
+  tell(d, [entry.captain_steamid], eventId, 'draft_standin_none', { requestId, entryId: entry.id });
 }
