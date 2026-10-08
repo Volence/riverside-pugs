@@ -15,11 +15,14 @@ export function KeepTeamPanel({ slug }: { slug: string }) {
   const [tag, setTag] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setError('');
+    setNote('');
     try {
-      await fn();
+      const r = await fn();
+      if (r && typeof r === 'object' && (r as { closed?: unknown }).closed === true) setNote('This keep was closed and no team was made.');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');
     } finally {
@@ -29,7 +32,7 @@ export function KeepTeamPanel({ slug }: { slug: string }) {
   };
   const k = data?.keep ?? null;
   if (!k) return null;
-  const voting = k.status === 'voting' || k.status === 'made';
+  const canAnswer = !k.captain && k.myAnswer === null && !k.closed;
   return (
     <Panel class="entrypanel keeppanel">
       <h3>Keep this team</h3>
@@ -43,13 +46,18 @@ export function KeepTeamPanel({ slug }: { slug: string }) {
           </div>
         </>
       ) : <p class="muted">Your captain can keep {k.team} together as a real team until {whenText(k.expiresAt)}.</p>)}
-      {voting && (
+      {k.status === 'made' && k.made && (
+        <p>
+          <a href={`/team/${k.made.slug}`}>{k.made.name} [{k.made.tag}]</a> is a team now{canAnswer ? `. Accept to join by ${whenText(k.expiresAt)}.` : '.'}
+        </p>
+      )}
+      {k.status === 'voting' && <p>{k.name} [{k.tag}]: made when 3 of the 4 of you accept{k.closed ? '' : `, by ${whenText(k.expiresAt)}`}.</p>}
+      {(k.status === 'voting' || k.status === 'made') && (
         <>
-          <p>{k.name} [{k.tag}]: made when 3 of the 4 of you accept{k.closed ? '' : `, by ${whenText(k.expiresAt)}`}.</p>
           <ul class="admin-list">
-            {k.players.map((p) => <li key={p.name}>{p.name}{p.captain ? ' (captain)' : ''} · {p.answer ? ANSWER[p.answer] : 'No answer yet'}</li>)}
+            {k.players.map((p) => <li key={p.steamid}>{p.name}{p.captain ? ' (captain)' : ''} · {p.answer ? ANSWER[p.answer] : 'No answer yet'}</li>)}
           </ul>
-          {!k.captain && k.myAnswer === null && !k.closed && (
+          {canAnswer && (
             <div class="inlinerow">
               <button class="btn" disabled={busy} onClick={() => run(() => eventsApi.answerKeep(slug, true))}>Accept</button>
               <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => eventsApi.answerKeep(slug, false))}>Decline</button>
@@ -57,8 +65,8 @@ export function KeepTeamPanel({ slug }: { slug: string }) {
           )}
         </>
       )}
-      {k.teamSlug && <p><a href={`/team/${k.teamSlug}`}>Open the team page</a></p>}
       {(k.status === 'lapsed' || (k.status === 'offered' && k.closed)) && <p class="muted">Keep this team has closed.</p>}
+      {note && <p class="muted">{note}</p>}
       {error && <p class="error" role="alert">{error}</p>}
     </Panel>
   );

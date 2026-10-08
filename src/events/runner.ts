@@ -8,7 +8,7 @@ import * as R from './entryRules.js';
 import { settleEvent, startEventFlow } from './flow.js';
 import * as K from './keepTeam.js';
 import { KEEP_OFFER_DAYS } from './draftRules.js';
-import { tellCaptainOffer, tellCheckinOpen, tellDropped, tellKeepOffer, tellKeepSettled } from './notices.js';
+import { tellCaptainOffer, tellCheckinOpen, tellDropped, tellKeepCaptainCap, tellKeepLapsed, tellKeepOffer, tellKeepSettled } from './notices.js';
 import { publishAdminEvent } from '../adminFeed.js';
 
 export const TICK_MS = 60_000;
@@ -120,8 +120,10 @@ export class EventRunner {
 
   /** Drafts plan D3b: offer Keep this team to each finished draft team's
    *  captain within KEEP_OFFER_DAYS of the finish, close keeps past their
-   *  window, and make the team for a vote that can now be made (an accepter
-   *  left a team since). Each keep is caught on its own. */
+   *  window (telling the four when a vote ran out), and make the team for a
+   *  vote that can now be made (an accepter left a team since); a vote held
+   *  up by its captain's team cap tells the captain once. Each keep is caught
+   *  on its own. */
   private stepKeeps(now: Date): void {
     const { db } = this.deps;
     const since = new Date(now.getTime() - KEEP_OFFER_DAYS * 86_400_000).toISOString();
@@ -142,12 +144,15 @@ export class EventRunner {
     for (const k of K.openKeeps(db)) {
       try {
         if (Date.parse(k.expires_at) <= now.getTime()) {
-          K.closeKeep(db, { keepId: k.id, now });
+          const c = K.closeKeep(db, { keepId: k.id, now });
+          if (c.ok && c.value.from === 'voting') tellKeepLapsed(this.deps, k.event_id, k.id);
           continue;
         }
         if (k.status !== 'voting') continue;
         const s = K.settleKeep(db, { keepId: k.id, now });
         if (s.ok) tellKeepSettled(this.deps, k.event_id, k.id, s.value);
+        // A captain at the team cap holds the team up: told once per keep.
+        else if (s.error === 'keep_captain_cap' && K.noteKeepCaptainCap(db, { keepId: k.id, now }).ok) tellKeepCaptainCap(this.deps, k.event_id, k.id);
       } catch (err) {
         console.error(`[events] keep ${k.id} failed:`, err instanceof Error ? err.message : err);
       }

@@ -145,6 +145,18 @@ const PLAIN: [table: string, column: string][] = [
   // person the same way.
   ['event_reschedules', 'proposed_by'],
   ['event_reschedules', 'responded_by'],
+  // Keep this team (drafts plan D3b, src/events/keepTeam.ts): the captain who
+  // pressed Keep. The four in players_json are rewritten by hand below.
+  ['draft_keeps', 'captain_steamid'],
+  // Bench stand-ins (drafts plan D3a, src/events/standins.ts): the player
+  // stood in for, who asked, who filled it, and who was offered it. Where both
+  // accounts have an open request on one entry, the alt's is closed first
+  // (below): draft_standins_open allows one per (entry, player). An offer's
+  // open index is per request, so moving its steamid cannot collide.
+  ['draft_standins', 'out_steamid'],
+  ['draft_standins', 'requested_by'],
+  ['draft_standins', 'filled_by'],
+  ['draft_standin_offers', 'steamid'],
 ];
 
 /** Tables where the steamid is part of the primary key, so `from` and `into`
@@ -197,6 +209,9 @@ const KEYED: [table: string, column: string][] = [
   ['booking_casters', 'caster_steamid'],
   // One opt-out per type; where both accounts set one, the survivor's stands.
   ['notification_prefs', 'steamid'],
+  // One answer per player per keep (drafts plan D3b). Where both accounts
+  // answered one keep, the survivor's answer stands and the alt's is dropped.
+  ['draft_keep_answers', 'steamid'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
@@ -278,6 +293,9 @@ export function mergePlayers(
   note('player_steam_signals', count('SELECT COUNT(*) AS n FROM player_steam_signals WHERE steamid = ?', from));
   note('steam_signal_alerts', count('SELECT COUNT(*) AS n FROM steam_signal_alerts WHERE player_id = ?', from));
   note('scrim_blocks', count('SELECT COUNT(*) AS n FROM scrim_blocks WHERE blocker_steamid = ? OR target_steamid = ?', from, from));
+  // A keep the alt is one of the four of without being its captain (the
+  // captain column is counted with PLAIN).
+  note('draft_keeps', count('SELECT COUNT(*) AS n FROM draft_keeps WHERE captain_steamid != ? AND instr(players_json, ?) > 0', from, JSON.stringify(from)));
 
   const matchesMoved = count('SELECT COUNT(DISTINCT match_id) AS n FROM match_players WHERE player_id = ?', from);
   const matchesCollapsed = count(
@@ -391,6 +409,20 @@ export function mergePlayers(
     // The closed alt row's role is not inherited: the cut recomputes roles.
     db.prepare(`UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'withdrawn' WHERE steamid = ? AND withdrawn_at IS NULL
       AND event_id IN (SELECT event_id FROM draft_signups WHERE steamid = ? AND withdrawn_at IS NULL)`).run(teamsNow, from, into);
+    // Both accounts with an open stand-in request on one entry: the alt's is
+    // cancelled (its open offer stopped first), the survivor's stands.
+    const dupStandins = `SELECT id FROM draft_standins WHERE out_steamid = ? AND status = 'open'
+      AND entry_id IN (SELECT entry_id FROM draft_standins WHERE out_steamid = ? AND status = 'open')`;
+    db.prepare(`UPDATE draft_standin_offers SET answer = 'stopped', answered_at = ? WHERE answer IS NULL AND request_id IN (${dupStandins})`)
+      .run(teamsNow, from, into);
+    db.prepare(`UPDATE draft_standins SET status = 'cancelled', closed_at = ? WHERE id IN (${dupStandins})`).run(teamsNow, from, into);
+    // The four of a keep: the alt's place becomes the survivor's, once.
+    const keeps = db.prepare('SELECT id, players_json FROM draft_keeps WHERE instr(players_json, ?) > 0')
+      .all(JSON.stringify(from)) as { id: number; players_json: string }[];
+    for (const k of keeps) {
+      const four = [...new Set((JSON.parse(k.players_json) as string[]).map((s) => (s === from ? into : s)))];
+      db.prepare('UPDATE draft_keeps SET players_json = ? WHERE id = ?').run(JSON.stringify(four), k.id);
+    }
 
     for (const [table, column] of PLAIN) {
       db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`).run(into, from);

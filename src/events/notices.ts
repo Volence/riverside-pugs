@@ -206,3 +206,13 @@ export function tellKeepJoined(d: NoticeDeps, eventId: number, keepId: number, s
   const k = keepOf(d.db, keepId);
   if (k) tell(d, [steamid], eventId, 'draft_keep_made', { keepId, entryId: k.entry_id });
 }
+/** A vote that ran out of time without a team: all four. */
+export function tellKeepLapsed(d: NoticeDeps, eventId: number, keepId: number): void {
+  const k = keepOf(d.db, keepId);
+  if (k) tell(d, playersOf(k), eventId, 'draft_keep_closed', { keepId, entryId: k.entry_id, keepLapsed: true });
+}
+/** The vote has its accepts but the captain is at the team cap: the captain, once. */
+export function tellKeepCaptainCap(d: NoticeDeps, eventId: number, keepId: number): void {
+  const k = keepOf(d.db, keepId);
+  if (k) tell(d, [k.captain_steamid], eventId, 'draft_keep_captain_cap', { keepId, entryId: k.entry_id });
+}

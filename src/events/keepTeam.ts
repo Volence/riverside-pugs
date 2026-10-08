@@ -31,8 +31,11 @@ export interface MyKeepView {
   keepId: number; status: KeepStatus; captain: boolean; team: string; name: string | null; tag: string | null;
   /** What the captain's form starts from: the draft entry's name and tag. */
   defaults: { name: string; tag: string }; expiresAt: string; closed: boolean;
-  players: { name: string; captain: boolean; answer: 'accept' | 'decline' | null }[];
-  myAnswer: 'accept' | 'decline' | null; teamSlug: string | null;
+  players: { steamid: string; name: string; captain: boolean; answer: 'accept' | 'decline' | null }[];
+  myAnswer: 'accept' | 'decline' | null;
+  /** The site team as it was made (its name or tag can differ from the
+   *  keep's when one was taken meanwhile), or null before it is made. */
+  made: { name: string; tag: string; slug: string } | null;
 }
 
 const DAY = 86_400_000;
@@ -79,8 +82,8 @@ export function myKeepView(db: DB, eventId: number, viewer: string, now: Date): 
   return {
     keepId: k.id, status: k.status, captain: k.captain_steamid === viewer, team: entry?.name ?? '', name: k.name, tag: k.tag,
     defaults: { name: entry?.name ?? '', tag: entry?.tag ?? '' }, expiresAt: k.expires_at, closed: k.closed_at !== null || due(k, now),
-    players: playersOf(k).map((s) => ({ name: getPlayer(db, s)?.name ?? s, captain: s === k.captain_steamid, answer: answers.get(s) ?? null })),
-    myAnswer: answers.get(viewer) ?? null, teamSlug: team?.slug ?? null,
+    players: playersOf(k).map((s) => ({ steamid: s, name: getPlayer(db, s)?.name ?? s, captain: s === k.captain_steamid, answer: answers.get(s) ?? null })),
+    myAnswer: answers.get(viewer) ?? null, made: team ? { name: team.name, tag: team.tag, slug: team.slug } : null,
   };
 }
 
@@ -197,16 +200,36 @@ export function settleKeep(db: DB, o: { keepId: number; now: Date }): V.Checked<
 }
 
 /** Ruling 2: the tick closes a keep past its window. An offer or a vote
- *  lapses; a made team keeps its status and stops taking late accepts. */
-export function closeKeep(db: DB, o: { keepId: number; now: Date }): V.Checked<{ status: KeepStatus }> {
+ *  lapses; a made team keeps its status and stops taking late accepts.
+ *  `from` is the status it closed from, so the tick can tell the four when a
+ *  vote ended without a team. */
+export function closeKeep(db: DB, o: { keepId: number; now: Date }): V.Checked<{ status: KeepStatus; from: KeepStatus }> {
   const at = o.now.toISOString();
-  return db.transaction((): V.Checked<{ status: KeepStatus }> => {
+  return db.transaction((): V.Checked<{ status: KeepStatus; from: KeepStatus }> => {
     const k = keepOf(db, o.keepId);
     if (!k || k.closed_at !== null) return V.fail('keep_closed');
     if (!due(k, o.now)) return V.fail('keep_open');
     const status: KeepStatus = k.status === 'made' ? 'made' : 'lapsed';
     db.prepare('UPDATE draft_keeps SET status = ?, closed_at = ? WHERE id = ?').run(status, at, k.id);
     E.logEvent(db, k.event_id, null, 'keep_closed', at, { keepId: k.id, status });
-    return V.ok({ status });
+    return V.ok({ status, from: k.status });
+  })();
+}
+
+/** The tick found a vote whose settle is held up by its captain's team cap
+ *  (keep_captain_cap): records that once per keep, so the captain is told
+ *  once and not every minute. keep_cap_told when it was recorded already. */
+export function noteKeepCaptainCap(db: DB, o: { keepId: number; now: Date }): V.Checked<{ keepId: number }> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<{ keepId: number }> => {
+    const k = keepOf(db, o.keepId);
+    if (!k || k.status === 'offered') return V.fail('keep_not_open');
+    if (k.status !== 'voting' || k.closed_at !== null || due(k, o.now)) return V.fail('keep_closed');
+    const told = db.prepare(
+      "SELECT 1 FROM event_log WHERE event_id = ? AND action = 'keep_captain_capped' AND json_extract(detail, '$.keepId') = ?",
+    ).get(k.event_id, k.id);
+    if (told) return V.fail('keep_cap_told');
+    E.logEvent(db, k.event_id, null, 'keep_captain_capped', at, { keepId: k.id });
+    return V.ok({ keepId: k.id });
   })();
 }

@@ -2151,15 +2151,17 @@ export type KeepStatus = 'offered' | 'voting' | 'made' | 'lapsed';
 export interface MyKeepView {
   keepId: number; status: KeepStatus; captain: boolean; team: string; name: string | null; tag: string | null;
   defaults: { name: string; tag: string }; expiresAt: string; closed: boolean;
-  players: { name: string; captain: boolean; answer: 'accept' | 'decline' | null }[];
-  myAnswer: 'accept' | 'decline' | null; teamSlug: string | null;
+  players: { steamid: string; name: string; captain: boolean; answer: 'accept' | 'decline' | null }[];
+  myAnswer: 'accept' | 'decline' | null;
+  /** The site team as it was made (its name or tag can differ from the keep's), or null before. */
+  made: { name: string; tag: string; slug: string } | null;
 }
 
 export const eventsApi = {
   /** Keep this team (drafts plan D3b). */
   keep: (slug: string, signal?: AbortSignal) => get<{ keep: MyKeepView | null }>(`/api/events/${enc(slug)}/keep`, signal),
   startKeep: (slug: string, body: { name: string; tag: string }) => post<{ keepId: number }>(`/api/events/${enc(slug)}/keep/start`, body),
-  answerKeep: (slug: string, accept: boolean) => post<{ joined: boolean; teamSlug: string | null }>(`/api/events/${enc(slug)}/keep/answer`, { accept }),
+  answerKeep: (slug: string, accept: boolean) => post<{ joined: boolean; teamSlug: string | null; closed: boolean }>(`/api/events/${enc(slug)}/keep/answer`, { accept }),
   list: (signal?: AbortSignal) => get<{ events: EventListItem[] }>('/api/events', signal),
   get: (slug: string, signal?: AbortSignal) => get<EventView>(`/api/events/${enc(slug)}`, signal),
   mine: (slug: string, signal?: AbortSignal) => get<MyEventView>(`/api/events/${enc(slug)}/mine`, signal),

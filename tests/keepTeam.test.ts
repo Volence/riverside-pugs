@@ -201,7 +201,7 @@ describe('closeKeep (Ruling 2)', () => {
     const f = finishedDraft();
     const a = offered(f);
     expect(err(K.closeKeep(f.db, { keepId: a.keepId, now: at(5) }))).toBe('keep_open');
-    expect(must(K.closeKeep(f.db, { keepId: a.keepId, now: at(7 * 24) }))).toEqual({ status: 'lapsed' });
+    expect(must(K.closeKeep(f.db, { keepId: a.keepId, now: at(7 * 24) }))).toEqual({ status: 'lapsed', from: 'offered' });
     expect(err(start(f, a, { now: at(7 * 24 + 1) }))).toBe('keep_closed');
     const entry = N.getEntry(f.db, f.entries[1]!)!;
     const { keepId } = must(K.offerKeep(f.db, { entryId: entry.id, now: at(1) }));
@@ -210,7 +210,7 @@ describe('closeKeep (Ruling 2)', () => {
     must(K.answerKeep(f.db, { keepId, steamid: four[1]!, accept: true, now: at(3) }));
     must(K.answerKeep(f.db, { keepId, steamid: four[2]!, accept: true, now: at(3) }));
     must(K.settleKeep(f.db, { keepId, now: at(3) }));
-    expect(must(K.closeKeep(f.db, { keepId, now: at(50) }))).toEqual({ status: 'made' });
+    expect(must(K.closeKeep(f.db, { keepId, now: at(50) }))).toEqual({ status: 'made', from: 'made' });
     expect(err(K.answerKeep(f.db, { keepId, steamid: four[3]!, accept: true, now: at(51) }))).toBe('keep_closed');
   });
 });
@@ -222,9 +222,36 @@ describe('myKeepView', () => {
     must(start(f, x));
     must(answer(f, x, x.p[1], false));
     const v = K.myKeepView(f.db, f.eventId, x.p[0], at(3))!;
-    expect(v).toMatchObject({ keepId: x.keepId, status: 'voting', captain: false, name: 'Night Owls', tag: 'OWL', myAnswer: null, closed: false, teamSlug: null });
+    expect(v).toMatchObject({ keepId: x.keepId, status: 'voting', captain: false, name: 'Night Owls', tag: 'OWL', myAnswer: null, closed: false, made: null });
     expect(v.players.map((p) => p.answer)).toEqual(['accept', null, 'decline', null]);
     expect(K.myKeepView(f.db, f.eventId, x.captain, at(3))).toMatchObject({ captain: true, myAnswer: 'accept', defaults: { name: x.entry.name, tag: x.entry.tag } });
     expect(K.myKeepView(f.db, f.eventId, BENCH[0]!, at(3))).toBeNull();
+  });
+});
+
+describe('myKeepView once the team is made (final review)', () => {
+  it('names the made team as it was really made, with its slug, and lists the four by steamid', () => {
+    const f = finishedDraft();
+    const x = offered(f);
+    must(start(f, x));
+    must(T.createTeam(f.db, { creator: BENCH[0]!, name: 'Night Owls', tag: 'OWL', now: at(2) }));
+    must(answer(f, x, x.p[0], true));
+    must(answer(f, x, x.p[1], true));
+    madeOf(settle(f, x));
+    const v = K.myKeepView(f.db, f.eventId, x.p[2], at(4))!;
+    expect(v).toMatchObject({ status: 'made', myAnswer: null, closed: false, made: { name: 'Night Owls 2', tag: 'OWL2', slug: 'night-owls-2' } });
+    expect(v.players.map((p) => p.steamid)).toEqual([x.captain, ...x.p]);
+  });
+});
+
+describe('noteKeepCaptainCap (final review)', () => {
+  it('notes a captain-cap stall once per keep, and only on a vote', () => {
+    const f = finishedDraft();
+    const x = offered(f);
+    expect(err(K.noteKeepCaptainCap(f.db, { keepId: x.keepId, now: at(2) }))).toBe('keep_not_open');
+    must(start(f, x));
+    must(K.noteKeepCaptainCap(f.db, { keepId: x.keepId, now: at(3) }));
+    expect(err(K.noteKeepCaptainCap(f.db, { keepId: x.keepId, now: at(4) }))).toBe('keep_cap_told');
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'keep_captain_capped'").get()).toEqual({ n: 1 });
   });
 });

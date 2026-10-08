@@ -16,7 +16,7 @@ import { getProposal, scheduleRules } from './schedule.js';
 import { KEEP_BUTTON_PREFIX, STANDIN_BUTTON_PREFIX, type CutRole } from './draftRules.js';
 import type { ReplaceReason } from './entries.js';
 import { keepOf } from './keepTeam.js';
-import { getTeam } from '../teams/teams.js';
+import { getTeam, membershipCap } from '../teams/teams.js';
 import { offerOf, requestOf, type StandinRow } from './standins.js';
 
 /** The event DMs (plan T1b Ruling 11, and the two match room DMs of plan
@@ -28,7 +28,8 @@ export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_ro
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
   | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set'
   | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none'
-  | 'draft_keep_offer' | 'draft_keep_ask' | 'draft_keep_made' | 'draft_keep_left_out' | 'draft_keep_closed';
+  | 'draft_keep_offer' | 'draft_keep_ask' | 'draft_keep_made' | 'draft_keep_left_out' | 'draft_keep_closed'
+  | 'draft_keep_captain_cap';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -73,7 +74,7 @@ function standinScopeText(db: DB, req: StandinRow): string {
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason; forCaptain?: string; offerId?: number; requestId?: number; keepId?: number } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason; forCaptain?: string; offerId?: number; requestId?: number; keepId?: number; keepLapsed?: boolean } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -228,11 +229,25 @@ export function eventMessage(
       };
     }
     case 'draft_keep_closed': {
-      // The captain lost good standing before the team could be made: nothing was made, so no team link.
+      // Nothing was made, so no team link: the captain lost good standing
+      // before the team could be made, or (keepLapsed) the vote ran out.
       const k = extra.keepId !== undefined ? keepOf(db, extra.keepId) : undefined;
       if (!k) return null;
       return {
-        content: `The keep for ${team} from ${event} was closed and no team was made. Staff can tell you more.`,
+        content: extra.keepLapsed
+          ? 'Keep this team closed: not enough of you accepted in time.'
+          : `The keep for ${team} from ${event} was closed and no team was made. Staff can tell you more.`,
+        embeds: [],
+        components: [[{ kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' }]],
+        mentionUserIds: [],
+      };
+    }
+    case 'draft_keep_captain_cap': {
+      // The vote has its accepts but the captain is at the team cap.
+      const k = extra.keepId !== undefined ? keepOf(db, extra.keepId) : undefined;
+      if (!k || k.name === null || k.tag === null) return null;
+      return {
+        content: `Enough of ${team} accepted to make ${escapeName(k.name)} [${k.tag}], but you are on or have created ${membershipCap(db)} teams, the most allowed. It is made once you leave a team (or disband one you created), if that is before ${discordTime(k.expires_at)}.`,
         embeds: [],
         components: [[{ kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' }]],
         mentionUserIds: [],
@@ -247,7 +262,7 @@ export function eventMessage(
       return {
         content: type === 'draft_keep_made'
           ? `${escapeName(t.name)} [${t.tag}] is a team now, formed at ${event}: ${url}`
-          : `You were not added to ${escapeName(t.name)} [${t.tag}], made from ${team} in ${event}. If you are on three teams already, leave one and ask the captain to add you: ${url}`,
+          : `You were not added to ${escapeName(t.name)} [${t.tag}], made from ${team} in ${event}. If you are on ${membershipCap(db)} teams already, leave one and ask the captain to add you: ${url}`,
         embeds: [],
         components: [[{ kind: 'link', url, label: 'Team page' }]],
         mentionUserIds: [],

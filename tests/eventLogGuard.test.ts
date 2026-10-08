@@ -661,9 +661,9 @@ describe('event_log guard', () => {
       f.db.prepare('SELECT * FROM draft_standin_offers ORDER BY id').all(),
     ]);
 
-    it('only src/events/standins.ts writes the stand-in tables', () => {
+    it('only src/events/standins.ts (and the account merge) writes the stand-in tables', () => {
       const offenders = walk('src')
-        .filter((f) => f !== 'src/events/standins.ts')
+        .filter((f) => f !== 'src/events/standins.ts' && f !== 'src/mergePlayers.ts')
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(STANDIN_WRITERS) ?? []).length > 0);
       expect(offenders).toEqual([]);
       expect('update draft_standin_offers set answer = ?'.match(STANDIN_WRITERS)).toHaveLength(1);
@@ -727,6 +727,7 @@ describe('event_log guard', () => {
       answerKeep: { action: 'keep_answered', setup: voting, run: (x) => K.answerKeep(x.f.db, { keepId: x.keepId, steamid: x.four[1]!, accept: true, now: LATER }) },
       settleKeep: { action: 'keep_team_made', setup: ready, run: (x) => K.settleKeep(x.f.db, { keepId: x.keepId, now: LATER }) },
       closeKeep: { action: 'keep_closed', setup: offered, run: (x) => K.closeKeep(x.f.db, { keepId: x.keepId, now: new Date('2026-10-30T00:00:00.000Z') }) },
+      noteKeepCaptainCap: { action: 'keep_captain_capped', setup: voting, run: (x) => K.noteKeepCaptainCap(x.f.db, { keepId: x.keepId, now: LATER }) },
     };
     const keepRows = (x: { f: ReturnType<typeof finishedDraft> }) => JSON.stringify([
       x.f.db.prepare('SELECT * FROM draft_keeps ORDER BY id').all(),
@@ -735,9 +736,9 @@ describe('event_log guard', () => {
       x.f.db.prepare('SELECT * FROM team_members ORDER BY id').all(),
     ]);
 
-    it('only src/events/keepTeam.ts writes the keep tables', () => {
+    it('only src/events/keepTeam.ts (and the account merge) writes the keep tables', () => {
       const offenders = walk('src')
-        .filter((f) => f !== 'src/events/keepTeam.ts')
+        .filter((f) => f !== 'src/events/keepTeam.ts' && f !== 'src/mergePlayers.ts')
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(KEEP_WRITERS) ?? []).length > 0);
       expect(offenders).toEqual([]);
     });
