@@ -33,4 +33,13 @@ describe('studio: draft on air', () => {
     fireEvent.change(getByRole('checkbox'), { target: { checked: false } });
     expect(state.draftStrip).toBe(false);
   });
+
+  it('shows a saved draft that left the list as off air, with a way to clear it', () => {
+    let state: StudioState = { ...defaultStudioState(), draftEventId: 12 };
+    const update = vi.fn((fn: (s: StudioState) => StudioState) => { state = fn(state); });
+    const { getByText, getByRole } = render(<DraftOnAir drafts={drafts} state={state} update={update} />);
+    expect(getByText('Off air')).toBeTruthy();
+    fireEvent.click(getByRole('button', { name: 'Clear' }));
+    expect(state.draftEventId).toBeNull();
+  });
 });
