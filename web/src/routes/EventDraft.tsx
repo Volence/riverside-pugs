@@ -184,14 +184,14 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
           <ol class="draftlog" reversed>
             {[...v.picks].reverse().map((p) => (
               <li key={pickKey(p)}>
-                <span>{`#${p.pickNo} ${nameOf(p.captain)} took ${p.name}`}</span>
+                <span>{`${nameOf(p.captain)} took ${p.name}`}</span>
                 {p.auto && <span class="chip">Auto</span>}
               </li>
             ))}
           </ol>
         </Panel>
       )}
-      {drawer && <PickListDrawer slug={slug} onClose={() => setDrawer(false)} />}
+      {drawer && <PickListDrawer slug={slug} available={v.pool.map((c) => c.steamid)} onClose={() => setDrawer(false)} />}
     </div>
   );
 }
