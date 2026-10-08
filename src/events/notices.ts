@@ -8,6 +8,7 @@ import type { CutRole } from './draftRules.js';
 import type { ReplaceReason } from './entries.js';
 import { openOffer } from './drafts.js';
 import { offerOf, requestOf } from './standins.js';
+import { answersOf, keepOf, playersOf, type SettleOutcome } from './keepTeam.js';
 
 /**
  * The event DMs (plan T1b Ruling 11), shared by the minute tick
@@ -177,4 +178,31 @@ export function tellStandinUnfilled(d: NoticeDeps, eventId: number, requestId: n
   const entry = r ? N.getEntry(d.db, r.entry_id) : undefined;
   if (!r || !entry || entry.captain_steamid === null) return;
   tell(d, [entry.captain_steamid], eventId, 'draft_standin_none', { requestId, entryId: entry.id });
+}
+
+/** Plan D3b: a finished draft team's captain, with the Keep button. */
+export function tellKeepOffer(d: NoticeDeps, eventId: number, keepId: number): void {
+  const k = keepOf(d.db, keepId);
+  if (k) tell(d, [k.captain_steamid], eventId, 'draft_keep_offer', { keepId, entryId: k.entry_id });
+}
+/** The captain pressed Keep: the other three, with Accept and Decline. */
+export function tellKeepAsk(d: NoticeDeps, eventId: number, keepId: number): void {
+  const k = keepOf(d.db, keepId);
+  if (k) tell(d, playersOf(k).filter((s) => s !== k.captain_steamid), eventId, 'draft_keep_ask', { keepId, entryId: k.entry_id });
+}
+/** A settle's outcome: the team was made (who joined, and each accepter left out), or the keep closed with no team. */
+export function tellKeepSettled(d: NoticeDeps, eventId: number, keepId: number, outcome: SettleOutcome): void {
+  const k = keepOf(d.db, keepId);
+  if (!k) return;
+  if (!outcome.made) {
+    tell(d, playersOf(k), eventId, 'draft_keep_closed', { keepId, entryId: k.entry_id });
+    return;
+  }
+  tell(d, outcome.joined, eventId, 'draft_keep_made', { keepId, entryId: k.entry_id });
+  tell(d, answersOf(d.db, keepId).filter((a) => a.answer === 'accept' && outcome.left.includes(a.steamid)).map((a) => a.steamid), eventId, 'draft_keep_left_out', { keepId, entryId: k.entry_id });
+}
+/** A late accept joined the made team: that player. */
+export function tellKeepJoined(d: NoticeDeps, eventId: number, keepId: number, steamid: string): void {
+  const k = keepOf(d.db, keepId);
+  if (k) tell(d, [steamid], eventId, 'draft_keep_made', { keepId, entryId: k.entry_id });
 }

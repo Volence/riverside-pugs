@@ -154,6 +154,7 @@ import { teamRoutes } from './routes/teams.js';
 import { eventRoutes } from './routes/events.js';
 import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
 import { handleStandinButton } from './discord/standinButtons.js';
+import { handleKeepButton } from './discord/keepButtons.js';
 import { BookingRunner, TICK_MS as BOOKING_TICK_MS } from './bookings/runner.js';
 import { BookingVoice } from './bookings/voice.js';
 import { Notifier } from './notify/notify.js';
@@ -166,7 +167,7 @@ import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
 import { RoomClock, ROOM_TICK_MS } from './events/roomClock.js';
 import { STANDIN_TICK_MS, Standins } from './events/standinFlow.js';
 import { standinRoutes } from './routes/standins.js';
-import { STANDIN_BUTTON_PREFIX } from './events/draftRules.js';
+import { KEEP_BUTTON_PREFIX, STANDIN_BUTTON_PREFIX } from './events/draftRules.js';
 import { DraftClock, DRAFT_TICK_MS } from './events/draftClock.js';
 import { draftRoomRoutes } from './routes/draftRoom.js';
 import { SeriesEngine, lateHooks } from './events/series.js';
@@ -1861,6 +1862,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         [MOD_CALL_PREFIX]: (i) => modCalls!.handleButton(i),
         [TEAM_BUTTON_PREFIX]: (i) => handleTeamButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
         [STANDIN_BUTTON_PREFIX]: (i) => handleStandinButton({ db: deps.db, publicUrl: deps.config.publicUrl, standins: () => standinsRef }, i),
+        [KEEP_BUTTON_PREFIX]: (i) => handleKeepButton({ db: deps.db, publicUrl: deps.config.publicUrl, notifier }, i),
       },
       extraModals: {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),

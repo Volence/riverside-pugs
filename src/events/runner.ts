@@ -6,7 +6,9 @@ import * as D from './drafts.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import { settleEvent, startEventFlow } from './flow.js';
-import { tellCaptainOffer, tellCheckinOpen, tellDropped } from './notices.js';
+import * as K from './keepTeam.js';
+import { KEEP_OFFER_DAYS } from './draftRules.js';
+import { tellCaptainOffer, tellCheckinOpen, tellDropped, tellKeepOffer, tellKeepSettled } from './notices.js';
 import { publishAdminEvent } from '../adminFeed.js';
 
 export const TICK_MS = 60_000;
@@ -111,6 +113,43 @@ export class EventRunner {
         this.stepOffers(ev, now);
       } catch (err) {
         console.error(`[events] captaincy offers of event ${ev.id} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
+    this.stepKeeps(now);
+  }
+
+  /** Drafts plan D3b: offer Keep this team to each finished draft team's
+   *  captain within KEEP_OFFER_DAYS of the finish, close keeps past their
+   *  window, and make the team for a vote that can now be made (an accepter
+   *  left a team since). Each keep is caught on its own. */
+  private stepKeeps(now: Date): void {
+    const { db } = this.deps;
+    const since = new Date(now.getTime() - KEEP_OFFER_DAYS * 86_400_000).toISOString();
+    const finished = db.prepare(
+      "SELECT id FROM events WHERE entry_kind = 'draft' AND status = 'finished' AND finished_at > ? ORDER BY id",
+    ).all(since) as { id: number }[];
+    for (const { id } of finished) {
+      for (const e of N.entriesOf(db, id)) {
+        if (!N.isActive(e) || e.captain_steamid === null || K.keepOfEntry(db, e.id)) continue;
+        try {
+          const r = K.offerKeep(db, { entryId: e.id, now });
+          if (r.ok) tellKeepOffer(this.deps, id, r.value.keepId);
+        } catch (err) {
+          console.error(`[events] keep offer for entry ${e.id} failed:`, err instanceof Error ? err.message : err);
+        }
+      }
+    }
+    for (const k of K.openKeeps(db)) {
+      try {
+        if (Date.parse(k.expires_at) <= now.getTime()) {
+          K.closeKeep(db, { keepId: k.id, now });
+          continue;
+        }
+        if (k.status !== 'voting') continue;
+        const s = K.settleKeep(db, { keepId: k.id, now });
+        if (s.ok) tellKeepSettled(this.deps, k.event_id, k.id, s.value);
+      } catch (err) {
+        console.error(`[events] keep ${k.id} failed:`, err instanceof Error ? err.message : err);
       }
     }
   }

@@ -21,7 +21,8 @@ export type NotifyType =
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
   | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set'
-  | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none';
+  | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none'
+  | 'draft_keep_offer' | 'draft_keep_ask' | 'draft_keep_made' | 'draft_keep_left_out' | 'draft_keep_closed';
 
 export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_invite', label: 'Someone invites me to a booked server' },
@@ -63,6 +64,11 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'draft_standin_placed', label: 'Draft: I am placed on a team as a stand-in' },
   { type: 'draft_standin_filled', label: 'Draft: a stand-in was found for a player on my team' },
   { type: 'draft_standin_none', label: 'Draft: nobody on the bench took a stand-in my team asked for' },
+  { type: 'draft_keep_offer', label: 'Draft: keep my draft team together after the event' },
+  { type: 'draft_keep_ask', label: 'Draft: my captain wants to keep our draft team' },
+  { type: 'draft_keep_made', label: 'Draft: our kept draft team is made' },
+  { type: 'draft_keep_left_out', label: 'Draft: I was left out of our kept team (team cap)' },
+  { type: 'draft_keep_closed', label: 'Draft: our kept draft team was not made' },
 ];
 
 export function isNotifyType(v: unknown): v is NotifyType {
