@@ -170,22 +170,24 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
         </>
       )}
       {n === 0 ? <Empty>Nobody has signed up yet.</Empty> : (
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>Name</th><th>SR</th><th>Captain</th><th>Note</th><th>Signed up</th><th>Reliability</th><th>Role</th>{canAct && <th>Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {data.signups.map((s) => (
-              <SignupRow key={s.steamid} s={s} canAct={canAct} busy={busy}
-                others={data.signups.filter((o) => o.role === (s.role === 'pool' ? 'bench' : 'pool') && (s.role === 'pool' || s.role === 'bench'))}
-                onCaptain={(x, c) => void run(() => adminApi.draftCaptain(eventId, x.steamid, c))}
-                onSwap={(x, other) => void run(() => (x.role === 'pool' ? adminApi.draftSwap(eventId, x.steamid, other) : adminApi.draftSwap(eventId, other, x.steamid)))}
-                onRemove={(x, reason) => void run(() => adminApi.removeSignup(eventId, x.steamid, reason), `Remove ${x.name}'s signup?`)} />
-            ))}
-          </tbody>
-        </table>
+        <div class="table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Name</th><th>SR</th><th>Captain</th><th>Note</th><th>Signed up</th><th>Reliability</th><th>Role</th>{canAct && <th>Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {data.signups.map((s) => (
+                <SignupRow key={s.steamid} s={s} canAct={canAct} busy={busy}
+                  others={data.signups.filter((o) => o.role === (s.role === 'pool' ? 'bench' : 'pool') && (s.role === 'pool' || s.role === 'bench'))}
+                  onCaptain={(x, c) => void run(() => adminApi.draftCaptain(eventId, x.steamid, c))}
+                  onSwap={(x, other) => void run(() => (x.role === 'pool' ? adminApi.draftSwap(eventId, x.steamid, other) : adminApi.draftSwap(eventId, other, x.steamid)))}
+                  onRemove={(x, reason) => void run(() => adminApi.removeSignup(eventId, x.steamid, reason), `Remove ${x.name}'s signup?`)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {locked && !published && canEdit && (
         <div class="inlinerow">

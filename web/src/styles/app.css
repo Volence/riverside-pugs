@@ -3530,6 +3530,8 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftboard__team.is-up { border-color: var(--accent); }
 .draftboard__team h4 { margin: 0 0 var(--sp-2); }
 .draftboard__slots { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
+/* A phone's panel is narrower than two 160px tracks, so two columns there rather than five stacked teams. */
+@media (max-width: 480px) { .draftboard { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .draftpool__tools { margin-bottom: var(--sp-3); }
 .draftpool__tools input { flex: 1 1 12rem; min-width: 0; }
 .draftpool { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-3); }
