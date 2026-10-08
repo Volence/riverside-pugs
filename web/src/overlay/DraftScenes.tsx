@@ -78,9 +78,11 @@ export function DraftBoard({ studio, draft, now, reveal }: { studio: StudioState
               const p = t.players[r];
               const pickNo = t.slots[r];
               const isUp = !p && up !== null && pickNo === up.pickNo;
+              // A finished draft can leave slots unfilled (a team ran out of players).
+              const none = !p && draft.status === 'done';
               const auto = p ? draft.picks.find((x) => x.steamid === p.steamid)?.auto === true : false;
               return (
-                <div key={r} class={`ov-dboard__slot${p ? ' is-filled' : ''}${isUp ? ' is-up' : ''}`}>
+                <div key={r} class={`ov-dboard__slot${p ? ' is-filled' : ''}${isUp ? ' is-up' : ''}${none ? ' is-none' : ''}`}>
                   <span class="ov-dboard__no">{pickNo ? `#${pickNo}` : `R${r + 1}`}</span>
                   {p ? (
                     <>
@@ -88,7 +90,7 @@ export function DraftBoard({ studio, draft, now, reveal }: { studio: StudioState
                       <span class="ov-dboard__name">{p.name}</span>
                       <span class="ov-dboard__sr">{`${p.sr} SR${auto ? ' · Auto' : ''}`}</span>
                     </>
-                  ) : <span class="ov-dboard__open">{isUp ? 'On the clock' : 'Open'}</span>}
+                  ) : <span class="ov-dboard__open">{isUp ? 'On the clock' : none ? 'No pick' : 'Open'}</span>}
                 </div>
               );
             })}

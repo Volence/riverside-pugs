@@ -37,6 +37,18 @@ describe('draft board', () => {
     expect(t).toContain('Auto');
   });
 
+  it('marks slots left empty when the draft is done as No pick, not Open', () => {
+    const d: CastDraftView = { ...sampleDraft(N), status: 'done', onClock: null, deadlineAt: null };
+    const { container } = render(<Overlay which="draftboard" feed={feedWith(d)} now={N} />);
+    const empty = [...container.querySelectorAll('.ov-dboard__slot:not(.is-filled)')];
+    expect(empty.length).toBeGreaterThan(0);
+    for (const e of empty) {
+      expect(e.textContent).toContain('No pick');
+      expect(e.classList.contains('is-none')).toBe(true);
+    }
+    expect(container.textContent).not.toContain('Open');
+  });
+
   it('shows the studio title and nothing else with no draft on air', () => {
     const { container } = render(<Overlay which="draftboard" feed={feedWith(null)} now={N} />);
     expect(container.querySelector('.ov-dboard')).toBeNull();
