@@ -3337,6 +3337,7 @@ a.teamrow:hover .teamrow__name { color: var(--accent); }
 .inlinerow > input:not([type='checkbox']):not([type='radio']),
 .bookingadd > input, .bookingexcuse > input, .teamlink > input { flex: 1 1 14rem; min-width: 0; }
 .inlinerow > select, .bookingadd > select { max-width: 100%; }
+.keeppanel .inlinerow { margin-top: var(--sp-3); }
 
 /* ---------- Bookings (routes/Bookings.tsx, routes/Booking.tsx) ----------
    Layout only: the list rows and form fields reuse the Teams look above

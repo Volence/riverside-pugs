@@ -112,7 +112,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
             {live ? <>Founded {day(team.createdAt)} · {team.members.length} / {ROSTER_MAX} players</>
               : <>Disbanded {day(team.disbandedAt!)}</>}
             {team.origin && (
-              <> · Formed at <a href={`/event/${team.origin.eventSlug}`}>{team.origin.eventName}</a>{team.origin.placement !== null ? ` (${placementText(team.origin.placement)})` : ''}</>
+              <span>Formed at <a href={`/event/${team.origin.eventSlug}`}>{team.origin.eventName}</a>{team.origin.placement !== null ? ` (${placementText(team.origin.placement)})` : ''}</span>
             )}
             {myRole && live && <span class="teamchip">You are {myRole.toLowerCase()}</span>}
             {/* The public badge (scrim_reliability_public), for anyone not on

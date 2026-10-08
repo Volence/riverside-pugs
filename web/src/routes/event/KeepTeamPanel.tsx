@@ -38,7 +38,7 @@ export function KeepTeamPanel({ slug }: { slug: string }) {
           <p>Keep {k.team} together as a real team. Your three are asked; it is made when 3 of the 4 of you accept.</p>
           <div class="inlinerow">
             <label>Team name <input value={name ?? k.defaults.name} maxLength={24} onInput={(e) => setName((e.target as HTMLInputElement).value)} /></label>
-            <label>Tag <input value={tag ?? k.defaults.tag} maxLength={5} onInput={(e) => setTag((e.target as HTMLInputElement).value)} /></label>
+            <label>Tag <input placeholder="2 to 5 letters" value={tag ?? k.defaults.tag} maxLength={5} onInput={(e) => setTag((e.target as HTMLInputElement).value)} /></label>
             <button class="btn" disabled={busy} onClick={() => run(() => eventsApi.startKeep(slug, { name: (name ?? k.defaults.name).trim(), tag: (tag ?? k.defaults.tag).trim() }))}>Keep this team</button>
           </div>
         </>
