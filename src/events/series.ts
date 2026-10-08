@@ -21,6 +21,7 @@ import * as E from './events.js';
 import * as N from './entries.js';
 import * as P from './play.js';
 import * as R from './room.js';
+import * as S from './standins.js';
 import * as V from './validate.js';
 import { carryEntries } from './carry.js';
 import { autoResultFlow, forfeitMatch } from './flow.js';
@@ -859,46 +860,48 @@ export class SeriesEngine {
     this.push(m.id);
   }
 
-  /** Staff remove a draft player and put a replacement in from the desk
-   *  (drafts plan D2c Ruling 5). Every rule is checked first, writing
-   *  nothing; a game on a box with the player on its roster is then asked
-   *  to take the sub (sm_pug_sub, as a captain's !sub), and a box that
-   *  refuses (mid-chapter) or does not answer refuses the replace as
-   *  replace_in_game with what it said, with nothing written. Only then is
-   *  the replace made. If it is refused at that point (the room moved on
-   *  between the two), the box is asked to undo the sub and staff are told. */
-  async staffReplace(o: {
-    eventId: number; entryId: number; out: string; in: string; reason: N.ReplaceReason; note: string | null; actor: string; now?: Date;
-  }): Promise<V.Checked<{ subbedInMatch: number | null }>> {
-    const at = () => o.now ?? new Date(this.now());
-    const plan = N.replaceDraftPlayer(this.db, { ...o, now: at(), check: true });
+  /** One player swapped for another, the box first (drafts plan D2c Ruling 5;
+   *  plan D3a reuses it for a stand-in). `run` is the entries.ts mutation:
+   *  called with `check` (every rule, no write, the games on a box that
+   *  roster `out`), then each such box is asked to take the sub
+   *  (sm_pug_sub, as a captain's !sub), and a box that refuses (mid-chapter)
+   *  or does not answer refuses the whole change as replace_in_game with
+   *  what it said, with nothing written. Only then is `run` called with the
+   *  games that took it. If it is refused at that point (the room moved on
+   *  between the two), the box is asked to undo the sub and staff are told.
+   *  `what` names the change in the box's log lines and the staff alerts. */
+  private async swapThroughBox<T extends { subbedInMatch: number | null; onBox?: N.BoxGame[] }>(
+    o: { out: string; in: string; entryId: number; what: string; announce: (m: P.MatchRow, side: Side | null) => string },
+    run: (x: { check?: boolean; boxTook?: number[] }) => V.Checked<T>,
+  ): Promise<V.Checked<T>> {
+    const plan = run({ check: true });
     if (!plan.ok) return plan;
     const took: N.BoxGame[] = [];
     for (const g of plan.value.onBox ?? []) {
-      const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${o.out} ${o.in}`], 'the staff replace');
+      const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${o.out} ${o.in}`], `the ${o.what}`);
       const reply = parseSubReply(replies?.[0], o.out, o.in);
       if (!reply || !reply.ok) {
         // No answer is a possible take (the reply may be all that was lost), so that box is asked to undo it too.
-        const kept = await this.undoBoxSubs(reply ? took : [...took, g], o.out, o.in);
+        const kept = await this.undoBoxSubs(reply ? took : [...took, g], o.out, o.in, o.what);
         const km = kept[0] ? P.getMatch(this.db, kept[0].matchId) : reply ? undefined : P.getMatch(this.db, g.matchId);
         if (km) {
-          const what = `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} ${reply ? 'was taken by one server and refused by another' : 'got no answer from the server'}`;
+          const what = `a ${o.what} of ${this.playerName(o.out)} by ${this.playerName(o.in)} ${reply ? 'was taken by one server and refused by another' : 'got no answer from the server'}`;
           // The undo got no answer or was refused: the site cannot know which player the box has.
           this.alert(km, kept.length === 0
             ? `${what}; it was asked to undo it and the server undid it.`
             : `${what}; the site could not confirm the server's state: it may have ${this.playerName(o.in)} or ${this.playerName(o.out)}. Check the live roster or use !sub.`);
         }
-        console.log(`[series] match ${g.matchId}: the box refused the staff replace of ${o.out} by ${o.in} (${reply ? reply.error : 'no answer'})`);
+        console.log(`[series] match ${g.matchId}: the box refused the ${o.what} of ${o.out} by ${o.in} (${reply ? reply.error : 'no answer'})`);
         return V.fail('replace_in_game', [{ steamid: o.out, problems: [reply ? `The server said: ${reply.error}.` : 'The server did not answer.'] }]);
       }
       took.push(g);
     }
-    const r = N.replaceDraftPlayer(this.db, { ...o, now: at(), boxTook: took.map((g) => g.gameMatchId) });
+    const r = run({ boxTook: took.map((g) => g.gameMatchId) });
     if (!r.ok) {
-      const kept = await this.undoBoxSubs(took, o.out, o.in);
+      const kept = await this.undoBoxSubs(took, o.out, o.in, o.what);
       const m = took[0] ? P.getMatch(this.db, took[0].matchId) : undefined;
       if (m) {
-        const what = `a staff replace of ${this.playerName(o.out)} by ${this.playerName(o.in)} was taken by the server but then refused on the site (${r.error})`;
+        const what = `a ${o.what} of ${this.playerName(o.out)} by ${this.playerName(o.in)} was taken by the server but then refused on the site (${r.error})`;
         // A refused undo leaves the box with the sub; an unanswered one leaves its state unknown.
         this.alert(m, kept.length === 0
           ? `${what}; the server undid it.`
@@ -912,26 +915,56 @@ export class SeriesEngine {
       const m = P.getMatch(this.db, r.value.subbedInMatch);
       const b = m?.booking_id != null ? B.getBooking(this.db, m.booking_id) : undefined;
       if (m && b && B.isOpen(b) && b.server_id !== null) {
-        const side = this.sideOfEntry(m, o.entryId);
-        // The removed player left the booking: the box's allow list now, not at the minute re-push.
+        // The player who left the lineup left the booking: the box's allow list now, not at the minute re-push.
         await this.deps.runner.pushAllowList(b.id);
-        this.deps.runner.announce(b.id, `Staff replaced ${this.playerName(o.out)} with ${this.playerName(o.in)}${side ? ` (${this.name(m, side)})` : ''}.`);
+        this.deps.runner.announce(b.id, o.announce(m, this.sideOfEntry(m, o.entryId)));
       }
       this.push(r.value.subbedInMatch);
     }
-    return { ok: true, value: { subbedInMatch: r.value.subbedInMatch } };
+    return r;
   }
 
-  /** The reverse sub on each box that took a staff replace the site then did
-   *  not make; the games whose box did not confirm the undo (parseSubReply). */
-  private async undoBoxSubs(games: N.BoxGame[], out: string, inn: string): Promise<(N.BoxGame & { undo: 'refused' | 'no_answer' })[]> {
+  /** Staff remove a draft player and put a replacement in from the desk
+   *  (drafts plan D2c Ruling 5), the box first. */
+  async staffReplace(o: {
+    eventId: number; entryId: number; out: string; in: string; reason: N.ReplaceReason; note: string | null; actor: string; now?: Date;
+  }): Promise<V.Checked<{ subbedInMatch: number | null }>> {
+    const at = () => o.now ?? new Date(this.now());
+    const r = await this.swapThroughBox(
+      {
+        out: o.out, in: o.in, entryId: o.entryId, what: 'staff replace',
+        announce: (m, side) => `Staff replaced ${this.playerName(o.out)} with ${this.playerName(o.in)}${side ? ` (${this.name(m, side)})` : ''}.`,
+      },
+      (x) => N.replaceDraftPlayer(this.db, { ...o, now: at(), ...x }),
+    );
+    return r.ok ? { ok: true, value: { subbedInMatch: r.value.subbedInMatch } } : r;
+  }
+
+  /** A bench player accepted a stand-in offer (drafts plan D3a Rulings 6 and
+   *  7), the box first, exactly as a staff replace. The window is judged at
+   *  acceptedAt, so the seconds the box takes never cost the player it. */
+  async standinPlace(o: Omit<N.StandinPlaceInput, 'now' | 'check' | 'boxTook'>): Promise<V.Checked<N.StandinPlaced>> {
+    const req = S.requestOf(this.db, o.requestId);
+    if (!req) return V.fail('standin_offer_gone');
+    return this.swapThroughBox(
+      {
+        out: req.out_steamid, in: o.steamid, entryId: req.entry_id, what: 'stand-in',
+        announce: (m, side) => `${this.playerName(o.steamid)} stands in for ${this.playerName(req.out_steamid)}${side ? ` (${this.name(m, side)})` : ''}.`,
+      },
+      (x) => N.placeStandin(this.db, { ...o, now: new Date(this.now()), ...x }),
+    );
+  }
+
+  /** The reverse sub on each box that took a change the site then did not
+   *  make; the games whose box did not confirm the undo (parseSubReply). */
+  private async undoBoxSubs(games: N.BoxGame[], out: string, inn: string, what: string): Promise<(N.BoxGame & { undo: 'refused' | 'no_answer' })[]> {
     const kept: (N.BoxGame & { undo: 'refused' | 'no_answer' })[] = [];
     for (const g of games) {
-      const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${inn} ${out}`], 'undoing the staff replace');
+      const replies = await this.deps.runner.send(g.bookingId, [`sm_pug_sub ${g.token} ${inn} ${out}`], `undoing the ${what}`);
       const reply = parseSubReply(replies?.[0], inn, out);
       if (!reply || !reply.ok) {
         kept.push({ ...g, undo: reply ? 'refused' : 'no_answer' });
-        console.error(`[series] match ${g.matchId}: undoing the staff replace of ${out} by ${inn} on the box failed (${reply ? reply.error : 'no answer'})`);
+        console.error(`[series] match ${g.matchId}: undoing the ${what} of ${out} by ${inn} on the box failed (${reply ? reply.error : 'no answer'})`);
       }
     }
     return kept;
