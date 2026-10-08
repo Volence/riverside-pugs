@@ -28,7 +28,7 @@ export function StandinsPanel({ eventId, canEdit, gen = 0 }: { eventId: number; 
       {canEdit ? (
         <div class="inlinerow">
           <label>SR margin <input type="number" min={0} max={2000} step={1} value={margin ?? String(data.margin)} onInput={(e) => setMargin((e.target as HTMLInputElement).value)} /></label>
-          <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.setStandinMargin(eventId, Number(margin ?? data.margin)))}>Save margin</button>
+          <button class="btn btn--ghost" disabled={busy || margin?.trim() === ''} onClick={() => { if (margin?.trim() !== '') void run(() => adminApi.setStandinMargin(eventId, Number(margin ?? data.margin))); }}>Save margin</button>
         </div>
       ) : <p class="muted">SR margin: {data.margin} above the missing player.</p>}
       {canEdit && data.open && (

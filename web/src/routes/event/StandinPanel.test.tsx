@@ -47,6 +47,8 @@ describe('StandinPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask the bench' }));
     await waitFor(() => expect(mockEvents.requestStandin).toHaveBeenCalledWith('cup', { entryId: 7, out: 'a', scope: 'match' }));
     expect(confirm).not.toHaveBeenCalled();
+    await waitFor(() => expect((screen.getByLabelText('Player') as HTMLSelectElement).value).toBe(''));
+    fireEvent.change(screen.getByLabelText('Player'), { target: { value: 'a' } });
     fireEvent.click(screen.getByLabelText('Rest of the event (they left)'));
     fireEvent.click(screen.getByRole('button', { name: 'Ask the bench' }));
     await waitFor(() => expect(mockEvents.requestStandin).toHaveBeenCalledWith('cup', { entryId: 7, out: 'a', scope: 'event' }));
@@ -72,5 +74,22 @@ describe('StandinPanel', () => {
     expect(screen.getByText(/bob · rest of the event · zed stands in/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel the stand-in for ann' }));
     await waitFor(() => expect(mockEvents.cancelStandin).toHaveBeenCalledWith('cup', 1));
+  });
+
+  it('clears the chosen player after a request goes through, and keeps it after a refusal', async () => {
+    mockEvents.standins.mockResolvedValue({ offer: null, captain: captain() });
+    const { ApiError } = await import('../../api');
+    mockEvents.requestStandin.mockRejectedValueOnce(new ApiError(409, 'A stand-in is already being found for that player.')).mockResolvedValueOnce({ requestId: 1 });
+    render(<StandinPanel slug="cup" />);
+    await screen.findByRole('heading', { name: 'Stand-ins' });
+    const player = screen.getByLabelText('Player') as HTMLSelectElement;
+    fireEvent.change(player, { target: { value: 'a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask the bench' }));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(player.value).toBe('a');
+    fireEvent.click(screen.getByRole('button', { name: 'Ask the bench' }));
+    await waitFor(() => expect(mockEvents.requestStandin).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(player.value).toBe(''));
+    expect((screen.getByRole('button', { name: 'Ask the bench' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
