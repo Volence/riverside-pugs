@@ -702,6 +702,8 @@ export function placeStandin(db: DB, o: StandinPlaceInput): V.Checked<StandinPla
       if (!isActive(entry)) return V.fail('entry_out');
       const place = placesOf(db, entry.id).find((p) => p.steamid === req.out_steamid && p.role === 'starter');
       if (!place) return V.fail('replace_not_starter');
+      // Made captain since the request: a captain is never stood in for the rest of the event.
+      if (req.scope === 'event' && req.out_steamid === entry.captain_steamid) return V.fail('standin_captain');
       if (req.scope === 'match') {
         const m = db.prepare('SELECT status FROM event_matches WHERE id = ?').get(req.match_id) as { status: string } | undefined;
         if (!m || m.status === 'done' || m.status === 'forfeit' || m.status === 'bye') return V.fail('standin_match_over');
@@ -721,7 +723,8 @@ export function placeStandin(db: DB, o: StandinPlaceInput): V.Checked<StandinPla
       if (boxMissing(onBox, o.boxTook)) return V.fail('replace_in_game', [{ steamid: req.out_steamid, problems: [BOX_NOT_ASKED] }]);
       if (req.scope === 'event') db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id = ?').run(at, place.id);
       addPlace(db, entry.id, o.steamid, req.scope === 'event' ? 'starter' : 'sub', at);
-      swapIntoLineups(db, matches, { out: req.out_steamid, in: o.steamid, actor: o.steamid, now: o.now });
+      // The swap is the asker's (captain or staff), as a sub would be; the stand-in only accepted it.
+      swapIntoLineups(db, matches, { out: req.out_steamid, in: o.steamid, actor: req.requested_by, now: o.now });
       S.markPlaced(db, { requestId: req.id, offerId: offer.id, steamid: o.steamid, at });
       E.logEvent(db, ev.id, o.steamid, 'standin_placed', at, {
         requestId: req.id, entryId: entry.id, out: req.out_steamid, in: o.steamid, scope: req.scope,

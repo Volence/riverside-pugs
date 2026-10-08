@@ -217,6 +217,8 @@ export const EVENT_ERRORS = {
   standin_offer_open: { status: 409, text: 'An offer for this stand-in is already open.' },
   standin_offer_gone: { status: 409, text: 'That stand-in offer is no longer open.' },
   standin_offer_expired: { status: 409, text: 'That stand-in offer ran out before your answer. It has gone to the next player.' },
+  standin_mid_chapter: { status: 409, text: 'The server is mid-chapter. Press Accept again between chapters.' },
+  standin_accepting: { status: 409, text: 'Your accept is being placed, one moment.' },
   standin_match_over: { status: 409, text: 'That match is already over.' },
   standin_running: { status: 409, text: 'That stand-in\'s match is not over yet.' },
   standin_margin_off: { status: 409, text: 'The SR limit is already off for this request.' },

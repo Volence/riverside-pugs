@@ -4,7 +4,7 @@ import * as ST from '../src/events/standins.js';
 import { EVENT_ERRORS } from '../src/events/validate.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { P } from './draftFixture.js';
-import { BENCH, entryOf, liveStandins, standinFixture, type StandinFixture } from './standinFixture.js';
+import { BENCH, entryOf, liveStandins, offeredFor, standinFixture, type StandinFixture } from './standinFixture.js';
 
 const MIN = 60_000;
 const at = (min: number) => new Date(NOW.getTime() + min * MIN);
@@ -155,5 +155,56 @@ describe('withStandins', () => {
     expect(ST.withStandins(['a', 'b', 'c', 'd'], [{ out: 'd', in: 'x' }])).toEqual(['a', 'b', 'c', 'x']);
     expect(ST.withStandins(['a', 'b', 'c', 'x'], [{ out: 'a', in: 'x' }])).toEqual(['a', 'b', 'c', 'x']);
     expect(ST.withStandins(['a', 'b'], [])).toEqual(['a', 'b']);
+  });
+});
+
+describe('final review fixes (plan D3a)', () => {
+  it('refuses a second match request for a player whose stand-in for that match is already found', async () => {
+    const f = await liveStandins();
+    const out = P[11]!;
+    const entry = entryOf(f, out);
+    const o = offeredFor(f, entry.id, out, 'match');
+    must(N.placeStandin(f.db, { eventId: f.eventId, requestId: o.requestId, offerId: o.offerId, steamid: o.steamid, acceptedAt: at(1), now: at(1) }));
+    expect(ST.requestOf(f.db, o.requestId)?.status).toBe('filled');
+    expect(err(ask(f, out, { scope: 'match', now: at(2) }))).toBe('standin_open');
+    // Once that stand-in has ended, the next match may have one.
+    f.db.prepare("UPDATE draft_standins SET status = 'ended' WHERE id = ?").run(o.requestId);
+    expect(err(ask(f, out, { scope: 'match', now: at(3) }))).toBeNull();
+  });
+
+  it('a rest-of-event request whose missing player became captain since is closed standin_captain, and an accept of it refused', () => {
+    const f = standinFixture();
+    const out = P[11]!;
+    const entry = entryOf(f, out);
+    const { requestId } = must(ask(f, out));
+    must(N.setDraftCaptain(f.db, { eventId: f.eventId, entryId: entry.id, steamid: out, actor: ADMIN, now: NOW }));
+    expect(next(f, requestId)).toEqual({ offerId: null, offered: null, unfilled: false, cancelled: 'standin_captain' });
+    expect(ST.requestOf(f.db, requestId)?.status).toBe('cancelled');
+
+    const g = standinFixture();
+    const gEntry = entryOf(g, out);
+    const o = offeredFor(g, gEntry.id, out, 'event');
+    must(N.setDraftCaptain(g.db, { eventId: g.eventId, entryId: gEntry.id, steamid: out, actor: ADMIN, now: NOW }));
+    expect(err(N.placeStandin(g.db, { eventId: g.eventId, requestId: o.requestId, offerId: o.offerId, steamid: o.steamid, acceptedAt: at(1), now: at(1) }))).toBe('standin_captain');
+    expect(N.entryOfPlayer(g.db, g.eventId, o.steamid)).toBeUndefined();
+  });
+
+  it('refuses a rest-of-event request for a team with no match left in a live event, but not between Swiss rounds', async () => {
+    const f = await liveStandins();
+    const out = P[11]!;
+    const entry = entryOf(f, out);
+    // Test setup only: the team's round 1 match is done.
+    f.db.prepare("UPDATE event_matches SET status = 'done' WHERE entry_a = ? OR entry_b = ?").run(entry.id, entry.id);
+    expect(ST.nextMatchOf(f.db, f.eventId, entry.id)).toBeNull();
+    // Swiss rounds are still to come: the team plays on.
+    expect(err(ask(f, out, { now: at(1) }))).toBeNull();
+    const other = N.rosterOf(f.db, entry.id).starters.find((s) => s !== out && s !== entry.captain_steamid)!;
+    // Test setup only: the stage has played its last round.
+    f.db.prepare("UPDATE event_stages SET config_json = json_set(config_json, '$.rounds', 1) WHERE event_id = ?").run(f.eventId);
+    expect(err(ask(f, other, { now: at(2) }))).toBe('standin_no_match');
+    f.db.prepare("UPDATE event_stages SET config_json = json_set(config_json, '$.rounds', 4) WHERE event_id = ?").run(f.eventId);
+    // Test setup only: the team is out of the event.
+    f.db.prepare("UPDATE event_entries SET status = 'eliminated' WHERE id = ?").run(entry.id);
+    expect(err(ask(f, other, { now: at(3) }))).toBe('standin_no_match');
   });
 });

@@ -8,6 +8,8 @@ import { A, B, OUTSIDER } from './entryFixture.js';
 import { TIMERS, roomFixture, windowFixture, type RoomFixture } from './roomFixture.js';
 import * as S from '../src/events/schedule.js';
 import { seriesFixture, type SeriesFixture, MIN } from './seriesFixture.js';
+import * as N from '../src/events/entries.js';
+import { asDraft, benchOn, offeredFor } from './standinFixture.js';
 
 const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
 const view = (f: RoomFixture, viewer: string | null, staff = false) =>
@@ -66,6 +68,21 @@ describe('matchRoomView', () => {
     expect(view(f, A[1]).me).toMatchObject({ side: 'a', manager: true, defaultFour: [A[1], A[2], A[3], A[4]] });
     expect(view(f, A[1]).me!.playable.map((p) => p.steamid)).toEqual(A.slice(0, 5));
     expect(view(f, A[3]).me).toEqual({ side: 'a', manager: false, playable: [], defaultFour: null });
+  });
+
+  it('pre-selects a placed match stand-in in place of the starter they stand in for (plan D3a Ruling 7)', async () => {
+    const f = await roomFixture();
+    asDraft(f);
+    benchOn(f.db, f.eventId, OUTSIDER);
+    R.savePrefs(f.db, { entryId: f.entryA, by: A[0], staff: false, prefs: { defaultFour: A.slice(0, 4), side: null, campaigns: {} }, now: NOW });
+    const o = offeredFor(f, f.entryA, A[3]!, 'match');
+    const placed = N.placeStandin(f.db, { eventId: f.eventId, requestId: o.requestId, offerId: o.offerId, steamid: OUTSIDER, acceptedAt: NOW, now: NOW });
+    expect(placed.ok).toBe(true);
+    toLineups(f);
+    expect(view(f, A[0]).me).toMatchObject({ manager: true, defaultFour: [A[0], A[1], A[2], OUTSIDER] });
+    expect(view(f, A[0]).me!.playable.map((p) => p.steamid)).toContain(OUTSIDER);
+    // The saved preference itself is untouched.
+    expect(prefsView(f.db, E.getEvent(f.db, f.eventId)!, f.entryA).defaultFour).toEqual(A.slice(0, 4));
   });
 
   it('shows the schedule of a window match to everyone, and what the viewer may do (plan T4)', async () => {
