@@ -416,9 +416,21 @@ const DRAFT_STATUS_CLASS: Record<StudioPickDraft['status'], string> = { ready: '
  *  from the match on air, so a show can cut between the two. */
 export function DraftOnAir({ drafts, state, update }: { drafts: StudioPickDraft[]; state: StudioState; update: Update }) {
   const pick = (id: number | null) => update((s) => ({ ...s, draftEventId: id }), true);
+  // A saved draft that left the list (cancelled, or past its six hours):
+  // the overlays already show nothing for it, and Clear lets it go.
+  const gone = state.draftEventId !== null && !drafts.some((d) => d.id === state.draftEventId);
   return (
     <section class="panel">
       <h3>Draft on air</h3>
+      {gone && (
+        <div class="studio__pick studio__pick--off">
+          <span class="studio__pick-head">
+            <b>Saved draft</b>
+            <span class="studio__state">Off air</span>
+          </span>
+          <button type="button" class="btn btn--ghost btn--sm" onClick={() => pick(null)}>Clear</button>
+        </div>
+      )}
       {drafts.length === 0 ? (
         <p class="muted">No live draft to follow. A draft shows here once its cut is published and staff choose Let captains pick.</p>
       ) : (
@@ -858,6 +870,7 @@ function LinksBox({ url, onNewKey }: { url: (scene: string) => string; onNewKey:
           </li>
         ))}
       </ul>
+      <p class="muted studio__hint">Program already reveals each pick, so a Pick reveal layer on top of Program shows it twice.</p>
       <button type="button" class="btn btn--ghost btn--sm" onClick={onNewKey}>New links (old ones stop working)</button>
     </section>
   );
