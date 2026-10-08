@@ -2142,6 +2142,12 @@ export const eventsApi = {
   signUp: (slug: string, body: { captainPref: CaptainPref; note: string }) => post<{ ok: true; signup: MySignupView }>(`/api/events/${enc(slug)}/signup`, body),
   withdrawSignup: (slug: string) => post(`/api/events/${enc(slug)}/withdraw-signup`),
   answerCaptainOffer: (slug: string, accept: boolean) => post(`/api/events/${enc(slug)}/captain-offer`, { accept }),
+  draftRoom: (slug: string, signal?: AbortSignal) => get<DraftRoomView>(`/api/events/${enc(slug)}/draft`, signal),
+  draftPick: (slug: string, player: string, pickNo: number) => post<{ pickNo: number; done: boolean }>(`/api/events/${enc(slug)}/draft/pick`, { player, pickNo }),
+  draftHeartbeat: (slug: string) => post<{ ok: true }>(`/api/events/${enc(slug)}/draft/heartbeat`),
+  draftCards: (slug: string, signal?: AbortSignal) => get<DraftCardsView>(`/api/events/${enc(slug)}/draft/cards`, signal),
+  draftList: (slug: string, signal?: AbortSignal) => get<{ list: string[] }>(`/api/events/${enc(slug)}/draft/list`, signal),
+  saveDraftList: (slug: string, list: string[]) => put<{ list: string[] }>(`/api/events/${enc(slug)}/draft/list`, { list }),
   /** The match room (plan T3a). */
   room: (slug: string, id: number, signal?: AbortSignal) => get<MatchRoomView>(`/api/events/${enc(slug)}/matches/${id}`, signal),
   ready: (slug: string, id: number) => post(`/api/events/${enc(slug)}/matches/${id}/ready`),
@@ -2477,6 +2483,36 @@ export interface DraftFairnessView {
 export interface AdminDraftTeamsView {
   mode: 'auto' | 'live' | null; teamsMadeAt: string | null; teams: DraftTeamView[] | null; fairness: DraftFairnessView | null;
 }
+/** Drafts plan D2b1: mirrors src/events/draftCards.ts PlayerCard. Public numbers only. */
+export interface PlayerCardView {
+  steamid: string; name: string; avatar: string | null; sr: number; trend: number[]; pugs: number; form: ('W' | 'L' | 'D')[];
+  survivor: { siDamage: number; commonKills: number }; infected: { damageAsSi: number; dpsLanded: number };
+  bestClass: { cls: 'hunter' | 'smoker' | 'boomer' | 'tank'; damage: number } | null;
+  skills: { key: string; label: string; total: number }[];
+}
+/** Mirrors src/chemistry.ts PairChemistry, from the viewing captain's side. */
+export interface PairChemistryView { together: number; wonTogether: number; against: number; wonAgainst: number }
+export type DraftFirstPick = 'lowest_sr' | 'highest_sr' | 'random';
+export interface DraftPickView { pickNo: number; round: number; captain: string; steamid: string; name: string; auto: boolean; at: string }
+/** Mirrors src/events/draftRoomView.ts DraftRoomView: notes, lists and
+ *  chemistry are null unless this viewer may see them. */
+export interface DraftRoomView {
+  eventId: number; slug: string; eventName: string;
+  status: 'none' | 'ready' | 'running' | 'paused' | 'done'; teamsMadeAt: string | null;
+  settings: { firstPick: DraftFirstPick; pickSeconds: number };
+  serverNow: string; deadlineAt: string | null; pausedLeftMs: number | null; totalPicks: number;
+  order: { steamid: string; name: string }[];
+  onClock: { pickNo: number; round: number; captain: string; picker: string } | null;
+  picks: DraftPickView[];
+  delegates: Record<string, string>;
+  teams: { captain: { steamid: string; name: string }; players: { steamid: string; name: string }[] }[];
+  pool: PlayerCardView[];
+  notes: Record<string, string> | null;
+  me: { role: 'captain' | 'delegate' | null; team: string | null; onClock: boolean; list: string[] | null; chemistry: Record<string, PairChemistryView> | null };
+  lists: Record<string, string[]> | null;
+  staff: boolean;
+}
+export interface DraftCardsView { cards: PlayerCardView[]; notes: Record<string, string>; chemistry: Record<string, PairChemistryView> | null }
 
 /** The Entries section of the desk (plan T1b Ruling 10). Mirrors
  *  src/events/views.ts AdminEntryView. */
@@ -2631,6 +2667,10 @@ export const adminApi = {
   draftBalance: (id: number) => post(`/api/admin/events/${id}/draft/balance`),
   draftMove: (id: number, a: string, b: string) => post(`/api/admin/events/${id}/draft/move`, { a, b }),
   draftPublishTeams: (id: number) => post<{ entries: unknown[] }>(`/api/admin/events/${id}/draft/publish-teams`),
+  draftRoom: (id: number, signal?: AbortSignal) => get<DraftRoomView>(`/api/admin/events/${id}/draft/room`, signal),
+  draftRoomAct: (id: number, action: 'start' | 'pause' | 'resume' | 'undo' | 'reset') => post(`/api/admin/events/${id}/draft/room/${action}`),
+  draftRoomDelegate: (id: number, captain: string, on: boolean) => post(`/api/admin/events/${id}/draft/room/delegate`, { captain, on }),
+  draftRoomSettings: (id: number, firstPick: DraftFirstPick, pickSeconds: number) => post(`/api/admin/events/${id}/draft/room/settings`, { firstPick, pickSeconds }),
   setEntryIdentity: (id: number, entryId: number, body: { name?: string; tag?: string }) => post(`/api/admin/events/${id}/entries/${entryId}/identity`, body),
   setEntryLogo: (id: number, entryId: number, png: string) => post<{ logoKey: string }>(`/api/admin/events/${id}/entries/${entryId}/logo`, { png }),
   draftOffers: (id: number, on: boolean) => post(`/api/admin/events/${id}/draft/offers`, { on }),

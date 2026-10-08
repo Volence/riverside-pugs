@@ -48,6 +48,8 @@ const CastStudio = lazy(() => import('./routes/CastStudio'));
 const EventPage = lazy(() => import('./routes/Event'));
 // The match room (plan T3a): its own chunk, like the rest of Events.
 const EventMatchPage = lazy(() => import('./routes/EventMatch'));
+// The live draft room (drafts plan D2b1): its own chunk, like the match room.
+const EventDraftPage = lazy(() => import('./routes/EventDraft'));
 
 /** The 404.
  *
@@ -136,6 +138,7 @@ export function AppRoutes(
       <Route path="/scrims" component={Scrims} session={session} />
       <Route path="/events" component={Events} session={session} />
       <Route path="/event/:slug" component={EventPage} session={session} />
+      <Route path="/event/:slug/draft" component={EventDraftPage} session={session} />
       <Route path="/event/:slug/match/:id" component={EventMatchPage} session={session} />
       <Route default component={NotFound} />
     </Router>

@@ -69,6 +69,10 @@ function DraftSection({ ev, draft, session }: { ev: EventView; draft: EventDraft
       )}
       {cut ? (
         <>
+          <p class="inlinerow">
+            <a class="btn btn--ghost" href={`/event/${ev.slug}/draft`}>Draft room</a>
+            <span class="muted">Player cards, captains' pick lists and the live draft.</span>
+          </p>
           {([['Captains', cut.captains], ['Pool', cut.pool], ['Bench', cut.bench]] as const).map(([label, names]) => (
             <div key={label}>
               <h4>{label}</h4>
