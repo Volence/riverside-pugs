@@ -76,3 +76,29 @@ export function chemistryFor(db: DB, steamid: string): Chemistry {
       .sort((a, b) => rate(a) - rate(b) || b.games - a.games || stable(a, b))[0]),
   };
 }
+
+/** "Chemistry with you" on a draft player card (drafts plan D2b1 Ruling 3):
+ *  completed PUGs where a and b were on the same side (and how many a's side
+ *  won) and on opposite sides (and how many a won), aliases resolved on
+ *  both sides with the same roster join as chemistryFor. Shown only to the
+ *  captain it is about. */
+export interface PairChemistry { together: number; wonTogether: number; against: number; wonAgainst: number }
+
+export function pairChemistry(db: DB, a: string, b: string): PairChemistry {
+  return db.prepare(
+    `WITH roster AS (
+       SELECT DISTINCT mp.match_id, COALESCE(pa.canonical_id, mp.player_id) AS pid, mp.team
+       FROM match_players mp
+       JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}
+       LEFT JOIN player_aliases pa ON pa.steamid = mp.player_id
+     )
+     SELECT COALESCE(SUM(CASE WHEN x.team = y.team THEN 1 ELSE 0 END), 0) AS together,
+            COALESCE(SUM(CASE WHEN x.team = y.team AND m.winner = x.team THEN 1 ELSE 0 END), 0) AS wonTogether,
+            COALESCE(SUM(CASE WHEN x.team <> y.team THEN 1 ELSE 0 END), 0) AS against,
+            COALESCE(SUM(CASE WHEN x.team <> y.team AND m.winner = x.team THEN 1 ELSE 0 END), 0) AS wonAgainst
+     FROM roster x
+     JOIN roster y ON y.match_id = x.match_id
+     JOIN matches m ON m.id = x.match_id
+     WHERE x.pid = ? AND y.pid = ?`,
+  ).get(resolveAlias(db, a), resolveAlias(db, b)) as PairChemistry;
+}
