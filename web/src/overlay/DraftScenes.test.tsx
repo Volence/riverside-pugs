@@ -75,6 +75,14 @@ describe('on the clock', () => {
     const { container } = render(<Overlay which="draftclock" feed={feedWith({ ...d, onClock: { ...d.onClock!, picker: delegate } })} now={N} />);
     expect(container.textContent).toContain('Player 3 picks for the team');
   });
+
+  it('never prints a raw steamid for a picker it cannot name', () => {
+    const d = sampleDraft(N);
+    const stranger = '76561198099999999';
+    const { container } = render(<Overlay which="draftclock" feed={feedWith({ ...d, onClock: { ...d.onClock!, picker: stranger } })} now={N} />);
+    expect(container.textContent).not.toContain(stranger);
+    expect(container.querySelector('.ov-dclock__picker')?.textContent).toBe('Player picks for the team');
+  });
 });
 
 describe('pick reveal', () => {

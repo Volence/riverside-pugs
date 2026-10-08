@@ -25,7 +25,8 @@ function nameIn(d: CastDraftView, steamid: string): string {
     const p = t.players.find((x) => x.steamid === steamid);
     if (p) return p.name;
   }
-  return steamid;
+  // Never put a raw steamid on air.
+  return 'Player';
 }
 
 /** Time left on the pick clock: the stored deadline against the overlay's
