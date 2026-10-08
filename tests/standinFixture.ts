@@ -1,5 +1,6 @@
 import type { DB } from '../src/db.js';
 import * as D from '../src/events/drafts.js';
+import * as T from '../src/teams/teams.js';
 import * as N from '../src/events/entries.js';
 import * as ST from '../src/events/standins.js';
 import { startEventFlow } from '../src/events/flow.js';
@@ -60,4 +61,22 @@ export function offeredFor(f: { db: DB; eventId: number }, entryId: number, out:
   must(ST.setStandinMarginOff(f.db, { requestId, actor: ADMIN, now }));
   const step = must(ST.offerNextStandin(f.db, { requestId, now, minutes: 10 }));
   return { requestId, offerId: step.offerId!, steamid: step.offered! };
+}
+
+/** Plan D3b: when finishedDraft's event finished. */
+export const FINISHED = new Date('2026-10-12T22:00:00.000Z');
+/** standinFixture with its event finished at FINISHED (test setup only: the
+ *  last stage's settle leaves an event exactly so, status and finished_at). */
+export function finishedDraft(): StandinFixture {
+  const f = standinFixture();
+  f.db.prepare("UPDATE events SET status = 'finished', finished_at = ? WHERE id = ?").run(FINISHED.toISOString(), f.eventId);
+  return f;
+}
+
+/** Three site teams created by this player: the membership cap (plan D3b). */
+export function capped(f: { db: DB }, steamid: string, prefix: string): void {
+  for (let i = 1; i <= 3; i++) {
+    const r = T.createTeam(f.db, { creator: steamid, name: `${prefix} Squad ${i}`, tag: `${prefix}${i}`, now: FINISHED });
+    if (!r.ok) throw new Error(`capped: ${r.error}`);
+  }
 }
