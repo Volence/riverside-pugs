@@ -78,3 +78,96 @@ export function nextOfferee(
   }
   return best?.steamid ?? null;
 }
+
+/**
+ * The live draft room's rules (drafts plan D2b1), pure like the rest of this
+ * file: the two settings kept in events.draft_json next to the D1 times, the
+ * round 1 order, the snake, the auto-pick choice and a saved pick list.
+ */
+
+export type FirstPick = 'lowest_sr' | 'highest_sr' | 'random';
+export const FIRST_PICKS: readonly FirstPick[] = ['lowest_sr', 'highest_sr', 'random'];
+export const PICK_SECONDS_DEFAULT = 75;
+export const PICK_SECONDS_MIN = 30;
+export const PICK_SECONDS_MAX = 300;
+/** Captain + 3 picks per team (spec section 4). */
+export const ROUNDS = 3;
+/** A list longer than any pool is not a list this site sends. */
+export const LIST_MAX = 200;
+
+export interface RoomSettings { firstPick: FirstPick; pickSeconds: number }
+
+const goodSeconds = (s: unknown): s is number =>
+  typeof s === 'number' && Number.isInteger(s) && s >= PICK_SECONDS_MIN && s <= PICK_SECONDS_MAX;
+
+/** Ruling 5: the settings as stored, each falling back to its default. */
+export function roomSettingsOf(draftJson: string | null): RoomSettings {
+  const d = draftJson ? (JSON.parse(draftJson) as Record<string, unknown>) : {};
+  return {
+    firstPick: FIRST_PICKS.includes(d.draftFirstPick as FirstPick) ? (d.draftFirstPick as FirstPick) : 'lowest_sr',
+    pickSeconds: goodSeconds(d.pickSeconds) ? d.pickSeconds : PICK_SECONDS_DEFAULT,
+  };
+}
+
+/** A desk body, or null when either field is missing or out of range. */
+export function parseRoomSettings(raw: unknown): RoomSettings | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (!FIRST_PICKS.includes(r.firstPick as FirstPick) || !goodSeconds(r.pickSeconds)) return null;
+  return { firstPick: r.firstPick as FirstPick, pickSeconds: r.pickSeconds };
+}
+
+/** A player as the room ranks them: current-season SR, then signup order. */
+export interface RankedPlayer { steamid: string; sr: number; order: number }
+
+/** Round 1 order (Ruling 5). Random shuffles the captains in signup order
+ *  with rand(n) in [0, n), Fisher-Yates. */
+export function firstRoundOrder(captains: RankedPlayer[], mode: FirstPick, rand: (n: number) => number): string[] {
+  if (mode === 'random') {
+    const out = [...captains].sort((a, b) => a.order - b.order).map((c) => c.steamid);
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = rand(i + 1);
+      [out[i], out[j]] = [out[j]!, out[i]!];
+    }
+    return out;
+  }
+  const dir = mode === 'lowest_sr' ? 1 : -1;
+  return [...captains].sort((a, b) => dir * (a.sr - b.sr) || a.order - b.order).map((c) => c.steamid);
+}
+
+export interface Slot { pickNo: number; round: number; captain: string }
+
+/** Every pick of the draft, in order: round r forward when r is odd, back
+ *  when even; pickNo counts from 1 across the whole draft. */
+export function snakeSlots(order: string[], rounds = ROUNDS): Slot[] {
+  const out: Slot[] = [];
+  for (let r = 1; r <= rounds; r++) {
+    const seq = r % 2 === 1 ? order : [...order].reverse();
+    for (const captain of seq) out.push({ pickNo: out.length + 1, round: r, captain });
+  }
+  return out;
+}
+
+/** Ruling 7: the first player on the list who is still free, else the
+ *  highest SR free player, ties by signup order. available is never empty
+ *  (the room only asks with a pick open). */
+export function autoPickChoice(available: RankedPlayer[], list: readonly string[]): string {
+  const free = new Set(available.map((p) => p.steamid));
+  const fromList = list.find((s) => free.has(s));
+  if (fromList) return fromList;
+  return [...available].sort((a, b) => b.sr - a.sr || a.order - b.order)[0]!.steamid;
+}
+
+/** A pick list as saved (Ruling 2): pool players only, each once, in the
+ *  given order. null when it is not a list of strings or is too long. */
+export function cleanPickList(raw: unknown, pool: ReadonlySet<string>): string[] | null {
+  if (!Array.isArray(raw) || raw.length > LIST_MAX || raw.some((s) => typeof s !== 'string')) return null;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of raw as string[]) {
+    if (!pool.has(s) || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
