@@ -680,15 +680,15 @@
 .ov-dboard--dense .ov-dboard__slot .ov-dboard__name, .ov-dboard--dense .ov-dboard__slot .ov-dboard__sr { grid-column: 2 / 4; }
 .ov-dboard__foot { position: absolute; left: 120px; right: 120px; bottom: 70px; padding: 14px 24px; background: var(--panel); border-top: 3px solid var(--accent); font: 500 30px var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--bone); }
 
-.ov-dclock { position: absolute; left: 120px; right: 120px; top: 290px; bottom: 90px; display: grid; grid-template-columns: 560px minmax(0, 1fr) 520px; gap: 36px; }
+.ov-dclock { position: absolute; left: 120px; right: 120px; top: 290px; bottom: 90px; display: grid; grid-template-columns: 440px minmax(0, 1fr) 480px; align-items: start; gap: 36px; }
 .ov-dclock--idle { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; }
-.ov-dclock__idle { font-size: 110px; text-align: center; }
+.ov-dclock__idle { font-size: 80px; text-align: center; }
 .ov-dclock__who { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 28px; min-width: 0; background: var(--panel); border-top: 8px solid var(--c); animation: ov-rise 500ms cubic-bezier(.2,.7,.2,1) both; }
 .ov-dclock__eyebrow, .ov-dclock__label { font: 500 22px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); }
-.ov-dclock__name { font-size: 84px; color: var(--bone); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-dclock__name { font-size: 72px; color: var(--bone); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-dclock__picker, .ov-dclock__pick { font: 400 26px var(--font-body); color: var(--text); }
 .ov-dclock__time { display: flex; flex-direction: column; align-items: center; gap: 28px; min-width: 0; }
-.ov-dclock__clock { font: 400 260px var(--stencil); line-height: 0.9; color: var(--bone); font-variant-numeric: tabular-nums; text-shadow: 0 8px 40px rgba(0,0,0,0.7); }
+.ov-dclock__clock { font: 400 200px var(--stencil); white-space: nowrap; line-height: 0.9; color: var(--bone); font-variant-numeric: tabular-nums; text-shadow: 0 8px 40px rgba(0,0,0,0.7); }
 .ov-dclock__clock.is-low { color: var(--accent); animation: ov-breathe 0.8s ease-in-out infinite; }
 .ov-dclock__team { align-self: stretch; padding: 18px 22px; background: var(--panel); }
 .ov-dclock__team ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -711,7 +711,7 @@
 .ov-dreveal {
   position: absolute; left: 50%; top: 50%; width: 820px; transform: translate(-50%, -50%);
   display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 40px 48px 36px; text-align: center;
-  background: var(--panel); border-top: 10px solid var(--c);
+  background: linear-gradient(var(--panel), var(--panel)), #0b0908; border-top: 10px solid var(--c);
   box-shadow: 0 0 0 9999px rgba(0,0,0,0.55), 0 24px 80px rgba(0,0,0,0.7);
   animation: ov-reveal 600ms cubic-bezier(.2,.7,.2,1) both;
 }
