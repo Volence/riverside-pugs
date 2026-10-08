@@ -39,24 +39,34 @@ function Item({ it, data, reload }: { it: PlayerAppealItem; data: MyAppeals; rel
   // not two pieces of information, so the refusal is suppressed whenever
   // the status line is already on screen.
   const statusShown = !!(ap && (!it.canAppeal || ap.state === 'asked') && ap.line);
+  const settled = ap && !['open', 'asked', 'answered'].includes(ap.state);
   return (
     <div class="appeal-item">
       <p><strong>{what(it)}</strong>: {it.reason}{it.endsAt ? `, ends ${new Date(it.endsAt).toLocaleString()}` : ''}</p>
       {statusShown && <p>{ap!.line}</p>}
-      {ap && ap.state === 'asked' && ap.question && (
+      {ap && !settled && ap.messages.length > 0 && (
+        <ol class="appeal-thread">
+          {ap.messages.map((m, i) => (
+            <li key={i} class={m.fromStaff ? 'appeal-msg appeal-msg--staff' : 'appeal-msg'}>
+              <p class="appeal-msg__who">{m.fromStaff ? 'Staff' : 'You'} · {new Date(m.at).toLocaleString()}</p>
+              <blockquote class="appeal-text">{m.body}</blockquote>
+            </li>
+          ))}
+        </ol>
+      )}
+      {ap && ap.canWrite && (
         <>
-          <blockquote class="appeal-text">{ap.question}</blockquote>
-          <label>Your answer
+          <label>{ap.state === 'asked' ? 'Your reply' : 'Add to your appeal'}
             <textarea maxLength={data.answerMax} value={answer} onInput={(e) => setAnswer((e.target as HTMLTextAreaElement).value)} />
           </label>
-          <button class="btn" disabled={busy || !answer.trim()} onClick={() => send(() => appealApi.answer(ap.id, answer))}>Send answer</button>
+          <button class="btn" disabled={busy || !answer.trim()} onClick={() => send(() => appealApi.message(ap.id, answer).then(() => setAnswer('')))}>Send</button>
         </>
       )}
       {it.refusal && !statusShown && <p class="muted">{it.refusal}</p>}
       {it.canAppeal && !open && <button class="btn" onClick={() => setOpen(true)}>Appeal this ban</button>}
       {it.canAppeal && open && (
         <>
-          <p class="muted">You get one appeal at a time. Staff may ask you one question; keep it short and stick to what happened.</p>
+          <p class="muted">You get one appeal at a time. Staff may write back with questions, and you can reply here; keep it to what happened.</p>
           <label>What happened?
             <textarea maxLength={data.textMax} value={a} onInput={(e) => setA((e.target as HTMLTextAreaElement).value)} />
           </label>

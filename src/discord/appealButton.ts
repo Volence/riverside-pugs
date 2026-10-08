@@ -28,7 +28,7 @@ function standingPayload(publicUrl: string): MessagePayload {
       '**Banned, on hold or timed out?**',
       '',
       'If you think it was a mistake, press Appeal and tell the staff what happened.',
-      'You get one appeal at a time, and staff may ask you one question.',
+      'You get one appeal at a time. Staff may write back with questions, and you can reply on the site.',
       '',
       `Banned from this Discord? Appeal at ${publicUrl}/appeal`,
     ].join('\n'),

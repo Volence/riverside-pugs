@@ -249,9 +249,12 @@ export function StaffGuide() {
           days. Bans shorter than a day cannot be appealed (holds always can).
         </p>
         <p>
-          You may ask <strong>one</strong> question. They have 72 hours to answer; no answer closes the appeal as denied.
-          Then Accept (the ban is lifted), Shorten (pick a new end; website bans only) or Deny. The player only ever sees
-          a fixed sentence for the outcome, so there is nothing to argue with.
+          You can write back and forth with the player as many times as you need, from the appeal page. They see your
+          messages as from "Staff", never your name, and get each one as a Discord DM; the whole conversation is also
+          posted in the appeal's forum thread. They can write any time while the appeal is open (deny it if they spam).
+          After each of your messages they have 72 hours to reply; no reply by then closes the appeal as denied.
+          Then Accept (the ban is lifted), Shorten (pick a new end; website bans only) or Deny. The outcome itself is
+          always a fixed sentence.
         </p>
         <p>
           Anyone at the issuer's rank or above decides, including whoever issued the ban: an admin's ban needs an admin.

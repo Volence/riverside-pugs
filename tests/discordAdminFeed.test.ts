@@ -452,8 +452,25 @@ describe('admin feed', () => {
     logAdmin(db, ADMIN, 'appeal_ask', IDS[2], { appealId: 8 });
     await settled();
     const line = JSON.stringify(inFeed()[0].payload);
-    expect(line).toContain('asked a question on appeal [#8](https://pug.test/admin/people/appeals/8):');
+    expect(line).toContain('wrote to the player on appeal [#8](https://pug.test/admin/people/appeals/8):');
     expect(line).toContain('> Why were you in\\n> \\\\*their\\\\* saferoom?');
+  });
+
+  it('a staff message quotes that message, not the latest one on the appeal', async () => {
+    const ban = db.prepare(
+      "INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', ?, datetime('now'))",
+    ).run(IDS[2], ADMIN).lastInsertRowid;
+    db.prepare(
+      `INSERT INTO appeals (id, ban_id, steamid, what_happened, why_lift, state, question, asked_by, asked_at, source, created_at)
+       VALUES (9, ?, ?, 'a', 'b', 'asked', 'second', ?, datetime('now'), 'site', datetime('now'))`,
+    ).run(ban, IDS[2], ADMIN);
+    const first = db.prepare("INSERT INTO appeal_messages (appeal_id, from_staff, author, body, created_at) VALUES (9, 1, ?, 'first', datetime('now'))")
+      .run(ADMIN).lastInsertRowid;
+    logAdmin(db, ADMIN, 'appeal_ask', IDS[2], { appealId: 9, messageId: Number(first) });
+    await settled();
+    const line = JSON.stringify(inFeed()[0].payload);
+    expect(line).toContain('> first');
+    expect(line).not.toContain('second');
   });
 
   it('appeal actions read as sentences linking the appeal, not the default fallback', async () => {
@@ -465,7 +482,7 @@ describe('admin feed', () => {
     logAdmin(db, ADMIN, 'appeal_unfinal', IDS[2], { appealId: 7 });
     await settled();
     const lines = inFeed().map((m) => JSON.stringify(m.payload));
-    expect(lines[0]).toContain('asked a question on appeal [#7](https://pug.test/admin/people/appeals/7)');
+    expect(lines[0]).toContain('wrote to the player on appeal [#7](https://pug.test/admin/people/appeals/7)');
     expect(lines[1]).toContain('accepted appeal [#7](https://pug.test/admin/people/appeals/7)');
     expect(lines[2]).toContain('shortened appeal [#7](https://pug.test/admin/people/appeals/7)');
     expect(lines[3]).toContain('denied appeal [#7](https://pug.test/admin/people/appeals/7)');

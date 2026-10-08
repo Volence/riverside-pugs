@@ -4,7 +4,7 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { appealSettings, canAppeal, refusalText } from './rules.js';
 import { publishAppealSignal } from './signals.js';
 import { appealIsQuiet, type Fail } from './access.js';
-import { OPEN_STATES, type AppealRef, type AppealRow, type AppealSource, type Appellant } from './types.js';
+import { OPEN_STATES, type AppealMessageRow, type AppealRef, type AppealRow, type AppealSource, type Appellant } from './types.js';
 
 const fail = (status: number, error: string): Fail => ({ ok: false, status, error });
 const inList = (xs: readonly string[]) => xs.map((x) => `'${x}'`).join(',');
@@ -69,37 +69,67 @@ export function fileAppeal(
   return result;
 }
 
-export function askQuestion(db: DB, id: number, by: string, question: unknown, now = new Date()): { ok: true } | Fail {
-  const q = text(question);
-  if (!q || q.length > 500) return fail(400, 'A question is up to 500 characters.');
-  const changed = db.prepare("UPDATE appeals SET state = 'asked', question = ?, asked_by = ?, asked_at = ? WHERE id = ? AND state = 'open'")
-    .run(q, by, now.toISOString(), id).changes > 0;
-  if (!changed) return fail(409, 'A question can only be asked once, before anything else happens.');
-  publishAppealSignal(id);
-  return { ok: true };
+/** The conversation on an appeal, oldest first. */
+export function listMessages(db: DB, id: number): AppealMessageRow[] {
+  return db.prepare('SELECT * FROM appeal_messages WHERE appeal_id = ? ORDER BY id').all(id) as AppealMessageRow[];
 }
 
-export function answerQuestion(
-  db: DB, who: Appellant, id: number, answer: unknown, now = new Date(),
-): { ok: true; state: 'answered' | 'auto_denied' } | Fail {
+/** Staff write to the appellant. Any number of times while the appeal is
+ *  open; each one sets it waiting on the player and starts the time to
+ *  answer again. The caller has already run decideCheck. */
+export function postStaffMessage(db: DB, id: number, by: string, body: unknown, now = new Date()): { ok: true; messageId: number } | Fail {
+  const s = appealSettings(db);
+  const b = text(body);
+  if (!b || b.length > s.textMax) return fail(400, `A message is up to ${s.textMax} characters.`);
+  const iso = now.toISOString();
+  const messageId = db.transaction((): number | null => {
+    const ok = db.prepare(`UPDATE appeals SET state = 'asked', question = ?, asked_by = ?, asked_at = ? WHERE id = ? AND state IN (${OPEN_SQL})`)
+      .run(b, by, iso, id).changes > 0;
+    if (!ok) return null;
+    return Number(db.prepare('INSERT INTO appeal_messages (appeal_id, from_staff, author, body, created_at) VALUES (?, 1, ?, ?, ?)').run(id, by, b, iso).lastInsertRowid);
+  })();
+  if (messageId === null) return fail(409, 'This appeal has already been decided.');
+  publishAppealSignal(id);
+  return { ok: true, messageId };
+}
+
+/** The appellant writes to staff. Any time while the appeal is open (owner:
+ *  staff deny an appeal that is being spammed), up to appeal_max_replies.
+ *  Once staff have written it is waiting on staff again; before that it
+ *  stays open. Past the time to answer a staff message, the appeal is about
+ *  to lapse and takes nothing more. */
+export function postPlayerMessage(
+  db: DB, who: Appellant, id: number, body: unknown, now = new Date(),
+): { ok: true; state: 'open' | 'answered' | 'auto_denied' } | Fail {
   const row = getAppeal(db, id);
   if (!row || !ownsAppeal(who, row)) return fail(404, 'no such appeal');
-  if (row.state !== 'asked') return fail(409, 'There is no question waiting for an answer.');
+  if (!OPEN_STATES.includes(row.state)) return fail(409, 'This appeal has already been decided.');
   const s = appealSettings(db);
-  if (Date.parse(row.asked_at!) + s.answerHours * 3600_000 <= now.getTime()) return fail(409, 'The time to answer has run out.');
-  const a = text(answer);
-  if (!a || a.length > s.answerMax) return fail(400, `An answer is up to ${s.answerMax} characters.`);
-  const slurs = findSlurs(a);
+  if (row.state === 'asked' && Date.parse(row.asked_at!) + s.answerHours * 3600_000 <= now.getTime()) {
+    return fail(409, 'The time to answer has run out.');
+  }
+  const b = text(body);
+  if (!b || b.length > s.answerMax) return fail(400, `A message is up to ${s.answerMax} characters.`);
+  const slurs = findSlurs(b);
   const iso = now.toISOString();
-  const state = slurs.length > 0 ? 'auto_denied' as const : 'answered' as const;
-  const changed = db.prepare(
-    `UPDATE appeals SET state = ?, answer = ?, answered_at = ?,
-       decided_by = CASE WHEN ? = 'auto_denied' THEN 'system' ELSE decided_by END,
-       decided_at = CASE WHEN ? = 'auto_denied' THEN ? ELSE decided_at END,
-       slurs = CASE WHEN ? = 'auto_denied' THEN ? ELSE slurs END
-     WHERE id = ? AND state = 'asked'`,
-  ).run(state, a, iso, state, state, iso, state, JSON.stringify(slurs), id).changes > 0;
-  if (!changed) return fail(409, 'There is no question waiting for an answer.');
+  const state = slurs.length > 0 ? 'auto_denied' as const : row.state === 'open' ? 'open' as const : 'answered' as const;
+  const r = db.transaction((): Fail | null => {
+    const sent = (db.prepare('SELECT COUNT(*) AS n FROM appeal_messages WHERE appeal_id = ? AND from_staff = 0').get(id) as { n: number }).n;
+    if (sent >= s.maxReplies) return fail(409, 'You have sent as many messages as this appeal takes. Staff will get to it.');
+    // Guarded on the state read above, so a staff message or a decision
+    // landing in between makes this one try again rather than undo it.
+    const changed = db.prepare(
+      `UPDATE appeals SET state = ?, answer = ?, answered_at = ?,
+         decided_by = CASE WHEN ? = 'auto_denied' THEN 'system' ELSE decided_by END,
+         decided_at = CASE WHEN ? = 'auto_denied' THEN ? ELSE decided_at END,
+         slurs = CASE WHEN ? = 'auto_denied' THEN ? ELSE slurs END
+       WHERE id = ? AND state = ?`,
+    ).run(state, b, iso, state, state, iso, state, JSON.stringify(slurs), id, row.state).changes > 0;
+    if (!changed) return fail(409, 'The appeal changed while you were writing. Reload and try again.');
+    db.prepare('INSERT INTO appeal_messages (appeal_id, from_staff, author, body, created_at) VALUES (?, 0, NULL, ?, ?)').run(id, b, iso);
+    return null;
+  })();
+  if (r) return r;
   if (state === 'auto_denied' && !appealIsQuiet(db, row)) {
     publishAdminEvent({ kind: 'appeal', appealId: id, what: 'auto_denied', name: row.appellant_name, slurs });
   }

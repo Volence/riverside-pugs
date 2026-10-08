@@ -8,7 +8,7 @@ import { fileUrl, ticketUrl } from './adminRoutes';
 export function AdminAppeal({ id }: { id: number }) {
   const { data: a, error: loadError, reload } = useFetch((s) => appealStaffApi.get(id, s), [id]);
   const { busy, error, run } = useAction(reload);
-  const [question, setQuestion] = useState('');
+  const [message, setMessage] = useState('');
   const [endsAt, setEndsAt] = useState('');
   if (loadError) return <Empty>No such appeal.</Empty>;
   if (!a) return null;
@@ -30,9 +30,20 @@ export function AdminAppeal({ id }: { id: number }) {
         <blockquote class="appeal-text">{a.whatHappened}</blockquote>
         <h4>Why it should be lifted or shortened</h4>
         <blockquote class="appeal-text">{a.whyLift}</blockquote>
-        {a.question && <><h4>Question from {a.askedByName}</h4><blockquote class="appeal-text">{a.question}</blockquote></>}
-        {a.state === 'asked' && a.answerBy && <p class="muted">Waiting for an answer until {fmtTime(a.answerBy)}.</p>}
-        {a.answer && <><h4>Answer</h4><blockquote class="appeal-text">{a.answer}</blockquote></>}
+        {a.messages.length > 0 && (
+          <>
+            <h4>Conversation</h4>
+            <ol class="appeal-thread">
+              {a.messages.map((m, i) => (
+                <li key={i} class={m.fromStaff ? 'appeal-msg appeal-msg--staff' : 'appeal-msg'}>
+                  <p class="appeal-msg__who">{m.fromStaff ? `${m.authorName ?? 'Staff'} (staff)` : a.name} · {fmtTime(m.at)}</p>
+                  <blockquote class="appeal-text">{m.body}</blockquote>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
+        {a.state === 'asked' && a.answerBy && <p class="muted">Waiting on the player until {fmtTime(a.answerBy)}; no reply by then closes it as denied.</p>}
         {a.slurs.length > 0 && <p class="error">Denied automatically: {a.slurs.join(', ')}.</p>}
         {!open && <p><strong>{a.state}</strong>{a.decidedByName ? ` by ${a.decidedByName}` : ''}{a.decidedAt ? `, ${fmtTime(a.decidedAt)}` : ''}{a.newExpiresAt ? `; now ends ${fmtTime(a.newExpiresAt)}` : ''}</p>}
       </Panel>
@@ -40,14 +51,12 @@ export function AdminAppeal({ id }: { id: number }) {
       {open && a.canDecide && (
         <Panel>
           {error && <p class="error">{error}</p>}
-          {a.state === 'open' && (
-            <p>
-              <label>One question (you only get one)
-                <input type="text" maxLength={500} value={question} onInput={(e) => setQuestion((e.target as HTMLInputElement).value)} />
-              </label>
-              <button class="btn" disabled={busy || !question.trim()} onClick={() => run(() => appealStaffApi.ask(a.id, question))}>Ask one question</button>
-            </p>
-          )}
+          <div class="appeal-reply">
+            <label>Message to the player (they see it as from "Staff", never your name)
+              <textarea maxLength={1500} value={message} onInput={(e) => setMessage((e.target as HTMLTextAreaElement).value)} />
+            </label>
+            <button class="btn" disabled={busy || !message.trim()} onClick={() => run(() => appealStaffApi.message(a.id, message).then(() => setMessage('')))}>Send to player</button>
+          </div>
           <p class="admin-actions">
             <button class="btn" disabled={busy} onClick={() => run(() => appealStaffApi.decide(a.id, 'accept'), {
               title: 'Accept this appeal?', body: 'The ban is lifted now. The player is told their appeal was accepted.', confirmLabel: 'Accept',

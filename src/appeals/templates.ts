@@ -1,11 +1,11 @@
 import type { DB } from '../db.js';
 import { appealSettings, nextAppealAt } from './rules.js';
-import { refOf, type AppealRow, type AppealState } from './types.js';
+import { refOf, type AppealMessageRow, type AppealRow, type AppealState } from './types.js';
 
 export const STATE_LABEL: Record<AppealState, string> = {
   open: 'Waiting for staff',
-  asked: 'Question asked',
-  answered: 'Answered, waiting for staff',
+  asked: 'Waiting on the player',
+  answered: 'Player replied, waiting for staff',
   accepted: 'Accepted',
   shortened: 'Shortened',
   denied: 'Denied',
@@ -27,7 +27,7 @@ function again(db: DB, row: AppealRow, now: Date): string {
 export function playerLine(db: DB, row: AppealRow, now = new Date()): string | null {
   switch (row.state) {
     case 'open': case 'answered': return 'Your appeal was received. Staff will review it.';
-    case 'asked': return `Staff have one question about your appeal. Answer it by ${fmt(answerBy(db, row))}.`;
+    case 'asked': return `Staff have written to you about your appeal. Reply by ${fmt(answerBy(db, row))}.`;
     case 'accepted': return 'Your appeal was accepted. The ban has been lifted.';
     case 'shortened': return `Your appeal was reviewed. The ban now ends ${fmt(row.new_expires_at!)}.`;
     case 'denied': case 'auto_denied': case 'lapsed': return `Your appeal was reviewed and the ban stands.${again(db, row, now)}`;
@@ -36,14 +36,21 @@ export function playerLine(db: DB, row: AppealRow, now = new Date()): string | n
 }
 
 /** The DM for a state, or null when that state sends none ('open' and
- *  'answered' are the appellant's own doing; 'moot' needs no word). */
+ *  'answered' are the appellant's own doing; 'asked' is told by the staff
+ *  message itself, see messageDmText; 'moot' needs no word). */
 export function dmText(db: DB, row: AppealRow, publicUrl: string, now = new Date()): string | null {
   const link = `${publicUrl}/appeal`;
   switch (row.state) {
-    case 'open': case 'answered': case 'moot': return null;
-    case 'asked': return `Staff have one question about your appeal:\n> ${row.question!.replace(/\n/g, '\n> ')}\nAnswer it at ${link} by <t:${Math.floor(Date.parse(answerBy(db, row)) / 1000)}:f>.`;
+    case 'open': case 'answered': case 'asked': case 'moot': return null;
     default: return `${playerLine(db, row, now)} (${link})`;
   }
+}
+
+/** The DM for one staff message. Never names who wrote it: the player
+ *  only ever hears from "Staff". */
+export function messageDmText(db: DB, msg: AppealMessageRow, publicUrl: string): string {
+  const by = Math.floor((Date.parse(msg.created_at) + appealSettings(db).answerHours * 3600_000) / 1000);
+  return `Staff wrote about your appeal:\n> ${msg.body.replace(/\n/g, '\n> ')}\nReply at ${publicUrl}/appeal by <t:${by}:f>.`;
 }
 
 /** Sent to a Discord member when the bot times them out or bans them. */

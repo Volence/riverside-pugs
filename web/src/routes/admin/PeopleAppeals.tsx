@@ -6,7 +6,7 @@ import { fmtTime } from './useAction';
 import { appealUrl } from './adminRoutes';
 
 const STATE: Record<string, string> = {
-  open: 'waiting', asked: 'question asked', answered: 'answered', accepted: 'accepted', shortened: 'shortened',
+  open: 'waiting', asked: 'waiting on player', answered: 'player replied', accepted: 'accepted', shortened: 'shortened',
   denied: 'denied', auto_denied: 'denied (slur)', lapsed: 'no answer', moot: 'ban ended',
 };
 
@@ -18,8 +18,8 @@ export function PeopleAppeals() {
     <Panel class="panel--table">
       <h3>Appeals</h3>
       <p class="muted">
-        One appeal per ban at a time. You may ask one question, then accept, shorten or deny. The player only ever
-        sees a fixed sentence for the outcome. <a href="/admin/people/guide#appeals">How appeals work</a>
+        One appeal per ban at a time. Write back and forth with the player as needed, then accept, shorten or deny.
+        The player sees you as "Staff" and the outcome as a fixed sentence. <a href="/admin/people/guide#appeals">How appeals work</a>
       </p>
       <p>
         <button class={`chip${which === 'open' ? ' is-on' : ''}`} onClick={() => setWhich('open')}>Waiting</button>{' '}

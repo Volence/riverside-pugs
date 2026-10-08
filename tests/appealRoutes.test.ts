@@ -8,6 +8,7 @@ import { setSetting } from '../src/settings.js';
 import { upsertPlayer } from '../src/players.js';
 import { insertBan, banMessage } from '../src/admin/players.js';
 import { APPEAL_COOKIE } from '../src/appeals/appealSession.js';
+import { postStaffMessage } from '../src/appeals/store.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
@@ -41,16 +42,28 @@ const discordCookie = (discordId: string, name = 'stranger') =>
   ({ [APPEAL_COOKIE]: app.signCookie(`${discordId}.${Date.now()}.${Buffer.from(name).toString('base64url')}`) });
 
 describe('player appeal routes', () => {
-  it('a banned player sees their ban, files once, and answers the one question', async () => {
+  it('a banned player sees their ban, files once, and writes back and forth with staff', async () => {
     const { ban, cookies } = bannedCookie(P);
     const mine = await app.inject({ method: 'GET', url: '/api/appeals/mine', cookies });
     expect(mine.json()).toMatchObject({ enabled: true, items: [{ ref: { kind: 'ban', id: ban }, canAppeal: true }] });
     const filed = await app.inject({ method: 'POST', url: '/api/appeals', cookies, payload: { kind: 'ban', id: ban, whatHappened: 'lag', whyLift: 'router' } });
     expect(filed.statusCode).toBe(200);
     const id = filed.json().id as number;
-    db.prepare("UPDATE appeals SET state = 'asked', question = 'Which map?', asked_by = ?, asked_at = ? WHERE id = ?").run(ADMIN, new Date().toISOString(), id);
+    const more = await app.inject({ method: 'POST', url: `/api/appeals/${id}/messages`, cookies, payload: { body: 'It was round 2' } });
+    expect(more.json()).toEqual({ ok: true, state: 'open' });
+    postStaffMessage(db, id, ADMIN, 'Which map?');
+    // The path from before the thread still works for a page loaded then.
     const ans = await app.inject({ method: 'POST', url: `/api/appeals/${id}/answer`, cookies, payload: { answer: 'Dead Air 2' } });
     expect(ans.json()).toEqual({ ok: true, state: 'answered' });
+    const after = (await app.inject({ method: 'GET', url: '/api/appeals/mine', cookies })).json();
+    expect(after.items[0].appeal).toMatchObject({ state: 'answered', canWrite: true });
+    // Staff are "Staff" to the player: no author on any message.
+    expect(after.items[0].appeal.messages).toEqual([
+      { fromStaff: false, body: 'It was round 2', at: expect.any(String) },
+      { fromStaff: true, body: 'Which map?', at: expect.any(String) },
+      { fromStaff: false, body: 'Dead Air 2', at: expect.any(String) },
+    ]);
+    expect(JSON.stringify(after)).not.toContain(ADMIN);
   });
 
   it('a forged ref (somebody else\'s ban) is refused and nothing is stored', async () => {
@@ -99,17 +112,23 @@ describe('staff appeal routes', () => {
   const fileAs = async (cookies: Record<string, string>, kind: 'ban' | 'sanction', id: number) =>
     (await app.inject({ method: 'POST', url: '/api/appeals', cookies, payload: { kind, id, whatHappened: 'a', whyLift: 'b' } })).json().id as number;
 
-  it('a moderator lists, asks once, and denies; the audit row names the decider', async () => {
+  it('a moderator lists, writes twice, and denies; the audit rows name the writer and the decider', async () => {
     const { mod } = staff();
     const { ban, cookies } = bannedCookie(P);
     const id = await fileAs(cookies, 'ban', ban);
     const list = await app.inject({ method: 'GET', url: '/api/mod/appeals?state=open', cookies: mod });
     expect(list.json().appeals.map((a: { id: number }) => a.id)).toEqual([id]);
-    expect((await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/ask`, cookies: mod, payload: { question: 'Which map?' } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/messages`, cookies: mod, payload: { body: 'Which map?' } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/ask`, cookies: mod, payload: { question: 'And round?' } })).statusCode).toBe(200);
+    const detail = (await app.inject({ method: 'GET', url: `/api/mod/appeals/${id}`, cookies: mod })).json();
+    expect(detail.messages).toEqual([
+      { fromStaff: true, authorName: 'p008', body: 'Which map?', at: expect.any(String) },
+      { fromStaff: true, authorName: 'p008', body: 'And round?', at: expect.any(String) },
+    ]);
     const deny = await app.inject({ method: 'POST', url: `/api/mod/appeals/${id}/decide`, cookies: mod, payload: { outcome: 'deny' } });
     expect(deny.statusCode).toBe(200);
     expect(db.prepare("SELECT admin_id, action FROM admin_actions WHERE action LIKE 'appeal_%'").all())
-      .toEqual([{ admin_id: MOD, action: 'appeal_ask' }, { admin_id: MOD, action: 'appeal_deny' }]);
+      .toEqual([{ admin_id: MOD, action: 'appeal_ask' }, { admin_id: MOD, action: 'appeal_ask' }, { admin_id: MOD, action: 'appeal_deny' }]);
   });
 
   it('a moderator cannot decide an appeal against an admin\'s ban', async () => {

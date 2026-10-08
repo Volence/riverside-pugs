@@ -58,9 +58,54 @@ export function ensureAppealSchema(db: DB): void {
       updated_at TEXT NOT NULL
     );
   `);
+  ensureAppealMessages(db);
   // Admin-only "this ban cannot be appealed".
   if (!columnsOf(db, 'bans').includes('no_appeal')) db.exec('ALTER TABLE bans ADD COLUMN no_appeal INTEGER NOT NULL DEFAULT 0');
   if (!columnsOf(db, 'discord_sanctions').includes('no_appeal')) {
     db.exec('ALTER TABLE discord_sanctions ADD COLUMN no_appeal INTEGER NOT NULL DEFAULT 0');
   }
+}
+
+/**
+ * The conversation on an appeal: staff and the appellant may each write any
+ * number of times while it is open (owner, 2026-10-08; it began as one
+ * question and one answer). `author` is the staff member's steamid; null on
+ * the appellant's own messages, who are always the appeal's appellant.
+ *
+ * `dm_message_seen` and `forum_message_seen` on appeals are the highest
+ * message id already DMed (staff messages only) and already posted to the
+ * forum, so AppealSync sends each message once whatever the state does.
+ * The question and answer columns stay, holding the latest of each, for the
+ * Discord card and anything else that still reads them.
+ *
+ * Appeals from before the thread get their question and answer copied in,
+ * marked as already sent: both reached the player and the forum card then.
+ */
+function ensureAppealMessages(db: DB): void {
+  const had = columnsOf(db, 'appeal_messages').length > 0;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS appeal_messages (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      appeal_id  INTEGER NOT NULL REFERENCES appeals(id),
+      from_staff INTEGER NOT NULL CHECK (from_staff IN (0, 1)),
+      author     TEXT,
+      body       TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_appeal_messages_appeal ON appeal_messages (appeal_id, id);
+  `);
+  const cols = columnsOf(db, 'appeals');
+  if (!cols.includes('dm_message_seen')) db.exec('ALTER TABLE appeals ADD COLUMN dm_message_seen INTEGER NOT NULL DEFAULT 0');
+  if (!cols.includes('forum_message_seen')) db.exec('ALTER TABLE appeals ADD COLUMN forum_message_seen INTEGER NOT NULL DEFAULT 0');
+  if (had) return;
+  db.transaction(() => {
+    const rows = db.prepare('SELECT id, question, asked_by, asked_at, answer, answered_at FROM appeals WHERE question IS NOT NULL ORDER BY id').all() as
+      { id: number; question: string; asked_by: string | null; asked_at: string; answer: string | null; answered_at: string | null }[];
+    const add = db.prepare('INSERT INTO appeal_messages (appeal_id, from_staff, author, body, created_at) VALUES (?, ?, ?, ?, ?)');
+    for (const r of rows) {
+      let last = Number(add.run(r.id, 1, r.asked_by, r.question, r.asked_at).lastInsertRowid);
+      if (r.answer !== null) last = Number(add.run(r.id, 0, null, r.answer, r.answered_at ?? r.asked_at).lastInsertRowid);
+      db.prepare('UPDATE appeals SET dm_message_seen = ?, forum_message_seen = ? WHERE id = ?').run(last, last, r.id);
+    }
+  })();
 }
