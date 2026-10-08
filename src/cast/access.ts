@@ -6,6 +6,10 @@ import { roleOf } from '../teams/teams.js';
 import { fullyInvited } from '../bookings/casters.js';
 import { getBooking, isOpen, managesSide, sideName, sidesOf } from '../bookings/bookings.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
+import { competitiveAccess } from '../teams/access.js';
+import { activeSignups } from '../events/drafts.js';
+import { livePicks, roomOf } from '../events/draftRoom.js';
+import type { DraftStatus } from './types.js';
 
 /**
  * What a caster may put on air (plan ruling 2). The same rule as /cast
@@ -161,4 +165,39 @@ export function resolveOnAir(
   }
   if (pick.matchId !== null && canCastMatch(db, steamid, pick.matchId)) return { matchId: pick.matchId, game: null };
   return { matchId: null, game: null };
+}
+
+/**
+ * Live drafts (drafts plan D2b2 Ruling 2): a published draft-kind event with
+ * its cut published, in live mode, its teams unpublished or published within
+ * RECENT_HOURS. The overlay carries only the public room, so there is no
+ * stake rule: a caster who is a captain may follow their own draft.
+ */
+interface DraftRow { id: number; name: string; slug: string }
+function castableDraftRows(db: DB, now: Date, id?: number): DraftRow[] {
+  const since = new Date(now.getTime() - RECENT_HOURS * 3_600_000).toISOString();
+  return db.prepare(
+    `SELECT id, name, slug FROM events
+     WHERE entry_kind = 'draft' AND team_mode = 'live' AND cut_at IS NOT NULL
+       AND status NOT IN ('draft', 'cancelled')
+       AND (teams_made_at IS NULL OR teams_made_at >= ?)
+       ${id === undefined ? '' : 'AND id = ?'}
+     ORDER BY starts_at, id LIMIT 20`,
+  ).all(...(id === undefined ? [since] : [since, id])) as DraftRow[];
+}
+
+export function canCastDraft(db: DB, steamid: string, eventId: number, now = new Date()): boolean {
+  return mayCast(db, steamid) && competitiveAccess(db, steamid) && castableDraftRows(db, now, eventId).length > 0;
+}
+
+export interface PickableDraft { id: number; name: string; slug: string; status: DraftStatus; picks: number; totalPicks: number }
+
+export function pickableDrafts(db: DB, steamid: string, now = new Date()): PickableDraft[] {
+  if (!mayCast(db, steamid) || !competitiveAccess(db, steamid)) return [];
+  return castableDraftRows(db, now).map((r) => ({
+    ...r,
+    status: roomOf(db, r.id)?.status ?? 'ready',
+    picks: livePicks(db, r.id).length,
+    totalPicks: activeSignups(db, r.id).filter((s) => s.role === 'pool').length,
+  }));
 }
