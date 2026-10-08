@@ -24,8 +24,9 @@ describe('a live draft from signups to entries', () => {
     const here = captains.slice(0, 4);
     for (const c of here) must(DR.savePickList(f.db, { eventId: f.eventId, steamid: c, list: P.slice(0, 15), now: NOW }));
 
-    let t = NOW.getTime() + 3_600_000;
+    let t = NOW.getTime() + 3_600_000 - 30_000;
     let clock = new DraftClock({ db: f.db, now: () => t });
+    t += 30_000; // the site has been up a while: its startup grace is over
     const beat = () => { for (const c of here) clock.heartbeat(f.eventId, c); };
     const st = () => DR.roomState(f.db, f.eventId)!;
     beat();
@@ -52,7 +53,7 @@ describe('a live draft from signups to entries', () => {
       }
       if (s.picks.length === 10 && !undone) {
         undone = true;
-        must(DR.undoPick(f.db, { eventId: f.eventId, actor: ADMIN, now: new Date(t) }));
+        must(DR.undoPick(f.db, { eventId: f.eventId, actor: ADMIN, now: new Date(t), present: clock.present(f.eventId) }));
         expect(st().picks).toHaveLength(9);
         expect(st().room.deadline_at).toBe(new Date(t + 75_000).toISOString());
         continue;

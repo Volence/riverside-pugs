@@ -64,6 +64,7 @@ describe('preferences', () => {
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_captain_set_old')).toEqual({ type: 'draft_captain_set_old', label: 'Draft: your team has a new captain' });
     // Plan D2b1 Task 6: the room is open.
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_room_open')).toEqual({ type: 'draft_room_open', label: 'Draft: the live draft room opened' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_delegate_set')).toEqual({ type: 'draft_delegate_set', label: 'Draft: staff handed your team\'s picking to you' });
   });
   it('lists the two reschedule DMs (plan T4)', () => {
     expect(NOTIFY_TYPES.filter((t) => t.type === 'event_reschedule' || t.type === 'event_match_time')).toEqual([

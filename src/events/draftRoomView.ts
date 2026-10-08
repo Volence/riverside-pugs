@@ -12,7 +12,8 @@ import type { PlayerCard } from './draftCards.js';
  * GET /api/events/:slug/draft, tailored per viewer (drafts plan D2b1
  * Rulings 10, 14, 16, 22). Everyone: status, settings, the clock (with the
  * server's now for skew), order, the pick log without undone picks, teams so
- * far and the free pool as public cards. The team's captain also gets that team's
+ * far, the free pool as public cards and which teams are in the room
+ * (presence is public by design). The team's captain also gets that team's
  * list; the captain or delegate gets the notes and chemistry with themselves. Staff and
  * the organizer get every list and the notes. Fairness is never here: it
  * stays on the desk's Make teams panel.
@@ -33,6 +34,8 @@ export interface DraftRoomView {
   me: { role: 'captain' | 'delegate' | null; team: string | null; onClock: boolean; list: string[] | null; chemistry: Record<string, PairChemistry> | null };
   lists: Record<string, string[]> | null;
   staff: boolean;
+  /** Captains whose team is in the room: the captain or that team's delegate has a fresh heartbeat. */
+  present: string[];
 }
 
 /** Signup notes by player, for the pool only. */
@@ -46,7 +49,9 @@ export function chemistryFor(db: DB, viewer: string, pool: D.SignupRow[]): Recor
   return Object.fromEntries(pool.filter((s) => s.steamid !== viewer).map((s) => [s.steamid, pairChemistry(db, viewer, s.steamid)]));
 }
 
-export function draftRoomView(db: DB, ev: E.EventRow, viewer: RoomViewer, now: Date, cardsOf: (steamids: string[]) => PlayerCard[]): DraftRoomView {
+export function draftRoomView(
+  db: DB, ev: E.EventRow, viewer: RoomViewer, now: Date, cardsOf: (steamids: string[]) => PlayerCard[], present: DR.Present,
+): DraftRoomView {
   const live = ev.team_mode === 'live';
   const st = live ? DR.roomState(db, ev.id) : null;
   const room = st?.room ?? null;
@@ -91,5 +96,6 @@ export function draftRoomView(db: DB, ev: E.EventRow, viewer: RoomViewer, now: D
     },
     lists: seeAll ? Object.fromEntries(captains.map((c) => [c.steamid, DR.pickListOf(db, ev.id, c.steamid)])) : null,
     staff: seeAll,
+    present: order.filter((c) => present(c) || (delegates[c] !== undefined && present(delegates[c]!))),
   };
 }

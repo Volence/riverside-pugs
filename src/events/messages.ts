@@ -23,7 +23,7 @@ export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_ro
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
-  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open';
+  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -54,7 +54,7 @@ export const REPLACE_TEXT: Record<ReplaceReason, string> = {
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason; forCaptain?: string } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -134,6 +134,11 @@ export function eventMessage(
     case 'draft_room_open':
       // Plan D2b1 Ruling 11: every captain, once, at Start.
       content = `The live draft for ${event} has started and you are a captain. If you are not in the room when your turn comes, the site picks for you from your pick list. Join now: ${publicUrl}/event/${ev.slug}/draft`;
+      break;
+    case 'draft_delegate_set':
+      // Plan D2b1 Ruling 16: the team's first drafted player now picks for it.
+      if (!extra.forCaptain) return null;
+      content = `Staff handed the picking for ${escapeName(getPlayer(db, extra.forCaptain)?.name ?? extra.forCaptain)}'s team in ${event} to you: you pick for the team when its turn comes. Join the draft room: ${publicUrl}/event/${ev.slug}/draft`;
       break;
     case 'draft_captain_offer':
       if (!extra.expiresAt) return null;

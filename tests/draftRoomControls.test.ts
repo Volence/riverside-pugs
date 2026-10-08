@@ -5,11 +5,11 @@ import * as DR from '../src/events/draftRoom.js';
 import * as N from '../src/events/entries.js';
 import { ADMIN } from './eventFixture.js';
 import { cutDraft, type DraftFixture } from './draftFixture.js';
-import { ALL, BENCH, CAPTAINS, POOL, T0, at, drive, err, liveDraft, must, startedDraft } from './draftRoomFixture.js';
+import { ALL, BENCH, CAPTAINS, NONE, POOL, T0, at, drive, err, liveDraft, must, startedDraft } from './draftRoomFixture.js';
 
 const state = (f: DraftFixture) => DR.roomState(f.db, f.eventId)!;
 const iso = (d: Date) => d.toISOString();
-const staff = (f: DraftFixture, s: number) => ({ eventId: f.eventId, actor: ADMIN, now: at(s) });
+const staff = (f: DraftFixture, s: number, present = ALL) => ({ eventId: f.eventId, actor: ADMIN, now: at(s), present });
 const logs = (f: DraftFixture, action: string) =>
   (f.db.prepare('SELECT actor, detail FROM event_log WHERE action = ? ORDER BY id').all(action) as { actor: string | null; detail: string }[])
     .map((r) => ({ actor: r.actor, ...JSON.parse(r.detail) }));
@@ -55,6 +55,29 @@ describe('undo', () => {
     expect(logs(f, 'draft_pick_undone')).toEqual([{ actor: ADMIN, picks: [{ pickNo: 3, steamid: third.steamid }] }]);
   });
 
+  it('gives the reopened pick an absent picker\'s 5 seconds, running or done, like any other turn', () => {
+    const f = startedDraft();
+    drive(f, 3);
+    must(DR.undoPick(f.db, staff(f, 40, NONE)));
+    expect(state(f).room.deadline_at).toBe(iso(at(45)));
+    must(DR.undoPick(f.db, staff(f, 41, (s) => s !== CAPTAINS[1])));
+    expect(state(f).room.deadline_at).toBe(iso(at(46)));
+
+    const g = startedDraft();
+    drive(g, 14);
+    must(DR.undoPick(g.db, staff(g, 60, NONE)));
+    expect(state(g).room).toMatchObject({ status: 'running', deadline_at: iso(at(65)) });
+  });
+
+  it('asks about the delegate when the reopened pick is a delegated team\'s', () => {
+    const f = startedDraft();
+    drive(f, 10); // CAPTAINS[0] picked 1 and 10
+    must(DR.setDelegate(f.db, { ...staff(f, 20), captain: CAPTAINS[0]!, on: true }));
+    const delegate = state(f).delegates[CAPTAINS[0]!]!;
+    must(DR.undoPick(f.db, staff(f, 21, (s) => s === delegate)));
+    expect(state(f).room.deadline_at).toBe(iso(at(96)));
+  });
+
   it('refuses with nothing to undo', () => {
     const f = startedDraft();
     expect(err(DR.undoPick(f.db, staff(f, 2)))).toBe('no_picks');
@@ -64,7 +87,7 @@ describe('undo', () => {
     const f = startedDraft();
     drive(f, 2);
     must(DR.pauseRoom(f.db, staff(f, 10)));
-    must(DR.undoPick(f.db, staff(f, 11)));
+    must(DR.undoPick(f.db, staff(f, 11, NONE)));
     expect(state(f).room).toMatchObject({ status: 'paused', paused_left_ms: 75_000, deadline_at: null });
   });
 

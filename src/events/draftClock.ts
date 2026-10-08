@@ -9,9 +9,11 @@ export const HEARTBEAT_FRESH_MS = 25_000;
 /**
  * The live draft room's clock (drafts plan D2b1 Rulings 7 and 8). Presence
  * is the only state it holds, in memory: who sent a room heartbeat in the
- * last 25 s, per event. A restart forgets it, so for up to 10 s every
- * picker reads as absent; the stored deadline of the running pick is never
- * touched by that. tick() runs every second from src/server.ts and
+ * last 25 s, per event. A restart forgets it, so for the first 25 s after
+ * the clock is made (the startup grace, one freshness window) everyone reads
+ * as present: a picker whose page has not beaten yet is not handed a 5 s
+ * clock by an overdue auto-pick. The stored deadline of the running pick is
+ * never touched by any of it. tick() runs every second from src/server.ts and
  * auto-picks for each running room whose deadline has passed; a fault in
  * one room is logged and never stops the rest. push tells the pages
  * (hub event draft:<eventId>) and never throws.
@@ -19,9 +21,11 @@ export const HEARTBEAT_FRESH_MS = 25_000;
 export class DraftClock {
   private readonly seen = new Map<string, number>();
   private readonly now: () => number;
+  private readonly startedAt: number;
 
   constructor(private readonly deps: { db: DB; push?: (eventId: number) => void; now?: () => number }) {
     this.now = deps.now ?? Date.now;
+    this.startedAt = this.now();
   }
 
   /** The one clock the room routes use, so tests can move it. */
@@ -35,6 +39,7 @@ export class DraftClock {
 
   present(eventId: number): Present {
     const t = this.now();
+    if (t - this.startedAt <= HEARTBEAT_FRESH_MS) return () => true;
     return (steamid) => {
       const last = this.seen.get(`${eventId}:${steamid}`);
       return last !== undefined && t - last <= HEARTBEAT_FRESH_MS;

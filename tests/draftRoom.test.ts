@@ -190,4 +190,26 @@ describe('auto picks', () => {
     expect(() => g.db.prepare("INSERT INTO draft_picks (event_id, round, pick_no, captain_steamid, steamid, auto, at) VALUES (?, 1, 1, ?, ?, 0, 'x')")
       .run(g.eventId, CAPTAINS[0], POOL[1])).toThrow(/UNIQUE/);
   });
+
+  it('refuses teams_changed, writing nothing, when the pool shrank and no player is left for a slot', () => {
+    // An account merge is the only way the pool shrinks mid-draft; a withdrawn signup stands in for it.
+    const gone = (f: DraftFixture, s: string) =>
+      f.db.prepare("UPDATE draft_signups SET withdrawn_at = '2026-10-01T00:00:00.000Z' WHERE event_id = ? AND steamid = ?").run(f.eventId, s);
+    const f = startedDraft();
+    drive(f, 13);
+    for (const s of state(f).available) gone(f, s.steamid);
+    const before = roomRows(f);
+    expect(err(DR.autoPickDue(f.db, { eventId: f.eventId, now: at(500), present: ALL }))).toBe('teams_changed');
+    expect(roomRows(f)).toBe(before);
+
+    // One player left for two open slots: the pick cannot be followed by the forced final pick.
+    const g = startedDraft();
+    drive(g, 13);
+    gone(g, state(g).available[0]!.steamid);
+    const st = state(g);
+    const rows = roomRows(g);
+    expect(err(DR.makePick(g.db, { eventId: g.eventId, steamid: st.picker!, player: st.available[0]!.steamid, pickNo: st.next!.pickNo, now: at(20), present: ALL }))).toBe('teams_changed');
+    expect(err(DR.autoPickDue(g.db, { eventId: g.eventId, now: at(500), present: ALL }))).toBe('teams_changed');
+    expect(roomRows(g)).toBe(rows);
+  });
 });
