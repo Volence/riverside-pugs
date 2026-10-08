@@ -676,6 +676,7 @@
 .ov-dboard__name { font: 600 26px var(--font-body); color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-dboard__open { grid-column: 2 / 4; grid-row: 1 / 3; font: 500 22px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
 .ov-dboard__slot.is-up .ov-dboard__open { color: var(--accent); }
+.ov-dboard__slot.is-none { opacity: 0.55; }
 .ov-dboard--dense .ov-dboard__slot .ov-dface { display: none; }
 .ov-dboard--dense .ov-dboard__slot .ov-dboard__name, .ov-dboard--dense .ov-dboard__slot .ov-dboard__sr { grid-column: 2 / 4; }
 .ov-dboard__foot { position: absolute; left: 120px; right: 120px; bottom: 70px; padding: 14px 24px; background: var(--panel); border-top: 3px solid var(--accent); font: 500 30px var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--bone); }
