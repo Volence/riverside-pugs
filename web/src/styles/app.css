@@ -2947,6 +2947,14 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .ticket-msg p { margin: 0 0 var(--sp-2); }
 .ticket-msg blockquote { margin: 0 0 var(--sp-2); padding-left: var(--sp-3); border-left: 2px solid var(--rule); color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
 .ticket-msg--reporter blockquote { border-left-color: #c9a45c; }
+/* The conversation on an appeal: staff lines indented so the two sides
+ * read apart without colour. Used on the player box and the staff page. */
+.appeal-thread { list-style: none; margin: 0 0 var(--sp-3); padding: 0; }
+.appeal-msg { margin: 0 0 var(--sp-2); }
+.appeal-msg--staff { padding-left: var(--sp-4); }
+.appeal-msg__who { margin: 0 0 var(--sp-1); font-size: 0.85em; color: var(--text-muted); }
+.appeal-reply label { display: block; }
+.appeal-reply textarea { width: 100%; margin-top: var(--sp-2); min-height: 5rem; resize: vertical; box-sizing: border-box; font: inherit; }
 .appeal-text { margin: 0 0 var(--sp-2); padding-left: var(--sp-3); border-left: 2px solid var(--rule); color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
 .ticket-files { list-style: none; margin: 0 0 var(--sp-2); padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: flex-end; }
 .ticket-file { overflow-wrap: anywhere; }

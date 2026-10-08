@@ -1,9 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import type { ModerationOps } from '../discord/transport.js';
 import { getSession } from '../session.js';
 import { appellantFromDiscord, appellantFromSteam } from '../appeals/rules.js';
-import { answerQuestion, fileAppeal } from '../appeals/store.js';
+import { fileAppeal, postPlayerMessage } from '../appeals/store.js';
 import { playerView } from '../appeals/views.js';
 import { clearAppealSession, readAppealSession } from '../appeals/appealSession.js';
 import type { AppealRef, AppealSource, Appellant } from '../appeals/types.js';
@@ -11,7 +11,7 @@ import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { fileViewer } from '../admin/fileAccess.js';
 import { logAdmin } from '../admin/audit.js';
 import { publishAdminEvent } from '../adminFeed.js';
-import { askQuestion, getAppeal, mootAppeal, recordDecision, targetInForce } from '../appeals/store.js';
+import { getAppeal, postStaffMessage, mootAppeal, recordDecision, targetInForce } from '../appeals/store.js';
 import { appealIsQuiet, canSeeAppeal, decideCheck } from '../appeals/access.js';
 import { decideBanAppeal } from '../appeals/decide.js';
 import { staffAppeal, staffAppeals } from '../appeals/views.js';
@@ -59,13 +59,18 @@ export async function appealRoutes(app: FastifyInstance, opts: AppealRouteOpts):
     return r;
   });
 
-  app.post('/api/appeals/:id/answer', async (req, reply) => {
+  /** The message box. `/answer` and `answer` are the one-question names,
+   *  kept for a page loaded before the thread shipped. */
+  const playerMessage = async (req: FastifyRequest, reply: FastifyReply) => {
     const a = appellantOf(req);
     if (!a) return reply.code(401).send({ error: 'not signed in' });
-    const r = answerQuestion(db, a.who, Number((req.params as { id: string }).id), ((req.body ?? {}) as { answer?: unknown }).answer);
+    const b = (req.body ?? {}) as { body?: unknown; answer?: unknown };
+    const r = postPlayerMessage(db, a.who, Number((req.params as { id: string }).id), b.body ?? b.answer);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
     return r;
-  });
+  };
+  app.post('/api/appeals/:id/messages', playerMessage);
+  app.post('/api/appeals/:id/answer', playerMessage);
 
   app.post('/api/appeals/sign-out', async (_req, reply) => {
     clearAppealSession(reply);
@@ -92,17 +97,21 @@ export async function appealRoutes(app: FastifyInstance, opts: AppealRouteOpts):
     return d ?? reply.code(404).send({ error: 'no such appeal' });
   });
 
-  app.post('/api/mod/appeals/:id/ask', async (req, reply) => {
+  /** Staff write to the player. `/ask` and `question`: as for /answer above. */
+  const staffMessage = async (req: FastifyRequest, reply: FastifyReply) => {
     const me = requireMod(req, reply);
     if (!me) return reply;
     const row = getAppeal(db, idOf(req));
     const c = row ? decideCheck(db, fileViewer(db, me), row) : { ok: false as const, status: 404, error: 'no such appeal' };
     if (!c.ok) return reply.code(c.status).send({ error: c.error });
-    const r = askQuestion(db, row!.id, me, ((req.body ?? {}) as { question?: unknown }).question);
+    const b = (req.body ?? {}) as { body?: unknown; question?: unknown };
+    const r = postStaffMessage(db, row!.id, me, b.body ?? b.question);
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    audit(me, 'appeal_ask', row!);
-    return r;
-  });
+    audit(me, 'appeal_ask', row!, { messageId: r.messageId });
+    return { ok: true };
+  };
+  app.post('/api/mod/appeals/:id/messages', staffMessage);
+  app.post('/api/mod/appeals/:id/ask', staffMessage);
 
   app.post('/api/mod/appeals/:id/decide', async (req, reply) => {
     const me = requireMod(req, reply);

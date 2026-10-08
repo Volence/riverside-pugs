@@ -46,6 +46,18 @@ export interface AppealRow {
   forum_message_id: string | null;
   forum_state: string | null;
   dm_state: string | null;
+  dm_message_seen: number;
+  forum_message_seen: number;
+}
+
+/** One `appeal_messages` row. */
+export interface AppealMessageRow {
+  id: number;
+  appeal_id: number;
+  from_staff: 0 | 1;
+  author: string | null;
+  body: string;
+  created_at: string;
 }
 
 /** Who is appealing. `steamids`: every player account this person may speak

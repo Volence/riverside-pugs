@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { MyAppeals } from '../api';
 
-const { mock } = vi.hoisted(() => ({ mock: { mine: vi.fn(), file: vi.fn(), answer: vi.fn(), signOut: vi.fn() } }));
+const { mock } = vi.hoisted(() => ({ mock: { mine: vi.fn(), file: vi.fn(), message: vi.fn(), signOut: vi.fn() } }));
 vi.mock('../api', async (orig) => ({ ...(await orig<typeof import('../api')>()), appealApi: mock }));
 const { AppealBox } = await import('./AppealBox');
 
@@ -30,11 +30,36 @@ describe('AppealBox', () => {
     await waitFor(() => expect(mock.file).toHaveBeenCalledWith(ban.ref, 'lag', 'router'));
   });
 
-  it('shows the one question with an answer box', async () => {
-    mock.mine.mockResolvedValue({ ...base, items: [{ ...ban, canAppeal: false, appeal: { id: 9, state: 'asked', question: 'Which map?', answerBy: '2026-10-07T12:00:00.000Z', line: 'Staff have one question about your appeal.', filedAt: '' } }] });
+  it('shows the whole conversation, staff unnamed, and sends a reply', async () => {
+    mock.mine.mockResolvedValue({ ...base, items: [{ ...ban, canAppeal: false, appeal: {
+      id: 9, state: 'asked', answerBy: '2026-10-07T12:00:00.000Z', line: 'Staff have written to you about your appeal.', filedAt: '', canWrite: true,
+      messages: [
+        { fromStaff: true, body: 'Which map?', at: '2026-10-04T12:00:00.000Z' },
+        { fromStaff: false, body: 'Farm 3', at: '2026-10-04T13:00:00.000Z' },
+        { fromStaff: true, body: 'Which round?', at: '2026-10-04T14:00:00.000Z' },
+      ],
+    } }] });
+    mock.message.mockResolvedValue({ ok: true });
     render(<AppealBox fallback="" />);
     expect(await screen.findByText('Which map?')).toBeTruthy();
-    expect(screen.getByLabelText('Your answer')).toBeTruthy();
+    expect(screen.getByText('Farm 3')).toBeTruthy();
+    expect(screen.getByText('Which round?')).toBeTruthy();
+    expect(screen.getAllByText(/^Staff ·/)).toHaveLength(2);
+    fireEvent.input(screen.getByLabelText('Your reply'), { target: { value: 'Round 2' } });
+    fireEvent.click(screen.getByText('Send'));
+    await waitFor(() => expect(mock.message).toHaveBeenCalledWith(9, 'Round 2'));
+  });
+
+  it('can add to an appeal staff have not answered yet, and no box once it cannot take more', async () => {
+    const appeal = { id: 9, state: 'open' as const, answerBy: null, line: 'Your appeal was received. Staff will review it.', filedAt: '', canWrite: true, messages: [] };
+    mock.mine.mockResolvedValue({ ...base, items: [{ ...ban, canAppeal: false, appeal }] });
+    render(<AppealBox fallback="" />);
+    expect(await screen.findByLabelText('Add to your appeal')).toBeTruthy();
+    cleanup();
+    mock.mine.mockResolvedValue({ ...base, items: [{ ...ban, canAppeal: false, appeal: { ...appeal, canWrite: false } }] });
+    render(<AppealBox fallback="" />);
+    expect(await screen.findByText('Your appeal was received. Staff will review it.')).toBeTruthy();
+    expect(screen.queryByLabelText('Add to your appeal')).toBeNull();
   });
 
   it('a refusal is shown instead of the button', async () => {
@@ -54,7 +79,7 @@ describe('AppealBox', () => {
       items: [{
         ...ban, canAppeal: false,
         refusal: 'Your last appeal for this was turned down. You can appeal again after Mon, 10 Oct 2026 12:00:00 UTC.',
-        appeal: { id: 9, state: 'denied', question: null, answerBy: null, line: cooldownLine, filedAt: '' },
+        appeal: { id: 9, state: 'denied', answerBy: null, line: cooldownLine, filedAt: '', messages: [], canWrite: false },
       }],
     });
     render(<AppealBox fallback="" />);

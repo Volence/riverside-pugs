@@ -1643,7 +1643,12 @@ export interface AppealRef { kind: 'ban' | 'sanction'; id: number }
 export interface PlayerAppealItem {
   ref: AppealRef; hold: boolean; sanctionKind: 'timeout' | 'ban' | null; reason: string; endsAt: string | null;
   canAppeal: boolean; refusal: string | null;
-  appeal: { id: number; state: AppealState; question: string | null; answerBy: string | null; line: string | null; filedAt: string } | null;
+  appeal: {
+    id: number; state: AppealState; answerBy: string | null; line: string | null; filedAt: string;
+    /** The conversation. Staff are never named to the player. */
+    messages: { fromStaff: boolean; body: string; at: string }[];
+    canWrite: boolean;
+  } | null;
 }
 export interface MyAppeals { enabled: boolean; signedInAs: 'steam' | 'discord'; name: string; textMax: number; answerMax: number; items: PlayerAppealItem[] }
 
@@ -1651,7 +1656,7 @@ export const appealApi = {
   mine: (signal?: AbortSignal) => get<MyAppeals>('/api/appeals/mine', signal),
   file: (ref: AppealRef, whatHappened: string, whyLift: string) =>
     post<{ ok: true; id: number; state: AppealState }>('/api/appeals', { kind: ref.kind, id: ref.id, whatHappened, whyLift }),
-  answer: (id: number, answer: string) => post<{ ok: true }>(`/api/appeals/${id}/answer`, { answer }),
+  message: (id: number, body: string) => post<{ ok: true }>(`/api/appeals/${id}/messages`, { body }),
   signOut: () => post<{ ok: true }>('/api/appeals/sign-out'),
 };
 
@@ -1663,8 +1668,8 @@ export interface StaffAppealRow {
 /** One appeal in full, as seen on its own staff page. */
 export interface StaffAppealDetail extends StaffAppealRow {
   whatHappened: string; whyLift: string;
-  question: string | null; askedByName: string | null; askedAt: string | null;
-  answer: string | null; answeredAt: string | null; answerBy: string | null;
+  messages: { fromStaff: boolean; authorName: string | null; body: string; at: string }[];
+  answerBy: string | null;
   decidedByName: string | null; newExpiresAt: string | null; slurs: string[];
   target: { reason: string; createdByName: string; createdAt: string; endsAt: string | null; ticketId: number | null; noAppeal: boolean; inForce: boolean };
   earlier: { id: number; state: AppealState; decidedAt: string | null }[];
@@ -1673,7 +1678,7 @@ export interface StaffAppealDetail extends StaffAppealRow {
 export const appealStaffApi = {
   list: (which: 'open' | 'closed', signal?: AbortSignal) => get<{ appeals: StaffAppealRow[] }>(`/api/mod/appeals?state=${which}`, signal),
   get: (id: number, signal?: AbortSignal) => get<StaffAppealDetail>(`/api/mod/appeals/${id}`, signal),
-  ask: (id: number, question: string) => post<{ ok: true }>(`/api/mod/appeals/${id}/ask`, { question }),
+  message: (id: number, body: string) => post<{ ok: true }>(`/api/mod/appeals/${id}/messages`, { body }),
   decide: (id: number, outcome: 'accept' | 'shorten' | 'deny', endsAt?: string) =>
     post<{ ok: true }>(`/api/mod/appeals/${id}/decide`, { outcome, endsAt }),
   markFinal: (id: number, on: boolean) => post<{ ok: true }>(`/api/admin/appeals/${id}/final`, { on }),

@@ -17,6 +17,7 @@ export function appealSettings(db: DB) {
     textMax: settingNumber(db, 'appeal_text_max', 1500, { min: 1, integer: true }),
     answerMax: settingNumber(db, 'appeal_answer_max', 800, { min: 1, integer: true }),
     answerHours: settingNumber(db, 'appeal_answer_hours', 72, { min: 1, integer: true }),
+    maxReplies: settingNumber(db, 'appeal_max_replies', 30, { min: 1, integer: true }),
   };
 }
 

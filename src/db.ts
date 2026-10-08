@@ -1493,6 +1493,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   appeal_text_max: '1500',
   appeal_answer_max: '800',
   appeal_answer_hours: '72',
+  appeal_max_replies: '30',
   ticket_reports_per_day: '5',
   ticket_store_attachments: '1',
   ticket_attachment_max_mb: '25',

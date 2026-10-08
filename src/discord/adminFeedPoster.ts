@@ -420,12 +420,17 @@ export class AdminFeedPoster {
         const link = `[#${appealId}](${this.deps.publicUrl}/admin/people/appeals/${appealId})`;
         switch (e.action) {
           case 'appeal_ask': {
-            // Asked once and never edited, so the row holds exactly what was
-            // sent; askQuestion caps it at 500 characters. Quoted like a note.
-            const q = ((this.deps.db.prepare('SELECT question FROM appeals WHERE id = ?').get(appealId) as
-              { question: string | null } | undefined)?.question ?? '').trim();
-            const quote = q === '' ? '' : `:\n${q.split('\n').map((l) => `> ${escapeName(l)}`).join('\n')}`;
-            return `${who} asked a question on appeal ${link}${quote}`;
+            // The message this row is about, never edited, so it holds
+            // exactly what was sent. Rows from before the thread carry no
+            // messageId; their appeal's one question is in appeals.question.
+            // Quoted like a note, clipped: the whole thing is on the forum post.
+            const raw = d.messageId !== undefined
+              ? (this.deps.db.prepare('SELECT body FROM appeal_messages WHERE id = ?').get(Number(d.messageId)) as { body: string } | undefined)?.body
+              : (this.deps.db.prepare('SELECT question FROM appeals WHERE id = ?').get(appealId) as { question: string | null } | undefined)?.question;
+            const q = (raw ?? '').trim();
+            const clipped = q.length > 500 ? `${q.slice(0, 499)}…` : q;
+            const quote = clipped === '' ? '' : `:\n${clipped.split('\n').map((l) => `> ${escapeName(l)}`).join('\n')}`;
+            return `${who} wrote to the player on appeal ${link}${quote}`;
           }
           case 'appeal_accept': return `${who} accepted appeal ${link}`;
           case 'appeal_shorten': return `${who} shortened appeal ${link}`;

@@ -4,7 +4,7 @@ import { setSetting } from '../src/settings.js';
 import { upsertPlayer, linkDiscord } from '../src/players.js';
 import { insertBan } from '../src/admin/players.js';
 import { appellantFromSteam } from '../src/appeals/rules.js';
-import { askQuestion, fileAppeal, getAppeal, recordDecision } from '../src/appeals/store.js';
+import { fileAppeal, getAppeal, postPlayerMessage, postStaffMessage, recordDecision } from '../src/appeals/store.js';
 import { appealCard, AppealSync } from '../src/discord/appealSync.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
@@ -43,20 +43,63 @@ describe('AppealSync', () => {
     expect(getAppeal(db, id)!.forum_thread_id).toBe(posts[0].id);
   });
 
-  it('DMs the question once, and the outcome once; never the filing itself', async () => {
+  it('DMs each staff message once, and the outcome once; never the filing itself', async () => {
     const id = file();
     await sync.reconcile();
     expect(t.dms).toEqual([]);
-    askQuestion(db, id, MOD, 'Which map?');
+    postStaffMessage(db, id, MOD, 'Which map?');
     await sync.reconcile();
     await sync.reconcile();
     expect(t.dms).toHaveLength(1);
     expect(t.dms[0].userId).toBe('700');
     expect(t.dms[0].payload.content).toContain('Which map?');
-    recordDecision(db, id, MOD, 'denied', null);
+    // A second staff message in a row, while the state stays 'asked', is its own DM.
+    postStaffMessage(db, id, MOD, 'And which round?');
     await sync.reconcile();
     expect(t.dms).toHaveLength(2);
-    expect(t.dms[1].payload.content).toContain('the ban stands');
+    expect(t.dms[1].payload.content).toContain('And which round?');
+    // Never the staff member's name.
+    expect(t.dms.map((d) => d.payload.content).join('\n')).not.toContain('mod');
+    // The player's own messages are never DMed back to them.
+    postPlayerMessage(db, appellantFromSteam(db, P), id, 'Round 2');
+    await sync.reconcile();
+    expect(t.dms).toHaveLength(2);
+    recordDecision(db, id, MOD, 'denied', null);
+    await sync.reconcile();
+    expect(t.dms).toHaveLength(3);
+    expect(t.dms[2].payload.content).toContain('the ban stands');
+  });
+
+  it('posts every message, both ways, into the forum post in order, once each', async () => {
+    const id = file();
+    await sync.reconcile();
+    postPlayerMessage(db, appellantFromSteam(db, P), id, 'One more thing');
+    postStaffMessage(db, id, MOD, 'Which map?');
+    postStaffMessage(db, id, MOD, 'And which round?');
+    await sync.reconcile();
+    postPlayerMessage(db, appellantFromSteam(db, P), id, 'Farm 3, round 2');
+    await sync.reconcile();
+    await sync.reconcile();
+    const post = t.threadsIn(FORUM)[0];
+    const lines = t.live().filter((m) => m.channelId === post.id && m.payload.content).map((m) => m.payload.content);
+    expect(lines).toEqual([
+      expect.stringMatching(/^\*\*telltale\*\* \(appellant\):\n> One more thing$/),
+      expect.stringMatching(/^\*\*mod\*\* to the player:\n> Which map\?$/),
+      expect.stringMatching(/^\*\*mod\*\* to the player:\n> And which round\?$/),
+      expect.stringMatching(/^\*\*telltale\*\* \(appellant\):\n> Farm 3, round 2$/),
+    ]);
+  });
+
+  it('a message written just before the decision still reaches the post before it closes', async () => {
+    const id = file();
+    await sync.reconcile();
+    postStaffMessage(db, id, MOD, 'Last word');
+    recordDecision(db, id, MOD, 'denied', null);
+    await sync.reconcile();
+    const post = t.threadsIn(FORUM)[0];
+    const contents = t.live().filter((m) => m.channelId === post.id).map((m) => m.payload.content ?? '');
+    expect(contents.some((c) => c.includes('Last word'))).toBe(true);
+    expect(post.locked).toBe(true);
   });
 
   it('closes the post when the appeal is settled', async () => {
@@ -79,7 +122,7 @@ describe('AppealSync', () => {
   it('a refused DM is not retried', async () => {
     t.dmsClosed.add('700');
     const id = file();
-    askQuestion(db, id, MOD, 'Which map?');
+    postStaffMessage(db, id, MOD, 'Which map?');
     await sync.reconcile();
     t.dmsClosed.delete('700');
     await sync.reconcile();
@@ -98,8 +141,8 @@ describe('AppealSync', () => {
   it('one appeal failing to reach the forum does not stop the next one in the same pass', async () => {
     const id1 = file();
     const id2 = file();
-    askQuestion(db, id1, MOD, 'Q1');
-    askQuestion(db, id2, MOD, 'Q2');
+    postStaffMessage(db, id1, MOD, 'Q1');
+    postStaffMessage(db, id2, MOD, 'Q2');
     // Consumes exactly the first thread operation of the pass: id1's
     // createForumPost. id2's createForumPost is unaffected.
     t.failThreadOps = 1;

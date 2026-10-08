@@ -38,6 +38,7 @@ const PLAIN: [table: string, column: string][] = [
   ['bans', 'player_id'],
   ['appeals', 'steamid'],
   ['appeals', 'asked_by'],
+  ['appeal_messages', 'author'],
   ['appeals', 'decided_by'],
   ['player_notes', 'player_id'],
   ['penalties', 'player_id'],

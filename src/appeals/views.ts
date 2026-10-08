@@ -3,7 +3,7 @@ import type { FileViewer } from '../admin/fileAccess.js';
 import { activeTargets, appealSettings, judge, refusalText } from './rules.js';
 import { canSeeAppeal, decideCheck } from './access.js';
 import { playerLine } from './templates.js';
-import { targetInForce } from './store.js';
+import { listMessages, targetInForce } from './store.js';
 import { OPEN_STATES, refColumn, type AppealRef, type AppealRow, type AppealState, type Appellant } from './types.js';
 
 export interface PlayerAppealItem {
@@ -14,10 +14,26 @@ export interface PlayerAppealItem {
   endsAt: string | null;
   canAppeal: boolean;
   refusal: string | null;
-  appeal: { id: number; state: AppealState; question: string | null; answerBy: string | null; line: string | null; filedAt: string } | null;
+  appeal: {
+    id: number; state: AppealState; answerBy: string | null; line: string | null; filedAt: string;
+    /** The conversation. Never who on staff wrote: the player hears from "Staff". */
+    messages: { fromStaff: boolean; body: string; at: string }[];
+    canWrite: boolean;
+  } | null;
 }
 
 export interface MyAppeals { enabled: boolean; name: string; textMax: number; answerMax: number; items: PlayerAppealItem[] }
+
+/** Whether the appellant may write on this appeal now: it is open, not
+ *  past the time to answer a staff message, and under the message cap.
+ *  The same rules postPlayerMessage enforces, for showing the box. */
+function canWrite(db: DB, row: AppealRow, now: Date): boolean {
+  const s = appealSettings(db);
+  if (!OPEN_STATES.includes(row.state)) return false;
+  if (row.state === 'asked' && Date.parse(row.asked_at!) + s.answerHours * 3600_000 <= now.getTime()) return false;
+  const sent = (db.prepare('SELECT COUNT(*) AS n FROM appeal_messages WHERE appeal_id = ? AND from_staff = 0').get(row.id) as { n: number }).n;
+  return sent < s.maxReplies;
+}
 
 export function playerView(db: DB, who: Appellant, now = new Date()): MyAppeals {
   const s = appealSettings(db);
@@ -29,9 +45,11 @@ export function playerView(db: DB, who: Appellant, now = new Date()): MyAppeals 
       ref: t.ref, hold: t.hold, sanctionKind: t.sanctionKind, reason: t.reason, endsAt: t.endsAt,
       canAppeal: v.ok, refusal: v.ok || v.reason === 'already_open' ? null : refusalText(v),
       appeal: latest ? {
-        id: latest.id, state: latest.state, question: latest.state === 'asked' ? latest.question : null,
+        id: latest.id, state: latest.state,
         answerBy: latest.state === 'asked' ? new Date(Date.parse(latest.asked_at!) + s.answerHours * 3600_000).toISOString() : null,
         line: playerLine(db, latest, now), filedAt: latest.created_at,
+        messages: listMessages(db, latest.id).map((m) => ({ fromStaff: m.from_staff === 1, body: m.body, at: m.created_at })),
+        canWrite: canWrite(db, latest, now),
       } : null,
     };
   });
@@ -45,8 +63,8 @@ export interface StaffAppealRow {
 
 export interface StaffAppealDetail extends StaffAppealRow {
   whatHappened: string; whyLift: string;
-  question: string | null; askedByName: string | null; askedAt: string | null;
-  answer: string | null; answeredAt: string | null; answerBy: string | null;
+  messages: { fromStaff: boolean; authorName: string | null; body: string; at: string }[];
+  answerBy: string | null;
   decidedByName: string | null; newExpiresAt: string | null; slurs: string[];
   target: { reason: string; createdByName: string; createdAt: string; endsAt: string | null; ticketId: number | null; noAppeal: boolean; inForce: boolean };
   earlier: { id: number; state: AppealState; decidedAt: string | null }[];
@@ -96,8 +114,9 @@ export function staffAppeal(db: DB, viewer: FileViewer, id: number, now = new Da
   return {
     ...toRow(db, r),
     whatHappened: r.what_happened, whyLift: r.why_lift,
-    question: r.question, askedByName: nameOf(db, r.asked_by), askedAt: r.asked_at,
-    answer: r.answer, answeredAt: r.answered_at,
+    messages: listMessages(db, r.id).map((m) => ({
+      fromStaff: m.from_staff === 1, authorName: m.from_staff === 1 ? nameOf(db, m.author) : null, body: m.body, at: m.created_at,
+    })),
     answerBy: r.state === 'asked' ? new Date(Date.parse(r.asked_at!) + s.answerHours * 3600_000).toISOString() : null,
     decidedByName: nameOf(db, r.decided_by), newExpiresAt: r.new_expires_at, slurs: r.slurs ? JSON.parse(r.slurs) as string[] : [],
     target: {

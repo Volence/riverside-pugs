@@ -36,9 +36,35 @@ describe('appeals schema', () => {
     expect(cols('discord_sanctions')).toContain('no_appeal');
   });
 
+  it('copies a one-question appeal into the message thread, marked as already sent, once', () => {
+    const db = openDb(':memory:');
+    upsertPlayer(db, { steamid: P, name: 'p', avatar: null }, []);
+    const ban = insertBan(db, P, 'system', 'abandon', 60 * 48);
+    const id = Number(insertAppeal(db, ban, 'answered').lastInsertRowid);
+    db.prepare(`UPDATE appeals SET question = 'Which match?', asked_by = 'mod1', asked_at = '2026-10-05T00:00:00.000Z',
+                answer = 'Match 400', answered_at = '2026-10-05T01:00:00.000Z' WHERE id = ?`).run(id);
+    const asked = Number(insertAppeal(db, insertBan(db, P, 'system', 'abandon', 60 * 48), 'asked').lastInsertRowid);
+    db.prepare(`UPDATE appeals SET question = 'Still there?', asked_by = 'mod1', asked_at = '2026-10-05T00:00:00.000Z' WHERE id = ?`).run(asked);
+    db.exec('DROP TABLE appeal_messages');
+    ensureAppealSchema(db);
+    ensureAppealSchema(db);
+    const msgs = db.prepare('SELECT appeal_id, from_staff, author, body, created_at FROM appeal_messages ORDER BY id').all();
+    expect(msgs).toEqual([
+      { appeal_id: id, from_staff: 1, author: 'mod1', body: 'Which match?', created_at: '2026-10-05T00:00:00.000Z' },
+      { appeal_id: id, from_staff: 0, author: null, body: 'Match 400', created_at: '2026-10-05T01:00:00.000Z' },
+      { appeal_id: asked, from_staff: 1, author: 'mod1', body: 'Still there?', created_at: '2026-10-05T00:00:00.000Z' },
+    ]);
+    // Already DMed and already on the forum card: the sync must not send them again.
+    const seen = db.prepare('SELECT id, dm_message_seen, forum_message_seen FROM appeals ORDER BY id').all();
+    expect(seen).toEqual([
+      { id, dm_message_seen: 2, forum_message_seen: 2 },
+      { id: asked, dm_message_seen: 3, forum_message_seen: 3 },
+    ]);
+  });
+
   it('every appeal setting is seeded and in the Settings schema, off by default', () => {
     const keys = ['appeals_enabled', 'appeal_min_ban_hours', 'appeal_cooldown_days', 'appeal_max_per_ban',
-      'appeal_text_max', 'appeal_answer_max', 'appeal_answer_hours'];
+      'appeal_text_max', 'appeal_answer_max', 'appeal_answer_hours', 'appeal_max_replies'];
     for (const k of keys) {
       expect(DEFAULT_SETTINGS[k], k).toBeDefined();
       expect(SETTINGS_SCHEMA.some((s) => s.key === k), k).toBe(true);
