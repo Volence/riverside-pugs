@@ -16,6 +16,8 @@ import { POOL7, TIMERS, driveToBooking, fakeBooking, fakeMatch, roomFixture, win
 import { presetConfig } from '../src/events/vetoConfig.js';
 import * as D from '../src/events/drafts.js';
 import { P as DP, draftFixture, type DraftFixture } from './draftFixture.js';
+import * as DR from '../src/events/draftRoom.js';
+import { ALL, CAPTAINS, POOL, T0, at, drive, liveDraft, startedDraft } from './draftRoomFixture.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -440,9 +442,9 @@ describe('event_log guard', () => {
       f.db.prepare('SELECT * FROM events ORDER BY id').all(),
     ]);
 
-    it('only src/events/drafts.ts (and the account merge) writes the draft tables', () => {
+    it('only src/events/drafts.ts (and the account merge, and draftRoom.ts for draft_team) writes the draft tables', () => {
       const offenders = walk('src')
-        .filter((f) => f !== 'src/events/drafts.ts' && f !== 'src/mergePlayers.ts')
+        .filter((f) => f !== 'src/events/drafts.ts' && f !== 'src/mergePlayers.ts' && f !== 'src/events/draftRoom.ts')
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(DRAFT_WRITERS) ?? []).length > 0);
       expect(offenders).toEqual([]);
       expect('update draft_signups set x = 1'.match(DRAFT_WRITERS)).toHaveLength(1);
@@ -492,6 +494,70 @@ describe('event_log guard', () => {
         g.db.exec("CREATE TRIGGER draft_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
         expect(() => m.run(g)).toThrow(/audit down/);
         expect(draftRows(g)).toBe(rows);
+      });
+    }
+  });
+
+  /** Drafts plan D2b1: src/events/draftRoom.ts is the only writer of the
+   *  room tables and writes draft_signups only through draft_team; each
+   *  mutation adds one event_log row or, when that row cannot be written,
+   *  nothing. */
+  describe('draft room guard (src/events/draftRoom.ts)', () => {
+    const ROOM_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:draft_rooms|draft_picks|draft_pick_lists)\b/gi;
+    const SIGNUP_WRITES = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+draft_signups\b[^'"`]*/gi;
+    const ROOM_READS = new Set(['roomOf', 'livePicks', 'roomState', 'pickListOf', 'captainFor']);
+    const ROOM_MUTATIONS: Record<string, { action: string; setup: () => DraftFixture; run: (f: DraftFixture) => V.Checked<unknown> }> = {
+      startRoom: { action: 'draft_room_started', setup: liveDraft, run: (f) => DR.startRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: T0, present: ALL }) },
+      makePick: {
+        action: 'draft_pick', setup: () => startedDraft(),
+        run: (f) => DR.makePick(f.db, { eventId: f.eventId, steamid: CAPTAINS[0]!, player: POOL[0]!, pickNo: 1, now: at(1), present: ALL }),
+      },
+      autoPickDue: { action: 'draft_pick', setup: () => startedDraft(), run: (f) => DR.autoPickDue(f.db, { eventId: f.eventId, now: at(80), present: ALL }) },
+    };
+    const roomRows = (f: DraftFixture) => JSON.stringify([
+      f.db.prepare('SELECT * FROM draft_rooms ORDER BY event_id').all(),
+      f.db.prepare('SELECT * FROM draft_picks ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM draft_pick_lists ORDER BY event_id, captain_steamid').all(),
+      f.db.prepare('SELECT * FROM draft_signups ORDER BY id').all(),
+    ]);
+
+    it('only src/events/draftRoom.ts writes the room tables', () => {
+      const offenders = walk('src')
+        .filter((f) => f !== 'src/events/draftRoom.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(ROOM_WRITERS) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+      expect('update draft_picks set undone_at = ?'.match(ROOM_WRITERS)).toHaveLength(1);
+    });
+
+    it('draftRoom.ts writes draft_signups only through draft_team', () => {
+      const writes = readFileSync(join(root, 'src/events/draftRoom.ts'), 'utf8').match(SIGNUP_WRITES) ?? [];
+      expect(writes.length).toBeGreaterThan(0);
+      for (const w of writes) expect(w).toMatch(/^UPDATE\s+draft_signups\s+SET\s+draft_team\s*=\s*(?:\?|NULL)\s+WHERE\b/i);
+    });
+
+    it('every exported function of draftRoom.ts is a known read or a guarded mutation', () => {
+      const fns = Object.entries(DR).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !ROOM_READS.has(k)).sort()).toEqual(Object.keys(ROOM_MUTATIONS).sort());
+    });
+
+    for (const [name, m] of Object.entries(ROOM_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, () => {
+        const f = m.setup();
+        const before = logCount(f);
+        const r = m.run(f);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(f)).toBe(before + 1);
+        expect(f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, () => {
+        const f = m.setup();
+        const before = roomRows(f);
+        const logs = logCount(f);
+        f.db.exec("CREATE TRIGGER room_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+        expect(() => m.run(f)).toThrow(/audit down/);
+        expect(roomRows(f)).toBe(before);
+        expect(logCount(f)).toBe(logs);
       });
     }
   });
