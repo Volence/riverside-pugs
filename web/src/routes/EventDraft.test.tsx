@@ -22,10 +22,10 @@ const card = (steamid: string, name: string, sr: number): PlayerCardView => ({
   survivor: { siDamage: 210.5, commonKills: 31 }, infected: { damageAsSi: 180, dpsLanded: 1.5 },
   bestClass: { cls: 'hunter', damage: 4000 }, skills: [{ key: 'skeets', label: 'Skeets', total: 9 }],
 });
-const view = (over: Partial<DraftRoomView> = {}): DraftRoomView => ({
+const view = (over: Partial<DraftRoomView> = {}): DraftRoomView => { const t = Date.now(); return {
   eventId: 4, slug: 'night', eventName: 'Draft Night', status: 'running', teamsMadeAt: null,
   settings: { firstPick: 'lowest_sr', pickSeconds: 75 },
-  serverNow: new Date().toISOString(), deadlineAt: new Date(Date.now() + 75_000).toISOString(), pausedLeftMs: null, totalPicks: 6,
+  serverNow: new Date(t).toISOString(), deadlineAt: new Date(t + 75_000).toISOString(), pausedLeftMs: null, totalPicks: 6,
   order: [{ steamid: 'c1', name: 'Ann' }, { steamid: 'c2', name: 'Eve' }],
   onClock: { pickNo: 1, round: 1, captain: 'c1', picker: 'c1' },
   picks: [], delegates: {},
@@ -35,7 +35,7 @@ const view = (over: Partial<DraftRoomView> = {}): DraftRoomView => ({
   me: { role: null, team: null, onClock: false, list: null, chemistry: null },
   lists: null, staff: false,
   ...over,
-});
+}; };
 const session = { kind: 'anonymous' } as const;
 const cardNames = () => screen.getAllByRole('article').map((a) => a.getAttribute('aria-label'));
 
@@ -50,7 +50,7 @@ describe('EventDraftPage', () => {
     mockEvents.draftRoom.mockResolvedValue(view());
     render(<EventDraftPage slug="night" session={session} />);
     expect(await screen.findByText('Ann is on the clock')).toBeTruthy();
-    expect(screen.getByLabelText('Time left').textContent).toMatch(/^1:1[456]$/);
+    expect(screen.getByLabelText('Time left').textContent).toMatch(/^1:1[45]$/);
     expect(screen.getByText('Pick 1 of 6 · Round 1')).toBeTruthy();
     expect(cardNames()).toEqual(['Cy', 'Bob', 'Di']);
     expect(screen.getAllByText('+30 SR across the last 2 rated games')).toHaveLength(3);
@@ -143,6 +143,20 @@ describe('EventDraftPage', () => {
     expect(screen.getByRole('button', { name: 'Pick Bob' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'My pick list' })).toBeNull();
     await waitFor(() => expect(mockEvents.draftHeartbeat).toHaveBeenCalledWith('night'));
+  });
+
+  it('keeps the board and Pick buttons up when a later refetch fails', async () => {
+    mockEvents.draftRoom.mockResolvedValue(view({ me: { role: 'captain', team: 'c1', onClock: true, list: [], chemistry: {} } }));
+    render(<EventDraftPage slug="night" session={session} />);
+    await screen.findByRole('button', { name: 'Pick Bob' });
+    mockEvents.draftRoom.mockRejectedValue(new ApiError(500, 'GET x'));
+    hub.fn!();
+    expect(await screen.findByText('Lost contact with the site, retrying.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pick Bob' })).toBeTruthy();
+    expect(screen.queryByText('Could not load the draft room.')).toBeNull();
+    mockEvents.draftRoom.mockResolvedValue(view({ me: { role: 'captain', team: 'c1', onClock: true, list: [], chemistry: {} } }));
+    hub.fn!();
+    await waitFor(() => expect(screen.queryByText('Lost contact with the site, retrying.')).toBeNull());
   });
 
   it('says so when there is no such draft, or the cut is not published', async () => {
