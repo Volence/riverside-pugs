@@ -1875,6 +1875,8 @@ export interface TeamInviteItem { id: number; slug: string; name: string; tag: s
 export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: TeamRole; joinedAt: string }
 export interface TeamView {
   slug: string; name: string; tag: string; logoKey: string | null; createdAt: string; disbandedAt: string | null;
+  /** The draft event a kept team was formed at (plan D3b). */
+  origin?: { eventSlug: string; eventName: string; placement: number | null } | null;
   captain: string; members: TeamMemberView[]; former: { steamid: string; name: string; leftAt: string }[];
   viewer: { role: TeamRole | null; staff: boolean };
   manage: { invites: { id: number; steamid: string; name: string; createdAt: string }[]; joinLinkToken: string | null } | null;
@@ -2145,7 +2147,19 @@ export interface PrefsView {
   stages: { stageId: number; ordinal: number; pool: { slug: string; name: string }[]; order: string[] }[];
 }
 
+export type KeepStatus = 'offered' | 'voting' | 'made' | 'lapsed';
+export interface MyKeepView {
+  keepId: number; status: KeepStatus; captain: boolean; team: string; name: string | null; tag: string | null;
+  defaults: { name: string; tag: string }; expiresAt: string; closed: boolean;
+  players: { name: string; captain: boolean; answer: 'accept' | 'decline' | null }[];
+  myAnswer: 'accept' | 'decline' | null; teamSlug: string | null;
+}
+
 export const eventsApi = {
+  /** Keep this team (drafts plan D3b). */
+  keep: (slug: string, signal?: AbortSignal) => get<{ keep: MyKeepView | null }>(`/api/events/${enc(slug)}/keep`, signal),
+  startKeep: (slug: string, body: { name: string; tag: string }) => post<{ keepId: number }>(`/api/events/${enc(slug)}/keep/start`, body),
+  answerKeep: (slug: string, accept: boolean) => post<{ joined: boolean; teamSlug: string | null }>(`/api/events/${enc(slug)}/keep/answer`, { accept }),
   list: (signal?: AbortSignal) => get<{ events: EventListItem[] }>('/api/events', signal),
   get: (slug: string, signal?: AbortSignal) => get<EventView>(`/api/events/${enc(slug)}`, signal),
   mine: (slug: string, signal?: AbortSignal) => get<MyEventView>(`/api/events/${enc(slug)}/mine`, signal),
