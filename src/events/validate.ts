@@ -1,6 +1,6 @@
 import { findSlurs } from '../slurs.js';
 import { DEFAULT_IGNORABLE, hasUnsafeChars } from '../profileFields.js';
-import { NOTE_MAX, PICK_SECONDS_MAX, PICK_SECONDS_MIN } from './draftRules.js';
+import { NOTE_MAX, PICK_SECONDS_MAX, PICK_SECONDS_MIN, STANDIN_MARGIN_MAX } from './draftRules.js';
 import { parseVetoConfig, presetConfig, vetoFamily, VETO_PRESETS, PRESET_MIN_POOL, type VetoConfig, type VetoPreset } from './vetoConfig.js';
 
 /**
@@ -208,6 +208,20 @@ export const EVENT_ERRORS = {
   replace_bad_note: { status: 400, text: `A staff note is at most ${REPLACE_NOTE_MAX} characters of plain text, on one line.` },
   replace_not_draft: { status: 409, text: 'Only a player on a draft team can be replaced.' },
   replace_bad_reason: { status: 400, text: 'A reason is one of: conduct, cheating, no-show, left the event, other.' },
+  // Drafts plan D3a: bench stand-ins.
+  standin_scope: { status: 400, text: 'A stand-in is for the next match or for the rest of the event.' },
+  standin_captain: { status: 409, text: 'A captain who leaves the event needs a new captain first: ask staff to make another player captain.' },
+  standin_no_match: { status: 409, text: 'Your team has no match left to find a stand-in for.' },
+  standin_open: { status: 409, text: 'A stand-in is already being found for that player.' },
+  standin_closed: { status: 409, text: 'That stand-in request is no longer open.' },
+  standin_offer_open: { status: 409, text: 'An offer for this stand-in is already open.' },
+  standin_offer_gone: { status: 409, text: 'That stand-in offer is no longer open.' },
+  standin_offer_expired: { status: 409, text: 'That stand-in offer ran out before your answer. It has gone to the next player.' },
+  standin_match_over: { status: 409, text: 'That match is already over.' },
+  standin_running: { status: 409, text: 'That stand-in\'s match is not over yet.' },
+  standin_margin_off: { status: 409, text: 'The SR limit is already off for this request.' },
+  standins_closed: { status: 409, text: 'Stand-ins open once the teams are made and close when the event ends.' },
+  bad_standin_margin: { status: 400, text: `The stand-in SR margin is a whole number from 0 to ${STANDIN_MARGIN_MAX}.` },
   bad_schedule: { status: 400, text: 'A round schedule lists rounds, each with a default time and, on a window stage, a window that starts before it ends and holds the default time; a rolling stage takes a date only.' },
   schedule_locked: { status: 409, text: 'The schedule of a finished stage or event cannot change.' },
   not_schedulable: { status: 409, text: 'This match cannot be rescheduled now: it is not waiting in a window stage with a scheduling window, or its window has passed.' },

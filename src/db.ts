@@ -520,6 +520,37 @@ CREATE TABLE IF NOT EXISTS draft_pick_lists (
   updated_at      TEXT NOT NULL,
   PRIMARY KEY (event_id, captain_steamid)
 );
+-- Drafts plan D3a: bench stand-ins. src/events/standins.ts owns every write.
+-- One request per missing player of a team (scope 'match': the team's next
+-- unfinished match, stored in match_id; 'event': the rest of the event), and
+-- one row per offer to a bench player. No players or event_matches foreign
+-- keys (plan Ruling 16).
+CREATE TABLE IF NOT EXISTS draft_standins (
+  id            INTEGER PRIMARY KEY,
+  event_id      INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  entry_id      INTEGER NOT NULL,
+  out_steamid   TEXT NOT NULL,
+  scope         TEXT NOT NULL CHECK (scope IN ('match','event')),
+  match_id      INTEGER,
+  margin        INTEGER NOT NULL,
+  margin_off    INTEGER NOT NULL DEFAULT 0 CHECK (margin_off IN (0,1)),
+  status        TEXT NOT NULL CHECK (status IN ('open','filled','unfilled','cancelled','ended')),
+  requested_by  TEXT NOT NULL,
+  requested_at  TEXT NOT NULL,
+  filled_by     TEXT,
+  closed_at     TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS draft_standins_open ON draft_standins (entry_id, out_steamid) WHERE status = 'open';
+CREATE TABLE IF NOT EXISTS draft_standin_offers (
+  id          INTEGER PRIMARY KEY,
+  request_id  INTEGER NOT NULL REFERENCES draft_standins(id) ON DELETE CASCADE,
+  steamid     TEXT NOT NULL,
+  offered_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  answer      TEXT CHECK (answer IS NULL OR answer IN ('accept','decline','expired','stopped','failed')),
+  answered_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS draft_standin_offers_open ON draft_standin_offers (request_id) WHERE answer IS NULL;
 -- Tournament matches (spec part 2 section 4; plan T2). One row per pairing of
 -- a stage. Swiss and league rows are written by src/events/play.ts from
 -- src/events/swiss.ts and roundRobin.ts. Elimination and round robin rows

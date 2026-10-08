@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import * as E from './events.js';
 import { playerFacts } from './entries.js';
 import * as R from './entryRules.js';
-import { cleanNote, cutProblems, defaultRoles, maxTeams, nextOfferee, parseRoomSettings, type CutProblem, type RoomSettings } from './draftRules.js';
+import { cleanNote, cutProblems, defaultRoles, maxTeams, nextOfferee, parseRoomSettings, parseStandinMargin, standinMarginOf, type CutProblem, type RoomSettings } from './draftRules.js';
 import { settingNumber } from '../settings.js';
 import { currentSeasonId } from '../players.js';
 import { seasonSr } from '../rating.js';
@@ -614,6 +614,26 @@ export function setRoomSettings(db: DB, o: { eventId: number; settings: unknown;
       .run(JSON.stringify({ ...old, draftFirstPick: s.firstPick, pickSeconds: s.pickSeconds }), at, ev.id);
     E.logEvent(db, ev.id, o.actor, 'draft_room_settings', at, { ...s });
     return V.ok(s);
+  })();
+}
+
+/** Plan D3a Ruling 3: the event's stand-in SR margin, written into
+ *  draft_json next to the D1 times and the room settings (updateEvent's merge
+ *  keeps it), any time from the cut until the event ends. A request copies
+ *  the margin when it is made. */
+export function setStandinMargin(db: DB, o: { eventId: number; margin: unknown; actor: string; now: Date }): V.Checked<{ margin: number }> {
+  const at = o.now.toISOString();
+  const margin = parseStandinMargin(o.margin);
+  if (margin === null) return V.fail('bad_standin_margin');
+  return db.transaction((): V.Checked<{ margin: number }> => {
+    const found = draftEvent(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    if (ev.cut_at === null || ev.status === 'finished' || ev.status === 'cancelled') return V.fail('wrong_status');
+    const old = ev.draft_json ? (JSON.parse(ev.draft_json) as Record<string, unknown>) : {};
+    db.prepare('UPDATE events SET draft_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify({ ...old, standinSrMargin: margin }), at, ev.id);
+    E.logEvent(db, ev.id, o.actor, 'draft_standin_margin', at, { margin, from: standinMarginOf(ev.draft_json) });
+    return V.ok({ margin });
   })();
 }
 
