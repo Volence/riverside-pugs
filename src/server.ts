@@ -2134,7 +2134,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // behind the competitive switch.
   await app.register(eventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock, series });
   // Caster studio: the producer panel and the OBS overlay feed.
-  await app.register(castStudioRoutes, { db: deps.db, config: deps.config, store: getCommunityStore });
+  await app.register(castStudioRoutes, { db: deps.db, config: deps.config, store: getCommunityStore, hub });
 
   // Purge community tombstones past their 30 days, once at start and then
   // daily. With no community folder yet nothing was ever written, so only

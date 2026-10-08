@@ -48,7 +48,7 @@ const toCard = (c: PlayerCard): CastDraftCard => ({
   bestClass: c.bestClass?.cls ?? null,
 });
 
-/** Null unless the event is a published draft with its cut published, in live mode. */
+/** Callers must check canCastDraft (src/cast/access.ts) first: this does not reject a cancelled or expired draft. Null unless the event is a published draft with its cut published, in live mode. */
 export function castDraftView(db: DB, eventId: number, now: Date, cardOf: (steamid: string) => PlayerCard): CastDraftView | null {
   const ev = E.getEvent(db, eventId);
   if (!ev || ev.status === 'draft' || ev.entry_kind !== 'draft' || ev.cut_at === null) return null;
