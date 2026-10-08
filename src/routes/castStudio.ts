@@ -9,8 +9,10 @@ import { makeRequireAdmin, makeRequireCaster } from './guards.js';
 import { overlayKey, readOverlayKey } from '../cast/key.js';
 import { bumpKeyGen, getStudio, saveStudio, cleanState } from '../cast/studio.js';
 import {
-  canCastBooking, canCastMatch, mayCast, pickableBookings, pickableMatches, resolveOnAir,
+  canCastBooking, canCastDraft, canCastMatch, mayCast, pickableBookings, pickableDrafts, pickableMatches, resolveOnAir,
 } from '../cast/access.js';
+import { castDraftView, makeCardCache } from '../cast/draftView.js';
+import type { Hub } from '../ws.js';
 import { buildMatchView } from '../cast/matchView.js';
 import { LiveRoundReader } from '../cast/liveRound.js';
 import { applyLiveHud, liveHudStore, type LiveHudStore } from '../cast/liveHud.js';
@@ -37,6 +39,11 @@ export async function castStudioRoutes(
     db: DB; config: Pick<Config, 'cookieSecret' | 'publicUrl' | 'replayDir' | 'replayLiveDir'>; store: () => CommunityStore;
     /** The LIVEHUD lines; the process-wide store unless a test passes one. */
     hud?: LiveHudStore;
+    /** Room broadcasts: draft:<eventId> drops the cached feed of every studio
+     *  following that draft, so the next poll is fresh (drafts plan D2b2 Ruling 6). */
+    hub?: Hub;
+    /** The feed's clock; tests pin it. */
+    now?: () => number;
   },
 ): Promise<void> {
   const { db, config } = opts;
@@ -45,13 +52,22 @@ export async function castStudioRoutes(
   const reader = new LiveRoundReader(config.replayDir, config.replayLiveDir ?? '');
   const cache = new Map<string, { at: number; rev: number; feed: OverlayFeed }>();
   const hud = opts.hud ?? liveHudStore;
+  const clockNow = opts.now ?? Date.now;
+  const cards = makeCardCache(db);
+  const unsubscribe = opts.hub?.subscribe((event) => {
+    const m = /^draft:(\d+)$/.exec(event);
+    if (!m) return;
+    const id = Number(m[1]);
+    for (const [k, v] of cache) if (v.feed.studio.draftEventId === id) cache.delete(k);
+  });
+  if (unsubscribe) app.addHook('onClose', async () => { unsubscribe(); });
 
   const tokenOf = (id: number): string | null =>
     (db.prepare('SELECT token FROM matches WHERE id = ?').get(id) as { token: string | null } | undefined)?.token ?? null;
 
   const keyFor = (steamid: string): string => overlayKey(config.cookieSecret, steamid, getStudio(db, steamid).keyGen);
 
-  function feedFor(steamid: string, nowMs = Date.now()): OverlayFeed {
+  function feedFor(steamid: string, nowMs = clockNow()): OverlayFeed {
     const studio = getStudio(db, steamid);
     const hit = cache.get(steamid);
     if (hit && hit.rev === studio.rev && nowMs - hit.at < FEED_CACHE_MS) return { ...hit.feed, serverNow: nowMs };
@@ -73,6 +89,11 @@ export async function castStudioRoutes(
     };
     const tank = liveMatch ? hud.tank(token, nowMs) : null;
     const witch = liveMatch ? hud.witch(token, nowMs) : null;
+    // The draft the studio follows, asked again on every build (Ruling 2):
+    // the public view only (Ruling 3).
+    const draftId = studio.state.draftEventId;
+    const nowDate = new Date(nowMs);
+    const draft = draftId !== null && canCastDraft(db, steamid, draftId, nowDate) ? castDraftView(db, draftId, nowDate, cards(draftId, nowMs)) : null;
     const feed: OverlayFeed = {
       rev: studio.rev, serverNow: nowMs, studio: studio.state, match, live,
       tankRecap: tank ? {
@@ -80,7 +101,7 @@ export async function castStudioRoutes(
         end: tank.recap.end, controller: nameOf(tank.recap.controller), players: rows(tank.recap.players),
       } : null,
       casterAvatars: casterAvatars(db, studio.state.casters),
-      draft: null,
+      draft,
       witchRecap: witch ? {
         agoMs: witch.agoMs, aliveS: witch.recap.aliveS, crown: witch.recap.crown, incaps: witch.recap.incaps,
         startled: nameOf(witch.recap.startled), killer: nameOf(witch.recap.killer), players: rows(witch.recap.players),
@@ -96,6 +117,7 @@ export async function castStudioRoutes(
     return {
       studio: s.state, rev: s.rev, key: keyFor(steamid),
       matches: pickableMatches(db, steamid), bookings: pickableBookings(db, steamid),
+      drafts: pickableDrafts(db, steamid, new Date(clockNow())),
       scenes: [...SCENES], layers: [...LAYERS],
       obsScenes: Object.fromEntries([...SCENES, 'program' as const].map((k) => [k, obsSceneName(k)])),
     };
@@ -118,7 +140,14 @@ export async function castStudioRoutes(
     // A save never touches the callout: it is fired and cleared only through
     // its own routes below. The panel debounces saves, so a save that left
     // before a fire can land after it, and must not clear or move it.
-    next.callout = getStudio(db, me).state.callout;
+    const prev = getStudio(db, me).state;
+    if (next.draftEventId !== null && !canCastDraft(db, me, next.draftEventId, new Date(clockNow()))) {
+      // Ruling 10: a newly chosen draft is refused; one that went off air
+      // while saved is dropped, or every later save would be refused too.
+      if (next.draftEventId !== prev.draftEventId) return reply.code(403).send({ error: 'not_castable_draft' });
+      next.draftEventId = null;
+    }
+    next.callout = prev.callout;
     const saved = saveStudio(db, me, next);
     return { studio: saved.state, rev: saved.rev };
   });
