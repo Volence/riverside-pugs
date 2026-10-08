@@ -81,11 +81,16 @@ export default function CastStudio() {
   const [feed, setFeed] = useState<OverlayFeed | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<StudioState | null>(null);
+  /** The draft on air as the server last saved it: where a refused draft
+   *  choice falls back to. */
+  const savedDraft = useRef<number | null>(null);
+  const loaded = useRef(false);
 
   const load = useCallback(async () => {
     try {
       const p = await studioApi.get();
       setPanel(p);
+      if (!loaded.current) { loaded.current = true; savedDraft.current = p.studio.draftEventId; }
       setState((cur) => cur ?? p.studio);
       setDenied(false);
     } catch (e) {
@@ -110,20 +115,45 @@ export default function CastStudio() {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
+  /** Swap the draft on air in the panel and in any save still waiting, but
+   *  only where it is still the one that was sent: a newer pick survives. */
+  const replaceDraft = useCallback((sentId: number | null, id: number | null) => {
+    if (sentId === id) return;
+    setState((cur) => (cur && cur.draftEventId === sentId ? { ...cur, draftEventId: id } : cur));
+    if (pending.current && pending.current.draftEventId === sentId) pending.current = { ...pending.current, draftEventId: id };
+  }, []);
+
   const flush = useCallback(async () => {
     const next = pending.current;
     if (!next) return;
     pending.current = null;
-    try {
-      const r = await studioApi.save(next);
-      setError(null);
+    const saved = (r: { studio: StudioState }, sentId: number | null) => {
+      // The server clears a saved draft that went off air (drafts plan D2b2
+      // Ruling 10). Keep its answer, or the next save resends the old id as
+      // a new choice and is refused.
+      savedDraft.current = r.studio.draftEventId;
+      replaceDraft(sentId, r.studio.draftEventId);
       setFeed((f) => (f ? { ...f, studio: r.studio } : f));
+    };
+    try {
+      saved(await studioApi.save(next), next.draftEventId);
+      setError(null);
     } catch (e) {
+      if (e instanceof ApiError && e.message === 'not_castable_draft') {
+        // A draft chosen as it went off air: go back to the last saved one
+        // and save once more, so the rest of this save (a scene cut) lands.
+        const fallback = savedDraft.current === next.draftEventId ? null : savedDraft.current;
+        replaceDraft(next.draftEventId, fallback);
+        if (!pending.current) {
+          try { saved(await studioApi.save({ ...next, draftEventId: fallback }), fallback); } catch { /* the error below stands */ }
+        }
+        setError('You cannot put that draft on air any more.');
+        return;
+      }
       setError(e instanceof ApiError && e.message === 'not_castable' ? 'You cannot put that match on air any more.'
-        : e instanceof ApiError && e.message === 'not_castable_draft' ? 'You cannot put that draft on air any more.'
         : 'Could not save. Check your connection.');
     }
-  }, []);
+  }, [replaceDraft]);
 
   /** Change the state now on screen and save it shortly (or now). */
   const update = useCallback((fn: (s: StudioState) => StudioState, now = false) => {
