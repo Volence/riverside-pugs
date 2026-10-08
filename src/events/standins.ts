@@ -4,6 +4,7 @@ import * as D from './drafts.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import { standinMarginOf, standinOrder, type BenchCandidate } from './draftRules.js';
+import { totalRounds } from './play.js';
 import * as V from './validate.js';
 
 /**
@@ -91,6 +92,25 @@ export function nextMatchOf(db: DB, eventId: number, entryId: number): number | 
   ).get(eventId, entryId, entryId) as { id: number } | undefined;
   return row?.id ?? null;
 }
+/** A match request already found for this player and this match: a second one would take a second bench player. */
+function filledMatchRequestFor(db: DB, entryId: number, out: string, matchId: number): StandinRow | undefined {
+  return db.prepare("SELECT * FROM draft_standins WHERE entry_id = ? AND out_steamid = ? AND scope = 'match' AND match_id = ? AND status = 'filled'")
+    .get(entryId, out, matchId) as StandinRow | undefined;
+}
+/** Whether the team still has a match to play in a live event: one waiting,
+ *  or more to come (a later stage it may reach, or rounds of a paired-as-it-goes
+ *  stage not drawn yet). An eliminated or placed team has none. */
+function playsOn(db: DB, eventId: number, entry: N.EntryRow): boolean {
+  if (entry.status === 'eliminated' || entry.status === 'placed') return false;
+  if (nextMatchOf(db, eventId, entry.id) !== null) return true;
+  const stages = E.stagesOf(db, eventId);
+  const live = stages.find((s) => s.status === 'live');
+  if (!live || stages.some((s) => s.ordinal > live.ordinal && s.status === 'pending')) return true;
+  const rounds = totalRounds(live);
+  if (rounds === null) return false;
+  const played = (db.prepare('SELECT MAX(round) AS n FROM event_matches WHERE stage_id = ?').get(live.id) as { n: number | null }).n ?? 0;
+  return played < rounds;
+}
 /** How many times this request has gone unfilled (Ruling 10: the stranded note is written the first time only). */
 export function unfilledCount(db: DB, requestId: number): number {
   return (db.prepare(
@@ -111,6 +131,7 @@ function requestGone(db: DB, req: StandinRow): V.EventError | null {
   const entry = N.getEntry(db, req.entry_id);
   if (!entry || !N.isActive(entry)) return 'entry_out';
   if (!N.placesOf(db, entry.id).some((p) => p.steamid === req.out_steamid && p.role === 'starter')) return 'replace_not_starter';
+  if (req.scope === 'event' && req.out_steamid === entry.captain_steamid) return 'standin_captain';
   if (req.scope === 'match') {
     const m = db.prepare('SELECT status FROM event_matches WHERE id = ?').get(req.match_id) as { status: string } | undefined;
     if (!m || ['done', 'forfeit', 'bye'].includes(m.status)) return 'standin_match_over';
@@ -159,7 +180,9 @@ export function requestStandin(db: DB, o: { eventId: number; entryId: number; ou
     if (scope === 'event' && o.out === entry.captain_steamid) return V.fail('standin_captain');
     const matchId = scope === 'match' ? nextMatchOf(db, ev.id, entry.id) : null;
     if (scope === 'match' && matchId === null) return V.fail('standin_no_match');
+    if (scope === 'event' && ev.status === 'live' && !playsOn(db, ev.id, entry)) return V.fail('standin_no_match');
     if (openRequestFor(db, entry.id, o.out)) return V.fail('standin_open');
+    if (matchId !== null && filledMatchRequestFor(db, entry.id, o.out, matchId)) return V.fail('standin_open');
     const id = Number(db.prepare(
       `INSERT INTO draft_standins (event_id, entry_id, out_steamid, scope, match_id, margin, status, requested_by, requested_at)
        VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
@@ -259,6 +282,22 @@ export function setStandinMarginOff(db: DB, o: { requestId: number; actor: strin
     db.prepare("UPDATE draft_standins SET margin_off = 1, status = 'open', closed_at = NULL WHERE id = ?").run(req.id);
     E.logEvent(db, req.event_id, o.actor, 'standin_margin_lifted', at, { requestId: req.id, reopened });
     return V.ok({ reopened });
+  })();
+}
+
+/** The game server would not take the sub mid-chapter (Review Focus 3): the
+ *  offer stays open and runs at least `minutes` from now, so the bench player
+ *  can press Accept again between chapters. Never shortens it. */
+export function holdStandinOffer(db: DB, o: { offerId: number; now: Date; minutes: number }): V.Checked<{ expiresAt: string }> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<{ expiresAt: string }> => {
+    const offer = offerOf(db, o.offerId);
+    if (!offer || offer.answer !== null) return V.fail('standin_offer_gone');
+    const req = requestOf(db, offer.request_id)!;
+    const expiresAt = new Date(Math.max(Date.parse(offer.expires_at), o.now.getTime() + o.minutes * 60_000)).toISOString();
+    db.prepare('UPDATE draft_standin_offers SET expires_at = ? WHERE id = ?').run(expiresAt, offer.id);
+    E.logEvent(db, req.event_id, null, 'standin_offer_held', at, { requestId: req.id, steamid: offer.steamid, expiresAt });
+    return V.ok({ expiresAt });
   })();
 }
 

@@ -119,8 +119,14 @@ describe('Standins', () => {
     h.standins.tick();
     expect(ST.offerOf(f.db, offer.id)?.answer).toBeNull();
     expect(ST.offersOf(f.db, requestId)).toHaveLength(1);
-    // A second press while the first is in flight does nothing.
-    expect((await h.standins.accept({ offerId: offer.id, steamid: BENCH[0]! })).ok).toBe(false);
+    // A second press while the first is in flight does nothing but say so, and a decline cannot move the chain on.
+    const again = await h.standins.accept({ offerId: offer.id, steamid: BENCH[0]! });
+    expect(!again.ok && again.error).toBe('standin_accepting');
+    expect(V.EVENT_ERRORS.standin_accepting.text).toBe('Your accept is being placed, one moment.');
+    const no = h.standins.decline({ offerId: offer.id, steamid: BENCH[0]! });
+    expect(!no.ok && no.error).toBe('standin_accepting');
+    expect(ST.offerOf(f.db, offer.id)?.answer).toBeNull();
+    expect(h.dms.filter((d) => d.type === 'draft_standin_offer')).toHaveLength(1);
     release();
     expect((await pending).ok).toBe(true);
     expect(series.standinPlace).toHaveBeenCalledTimes(1);
@@ -210,16 +216,45 @@ describe('Standins', () => {
     expect(h.dms.filter((d) => d.type === 'draft_standin_offer')).toHaveLength(1);
   });
 
-  it('a game server that refuses the sub mid-chapter leaves the offer open for another press', async () => {
+  it('a game server that refuses the sub mid-chapter leaves the offer open for another press, tells the bench player plainly, and gives them time to press again', async () => {
     const f = standinFixture();
     const series = { standinPlace: vi.fn(async () => V.fail('replace_in_game', [{ steamid: P[11]!, problems: ['The server said: mid chapter.'] }]) as V.Checked<N.StandinPlaced>) };
     const h = harness(f, { series });
     const { requestId } = must(askEvent(h, f, P[11]!));
     const o1 = ST.openOfferOf(f.db, requestId)!;
+    // Pressed 30 seconds before the window ends.
+    h.t.t += 10 * MIN - 30_000;
     const r = await h.standins.accept({ offerId: o1.id, steamid: BENCH[0]! });
-    expect(!r.ok && r.error).toBe('replace_in_game');
-    expect(ST.offerOf(f.db, o1.id)?.answer).toBeNull();
+    expect(r).toEqual({ ok: false, error: 'standin_mid_chapter' });
+    expect(V.EVENT_ERRORS.standin_mid_chapter.text).toBe('The server is mid-chapter. Press Accept again between chapters.');
+    expect(ST.offerOf(f.db, o1.id)).toMatchObject({ answer: null, expires_at: new Date(h.t.t + 2 * MIN).toISOString() });
     expect(ST.requestOf(f.db, requestId)?.status).toBe('open');
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE action = 'standin_offer_held'").get()).toEqual({ n: 1 });
+    // The tick a minute later leaves it open; a refusal early in the window never shortens it.
+    h.t.t += MIN;
+    h.standins.tick();
+    expect(ST.offerOf(f.db, o1.id)?.answer).toBeNull();
+    const g = standinFixture();
+    const hg = harness(g, { series });
+    const { requestId: rg } = must(askEvent(hg, g, P[11]!));
+    const og = ST.openOfferOf(g.db, rg)!;
+    expect((await hg.standins.accept({ offerId: og.id, steamid: BENCH[0]! })).ok).toBe(false);
+    expect(ST.offerOf(g.db, og.id)?.expires_at).toBe(og.expires_at);
+  });
+
+  it('an accept of a rest-of-event stand-in for a player made captain since closes the request and tells the bench player plainly', async () => {
+    const f = standinFixture();
+    const h = harness(f);
+    const out = P[11]!;
+    const entry = entryOf(f, out);
+    const { requestId } = must(askEvent(h, f, out));
+    const o1 = ST.openOfferOf(f.db, requestId)!;
+    must(N.setDraftCaptain(f.db, { eventId: f.eventId, entryId: entry.id, steamid: out, actor: ADMIN, now: NOW }));
+    const r = await h.standins.accept({ offerId: o1.id, steamid: BENCH[0]! });
+    expect(!r.ok && r.error).toBe('standin_closed');
+    expect(ST.offerOf(f.db, o1.id)?.answer).toBe('failed');
+    expect(ST.requestOf(f.db, requestId)?.status).toBe('cancelled');
+    expect(N.entryOfPlayer(f.db, f.eventId, BENCH[0]!)).toBeUndefined();
   });
 
   it('Review Focus 5: a match stand-in leaves the roster once the match is over and is back on the bench for the next request', async () => {

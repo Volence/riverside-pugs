@@ -94,6 +94,17 @@ describe('placeStandin, next match (Ruling 7)', () => {
     expect(err(N.endStandin(f.db, { requestId: o.requestId, now: at(61) }))).toBe('standin_closed');
   });
 
+  it('the swap into a locked lineup is logged as the request\'s asker, not the stand-in', async () => {
+    const f = await roomFixture();
+    asDraft(f);
+    driveToBooking(f);
+    benchOn(f.db, f.eventId, OUTSIDER);
+    const o = offeredFor(f, f.entryA, A[3]!, 'match', at(5));
+    must(N.placeStandin(f.db, { eventId: f.eventId, requestId: o.requestId, offerId: o.offerId, steamid: OUTSIDER, acceptedAt: at(6), now: at(6) }));
+    expect(f.db.prepare("SELECT actor FROM event_log WHERE action = 'player_subbed'").all()).toEqual([{ actor: ADMIN }]);
+    expect(f.db.prepare("SELECT actor FROM event_log WHERE action = 'standin_placed'").all()).toEqual([{ actor: OUTSIDER }]);
+  });
+
   it('refuses once the target match is over', async () => {
     const f = await roomFixture();
     asDraft(f);

@@ -13,6 +13,7 @@ import { gameNumberOf, playOrder, seriesVerdict } from './seriesRules.js';
 import { vetoSummary } from './vetoConfig.js';
 import { isHumanStep, type VetoActionKind } from './veto.js';
 import { openProposal, proposalsOf, schedulable, scheduleRules, type RescheduleRow, type RescheduleStatus } from './schedule.js';
+import { matchStandins, withStandins } from './standins.js';
 
 /** What the match room page shows (tournaments plan T3a). Lineups stay
  *  secret until both are locked, and preferences never appear here
@@ -220,7 +221,7 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
     me: mySide === null ? null : {
       side: mySide, manager,
       playable: manager && myEntry !== null ? R.playableOf(db, myEntry).map((s) => player(db, s)) : [],
-      defaultFour: manager && myEntry !== null ? R.entryPrefs(db, myEntry).defaultFour : null,
+      defaultFour: manager && myEntry !== null ? defaultFourOf(db, m.id, myEntry) : null,
     },
     series: verdict ? {
       bestOf: verdict.bestOf, totalScore: verdict.totalScore, winsA: verdict.winsA, winsB: verdict.winsB, totalA: verdict.totalA, totalB: verdict.totalB,
@@ -233,6 +234,14 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
     schedule,
     pauses: roomPauses(db, m, staff || mySide !== null),
   };
+}
+
+/** The four the lineup picker starts with: the saved default, with a placed
+ *  match stand-in in place of the starter they stand in for (plan D3a Ruling
+ *  7), so Lock alone plays them. The captain may still choose any four. */
+function defaultFourOf(db: DB, matchId: number, entryId: number): string[] | null {
+  const four = R.entryPrefs(db, entryId).defaultFour;
+  return four === null ? null : withStandins(four, matchStandins(db, matchId, entryId));
 }
 
 export function prefsView(db: DB, ev: E.EventRow, entryId: number): PrefsView {

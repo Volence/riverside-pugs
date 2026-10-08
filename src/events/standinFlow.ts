@@ -11,6 +11,8 @@ import { tellStandinFilled, tellStandinOffer, tellStandinUnfilled, type NoticeDe
 
 /** How often the tick runs: expiries move on within this long of the window's end. */
 export const STANDIN_TICK_MS = 15_000;
+/** After a mid-chapter refusal the offer runs at least this long, so the bench player can press again between chapters. */
+export const STANDIN_RETRY_MINUTES = 2;
 export type StandinAccept = Omit<N.StandinPlaceInput, 'now' | 'check' | 'boxTook'>;
 export interface StandinDeps extends NoticeDeps {
   /** The series engine: a placement that touches a game on a box asks the box first (Task 4). */
@@ -28,6 +30,7 @@ type Refusal = { ok: false; error: V.EventError; detail?: V.EntryProblem[] };
  *  and the bench player hears plainly that it is no longer open. */
 const REQUEST_GONE: ReadonlySet<V.EventError> = new Set<V.EventError>([
   'replace_not_starter', 'standin_match_over', 'wrong_status', 'entry_out', 'replace_not_possible', 'standin_closed', 'standins_closed', 'standin_offer_gone',
+  'standin_captain',
 ]);
 /** Refusals about the player who accepted: the next one is asked. */
 const PLAYER_OUT: ReadonlySet<V.EventError> = new Set<V.EventError>(['player_entered', 'replace_ineligible']);
@@ -63,7 +66,8 @@ export class Standins {
     const acceptedAt = this.date();
     const offer = ST.offerOf(this.db, o.offerId);
     const req = offer ? ST.requestOf(this.db, offer.request_id) : undefined;
-    if (!offer || !req || offer.steamid !== o.steamid || offer.answer !== null || this.inFlight.has(offer.id)) return V.fail('standin_offer_gone');
+    if (!offer || !req || offer.steamid !== o.steamid || offer.answer !== null) return V.fail('standin_offer_gone');
+    if (this.inFlight.has(offer.id)) return V.fail('standin_accepting');
     this.inFlight.add(offer.id);
     try {
       const input: StandinAccept = { eventId: req.event_id, requestId: req.id, offerId: offer.id, steamid: o.steamid, acceptedAt };
@@ -78,7 +82,10 @@ export class Standins {
     }
   }
 
+  /** Refused while that player's accept is with the game server, so a
+   *  decline never moves the chain on under a placement. */
   decline(o: { offerId: number; steamid: string }): V.Checked<null> {
+    if (this.inFlight.has(o.offerId) && ST.offerOf(this.db, o.offerId)?.steamid === o.steamid) return V.fail('standin_accepting');
     const r = ST.declineStandinOffer(this.db, { ...o, now: this.date() });
     const offer = ST.offerOf(this.db, o.offerId);
     if (offer && (r.ok || r.error === 'standin_offer_expired')) this.advance(offer.request_id);
@@ -129,8 +136,9 @@ export class Standins {
   }
 
   /** Ruling 12: what a refused accept does to the chain, and what the bench
-   *  player is told. A refusal not listed here (a game server that would not
-   *  take the sub mid-chapter) leaves the offer open for another press. */
+   *  player is told. A game server that would not take the sub mid-chapter
+   *  leaves the offer open, with time for another press between chapters;
+   *  any other refusal not listed here leaves it open as it is. */
   private refused(requestId: number, offerId: number, r: Refusal): Refusal {
     const now = this.date();
     if (r.error === 'standin_offer_expired') {
@@ -147,6 +155,11 @@ export class Standins {
       // The offer may already be answered (a cancel stopped it): then there is nothing left to fail.
       ST.failStandinOffer(this.db, { offerId, why: r.error, cancel: true, now });
       return V.fail('standin_closed');
+    }
+    if (r.error === 'replace_in_game') {
+      // The staff detail (what the box said) is not the bench player's to act on.
+      ST.holdStandinOffer(this.db, { offerId, now, minutes: STANDIN_RETRY_MINUTES });
+      return V.fail('standin_mid_chapter');
     }
     return r;
   }

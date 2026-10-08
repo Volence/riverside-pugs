@@ -653,6 +653,7 @@ describe('event_log guard', () => {
       cancelStandin: { action: 'standin_cancelled', setup: offered, run: ({ f, requestId }) => ST.cancelStandin(f.db, { requestId, by: ADMIN, staff: true, now: NOW }) },
       setStandinMarginOff: { action: 'standin_margin_lifted', setup: requested, run: ({ f, requestId }) => ST.setStandinMarginOff(f.db, { requestId, actor: ADMIN, now: NOW }) },
       failStandinOffer: { action: 'standin_offer_failed', setup: offered, run: ({ f, offerId }) => ST.failStandinOffer(f.db, { offerId, why: 'player_entered', cancel: false, now: NOW }) },
+      holdStandinOffer: { action: 'standin_offer_held', setup: offered, run: ({ f, offerId }) => ST.holdStandinOffer(f.db, { offerId, now: NOW, minutes: 2 }) },
     };
     const standinRows = (f: StandinFixture) => JSON.stringify([
       f.db.prepare('SELECT * FROM draft_standins ORDER BY id').all(),
