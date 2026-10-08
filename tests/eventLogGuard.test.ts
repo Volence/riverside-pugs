@@ -519,7 +519,7 @@ describe('event_log guard', () => {
         setup: () => { const f = startedDraft(); DR.pauseRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: at(10) }); return f; },
         run: (f) => DR.resumeRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: at(20) }),
       },
-      undoPick: { action: 'draft_pick_undone', setup: () => { const f = startedDraft(); drive(f, 1); return f; }, run: (f) => DR.undoPick(f.db, { eventId: f.eventId, actor: ADMIN, now: at(10) }) },
+      undoPick: { action: 'draft_pick_undone', setup: () => { const f = startedDraft(); drive(f, 1); return f; }, run: (f) => DR.undoPick(f.db, { eventId: f.eventId, actor: ADMIN, now: at(10), present: ALL }) },
       setDelegate: {
         action: 'draft_delegate_set', setup: () => { const f = startedDraft(); drive(f, 1); return f; },
         run: (f) => DR.setDelegate(f.db, { eventId: f.eventId, captain: CAPTAINS[0]!, on: true, actor: ADMIN, now: at(10) }),

@@ -150,3 +150,9 @@ export function tellTeamMade(d: NoticeDeps, eventId: number, entries: number[]):
 export function tellDraftRoomOpen(d: NoticeDeps, eventId: number, captains: string[]): void {
   tell(d, captains, eventId, 'draft_room_open', {});
 }
+
+/** Staff handed a team's picking to its first drafted player (drafts plan
+ *  D2b1 Ruling 16): the delegate, with the room link. */
+export function tellDelegateSet(d: NoticeDeps, eventId: number, captain: string, delegate: string): void {
+  tell(d, [delegate], eventId, 'draft_delegate_set', { forCaptain: captain });
+}

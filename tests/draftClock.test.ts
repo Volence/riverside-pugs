@@ -9,6 +9,7 @@ describe('presence (Ruling 8)', () => {
   it('counts a heartbeat for 25 seconds, per event', () => {
     let t = T0.getTime();
     const clock = new DraftClock({ db: liveDraft().db, now: () => t });
+    t += HEARTBEAT_FRESH_MS + 1; // past the startup grace
     clock.heartbeat(7, 'a');
     expect(clock.present(7)('a')).toBe(true);
     expect(clock.present(8)('a')).toBe(false);
@@ -19,12 +20,25 @@ describe('presence (Ruling 8)', () => {
   });
 });
 
+describe('startup grace', () => {
+  it('reads every picker as present for 25 seconds after a restart, then needs heartbeats', () => {
+    let t = T0.getTime();
+    const clock = new DraftClock({ db: liveDraft().db, now: () => t });
+    expect(clock.present(7)('a')).toBe(true);
+    t += HEARTBEAT_FRESH_MS;
+    expect(clock.present(7)('a')).toBe(true);
+    t += 1;
+    expect(clock.present(7)('a')).toBe(false);
+  });
+});
+
 describe('the tick (Ruling 7)', () => {
   it('auto-picks a running room once its deadline passes, pushes it, and gives an absent next picker 5 seconds', () => {
     const f = startedDraft();
-    let t = at(74).getTime();
+    let t = at(-30).getTime(); // the process started before the draft, so its startup grace is over
     const push = vi.fn();
     const clock = new DraftClock({ db: f.db, now: () => t, push });
+    t = at(74).getTime();
     clock.tick();
     expect(DR.livePicks(f.db, f.eventId)).toHaveLength(0);
     expect(push).not.toHaveBeenCalled();
@@ -61,10 +75,25 @@ describe('the tick (Ruling 7)', () => {
     t = Date.parse(deadline);
     after.tick();
     expect(DR.livePicks(f.db, f.eventId)[1]).toMatchObject({ pick_no: 2, captain_steamid: CAPTAINS[1], auto: 1 });
+    // Past the startup grace with no heartbeat since the restart: the next picker reads absent.
+    expect(DR.roomOf(f.db, f.eventId)!.deadline_at).toBe(new Date(t + 5000).toISOString());
 
     must(DR.pauseRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: new Date(t) }));
     new DraftClock({ db: f.db, now: () => t + 3_600_000 }).tick();
     expect(DR.livePicks(f.db, f.eventId)).toHaveLength(2);
     expect(DR.roomOf(f.db, f.eventId)!.status).toBe('paused');
+  });
+
+  it('gives the next picker a full clock when the overdue auto-pick lands inside the startup grace', () => {
+    const f = liveDraft();
+    let t = T0.getTime();
+    must(DR.startRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: new Date(t), present: () => true }));
+    const deadline = Date.parse(DR.roomOf(f.db, f.eventId)!.deadline_at!);
+    t = deadline + 60_000; // the site was down past the deadline
+    const restarted = new DraftClock({ db: f.db, now: () => t });
+    t += 1000;
+    restarted.tick();
+    expect(DR.livePicks(f.db, f.eventId)).toHaveLength(1);
+    expect(DR.roomOf(f.db, f.eventId)!.deadline_at).toBe(new Date(t + 75_000).toISOString());
   });
 });

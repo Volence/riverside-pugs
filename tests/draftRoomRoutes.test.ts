@@ -3,14 +3,14 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import { draftRoomRoutes } from '../src/routes/draftRoom.js';
-import { DraftClock } from '../src/events/draftClock.js';
+import { DraftClock, HEARTBEAT_FRESH_MS } from '../src/events/draftClock.js';
 import * as DR from '../src/events/draftRoom.js';
 import type { Notifier } from '../src/notify/notify.js';
 import { EVENT_ERRORS, type EventError } from '../src/events/validate.js';
 import { authedCookie } from './helpers.js';
 import { ADMIN } from './eventFixture.js';
 import { cutDraft, type DraftFixture } from './draftFixture.js';
-import { ALL, BENCH, CAPTAINS, POOL, T0, liveDraft, must } from './draftRoomFixture.js';
+import { ALL, BENCH, CAPTAINS, POOL, T0, drive, liveDraft, must } from './draftRoomFixture.js';
 
 const MOD = '76561199000000777';
 let f: DraftFixture;
@@ -129,10 +129,48 @@ describe('picking', () => {
 
   it('records heartbeats from captains only', async () => {
     await build(liveDraft());
+    t += HEARTBEAT_FRESH_MS + 1; // past the startup grace
     expect((await post(room('/heartbeat'), CAPTAINS[2]!)).json()).toEqual({ ok: true });
     expect((await post(room('/heartbeat'), POOL[2]!)).json()).toEqual({ ok: true });
     expect(clock.present(f.eventId)(CAPTAINS[2]!)).toBe(true);
     expect(clock.present(f.eventId)(POOL[2]!)).toBe(false);
+  });
+});
+
+describe('presence on the board', () => {
+  it('lists every captain as present in the startup grace, then only teams whose captain or delegate beat', async () => {
+    await build(liveDraft());
+    expect((await get(room())).json().present).toEqual(CAPTAINS);
+    t += HEARTBEAT_FRESH_MS + 1;
+    expect((await get(room())).json().present).toEqual([]);
+    await post(room('/heartbeat'), CAPTAINS[3]!);
+    expect((await get(room())).json().present).toEqual([CAPTAINS[3]]);
+    expect((await get(`/api/admin/events/${f.eventId}/draft/room`, MOD)).json().present).toEqual([CAPTAINS[3]]);
+
+    start();
+    drive(f, 1);
+    must(DR.setDelegate(f.db, { eventId: f.eventId, captain: CAPTAINS[0]!, on: true, actor: ADMIN, now: new Date(t) }));
+    await post(room('/heartbeat'), POOL[0]!);
+    expect((await get(room())).json().present).toEqual([CAPTAINS[0], CAPTAINS[3]]);
+  });
+});
+
+describe('handing picking over', () => {
+  it('DMs the delegate the room link, and a DM that fails never fails the request', async () => {
+    await build(liveDraft());
+    start();
+    drive(f, 1);
+    const res = await post(desk('delegate'), ADMIN, { captain: CAPTAINS[0], on: true });
+    expect(res.statusCode).toBe(200);
+    expect(send).toHaveBeenCalledWith([POOL[0]], 'draft_delegate_set', expect.objectContaining({
+      content: `Staff handed the picking for d16's team in Draft Night to you: you pick for the team when its turn comes. Join the draft room: https://x/event/${f.slug}/draft`,
+    }));
+    send.mockClear();
+    expect((await post(desk('delegate'), ADMIN, { captain: CAPTAINS[0], on: false })).statusCode).toBe(200);
+    expect(send).not.toHaveBeenCalled();
+    send.mockImplementationOnce(() => { throw new Error('discord down'); });
+    expect((await post(desk('delegate'), ADMIN, { captain: CAPTAINS[0], on: true })).statusCode).toBe(200);
+    expect(DR.roomState(f.db, f.eventId)!.delegates).toEqual({ [CAPTAINS[0]!]: POOL[0] });
   });
 });
 

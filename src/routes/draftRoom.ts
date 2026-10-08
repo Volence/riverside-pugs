@@ -11,7 +11,7 @@ import * as DR from '../events/draftRoom.js';
 import * as V from '../events/validate.js';
 import { playerCard, type PlayerCard } from '../events/draftCards.js';
 import { chemistryFor, draftRoomView, notesFor } from '../events/draftRoomView.js';
-import { tellDraftRoomOpen } from '../events/notices.js';
+import { tellDelegateSet, tellDraftRoomOpen } from '../events/notices.js';
 import type { DraftClock } from '../events/draftClock.js';
 import type { Notifier } from '../notify/notify.js';
 
@@ -67,7 +67,8 @@ export async function draftRoomRoutes(
     const cards = m.cards;
     return ids.map((id) => cards.get(id) ?? playerCard(db, id));
   };
-  const viewFor = (ev: E.EventRow, steamid: string | null, staff: boolean) => draftRoomView(db, ev, { steamid, staff }, clock.nowDate(), cardsOf(ev.id));
+  const viewFor = (ev: E.EventRow, steamid: string | null, staff: boolean) =>
+    draftRoomView(db, ev, { steamid, staff }, clock.nowDate(), cardsOf(ev.id), clock.present(ev.id));
   type Slug = { slug: string };
 
   app.get('/api/events/:slug/draft', async (req, reply) => {
@@ -155,7 +156,8 @@ export async function draftRoomRoutes(
     return viewFor(ev, me, true);
   });
   const roomPost = <T>(
-    path: string, run: (ev: E.EventRow, me: string, body: Record<string, unknown>) => V.Checked<T> | null, after?: (ev: E.EventRow, value: T) => void,
+    path: string, run: (ev: E.EventRow, me: string, body: Record<string, unknown>) => V.Checked<T> | null,
+    after?: (ev: E.EventRow, value: T, body: Record<string, unknown>) => void,
   ) => app.post(`/api/admin/events/:id/draft/room/${path}`, async (req, reply) => {
     const me = requireAdmin(req, reply);
     if (!me) return;
@@ -167,7 +169,7 @@ export async function draftRoomRoutes(
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, `event_draft_room_${path}`, ev.id, { slug: ev.slug, ...Object.fromEntries(AUDIT_KEYS.filter((k) => k in body).map((k) => [k, body[k]])) });
     clock.push(ev.id);
-    after?.(ev, r.value);
+    after?.(ev, r.value, body);
     return { ok: true };
   });
   const staffOpts = (ev: E.EventRow, me: string) => ({ eventId: ev.id, actor: me, now: clock.nowDate() });
@@ -175,9 +177,10 @@ export async function draftRoomRoutes(
     (ev, v) => tellDraftRoomOpen(opts, ev.id, v.order));
   roomPost('pause', (ev, me) => DR.pauseRoom(db, staffOpts(ev, me)));
   roomPost('resume', (ev, me) => DR.resumeRoom(db, staffOpts(ev, me)));
-  roomPost('undo', (ev, me) => DR.undoPick(db, staffOpts(ev, me)));
+  roomPost('undo', (ev, me) => DR.undoPick(db, { ...staffOpts(ev, me), present: clock.present(ev.id) }));
   roomPost('reset', (ev, me) => DR.resetRoom(db, staffOpts(ev, me)));
   roomPost('delegate', (ev, me, b) => (typeof b.captain !== 'string' || typeof b.on !== 'boolean' ? null
-    : DR.setDelegate(db, { ...staffOpts(ev, me), captain: b.captain, on: b.on })));
+    : DR.setDelegate(db, { ...staffOpts(ev, me), captain: b.captain, on: b.on })),
+  (ev, v, b) => { if (v.delegate) tellDelegateSet(opts, ev.id, b.captain as string, v.delegate); });
   roomPost('settings', (ev, me, b) => D.setRoomSettings(db, { ...staffOpts(ev, me), settings: b }));
 }

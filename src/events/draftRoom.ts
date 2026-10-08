@@ -114,6 +114,11 @@ function ranker(db: DB, signups: D.SignupRow[]): (s: D.SignupRow) => RankedPlaye
   return (s) => ({ steamid: s.steamid, sr: seasonSr(db, s.steamid, season), order: order.get(s.id)! });
 }
 
+/** Fewer free players than open slots: the pool shrank mid-draft (an
+ *  account merge is the only way), so a pick could leave a slot no player
+ *  can fill. The room refuses teams_changed instead; staff reset it. */
+const poolShort = (st: RoomState): boolean => st.available.length < st.slots.length - st.picks.length;
+
 const deadlineFor = (now: Date, pickSeconds: number, here: boolean): string =>
   new Date(now.getTime() + (here ? pickSeconds : ABSENT_SECONDS) * 1000).toISOString();
 
@@ -194,6 +199,7 @@ export function makePick(
     if (!st || st.room.status !== 'running' || !st.next) return V.fail('room_not_running');
     if (o.pickNo !== st.next.pickNo) return V.fail('pick_moved');
     if (o.steamid !== st.picker) return V.fail('not_your_pick');
+    if (poolShort(st)) return V.fail('teams_changed');
     if (!st.available.some((s) => s.steamid === o.player)) return V.fail('not_available');
     const r = pickAndAdvance(db, st, o.player, false, o.now, o.present);
     E.logEvent(db, o.eventId, o.steamid, 'draft_pick', at, r);
@@ -202,7 +208,8 @@ export function makePick(
 }
 
 /** The clock's pick (Ruling 7): only for a running room whose deadline has
- *  passed; from the captain's list, else by SR. not_due writes nothing. */
+ *  passed; from the captain's list, else by SR. not_due and teams_changed
+ *  write nothing. */
 export function autoPickDue(db: DB, o: { eventId: number; now: Date; present: Present }): V.Checked<PickResult> {
   const at = o.now.toISOString();
   return db.transaction((): V.Checked<PickResult> => {
@@ -211,6 +218,7 @@ export function autoPickDue(db: DB, o: { eventId: number; now: Date; present: Pr
     const st = roomState(db, o.eventId);
     if (!st || st.room.status !== 'running' || !st.next || st.room.deadline_at === null
       || Date.parse(st.room.deadline_at) > o.now.getTime()) return V.fail('not_due');
+    if (poolShort(st)) return V.fail('teams_changed');
     const choice = autoPickChoice(st.available.map(ranker(db, st.signups)), pickListOf(db, o.eventId, st.next.captain));
     const r = pickAndAdvance(db, st, choice, true, o.now, o.present);
     E.logEvent(db, o.eventId, null, 'draft_pick', at, r);
@@ -261,10 +269,11 @@ export function resumeRoom(db: DB, o: { eventId: number; actor: string; now: Dat
 /** Staff undo (Ruling 6, Review Focus 4): the last live pick is flagged
  *  undone and its player freed. When it is the final pick (always made by
  *  the site with the pick before it) both are taken back, or the final pick
- *  would be forced again at once. The reopened pick gets a full clock; a
- *  done room runs again, a paused one stays paused with the full clock
- *  waiting. A delegate whose pick was undone is dropped. */
-export function undoPick(db: DB, o: { eventId: number; actor: string; now: Date }): V.Checked<{ undone: number[] }> {
+ *  would be forced again at once. A delegate whose pick was undone is
+ *  dropped. A running or done room runs the reopened pick like any turn: a
+ *  full clock when its picker is present, ABSENT_SECONDS when not. A paused
+ *  room stays paused with the full clock waiting. */
+export function undoPick(db: DB, o: { eventId: number; actor: string; now: Date; present: Present }): V.Checked<{ undone: number[] }> {
   const at = o.now.toISOString();
   return db.transaction((): V.Checked<{ undone: number[] }> => {
     const found = startedRoom(db, o.eventId);
@@ -280,13 +289,14 @@ export function undoPick(db: DB, o: { eventId: number; actor: string; now: Date 
       free.run(o.eventId, p.steamid);
     }
     const gone = new Set(back.map((p) => p.steamid));
-    const delegates = JSON.stringify(Object.fromEntries(Object.entries(st.delegates).filter(([, d]) => !gone.has(d))));
-    const full = st.room.pick_seconds * 1000;
+    const kept: Record<string, string> = Object.fromEntries(Object.entries(st.delegates).filter(([, d]) => !gone.has(d)));
+    const delegates = JSON.stringify(kept);
     if (st.room.status === 'paused') {
-      db.prepare('UPDATE draft_rooms SET paused_left_ms = ?, delegates_json = ? WHERE event_id = ?').run(full, delegates, o.eventId);
+      db.prepare('UPDATE draft_rooms SET paused_left_ms = ?, delegates_json = ? WHERE event_id = ?').run(st.room.pick_seconds * 1000, delegates, o.eventId);
     } else {
+      const reopened = back.at(-1)!.captain_steamid;
       db.prepare("UPDATE draft_rooms SET status = 'running', deadline_at = ?, finished_at = NULL, delegates_json = ? WHERE event_id = ?")
-        .run(new Date(o.now.getTime() + full).toISOString(), delegates, o.eventId);
+        .run(deadlineFor(o.now, st.room.pick_seconds, o.present(kept[reopened] ?? reopened)), delegates, o.eventId);
     }
     E.logEvent(db, o.eventId, o.actor, 'draft_pick_undone', at, { picks: back.map((p) => ({ pickNo: p.pick_no, steamid: p.steamid })) });
     return V.ok({ undone: back.map((p) => p.pick_no) });
