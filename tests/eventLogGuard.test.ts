@@ -513,6 +513,19 @@ describe('event_log guard', () => {
         run: (f) => DR.makePick(f.db, { eventId: f.eventId, steamid: CAPTAINS[0]!, player: POOL[0]!, pickNo: 1, now: at(1), present: ALL }),
       },
       autoPickDue: { action: 'draft_pick', setup: () => startedDraft(), run: (f) => DR.autoPickDue(f.db, { eventId: f.eventId, now: at(80), present: ALL }) },
+      pauseRoom: { action: 'draft_room_paused', setup: () => startedDraft(), run: (f) => DR.pauseRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: at(10) }) },
+      resumeRoom: {
+        action: 'draft_room_resumed',
+        setup: () => { const f = startedDraft(); DR.pauseRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: at(10) }); return f; },
+        run: (f) => DR.resumeRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: at(20) }),
+      },
+      undoPick: { action: 'draft_pick_undone', setup: () => { const f = startedDraft(); drive(f, 1); return f; }, run: (f) => DR.undoPick(f.db, { eventId: f.eventId, actor: ADMIN, now: at(10) }) },
+      setDelegate: {
+        action: 'draft_delegate_set', setup: () => { const f = startedDraft(); drive(f, 1); return f; },
+        run: (f) => DR.setDelegate(f.db, { eventId: f.eventId, captain: CAPTAINS[0]!, on: true, actor: ADMIN, now: at(10) }),
+      },
+      resetRoom: { action: 'draft_room_reset', setup: () => { const f = startedDraft(); drive(f, 1); return f; }, run: (f) => DR.resetRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: at(10) }) },
+      savePickList: { action: 'draft_list_saved', setup: liveDraft, run: (f) => DR.savePickList(f.db, { eventId: f.eventId, steamid: CAPTAINS[0]!, list: [POOL[3]], now: at(1) }) },
     };
     const roomRows = (f: DraftFixture) => JSON.stringify([
       f.db.prepare('SELECT * FROM draft_rooms ORDER BY event_id').all(),
