@@ -1,9 +1,12 @@
 import { campaignTint, mapName } from '../format';
 import { useRef } from 'preact/hooks';
+import { Backdrop, Countdown, Title } from './pieces';
+import { DraftBoard, DraftRevealStrip, OnTheClock } from './DraftScenes';
+import { emptyReveal, stepReveal, type DraftReveal } from './draftReveal';
 import { camSlots } from '../../../src/cast/layout';
 import { emptyQueue, stepAuto, type AutoCard } from './callouts';
 import {
-  boomerRate, CALLOUT_MS, ITEM, skeetTotal, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
+  boomerRate, CALLOUT_MS, DRAFT_SCENES, type CastDraftView, ITEM, skeetTotal, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
@@ -23,6 +26,7 @@ interface Props { which: OverlayKey; feed: OverlayFeed; now: number }
 export function Overlay({ which, feed, now }: Props) {
   const { studio, match } = feed;
   const auto = useAutoCallout(studio, match, now);
+  const reveal = useDraftReveal(feed.draft ?? null, now);
   const scene: OverlayKey = which === 'program' ? studio.scene : which;
   const tint = match ? campaignTint(match.campaign) : 'var(--c-blood-harvest)';
   const style = {
@@ -34,9 +38,12 @@ export function Overlay({ which, feed, now }: Props) {
     <div class={`ov ov--${scene} theme--${studio.theme}`} style={style} data-scene={scene}>
       {/* Keyed on the scene and match so entrance animations replay on a cut. */}
       <div class="ov__scene" key={`${scene}:${match?.id ?? 0}`}>
-        <SceneBody scene={scene} feed={feed} now={now} auto={auto} />
+        <SceneBody scene={scene} feed={feed} now={now} auto={auto} reveal={reveal} />
       </div>
       {which === 'program' && studio.lowerThird.show && <LowerThird studio={studio} />}
+      {which === 'program' && studio.draftStrip && feed.draft && reveal && !(DRAFT_SCENES as readonly string[]).includes(scene) && (
+        <DraftRevealStrip draft={feed.draft} reveal={reveal} />
+      )}
     </div>
   );
 }
@@ -55,7 +62,15 @@ function useAutoCallout(studio: StudioState, match: CastMatchView | null, now: n
   return q.current.showing;
 }
 
-function SceneBody({ scene, feed, now, auto }: { scene: OverlayKey; feed: OverlayFeed; now: number; auto: AutoCard | null }) {
+/** The pick reveal (drafts plan D2b2 Ruling 5): this overlay's own queue,
+ *  held above the scene like auto-fire so a cut keeps its place. */
+function useDraftReveal(draft: CastDraftView | null, now: number): DraftReveal | null {
+  const q = useRef(emptyReveal());
+  q.current = stepReveal(q.current, draft, now);
+  return q.current.showing;
+}
+
+function SceneBody({ scene, feed, now, auto, reveal }: { scene: OverlayKey; feed: OverlayFeed; now: number; auto: AutoCard | null; reveal: DraftReveal | null }) {
   const { studio, match, live } = feed;
   switch (scene) {
     case 'starting': return <Starting studio={studio} match={match} now={now} />;
@@ -72,23 +87,14 @@ function SceneBody({ scene, feed, now, auto }: { scene: OverlayKey; feed: Overla
     case 'brb': return <Brb studio={studio} match={match} now={now} />;
     case 'winner': return <Winner studio={studio} match={match} />;
     case 'ending': return <Ending studio={studio} match={match} />;
+    case 'draftboard': return <DraftBoard studio={studio} draft={feed.draft ?? null} now={now} reveal={reveal} />;
+    case 'draftclock': return <OnTheClock studio={studio} draft={feed.draft ?? null} now={now} reveal={reveal} />;
+    case 'draftreveal': return feed.draft && reveal ? <DraftRevealStrip draft={feed.draft} reveal={reveal} /> : null;
     case 'program': return null;
   }
 }
 
 /* ---------- shared pieces ---------- */
-
-/** The full-frame backdrop: page black, grain, the campaign's tint and a
- *  survivor or infected still, darkened. */
-function Backdrop({ art = 'survivor-hilltop' }: { art?: string }) {
-  return (
-    <div class="ov-bg" aria-hidden="true">
-      <div class="ov-bg__art" style={{ backgroundImage: `url(/hud-backdrops/${art}.jpg)` }} />
-      <div class="ov-bg__tint" />
-      <div class="ov-bg__grain" />
-    </div>
-  );
-}
 
 /** The spray-painted safe room arrow. */
 function SafeArrow({ class: cls = '' }: { class?: string }) {
@@ -116,23 +122,6 @@ function Logo({ team, size }: { team: CastTeam; size: number }) {
 function SideChip({ side }: { side: CastTeam['side'] }) {
   if (!side) return null;
   return <span class={`ov-side ov-side--${side}`}>{side === 'survivor' ? 'Survivors' : 'Infected'}</span>;
-}
-
-function fmtClock(ms: number): string {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(s / 60);
-  return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-}
-
-function Countdown({ to, now, label }: { to: string | null; now: number; label: string }) {
-  if (!to) return <p class="ov-count ov-count--idle">{label}</p>;
-  const left = Date.parse(to) - now;
-  return (
-    <div class="ov-count">
-      <span class="ov-count__label">{left > 0 ? label : 'Any moment now'}</span>
-      {left > 0 && <span class="ov-count__clock">{fmtClock(left)}</span>}
-    </div>
-  );
 }
 
 function Versus({ match, big = false }: { match: CastMatchView; big?: boolean }) {
@@ -166,16 +155,6 @@ function MatchRibbon({ match }: { match: CastMatchView }) {
       <span class="ov-ribbon__score">{b.score}</span>
       <span class="ov-ribbon__team" style={{ '--c': 'var(--team-b)' } as Record<string, string>}>{b.tag}</span>
     </div>
-  );
-}
-
-function Title({ studio, fallback }: { studio: StudioState; fallback: string }) {
-  return (
-    <header class="ov-title">
-      <p class="ov-title__eyebrow">{studio.title || 'Riverside PUGs'}</p>
-      <h1 class="ov-title__main">{fallback}</h1>
-      {studio.subtitle && <p class="ov-title__sub">{studio.subtitle}</p>}
-    </header>
   );
 }
 
