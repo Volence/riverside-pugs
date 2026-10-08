@@ -767,6 +767,32 @@ describe('event_log guard', () => {
         expect(logCount(x.f)).toBe(logs);
       });
     }
+
+    describe('settleKeep standing close (captain out of good standing)', () => {
+      const banned = (): Keep => {
+        const x = ready();
+        x.f.db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(x.four[0]);
+        return x;
+      };
+      it('writes exactly one keep_closed row and no team', () => {
+        const x = banned();
+        const before = logCount(x.f);
+        const r = K.settleKeep(x.f.db, { keepId: x.keepId, now: LATER });
+        expect(r).toEqual({ ok: true, value: { made: false, closed: 'captain_standing' } });
+        expect(logCount(x.f)).toBe(before + 1);
+        expect(x.f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: 'keep_closed' });
+        expect(x.f.db.prepare('SELECT COUNT(*) AS n FROM teams WHERE origin = ?').get('draft')).toEqual({ n: 0 });
+      });
+      it('writes nothing when its event_log row cannot be written', () => {
+        const x = banned();
+        const before = keepRows(x);
+        const logs = logCount(x.f);
+        x.f.db.exec("CREATE TRIGGER keep_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+        expect(() => K.settleKeep(x.f.db, { keepId: x.keepId, now: LATER })).toThrow(/audit down/);
+        expect(keepRows(x)).toBe(before);
+        expect(logCount(x.f)).toBe(logs);
+      });
+    });
   });
 
   /** Plan T2: src/events/play.ts is the only writer of event_matches, and

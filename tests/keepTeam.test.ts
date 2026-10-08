@@ -23,6 +23,12 @@ const start = (f: StandinFixture, x: X, over: Partial<Parameters<typeof K.startK
   K.startKeep(f.db, { entryId: x.entry.id, steamid: x.captain, name: 'Night Owls', tag: 'OWL', now: at(2), ...over });
 const answer = (f: StandinFixture, x: X, steamid: string, accept: boolean, h = 3) => K.answerKeep(f.db, { keepId: x.keepId, steamid, accept, now: at(h) });
 const settle = (f: StandinFixture, x: X, h = 3) => K.settleKeep(f.db, { keepId: x.keepId, now: at(h) });
+/** A settle that made the team. */
+const madeOf = (r: ReturnType<typeof settle>) => {
+  const v = must(r);
+  if (!v.made) throw new Error(`expected a team, got ${v.closed}`);
+  return v;
+};
 
 describe('offerKeep (Rulings 1 and 2)', () => {
   it('offers a finished draft team\'s captain, once, with its four, until 7 days after the finish', () => {
@@ -74,7 +80,7 @@ describe('answers and the team (Rulings 3, 5 to 8)', () => {
     must(answer(f, x, x.p[1], false));
     expect(err(answer(f, x, x.p[1], true))).toBe('keep_answered');
     must(answer(f, x, x.p[2], true, 4));
-    const made = must(settle(f, x, 4));
+    const made = madeOf(settle(f, x, 4));
     expect(made).toMatchObject({ joined: [x.captain, x.p[0], x.p[2]], left: [] });
     expect(T.getTeam(f.db, made.teamId)).toMatchObject({ name: 'Night Owls', tag: 'OWL', origin: 'draft', origin_ref: String(f.eventId), logo_key: 'b'.repeat(64), captain_steamid: x.captain });
     expect(K.keepOf(f.db, x.keepId)).toMatchObject({ status: 'made', team_id: made.teamId });
@@ -91,7 +97,7 @@ describe('answers and the team (Rulings 3, 5 to 8)', () => {
     must(start(f, x));
     must(answer(f, x, x.p[0], true));
     must(answer(f, x, x.p[1], true));
-    const made = must(settle(f, x));
+    const made = madeOf(settle(f, x));
     expect(must(answer(f, x, x.p[2], true, 10))).toEqual({ joined: true });
     expect(T.roleOf(f.db, made.teamId, x.p[2])).toBe('member');
     expect(err(answer(f, x, x.p[2], true, 11))).toBe('keep_answered');
@@ -116,7 +122,7 @@ describe('answers and the team (Rulings 3, 5 to 8)', () => {
     must(answer(f, x, x.p[1], true));
     expect(err(settle(f, x))).toBe('keep_waiting');
     must(answer(f, x, x.p[2], true, 4));
-    const made = must(settle(f, x, 4));
+    const made = madeOf(settle(f, x, 4));
     expect(made).toMatchObject({ joined: [x.captain, x.p[1], x.p[2]], left: [x.p[0]] });
     expect(T.roleOf(f.db, made.teamId, x.p[0])).toBeNull();
   });
@@ -128,7 +134,7 @@ describe('answers and the team (Rulings 3, 5 to 8)', () => {
     must(T.createTeam(f.db, { creator: BENCH[0]!, name: 'Night Owls', tag: 'OWL', now: at(2) }));
     must(answer(f, x, x.p[0], true));
     must(answer(f, x, x.p[1], true));
-    expect(T.getTeam(f.db, must(settle(f, x)).teamId)).toMatchObject({ name: 'Night Owls 2', tag: 'OWL2' });
+    expect(T.getTeam(f.db, madeOf(settle(f, x)).teamId)).toMatchObject({ name: 'Night Owls 2', tag: 'OWL2' });
   });
 });
 
@@ -143,7 +149,7 @@ describe('the captain\'s standing (Task 1 review ruling)', () => {
     expect(K.answersOf(f.db, x.keepId)).toHaveLength(0);
   });
 
-  it('a settle after the captain lost standing closes the keep with no team, one log row, and a distinguishable not_player', () => {
+  it('a settle after the captain lost standing closes the keep with no team, one log row, and a made:false outcome', () => {
     const f = finishedDraft();
     const x = offered(f);
     must(start(f, x));
@@ -152,13 +158,41 @@ describe('the captain\'s standing (Task 1 review ruling)', () => {
     ban(f, x.captain);
     const logs = () => (f.db.prepare('SELECT COUNT(*) AS n FROM event_log').get() as { n: number }).n;
     const before = logs();
-    expect(err(settle(f, x))).toBe('not_player');
+    expect(must(settle(f, x))).toEqual({ made: false, closed: 'captain_standing' });
     expect(logs()).toBe(before + 1);
     expect(f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: 'keep_closed' });
     expect(K.keepOf(f.db, x.keepId)).toMatchObject({ status: 'lapsed', team_id: null });
     expect(K.keepOf(f.db, x.keepId)?.closed_at).not.toBeNull();
     expect(f.db.prepare("SELECT COUNT(*) AS n FROM teams WHERE origin = 'draft'").get()).toEqual({ n: 0 });
     expect(err(settle(f, x))).toBe('keep_closed');
+  });
+});
+
+describe('refusals that name the real problem', () => {
+  it('a settle with a captain at the team cap says keep_captain_cap and writes nothing', () => {
+    const f = finishedDraft();
+    const x = offered(f);
+    must(start(f, x));
+    must(answer(f, x, x.p[0], true));
+    must(answer(f, x, x.p[1], true));
+    capped(f, x.captain, 'CP');
+    expect(err(settle(f, x))).toBe('keep_captain_cap');
+    expect(K.keepOf(f.db, x.keepId)?.status).toBe('voting');
+  });
+
+  it('a late accept by a player who lost standing is not_player, and onto a full roster is roster_full', () => {
+    const f = finishedDraft();
+    const x = offered(f);
+    must(start(f, x));
+    must(answer(f, x, x.p[0], true));
+    must(answer(f, x, x.p[1], true));
+    const made = madeOf(settle(f, x));
+    f.db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(x.p[2]);
+    expect(err(answer(f, x, x.p[2], true, 4))).toBe('not_player');
+    f.db.prepare("UPDATE players SET status = 'active' WHERE steamid = ?").run(x.p[2]);
+    for (const b of BENCH) f.db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'member', ?)").run(made.teamId, b, at(3).toISOString());
+    expect(err(answer(f, x, x.p[2], true, 5))).toBe('roster_full');
+    expect(K.answersOf(f.db, x.keepId).some((a) => a.steamid === x.p[2])).toBe(false);
   });
 });
 

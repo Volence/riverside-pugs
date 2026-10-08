@@ -21,6 +21,11 @@ export interface KeepRow {
   id: number; event_id: number; entry_id: number; captain_steamid: string; players_json: string; status: KeepStatus;
   name: string | null; tag: string | null; offered_at: string; started_at: string | null; expires_at: string; team_id: number | null; closed_at: string | null;
 }
+/** What a settle did: made the team, or closed the keep because its captain
+ *  is no longer in good standing (no team; the DM layer tells the players). */
+export type SettleOutcome =
+  | { made: true; teamId: number; slug: string; joined: string[]; left: string[] }
+  | { made: false; closed: 'captain_standing' };
 export interface KeepAnswerRow { keep_id: number; steamid: string; answer: 'accept' | 'decline'; answered_at: string; joined: number }
 export interface MyKeepView {
   keepId: number; status: KeepStatus; captain: boolean; team: string; name: string | null; tag: string | null;
@@ -147,7 +152,7 @@ export function answerKeep(db: DB, o: { keepId: number; steamid: string; accept:
     let joined = false;
     if (o.accept && k.status === 'made' && k.team_id !== null) {
       const add = T.addDraftMember(db, { teamId: k.team_id, steamid: o.steamid, now: o.now });
-      if (!add.ok) return V.fail(add.error === 'their_cap' ? 'keep_cap' : add.error === 'already_member' ? 'keep_answered' : 'keep_closed');
+      if (!add.ok) return V.fail(add.error === 'their_cap' ? 'keep_cap' : add.error === 'already_member' ? 'keep_answered' : add.error === 'not_player' ? 'not_player' : add.error === 'roster_full' ? 'roster_full' : 'keep_closed');
       joined = true;
     }
     db.prepare('INSERT INTO draft_keep_answers (keep_id, steamid, answer, answered_at, joined) VALUES (?, ?, ?, ?, ?)')
@@ -159,21 +164,20 @@ export function answerKeep(db: DB, o: { keepId: number; steamid: string; accept:
 
 /** Ruling 3: once three accepters can join, the team is made (an accepter at
  *  the cap is left out). keep_waiting while fewer can. A captain no longer in
- *  good standing closes the keep with no team and returns not_player (that
- *  one failure has committed the close). A made or closed keep
+ *  good standing closes the keep with no team (one log row) and returns
+ *  { made: false }, as a success, so refusals still write nothing. A made or closed keep
  *  is keep_closed, so two settles never make two teams (Review Focus 4). */
-export function settleKeep(db: DB, o: { keepId: number; now: Date }): V.Checked<{ teamId: number; slug: string; joined: string[]; left: string[] }> {
+export function settleKeep(db: DB, o: { keepId: number; now: Date }): V.Checked<SettleOutcome> {
   const at = o.now.toISOString();
-  return db.transaction((): V.Checked<{ teamId: number; slug: string; joined: string[]; left: string[] }> => {
+  return db.transaction((): V.Checked<SettleOutcome> => {
     const k = keepOf(db, o.keepId);
     if (!k || k.status !== 'voting' || k.closed_at !== null || due(k, o.now)) return V.fail('keep_closed');
     if (!getPlayer(db, k.captain_steamid) || !inGoodStanding(db, k.captain_steamid, o.now)) {
-      // The captain lost standing since pressing Keep: no team is made. The
-      // keep closes (one log row) and this refusal, unlike the others, has
-      // committed that close, so the DM layer can tell it from a plain miss.
+      // The captain lost standing since pressing Keep: no team is made and
+      // the keep closes with one log row.
       db.prepare("UPDATE draft_keeps SET status = 'lapsed', closed_at = ? WHERE id = ?").run(at, k.id);
       E.logEvent(db, k.event_id, null, 'keep_closed', at, { keepId: k.id, status: 'lapsed', why: 'captain_standing' });
-      return V.fail('not_player');
+      return V.ok({ made: false, closed: 'captain_standing' });
     }
     const accepted = answersOf(db, k.id).filter((a) => a.answer === 'accept').map((a) => a.steamid);
     if (accepted.length < KEEP_MAJORITY) return V.fail('keep_waiting');
@@ -181,14 +185,14 @@ export function settleKeep(db: DB, o: { keepId: number; now: Date }): V.Checked<
     const made = T.createDraftTeam(db, {
       captain: k.captain_steamid, members: accepted, name: k.name!, tag: k.tag!, logoKey: entry.logo_key, eventId: k.event_id, min: KEEP_MAJORITY, now: o.now,
     });
-    if (!made.ok) return V.fail('keep_waiting');
+    if (!made.ok) return V.fail(made.error === 'your_cap' || made.error === 'created_cap' ? 'keep_captain_cap' : 'keep_waiting');
     db.prepare("UPDATE draft_keeps SET status = 'made', team_id = ? WHERE id = ?").run(made.value.id, k.id);
     const join = db.prepare('UPDATE draft_keep_answers SET joined = 1 WHERE keep_id = ? AND steamid = ?');
     for (const s of made.value.joined) join.run(k.id, s);
     E.logEvent(db, k.event_id, null, 'keep_team_made', at, {
       keepId: k.id, teamId: made.value.id, name: made.value.name, tag: made.value.tag, joined: made.value.joined, left: made.value.left,
     });
-    return V.ok({ teamId: made.value.id, slug: made.value.slug, joined: made.value.joined, left: made.value.left });
+    return V.ok({ made: true, teamId: made.value.id, slug: made.value.slug, joined: made.value.joined, left: made.value.left });
   })();
 }
 

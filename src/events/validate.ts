@@ -230,6 +230,8 @@ export const EVENT_ERRORS = {
   keep_closed: { status: 409, text: 'Keep this team has closed for this team.' },
   keep_open: { status: 409, text: 'Keep this team is still open for this team.' },
   not_player: { status: 400, text: 'That is not an active player.' },
+  roster_full: { status: 409, text: 'That team\'s roster is full.' },
+  keep_captain_cap: { status: 409, text: 'The captain is on or has created as many teams as allowed, so the team cannot be made yet.' },
   keep_not_player: { status: 403, text: 'Only the drafted players of this team can answer.' },
   keep_answered: { status: 409, text: 'You already answered.' },
   keep_cap: { status: 409, text: 'You are on as many teams as allowed. Leave a team first, then try again.' },
