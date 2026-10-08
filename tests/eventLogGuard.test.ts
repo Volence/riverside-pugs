@@ -435,6 +435,11 @@ describe('event_log guard', () => {
         run: (f) => D.setRoomSettings(f.db, { eventId: f.eventId, settings: { firstPick: 'random', pickSeconds: 60 }, actor: ADMIN, now: NOW }),
       },
       moveDraftPlayers: { action: 'draft_teams_swapped', setup: balanced, run: (f) => D.moveDraftPlayers(f.db, { eventId: f.eventId, ...crossPair(f), actor: ADMIN, now: NOW }) },
+      // Plan D3a Task 1: the stand-in SR margin.
+      setStandinMargin: {
+        action: 'draft_standin_margin', setup: published,
+        run: (f) => D.setStandinMargin(f.db, { eventId: f.eventId, margin: 150, actor: ADMIN, now: NOW }),
+      },
     };
     const draftRows = (f: DraftFixture) => JSON.stringify([
       f.db.prepare('SELECT * FROM draft_signups ORDER BY id').all(),

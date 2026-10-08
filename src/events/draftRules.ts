@@ -117,6 +117,43 @@ export function parseRoomSettings(raw: unknown): RoomSettings | null {
   return { firstPick: r.firstPick as FirstPick, pickSeconds: r.pickSeconds };
 }
 
+// ---------- bench stand-ins (plan D3a) ----------
+
+/** Ruling 3: the event's stand-in SR margin, draft_json.standinSrMargin. */
+export const STANDIN_MARGIN_DEFAULT = 100;
+export const STANDIN_MARGIN_MAX = 2000;
+/** Ruling 5: each stand-in offer is open this long. */
+export const STANDIN_OFFER_MINUTES = 10;
+/** Discord custom id prefix of the stand-in buttons (src/discord/standinButtons.ts). */
+export const STANDIN_BUTTON_PREFIX = 'ds:';
+
+const goodMargin = (m: unknown): m is number => typeof m === 'number' && Number.isInteger(m) && m >= 0 && m <= STANDIN_MARGIN_MAX;
+
+/** The margin as stored, or the default. */
+export function standinMarginOf(draftJson: string | null): number {
+  const d = draftJson ? (JSON.parse(draftJson) as Record<string, unknown>) : {};
+  return goodMargin(d.standinSrMargin) ? d.standinSrMargin : STANDIN_MARGIN_DEFAULT;
+}
+
+/** A desk body's margin, or null. */
+export function parseStandinMargin(raw: unknown): number | null {
+  return goodMargin(raw) ? raw : null;
+}
+
+/** A bench player as the stand-in offers see them. busy: holds a place on a
+ *  team of this event, or has an open offer for another request. */
+export interface BenchCandidate { steamid: string; sr: number; order: number; eligible: boolean; busy: boolean }
+
+/** Ruling 3: who is asked, in order. Eligible, not busy, not offered this
+ *  request before, SR at most `margin` above the missing player's (any
+ *  amount below; null is no limit), closest SR first, ties by signup order. */
+export function standinOrder(bench: readonly BenchCandidate[], outSr: number, margin: number | null, offered: ReadonlySet<string>): string[] {
+  return bench
+    .filter((c) => c.eligible && !c.busy && !offered.has(c.steamid) && (margin === null || c.sr <= outSr + margin))
+    .sort((a, b) => Math.abs(a.sr - outSr) - Math.abs(b.sr - outSr) || a.order - b.order)
+    .map((c) => c.steamid);
+}
+
 /** A player as the room ranks them: current-season SR, then signup order. */
 export interface RankedPlayer { steamid: string; sr: number; order: number }
 
