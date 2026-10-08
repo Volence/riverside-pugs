@@ -132,6 +132,7 @@ export function cleanState(v: unknown): StudioState {
   return {
     matchId: posInt(o.matchId),
     bookingId: posInt(o.bookingId),
+    draftEventId: posInt(o.draftEventId),
     scene: SCENES.includes(o.scene as SceneKey) ? (o.scene as SceneKey) : d.scene,
     title: typeof o.title === 'string' ? str(o.title) : d.title,
     subtitle: str(o.subtitle),
@@ -163,5 +164,6 @@ export function cleanState(v: unknown): StudioState {
       return { on: a.on === true, kinds };
     })(),
     calloutSize: o.calloutSize === 'normal' ? 'normal' : 'compact',
+    draftStrip: o.draftStrip !== false,
   };
 }

@@ -80,6 +80,7 @@ export async function castStudioRoutes(
         end: tank.recap.end, controller: nameOf(tank.recap.controller), players: rows(tank.recap.players),
       } : null,
       casterAvatars: casterAvatars(db, studio.state.casters),
+      draft: null,
       witchRecap: witch ? {
         agoMs: witch.agoMs, aliveS: witch.recap.aliveS, crown: witch.recap.crown, incaps: witch.recap.incaps,
         startled: nameOf(witch.recap.startled), killer: nameOf(witch.recap.killer), players: rows(witch.recap.players),

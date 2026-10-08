@@ -60,5 +60,5 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     players: [...a.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'a' as const, stats: { sidmg: [930, 610, 420, 300][i] ?? 0, sikill: [9, 6, 4, 3][i] ?? 0, ck: [88, 71, 52, 40][i] ?? 0, skeets: [2, 0, 1, 0][i] ?? 0 } })),
       ...b.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'b' as const, stats: { damage_as_si: [212, 180, 96, 60][i] ?? 0, dps_landed: [1, 0, 0, 0][i] ?? 0, survivors_biled: [0, 3, 0, 1][i] ?? 0, dmg_as_tank: [0, 0, 240, 0][i] ?? 0 } }))],
   };
-  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null) };
+  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null), draft: null };
 }
