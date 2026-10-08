@@ -3485,6 +3485,13 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftpanel__prefs { display: flex; flex-direction: column; gap: var(--sp-2); }
 .draftpanel__pref { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .draftpanel__note { width: 100%; max-width: none; box-sizing: border-box; }
+/* Drafts plan D3a: stand-ins on the event page and the desk. */
+.standinpanel__ask { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin-bottom: 0.75rem; }
+.standinpanel__ask fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.standinpanel__ask select { max-width: 100%; }
+.standinrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.standinoffers { flex-basis: 100%; margin: 0; padding: 0 0 0 1rem; font-size: 0.9em; }
+.standinoffers li { border: 0; padding: 0; }
 .draftsection .eventpool { min-width: 0; overflow-wrap: anywhere; }
 .draftsection h4 { margin: var(--sp-3) 0 0; }
 .maketeams { display: flex; flex-direction: column; gap: var(--sp-3); }

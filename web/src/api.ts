@@ -2053,6 +2053,16 @@ export interface MyEventView {
   signup?: MySignupView | null;
   offer?: { expiresAt: string } | null;
 }
+export type StandinScope = 'match' | 'event';
+export type StandinStatus = 'open' | 'filled' | 'unfilled' | 'cancelled' | 'ended';
+export interface StandinRequestView { id: number; out: { steamid: string; name: string }; scope: StandinScope; status: StandinStatus; asked: number; standin: string | null; requestedAt: string; marginOff: boolean }
+export interface MyStandinView {
+  offer: { offerId: number; team: string; out: string; scope: StandinScope; expiresAt: string } | null;
+  captain: { entryId: number; team: string; starters: { steamid: string; name: string; captain: boolean }[]; requests: StandinRequestView[]; open: boolean; canMatch: boolean } | null;
+}
+export interface AdminStandinOfferView { steamid: string; name: string; sr: number; answer: string | null; offeredAt: string; expiresAt: string }
+export interface AdminStandinView extends StandinRequestView { entryId: number; team: string; margin: number; offers: AdminStandinOfferView[] }
+export interface AdminStandinsView { margin: number; open: boolean; teams: { entryId: number; name: string; starters: { steamid: string; name: string }[] }[]; requests: AdminStandinView[] }
 export const entryLogoUrl = (key: string): string => `/api/events/logos/${key}.png`;
 
 // ---------- the match room (tournaments plan T3a; mirrors src/events/roomViews.ts) ----------
@@ -2139,6 +2149,11 @@ export const eventsApi = {
   list: (signal?: AbortSignal) => get<{ events: EventListItem[] }>('/api/events', signal),
   get: (slug: string, signal?: AbortSignal) => get<EventView>(`/api/events/${enc(slug)}`, signal),
   mine: (slug: string, signal?: AbortSignal) => get<MyEventView>(`/api/events/${enc(slug)}/mine`, signal),
+  /** Bench stand-ins (drafts plan D3a). */
+  standins: (slug: string, signal?: AbortSignal) => get<MyStandinView>(`/api/events/${enc(slug)}/standins`, signal),
+  requestStandin: (slug: string, body: { entryId: number; out: string; scope: StandinScope }) => post<{ requestId: number }>(`/api/events/${enc(slug)}/standins`, body),
+  cancelStandin: (slug: string, id: number) => post(`/api/events/${enc(slug)}/standins/${id}/cancel`),
+  answerStandin: (slug: string, offerId: number, accept: boolean) => post(`/api/events/${enc(slug)}/standin-offers/${offerId}`, { accept }),
   register: (slug: string, teamId: number, roster: EntryRoster) => post<{ id: number }>(`/api/events/${enc(slug)}/entries`, { teamId, roster }),
   setRoster: (slug: string, entryId: number, roster: EntryRoster) => post(`/api/events/${enc(slug)}/entries/${entryId}/roster`, { roster }),
   withdraw: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/withdraw`),
@@ -2693,6 +2708,12 @@ export const adminApi = {
   /** D2c addendum: staff make another starter a draft team's captain. */
   setEntryCaptain: (id: number, entryId: number, steamid: string) =>
     post<{ from: string; to: string }>(`/api/admin/events/${id}/entries/${entryId}/captain`, { steamid }),
+  /** Plan D3a: bench stand-ins on the desk. */
+  eventStandins: (id: number, signal?: AbortSignal) => get<AdminStandinsView>(`/api/admin/events/${id}/standins`, signal),
+  requestStandinFor: (id: number, body: { entryId: number; out: string; scope: StandinScope }) => post<{ requestId: number }>(`/api/admin/events/${id}/standins`, body),
+  cancelStandinFor: (id: number, rid: number) => post(`/api/admin/events/${id}/standins/${rid}/cancel`),
+  standinMarginOff: (id: number, rid: number) => post<{ reopened: boolean }>(`/api/admin/events/${id}/standins/${rid}/margin-off`),
+  setStandinMargin: (id: number, margin: number) => post<{ margin: number }>(`/api/admin/events/${id}/standin-margin`, { margin }),
   /** The Play section (plan T2 Ruling 17). */
   eventPlay: (id: number, signal?: AbortSignal) => get<AdminEventPlay>(`/api/admin/events/${id}/play`, signal),
   startEvent: (id: number) => post(`/api/admin/events/${id}/start`),

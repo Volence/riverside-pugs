@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/preact';
 import type { EventView } from '../api';
 
-const { mockEvents } = vi.hoisted(() => ({ mockEvents: { list: vi.fn(), get: vi.fn(), mine: vi.fn(), prefs: vi.fn() } }));
+const { mockEvents } = vi.hoisted(() => ({ mockEvents: { list: vi.fn(), get: vi.fn(), mine: vi.fn(), prefs: vi.fn(), standins: vi.fn(async () => ({ offer: null, captain: null })) } }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
   return { ...actual, eventsApi: mockEvents };
