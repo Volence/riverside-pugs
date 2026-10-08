@@ -10,6 +10,7 @@ import { competitiveAccess } from '../teams/access.js';
 import { activeMembers, getTeam, normalizeName, normalizeTag } from '../teams/teams.js';
 import * as E from './events.js';
 import * as D from './drafts.js';
+import { roomOf } from './draftRoom.js';
 import * as R from './entryRules.js';
 import * as Room from './room.js';
 import * as V from './validate.js';
@@ -396,6 +397,8 @@ export function createDraftEntries(db: DB, o: { eventId: number; actor: string; 
     if (ev.teams_made_at !== null) return V.fail('teams_made');
     if (ev.status !== 'registration' && ev.status !== 'checkin') return V.fail('wrong_status');
     if (ev.cut_at === null) return V.fail('cut_not_published');
+    // Plan D2b1 Ruling 19: a live draft publishes only once its room is done.
+    if (ev.team_mode === 'live' && roomOf(db, ev.id)?.status !== 'done') return V.fail('draft_not_done');
     const teams = D.draftTeamsOf(db, ev.id);
     if (!teams || teams.length < 2 || teams.length !== ev.draft_teams || teams.some((t) => t.players.length !== R.STARTERS - 1)) return V.fail('teams_changed');
     const checkedIn = E.fieldsOf(ev).checkin.enabled;
