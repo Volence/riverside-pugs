@@ -24,6 +24,7 @@ afterEach(() => { cleanup(); for (const f of Object.values(mockTeams)) f.mockRes
 const view = (over: Partial<TeamView> = {}): TeamView => ({
   slug: 'rats', name: 'Riverside Rats', tag: 'RR', logoKey: null, createdAt: '2026-10-01T00:00:00.000Z', disbandedAt: null,
   captain: '1',
+  origin: null,
   members: [
     { steamid: '1', name: 'cap', avatar: null, role: 'captain', joinedAt: '2026-10-01T00:00:00.000Z' },
     { steamid: '2', name: 'bob', avatar: null, role: 'member', joinedAt: '2026-10-02T00:00:00.000Z' },
@@ -36,6 +37,14 @@ const view = (over: Partial<TeamView> = {}): TeamView => ({
 const session = (steamid: string) => ({ kind: 'active', me: { steamid, name: 'x', avatar: null, status: 'active', isAdmin: false, teams: true } }) as never;
 
 describe('Team', () => {
+  it('says where a kept draft team was formed', async () => {
+    mockTeams.get.mockResolvedValue(view({ origin: { eventSlug: 'draft-night', eventName: 'Draft Night', placement: 2 } }));
+    render(<Team slug="rats" session={session('9')} />);
+    expect((await screen.findByRole('link', { name: 'Draft Night' })).getAttribute('href')).toBe('/event/draft-night');
+    expect(screen.getByText(/Formed at/)).toBeTruthy();
+    expect(screen.getByText(/\(2nd\)/)).toBeTruthy();
+  });
+
   it('shows the roster and former players to anyone, with no controls', async () => {
     mockTeams.get.mockResolvedValue(view());
     render(<Team slug="rats" session={session('9')} />);

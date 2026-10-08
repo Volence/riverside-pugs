@@ -6,6 +6,7 @@ import { inGoodStanding } from '../standing.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { competitiveAccess, competitivePublic } from '../teams/access.js';
 import * as T from '../teams/teams.js';
+import { keptFrom } from '../events/keepTeam.js';
 import { checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
 import { teamScrims } from '../bookings/games.js';
 import { seesBooking } from '../bookings/bookings.js';
@@ -21,6 +22,8 @@ export interface InviteItem { id: number; slug: string; name: string; tag: strin
 export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: T.TeamRole; joinedAt: string }
 export interface TeamView {
   slug: string; name: string; tag: string; logoKey: string | null; createdAt: string; disbandedAt: string | null;
+  /** Drafts plan D3b: the draft event a kept team was formed at, with its placement; null for any other team. */
+  origin: { eventSlug: string; eventName: string; placement: number | null } | null;
   captain: string; members: TeamMemberView[]; former: { steamid: string; name: string; leftAt: string }[];
   viewer: { role: T.TeamRole | null; staff: boolean };
   manage: { invites: { id: number; steamid: string; name: string; createdAt: string }[]; joinLinkToken: string | null } | null;
@@ -184,6 +187,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     const view: TeamView = {
       slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, createdAt: t.created_at, disbandedAt: t.disbanded_at,
       captain: t.captain_steamid,
+      origin: keptFrom(db, t.id),
       members: T.activeMembers(db, t.id).map((m) => {
         const p = getPlayer(db, m.steamid);
         return { steamid: m.steamid, name: p?.name ?? m.steamid, avatar: p?.avatar ?? null, role: m.role, joinedAt: m.joined_at };

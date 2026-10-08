@@ -152,6 +152,7 @@ import { CommunityStore } from './community/store.js';
 import { sweepCommunity } from './community/sweep.js';
 import { teamRoutes } from './routes/teams.js';
 import { eventRoutes } from './routes/events.js';
+import { keepRoutes } from './routes/keepTeam.js';
 import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
 import { handleStandinButton } from './discord/standinButtons.js';
 import { handleKeepButton } from './discord/keepButtons.js';
@@ -2151,6 +2152,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // Events (tournaments plan T1a/T1b): the public pages and entry routes,
   // behind the competitive switch.
   await app.register(eventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock, series });
+  await app.register(keepRoutes, { db: deps.db, notifier, publicUrl: deps.config.publicUrl });
   // Caster studio: the producer panel and the OBS overlay feed.
   await app.register(castStudioRoutes, { db: deps.db, config: deps.config, store: getCommunityStore, hub });
 
