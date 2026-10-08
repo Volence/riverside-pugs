@@ -153,6 +153,7 @@ import { sweepCommunity } from './community/sweep.js';
 import { teamRoutes } from './routes/teams.js';
 import { eventRoutes } from './routes/events.js';
 import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
+import { handleStandinButton } from './discord/standinButtons.js';
 import { BookingRunner, TICK_MS as BOOKING_TICK_MS } from './bookings/runner.js';
 import { BookingVoice } from './bookings/voice.js';
 import { Notifier } from './notify/notify.js';
@@ -163,6 +164,8 @@ import { adminRulesetRoutes } from './routes/adminRulesets.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
 import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
 import { RoomClock, ROOM_TICK_MS } from './events/roomClock.js';
+import { STANDIN_TICK_MS, Standins } from './events/standinFlow.js';
+import { STANDIN_BUTTON_PREFIX } from './events/draftRules.js';
 import { DraftClock, DRAFT_TICK_MS } from './events/draftClock.js';
 import { draftRoomRoutes } from './routes/draftRoom.js';
 import { SeriesEngine, lateHooks } from './events/series.js';
@@ -1736,6 +1739,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let appealSync: AppealSync | null = null;
   let appealButton: AppealButton | null = null;
   let reporterChats: ReporterChats | null = null;
+  let standinsRef: Standins | null = null;
   let scrimPoster: ScrimPoster | null = null;
   // Only where a real listener exists to feed it. `bot` is read per drop,
   // because the bot logs in some seconds after this line runs, and stays null
@@ -1855,6 +1859,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         'ap:': (i) => handleAppealButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
         [MOD_CALL_PREFIX]: (i) => modCalls!.handleButton(i),
         [TEAM_BUTTON_PREFIX]: (i) => handleTeamButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
+        [STANDIN_BUTTON_PREFIX]: (i) => handleStandinButton({ db: deps.db, publicUrl: deps.config.publicUrl, standins: () => standinsRef }, i),
       },
       extraModals: {
         't:': (i) => handleTicketModal({ db: deps.db, publicUrl: deps.config.publicUrl, chats: () => deps.reporterChats ?? reporterChats }, i),
@@ -2092,6 +2097,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // The Events desk (tournaments plan T1a): staff read, admins write, not behind the switch.
   await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock, series });
+  // Drafts plan D3a: bench stand-ins. Offers go out by DM one at a time; the
+  // tick expires due ones, asks the next player, and ends match stand-ins
+  // whose match is over. Accepts go through the series engine, which asks a
+  // game server first when the change touches a game on it.
+  const standins = new Standins({ db: deps.db, notifier, publicUrl: deps.config.publicUrl, series, rooms: roomClock });
+  standinsRef = standins;
+  const standinTick = setInterval(() => standins.tick(), STANDIN_TICK_MS);
+  standinTick.unref();
+  app.addHook('onClose', async () => { clearInterval(standinTick); });
   // Drafts plan D2b1: the live draft room. Its state lives in the database
   // with stored deadlines, so the clock only holds presence and a restart
   // resumes the draft; every second it auto-picks overdue picks. A change is

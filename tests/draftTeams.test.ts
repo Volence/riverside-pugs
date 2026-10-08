@@ -439,7 +439,7 @@ describe('publishing the teams over HTTP', () => {
       const others = t.players.map((p) => name(p.steamid));
       const team = `Team ${name(t.captain.steamid)}`;
       return [
-        { to: [t.captain.steamid], type: 'draft_team_made', content: `Your team in Draft Night is set: ${others[0]}, ${others[1]} and ${others[2]}. Name your team and upload a logo before the event starts: ${link}` },
+        { to: [t.captain.steamid], type: 'draft_team_made', content: `Your team in Draft Night is set: ${others[0]}, ${others[1]} and ${others[2]}. Name your team and upload a logo before the event starts: ${link} If one of them cannot make a match, press their stand-in button below and the bench is asked.` },
         { to: t.players.map((p) => p.steamid), type: 'draft_team_made', content: `You are on ${team} in Draft Night, captained by ${name(t.captain.steamid)}. Your captain can rename the team before the event starts: ${link}` },
       ];
     }));
