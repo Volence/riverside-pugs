@@ -401,7 +401,7 @@ export function DraftOnAir({ drafts, state, update }: { drafts: StudioPickDraft[
                   <b>{d.name}</b>
                   <span class={`studio__state studio__state--${DRAFT_STATUS_CLASS[d.status]}`}>{DRAFT_STATUS_LABEL[d.status]}</span>
                 </span>
-                <span class="studio__pick-teams"><span>{`${d.picks} of ${d.totalPicks} picks`}</span></span>
+                <span class="studio__pick-count">{`${d.picks} of ${d.totalPicks} picks`}</span>
               </button>
             );
           })}
