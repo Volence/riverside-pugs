@@ -24,6 +24,8 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   const [v, setV] = useState<DraftRoomView | null>(null);
   const [missing, setMissing] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [lost, setLost] = useState(false);
+  const hasView = useRef(false);
   const [busy, setBusy] = useState(false);
   const [offset, setOffset] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -35,6 +37,9 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   const wasOnClock = useRef(false);
 
   const load = () => eventsApi.draftRoom(slug).then((x) => {
+    hasView.current = true;
+    setMissing(null);
+    setLost(false);
     setV(x);
     setOffset(Date.parse(x.serverNow) - Date.now());
     setNow(Date.now());
@@ -45,6 +50,8 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
     if (x.me.onClock && !wasOnClock.current) playPopSound();
     wasOnClock.current = x.me.onClock;
   }, (e) => {
+    // Once the board is up, a failed refetch keeps it and says so; only a first load can be "missing".
+    if (hasView.current) { setLost(true); return; }
     setMissing(e instanceof ApiError && e.status === 404 ? 'No such draft.'
       : e instanceof ApiError && e.status === 409 ? 'The draft room opens once the cut is published.' : 'Could not load the draft room.');
   });
@@ -109,6 +116,7 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
         <p class="room__sub"><a href={`/event/${v.slug}`}>Back to the event</a></p>
       </PageHeader>
       {problem && <p class="error" role="alert">{problem}</p>}
+      {lost && <p class="muted" role="status">Lost contact with the site, retrying.</p>}
       {reveal && (
         <div class="draftreveal" role="status">
           <span class="draftreveal__pick">{`Pick ${reveal.pickNo}`}</span>

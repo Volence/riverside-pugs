@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ApiError, eventsApi, type DraftCardsView } from '../../../api';
 
-/** The captain's (or delegate's) ordered pick list (drafts plan D2b1
+/** The captain's ordered pick list (staff read it on the desk) (drafts plan D2b1
  *  Rulings 1, 2, 13): Up, Down, Remove, Add and an explicit Save, so one
  *  reorder is not one server write. */
 export function PickListDrawer({ slug, onClose }: { slug: string; onClose: () => void }) {
