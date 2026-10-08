@@ -18,6 +18,8 @@ import * as D from '../src/events/drafts.js';
 import { P as DP, draftFixture, type DraftFixture } from './draftFixture.js';
 import * as DR from '../src/events/draftRoom.js';
 import { ALL, CAPTAINS, POOL, T0, at, drive, liveDraft, startedDraft } from './draftRoomFixture.js';
+import * as ST from '../src/events/standins.js';
+import { standinFixture, type StandinFixture } from './standinFixture.js';
 
 /**
  * Spec, Error handling: every event state change is one transaction with an
@@ -576,6 +578,85 @@ describe('event_log guard', () => {
         expect(() => m.run(f)).toThrow(/audit down/);
         expect(roomRows(f)).toBe(before);
         expect(logCount(f)).toBe(logs);
+      });
+    }
+  });
+
+  /** Drafts plan D3a: src/events/standins.ts is the only writer of the
+   *  stand-in tables; each mutation adds one event_log row or, when that row
+   *  cannot be written, nothing. markPlaced and markEnded are helpers that
+   *  entries.ts calls inside its own logged transactions (Task 3 guards them
+   *  there). */
+  describe('stand-in guard (src/events/standins.ts)', () => {
+    const STANDIN_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+(?:draft_standins|draft_standin_offers)\b/gi;
+    const STANDIN_READS = new Set(['requestOf', 'offerOf', 'openOfferOf', 'openRequestFor', 'requestsOf', 'offersOf', 'openRequests',
+      'endableStandins', 'standinsOpen', 'matchStandins', 'nextMatchOf', 'unfilledCount', 'withStandins']);
+    const STANDIN_HELPERS = new Set(['markPlaced', 'markEnded']);
+    const must = <T>(r: V.Checked<T>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
+    const OUT = DP[11]!;
+    const entryOfOut = (f: StandinFixture) => N.entryOfPlayer(f.db, f.eventId, OUT)!;
+    const requested = (): Pick<Setup, 'f' | 'requestId'> => {
+      const f = standinFixture();
+      const e = entryOfOut(f);
+      const { requestId } = must(ST.requestStandin(f.db, { eventId: f.eventId, entryId: e.id, out: OUT, scope: 'event', by: e.captain_steamid!, staff: false, now: NOW }));
+      return { f, requestId };
+    };
+    const offered = (): Setup => {
+      const x = requested();
+      const step = must(ST.offerNextStandin(x.f.db, { requestId: x.requestId, now: NOW, minutes: 10 }));
+      return { ...x, offerId: step.offerId!, steamid: step.offered! };
+    };
+    const LATE = new Date(NOW.getTime() + 11 * 60_000);
+    type Setup = { f: StandinFixture; requestId: number; offerId: number; steamid: string };
+    const STANDIN_MUTATIONS: Record<string, { action: string; setup: () => Pick<Setup, 'f'> & Partial<Setup>; run: (x: Setup) => V.Checked<unknown> }> = {
+      requestStandin: {
+        action: 'standin_requested', setup: () => ({ f: standinFixture() }),
+        run: ({ f }) => { const e = entryOfOut(f); return ST.requestStandin(f.db, { eventId: f.eventId, entryId: e.id, out: OUT, scope: 'event', by: e.captain_steamid!, staff: false, now: NOW }); },
+      },
+      offerNextStandin: { action: 'standin_offered', setup: requested, run: ({ f, requestId }) => ST.offerNextStandin(f.db, { requestId, now: NOW, minutes: 10 }) },
+      expireStandinOffer: { action: 'standin_offer_expired', setup: offered, run: ({ f, requestId }) => ST.expireStandinOffer(f.db, { requestId, now: LATE }) },
+      declineStandinOffer: { action: 'standin_declined', setup: offered, run: ({ f, offerId, steamid }) => ST.declineStandinOffer(f.db, { offerId, steamid, now: NOW }) },
+      cancelStandin: { action: 'standin_cancelled', setup: offered, run: ({ f, requestId }) => ST.cancelStandin(f.db, { requestId, by: ADMIN, staff: true, now: NOW }) },
+      setStandinMarginOff: { action: 'standin_margin_lifted', setup: requested, run: ({ f, requestId }) => ST.setStandinMarginOff(f.db, { requestId, actor: ADMIN, now: NOW }) },
+      failStandinOffer: { action: 'standin_offer_failed', setup: offered, run: ({ f, offerId }) => ST.failStandinOffer(f.db, { offerId, why: 'player_entered', cancel: false, now: NOW }) },
+    };
+    const standinRows = (f: StandinFixture) => JSON.stringify([
+      f.db.prepare('SELECT * FROM draft_standins ORDER BY id').all(),
+      f.db.prepare('SELECT * FROM draft_standin_offers ORDER BY id').all(),
+    ]);
+
+    it('only src/events/standins.ts writes the stand-in tables', () => {
+      const offenders = walk('src')
+        .filter((f) => f !== 'src/events/standins.ts')
+        .filter((f) => (readFileSync(join(root, f), 'utf8').match(STANDIN_WRITERS) ?? []).length > 0);
+      expect(offenders).toEqual([]);
+      expect('update draft_standin_offers set answer = ?'.match(STANDIN_WRITERS)).toHaveLength(1);
+    });
+
+    it('every exported function of standins.ts is a known read, a helper, or a guarded mutation', () => {
+      const fns = Object.entries(ST).filter(([, v]) => typeof v === 'function').map(([k]) => k);
+      expect(fns.filter((k) => !STANDIN_READS.has(k) && !STANDIN_HELPERS.has(k)).sort()).toEqual(Object.keys(STANDIN_MUTATIONS).sort());
+      expect(fns.filter((k) => STANDIN_HELPERS.has(k)).sort()).toEqual([...STANDIN_HELPERS].sort());
+    });
+
+    for (const [name, m] of Object.entries(STANDIN_MUTATIONS)) {
+      it(`${name} writes exactly one event_log row, ${m.action}`, () => {
+        const x = m.setup();
+        const before = logCount(x.f);
+        const r = m.run(x as Setup);
+        expect(r.ok, r.ok ? '' : r.error).toBe(true);
+        expect(logCount(x.f)).toBe(before + 1);
+        expect(x.f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: m.action });
+      });
+
+      it(`${name} writes nothing when its event_log row cannot be written`, () => {
+        const x = m.setup();
+        const before = standinRows(x.f);
+        const logs = logCount(x.f);
+        x.f.db.exec("CREATE TRIGGER standin_log_down BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+        expect(() => m.run(x as Setup)).toThrow(/audit down/);
+        expect(standinRows(x.f)).toBe(before);
+        expect(logCount(x.f)).toBe(logs);
       });
     }
   });
