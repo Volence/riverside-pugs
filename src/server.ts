@@ -163,6 +163,8 @@ import { adminRulesetRoutes } from './routes/adminRulesets.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
 import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
 import { RoomClock, ROOM_TICK_MS } from './events/roomClock.js';
+import { DraftClock, DRAFT_TICK_MS } from './events/draftClock.js';
+import { draftRoomRoutes } from './routes/draftRoom.js';
 import { SeriesEngine, lateHooks } from './events/series.js';
 import { getMatch as getEventMatch } from './events/play.js';
 import { isParticipant as isRoomParticipant } from './events/room.js';
@@ -2090,6 +2092,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // The Events desk (tournaments plan T1a): staff read, admins write, not behind the switch.
   await app.register(adminEventRoutes, { db: deps.db, store: getCommunityStore, notifier, publicUrl: deps.config.publicUrl, rooms: roomClock, series });
+  // Drafts plan D2b1: the live draft room. Its state lives in the database
+  // with stored deadlines, so the clock only holds presence and a restart
+  // resumes the draft; every second it auto-picks overdue picks. A change is
+  // broadcast as draft:<eventId>, which only the room page and the desk
+  // controls listen for (useLiveState ignores it).
+  const draftClock = new DraftClock({ db: deps.db, push: (eventId) => hub.broadcast(`draft:${eventId}`) });
+  const draftTick = setInterval(() => draftClock.tick(), DRAFT_TICK_MS);
+  draftTick.unref();
+  app.addHook('onClose', async () => { clearInterval(draftTick); });
+  await app.register(draftRoomRoutes, { db: deps.db, clock: draftClock, notifier, publicUrl: deps.config.publicUrl });
 
   // Setup > Rulesets and Game configs (rulesets editor plan): admins only.
   await app.register(adminRulesetRoutes, { db: deps.db });

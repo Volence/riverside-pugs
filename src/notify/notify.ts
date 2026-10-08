@@ -20,7 +20,7 @@ export type NotifyType =
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
-  | 'draft_captain_set_new' | 'draft_captain_set_old';
+  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open';
 
 export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'booking_invite', label: 'Someone invites me to a booked server' },
@@ -56,6 +56,7 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'draft_roster_changed', label: 'Draft: a player on your team was replaced' },
   { type: 'draft_captain_set_new', label: 'Draft: made your team\'s captain by staff' },
   { type: 'draft_captain_set_old', label: 'Draft: your team has a new captain' },
+  { type: 'draft_room_open', label: 'Draft: the live draft room opened' },
 ];
 
 export function isNotifyType(v: unknown): v is NotifyType {

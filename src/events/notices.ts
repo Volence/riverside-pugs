@@ -144,3 +144,9 @@ export function tellTeamMade(d: NoticeDeps, eventId: number, entries: number[]):
     tell(d, N.rosterOf(d.db, id).starters.filter((s) => s !== captain), eventId, 'draft_team_made', { entryId: id });
   }
 }
+
+/** The live draft room started (drafts plan D2b1 Ruling 11): every captain,
+ *  in pick order, with the room link. */
+export function tellDraftRoomOpen(d: NoticeDeps, eventId: number, captains: string[]): void {
+  tell(d, captains, eventId, 'draft_room_open', {});
+}
