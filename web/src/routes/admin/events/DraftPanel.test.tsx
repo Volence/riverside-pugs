@@ -57,6 +57,14 @@ describe('DraftPanel', () => {
     expect(screen.getAllByText(/\(did not volunteer\)/)).toHaveLength(1);
   });
 
+  it('keeps the signups table in a scroll wrapper so it cannot widen the page at phone width', async () => {
+    mockAdmin.eventDraft.mockResolvedValue(view({ signups: [su({}), su({ steamid: '2', name: 'Bob' })] }));
+    const { container } = render(<DraftPanel eventId={9} canEdit />);
+    await screen.findByText('Bob');
+    const table = container.querySelector('table.admin-table');
+    expect(table?.closest('.table-wrap')).not.toBeNull();
+  });
+
   it('with fewer than 8 signups tells staff to cancel and offers no team count', async () => {
     mockAdmin.eventDraft.mockResolvedValue(view({
       teams: 1, maxTeams: 1, problems: ['too_few_teams'],
