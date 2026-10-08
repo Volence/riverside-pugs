@@ -8,6 +8,14 @@ export type Session =
   | { kind: 'pending'; me: Me }
   | { kind: 'active'; me: Me };
 
+/** Whether a hub event should refetch the queue state. A draft room's change
+ *  (draft:<eventId>, drafts plan D2b1) can come every few seconds and only
+ *  the room page and the desk controls want it; they listen with
+ *  useHubEvent. */
+export function wakesLiveState(name: string | null): boolean {
+  return name === null || !name.startsWith('draft:');
+}
+
 /** Live queue/lobby/match state, refreshed on every websocket nudge.
  *
  *  The wire protocol is unchanged from the vanilla frontend and unchanged by 4a:
@@ -68,12 +76,14 @@ export function useLiveState(): {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
       ws.onmessage = (m) => {
+        const name = eventName(m.data);
         // 'tickets' is for ticket pages, goes only to staff, and says nothing
         // about the queue: pass it on and leave the live state alone.
-        if (eventName(m.data) === 'tickets') {
+        if (name === 'tickets') {
           window.dispatchEvent(new Event(TICKETS_EVENT));
           return;
         }
+        if (!wakesLiveState(name)) return;
         refreshRef.current();
       };
       ws.onclose = () => {

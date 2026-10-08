@@ -3518,6 +3518,59 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 }
 .chip--ok { border-color: var(--win); color: var(--win); }
 .chip--bad { border-color: var(--loss); color: var(--loss); }
+
+/* Drafts plan D2b1: the live draft room. */
+.draftroom { display: flex; flex-direction: column; gap: var(--sp-4); }
+.draftclock { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.draftclock p { margin: 0; }
+.draftclock__who { font-family: var(--font-label); font-size: var(--fs-h3); color: var(--text-bright); overflow-wrap: anywhere; }
+.draftclock__time { font-family: var(--font-display); font-size: clamp(3rem, 14vw, var(--fs-hero)); line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+.draftboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--sp-3); }
+.draftboard__team { padding: var(--sp-3); border: 1px solid var(--border); background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
+.draftboard__team.is-up { border-color: var(--accent); }
+.draftboard__team h4 { margin: 0 0 var(--sp-2); }
+.draftboard__slots { margin: 0; padding-left: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
+.draftpool__tools { margin-bottom: var(--sp-3); }
+.draftpool__tools input { flex: 1 1 12rem; min-width: 0; }
+.draftpool { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-3); }
+.draftcard { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3); border: 1px solid var(--border); background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
+.draftcard__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); }
+.draftcard__name { margin: 0; min-width: 0; }
+.draftcard__sr { color: var(--rating); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.draftcard__line, .draftcard__note, .draftcard__form { margin: 0; font-size: var(--fs-dense); }
+.draftcard__note { color: var(--text-bright); }
+.draftcard__form { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.draftcard__res--W { border-color: var(--win); color: var(--win); }
+.draftcard__res--L { border-color: var(--loss); color: var(--loss); }
+.draftcard__res--D { color: var(--draw); }
+.draftlog { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); }
+.draftlog li { overflow-wrap: anywhere; }
+.draftlog .chip { margin-left: var(--sp-2); }
+.draftreveal {
+  position: fixed; left: 50%; top: var(--sp-6); transform: translateX(-50%); z-index: 20;
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); padding: var(--sp-4) var(--sp-5);
+  max-width: calc(100vw - 2 * var(--sp-4)); box-sizing: border-box; text-align: center; overflow-wrap: anywhere;
+  background: var(--surface); border: 1px solid var(--accent); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  animation: draftreveal 0.35s ease-out;
+}
+.draftreveal__pick { font-family: var(--font-label); font-size: var(--fs-label); color: var(--text-muted); text-transform: uppercase; }
+.draftreveal__name { font-family: var(--font-display); font-size: var(--fs-h2); color: var(--text-bright); }
+@keyframes draftreveal {
+  from { opacity: 0; transform: translate(-50%, -12px) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .draftreveal { animation: none; } }
+.picklist {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); box-sizing: border-box; z-index: 30; overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4);
+  background: var(--surface); border-left: 1px solid var(--border-strong);
+}
+.picklist__head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.picklist__head h3, .picklist p { margin: 0; }
+.picklist__rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.picklist__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
+.picklist__name { flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
+.picklist__add { display: flex; flex-direction: column; gap: var(--sp-1); }
 /* Plan T3a: a team's match prep on the event page (PrepPanel.tsx), what the
    room's timers act from. Default four, side and one block per stage's
    campaign order; buttons wrap under the name at phone width so nothing

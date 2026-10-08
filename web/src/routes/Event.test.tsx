@@ -118,6 +118,20 @@ describe('EventPage', () => {
     expect(screen.queryByText(/signed up/)).toBeNull();
   });
 
+  it('links the draft room once the cut is published, and not before', async () => {
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft', status: 'registration',
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 5, names: [], cut: { captains: ['Alice'], pool: ['Bob', 'Cy', 'Di'], bench: ['Ed'] } },
+    }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    expect((await screen.findByRole('link', { name: 'Draft room' })).getAttribute('href')).toBe('/event/riverside-cup/draft');
+    cleanup();
+    mockEvents.get.mockResolvedValue(view({ entryKind: 'draft', status: 'registration', draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 1, names: ['Ann'], cut: null } }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    await screen.findByText('1 signed up');
+    expect(screen.queryByRole('link', { name: 'Draft room' })).toBeNull();
+  });
+
   it('a cancelled event says so, with the reason, and no countdown', async () => {
     mockEvents.get.mockResolvedValue(view({ status: 'cancelled', cancelReason: 'Not enough teams' }));
     render(<EventPage slug="riverside-cup" session={session} />);
