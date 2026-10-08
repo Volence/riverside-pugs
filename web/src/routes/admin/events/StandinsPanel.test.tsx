@@ -49,4 +49,17 @@ describe('StandinsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask the bench' }));
     await waitFor(() => expect(mockAdmin.requestStandinFor).toHaveBeenCalledWith(9, { entryId: 7, out: 'a', scope: 'event' }));
   });
+
+  it('an empty margin cannot be saved as 0', async () => {
+    mockAdmin.eventStandins.mockResolvedValue(view());
+    render(<StandinsPanel eventId={9} canEdit />);
+    await screen.findByText(/Night Owls · ann/);
+    fireEvent.input(screen.getByLabelText('SR margin'), { target: { value: '' } });
+    const save = screen.getByRole('button', { name: 'Save margin' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(mockAdmin.setStandinMargin).not.toHaveBeenCalled();
+    fireEvent.input(screen.getByLabelText('SR margin'), { target: { value: '0' } });
+    expect(save.disabled).toBe(false);
+  });
 });

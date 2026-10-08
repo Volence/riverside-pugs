@@ -19,13 +19,16 @@ export function StandinPanel({ slug }: { slug: string }) {
   const [scope, setScope] = useState<StandinScope>('match');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const run = async (fn: () => Promise<unknown>) => {
+  /** Whether it went through. */
+  const run = async (fn: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true);
     setError('');
     try {
       await fn();
+      return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');
+      return false;
     } finally {
       setBusy(false);
       reload();
@@ -42,7 +45,7 @@ export function StandinPanel({ slug }: { slug: string }) {
       body: `The bench is asked for a stand-in for the rest of the event. Whoever accepts takes ${chosen.name}'s place on ${captain.team}.`,
       confirmLabel: 'Ask the bench',
     }))) return;
-    void run(() => eventsApi.requestStandin(slug, { entryId: captain.entryId, out: chosen.steamid, scope: wanted }));
+    if (await run(() => eventsApi.requestStandin(slug, { entryId: captain.entryId, out: chosen.steamid, scope: wanted }))) setOut('');
   };
   return (
     <Panel class="entrypanel standinpanel">
