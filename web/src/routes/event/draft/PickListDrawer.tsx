@@ -4,8 +4,10 @@ import { ApiError, eventsApi, type DraftCardsView } from '../../../api';
 
 /** The captain's ordered pick list (staff read it on the desk) (drafts plan D2b1
  *  Rulings 1, 2, 13): Up, Down, Remove, Add and an explicit Save, so one
- *  reorder is not one server write. */
-export function PickListDrawer({ slug, onClose }: { slug: string; onClose: () => void }) {
+ *  reorder is not one server write. available is the room's free pool: a
+ *  player picked since (or no longer in the pool) leaves the list, the Add
+ *  choices and the save (controller ruling, Task 9). */
+export function PickListDrawer({ slug, available, onClose }: { slug: string; available?: string[]; onClose: () => void }) {
   const [cards, setCards] = useState<DraftCardsView | null>(null);
   const [list, setList] = useState<string[]>([]);
   const [saved, setSaved] = useState<string | null>(null);
@@ -19,8 +21,11 @@ export function PickListDrawer({ slug, onClose }: { slug: string; onClose: () =>
     );
   }, [slug]);
 
+  const free = available ? new Set(available) : null;
+  const isFree = (s: string) => free === null || free.has(s);
+  const shown = list.filter(isFree);
   const nameOf = (s: string) => cards?.cards.find((c) => c.steamid === s)?.name ?? s;
-  const edit = (fn: (l: string[]) => string[]) => { setSaved(null); setList(fn); };
+  const edit = (fn: (l: string[]) => string[]) => { setSaved(null); setList((l) => fn(l.filter(isFree))); };
   const move = (i: number, d: -1 | 1) => edit((l) => {
     const j = i + d;
     if (j < 0 || j >= l.length) return l;
@@ -32,7 +37,7 @@ export function PickListDrawer({ slug, onClose }: { slug: string; onClose: () =>
     setBusy(true);
     setProblem(null);
     try {
-      const r = await eventsApi.saveDraftList(slug, list);
+      const r = await eventsApi.saveDraftList(slug, shown);
       setList(r.list);
       setSaved('Saved.');
     } catch (e) {
@@ -41,7 +46,7 @@ export function PickListDrawer({ slug, onClose }: { slug: string; onClose: () =>
       setBusy(false);
     }
   };
-  const rest = (cards?.cards ?? []).filter((c) => !list.includes(c.steamid)).sort((a, b) => b.sr - a.sr);
+  const rest = (cards?.cards ?? []).filter((c) => isFree(c.steamid) && !shown.includes(c.steamid)).sort((a, b) => b.sr - a.sr);
 
   return (
     <aside class="picklist" aria-label="My pick list">
@@ -51,13 +56,13 @@ export function PickListDrawer({ slug, onClose }: { slug: string; onClose: () =>
       </header>
       <p class="muted">Used if captains pick live: when your turn comes and you are away, or your clock runs out, the site takes the highest player on this list who is still free. With no list, it takes the highest SR.</p>
       {problem && <p class="error" role="alert">{problem}</p>}
-      {list.length === 0 ? <p class="empty">Your list is empty.</p> : (
+      {shown.length === 0 ? <p class="empty">Your list is empty.</p> : (
         <ol class="picklist__rows">
-          {list.map((s, i) => (
+          {shown.map((s, i) => (
             <li key={s} class="picklist__row">
               <span class="picklist__name">{`${i + 1}. ${nameOf(s)}`}</span>
               <button class="btn btn--ghost btn--sm" type="button" aria-label={`Move ${nameOf(s)} up`} disabled={i === 0} onClick={() => move(i, -1)}>Up</button>
-              <button class="btn btn--ghost btn--sm" type="button" aria-label={`Move ${nameOf(s)} down`} disabled={i === list.length - 1} onClick={() => move(i, 1)}>Down</button>
+              <button class="btn btn--ghost btn--sm" type="button" aria-label={`Move ${nameOf(s)} down`} disabled={i === shown.length - 1} onClick={() => move(i, 1)}>Down</button>
               <button class="btn btn--ghost btn--sm" type="button" aria-label={`Remove ${nameOf(s)}`} onClick={() => edit((l) => l.filter((x) => x !== s))}>Remove</button>
             </li>
           ))}

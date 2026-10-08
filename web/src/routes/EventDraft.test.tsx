@@ -106,9 +106,34 @@ describe('EventDraftPage', () => {
       onClock: { pickNo: 2, round: 1, captain: 'c2', picker: 'c2' },
     }));
     render(<EventDraftPage slug="night" session={session} />);
-    expect(await screen.findByText('#1 Ann took Gus')).toBeTruthy();
+    // One number only: the ordered list numbers the row, the text does not repeat it.
+    expect(await screen.findByText('Ann took Gus')).toBeTruthy();
+    expect(screen.queryByText(/#1/)).toBeNull();
     expect(screen.getByText('Auto')).toBeTruthy();
     expect(screen.getAllByText('Open')).toHaveLength(5);
+  });
+
+  it('labels the recent form row and spells out each result for screen readers and on hover', async () => {
+    mockEvents.draftRoom.mockResolvedValue(view({ pool: [{ ...card('p1', 'Bob', 1200), form: ['W', 'L', 'D'] }] }));
+    render(<EventDraftPage slug="night" session={session} />);
+    const row = await screen.findByLabelText('Recent form: Win, Loss, Draw');
+    expect(row.textContent).toContain('Last 3');
+    expect(screen.getByTitle('Win').textContent).toBe('W');
+    expect(screen.getByTitle('Loss').textContent).toBe('L');
+    expect(screen.getByTitle('Draw').textContent).toBe('D');
+  });
+
+  it('gives the pick list drawer only the players still free, so picked ones drop out', async () => {
+    mockEvents.draftRoom.mockResolvedValue(view({
+      pool: [card('p2', 'Cy', 1350), card('p3', 'Di', 1100)],
+      me: { role: 'captain', team: 'c1', onClock: false, list: ['p1', 'p2'], chemistry: null },
+    }));
+    mockEvents.draftCards.mockResolvedValue({ cards: [card('p1', 'Bob', 1200), card('p2', 'Cy', 1350), card('p3', 'Di', 1100)], notes: {}, chemistry: null });
+    mockEvents.draftList.mockResolvedValue({ list: ['p1', 'p2'] });
+    render(<EventDraftPage slug="night" session={session} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'My pick list' }));
+    expect(await screen.findByText('1. Cy')).toBeTruthy();
+    expect(screen.queryByText(/Bob/, { selector: '.picklist *' })).toBeNull();
   });
 
   it('filters the pool by name and sorts by name', async () => {

@@ -32,6 +32,20 @@ describe('PickListDrawer', () => {
     expect(await screen.findByText('Saved.')).toBeTruthy();
   });
 
+  it('drops players no longer available from the list, the Add choices and the save', async () => {
+    mockEvents.draftCards.mockResolvedValue({ cards: [card('p1', 'Bob', 1200), card('p2', 'Cy', 1350), card('p3', 'Di', 1100), card('p4', 'Ed', 1000)], notes: {}, chemistry: null });
+    mockEvents.draftList.mockResolvedValue({ list: ['p1', 'p2'] });
+    mockEvents.saveDraftList.mockResolvedValue({ list: ['p2'] });
+    render(<PickListDrawer slug="night" available={['p2', 'p3']} onClose={() => {}} />);
+    expect(await screen.findByText('1. Cy')).toBeTruthy();
+    expect(screen.queryByText(/Bob/)).toBeNull();
+    const options = [...(screen.getByLabelText('Add a player') as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).toEqual(['', 'p3']);
+    expect(screen.getByRole('button', { name: 'Move Cy down' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Save list' }));
+    await waitFor(() => expect(mockEvents.saveDraftList).toHaveBeenCalledWith('night', ['p2']));
+  });
+
   it('shows the server sentence when saving is refused', async () => {
     mockEvents.draftCards.mockResolvedValue({ cards: [card('p1', 'Bob', 1200)], notes: {}, chemistry: null });
     mockEvents.draftList.mockResolvedValue({ list: [] });

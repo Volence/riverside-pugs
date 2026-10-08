@@ -3541,7 +3541,10 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftcard__sr { color: var(--rating); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .draftcard__line, .draftcard__note, .draftcard__form { margin: 0; font-size: var(--fs-dense); }
 .draftcard__note { color: var(--text-bright); }
-.draftcard__form { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.draftcard__form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.draftcard__formlabel { margin-right: var(--sp-1); }
+/* Results are read, not pressed: compact letters, not the chip's 36/44px hit target, so ten fit a phone card. */
+.draftcard__res { min-height: 0; min-width: 1.5rem; padding: 2px 0; letter-spacing: 0; cursor: default; }
 .draftcard__res--W { border-color: var(--win); color: var(--win); }
 .draftcard__res--L { border-color: var(--loss); color: var(--loss); }
 .draftcard__res--D { color: var(--draw); }
