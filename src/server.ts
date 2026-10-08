@@ -165,6 +165,7 @@ import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
 import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
 import { RoomClock, ROOM_TICK_MS } from './events/roomClock.js';
 import { STANDIN_TICK_MS, Standins } from './events/standinFlow.js';
+import { standinRoutes } from './routes/standins.js';
 import { STANDIN_BUTTON_PREFIX } from './events/draftRules.js';
 import { DraftClock, DRAFT_TICK_MS } from './events/draftClock.js';
 import { draftRoomRoutes } from './routes/draftRoom.js';
@@ -2106,6 +2107,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const standinTick = setInterval(() => standins.tick(), STANDIN_TICK_MS);
   standinTick.unref();
   app.addHook('onClose', async () => { clearInterval(standinTick); });
+  await app.register(standinRoutes, { db: deps.db, standins });
   // Drafts plan D2b1: the live draft room. Its state lives in the database
   // with stored deadlines, so the clock only holds presence and a restart
   // resumes the draft; every second it auto-picks overdue picks. A change is
