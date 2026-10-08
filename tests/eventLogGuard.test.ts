@@ -285,6 +285,38 @@ describe('event_log guard', () => {
           return N.setDraftCaptain(f.db, { eventId: f.eventId, entryId, steamid: N.rosterOf(f.db, entryId).starters[1]!, actor: ADMIN, now: NOW });
         },
       },
+      // Plan D3a Task 3: DP[8] (not signed up by balancedDraft) put on the bench and offered the first team's second starter's place.
+      placeStandin: {
+        action: 'standin_placed',
+        setup: (f) => {
+          balancedDraft(f);
+          must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+          f.db.prepare("INSERT INTO draft_signups (event_id, steamid, captain_pref, created_at, role) VALUES (?, ?, 'no', ?, 'bench')").run(f.eventId, DP[8], NOW.toISOString());
+          const entryId = (f.db.prepare('SELECT id FROM event_entries ORDER BY id LIMIT 1').get() as { id: number }).id;
+          const { requestId } = must(ST.requestStandin(f.db, { eventId: f.eventId, entryId, out: N.rosterOf(f.db, entryId).starters[1]!, scope: 'event', by: ADMIN, staff: true, now: NOW }));
+          must(ST.setStandinMarginOff(f.db, { requestId, actor: ADMIN, now: NOW }));
+          must(ST.offerNextStandin(f.db, { requestId, now: NOW, minutes: 10 }));
+        },
+        run: (f) => {
+          const o = f.db.prepare('SELECT o.id, o.request_id FROM draft_standin_offers o WHERE o.answer IS NULL').get() as { id: number; request_id: number };
+          return N.placeStandin(f.db, { eventId: f.eventId, requestId: o.request_id, offerId: o.id, steamid: DP[8]!, acceptedAt: NOW, now: NOW });
+        },
+      },
+      // A filled match stand-in whose match is gone (test setup writes the rows directly).
+      endStandin: {
+        action: 'standin_ended',
+        setup: (f) => {
+          balancedDraft(f);
+          must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }));
+          const entryId = (f.db.prepare('SELECT id FROM event_entries ORDER BY id LIMIT 1').get() as { id: number }).id;
+          f.db.prepare("INSERT INTO event_entry_players (entry_id, steamid, role, added_at) VALUES (?, ?, 'sub', ?)").run(entryId, DP[8], NOW.toISOString());
+          f.db.prepare(
+            `INSERT INTO draft_standins (event_id, entry_id, out_steamid, scope, match_id, margin, status, requested_by, requested_at, filled_by)
+             VALUES (?, ?, ?, 'match', NULL, 100, 'filled', ?, ?, ?)`,
+          ).run(f.eventId, entryId, N.rosterOf(f.db, entryId).starters[1], ADMIN, NOW.toISOString(), DP[8]);
+        },
+        run: (f) => N.endStandin(f.db, { requestId: (f.db.prepare('SELECT id FROM draft_standins').get() as { id: number }).id, now: NOW }),
+      },
     };
 
     it('every exported function of entries.ts is a known read or a guarded mutation', () => {
@@ -307,6 +339,8 @@ describe('event_log guard', () => {
         f.db.prepare('SELECT * FROM event_entries ORDER BY id').all(),
         f.db.prepare('SELECT * FROM event_entry_players ORDER BY id').all(),
         f.db.prepare('SELECT * FROM events ORDER BY id').all(),
+        f.db.prepare('SELECT * FROM draft_standins ORDER BY id').all(),
+        f.db.prepare('SELECT * FROM draft_standin_offers ORDER BY id').all(),
       ]);
       it(`${name} writes exactly one event_log row, ${m.action}`, () => {
         const f = draftFixture();

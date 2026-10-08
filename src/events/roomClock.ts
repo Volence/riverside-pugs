@@ -9,6 +9,7 @@ import * as S from './schedule.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { forfeitMatch, stageTable } from './flow.js';
 import { tellReadyForfeit, tellReschedule, tellRoomOpen, tellTimeLocked } from './notices.js';
+import { matchStandins, withStandins } from './standins.js';
 import { autoAction, isHumanStep, other, type Side } from './veto.js';
 
 export const ROOM_TICK_MS = 5_000;
@@ -367,7 +368,9 @@ export class RoomClock {
     for (const side of ['a', 'b'] as const) {
       const entryId = R.entryOn(m, side);
       if (locked.has(entryId)) continue;
-      const four = R.autoFour({ defaultFour: R.entryPrefs(db, entryId).defaultFour, lastFour: R.lastFour(db, entryId), playable: R.playableOf(db, entryId) });
+      const auto = R.autoFour({ defaultFour: R.entryPrefs(db, entryId).defaultFour, lastFour: R.lastFour(db, entryId), playable: R.playableOf(db, entryId) });
+      // Plan D3a Ruling 7: a match stand-in plays in place of the starter they stand in for.
+      const four = withStandins(auto, matchStandins(db, m.id, entryId));
       const r = R.lockLineup(db, { matchId: m.id, steamid: null, side, steamids: four, timers, now });
       if (!r.ok && r.error === 'bad_lineup') {
         R.holdMatch(db, { matchId: m.id, by: null, reason: 'lineup_short', now });
