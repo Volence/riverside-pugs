@@ -25,7 +25,7 @@ const live: OverlayFeed['live'] = {
   hud: { progress: 41, tank: 70, witch: 30, rivalReach: 74 },
 };
 const feed = (patch: Partial<ReturnType<typeof defaultStudioState>> = {}): OverlayFeed => ({
-  rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live, tankRecap: null, witchRecap: null, casterAvatars: [],
+  rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live, tankRecap: null, witchRecap: null, casterAvatars: [], draft: null,
 });
 
 const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };

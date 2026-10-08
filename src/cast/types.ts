@@ -5,18 +5,27 @@
 
 export const SCENES = [
   'starting', 'casters', 'gameplay', 'mapintro', 'maps', 'lineups', 'stats', 'brb', 'winner', 'ending', 'results',
+  // Drafts plan D2b2: appended, so the run-of-show keys never move.
+  'draftboard', 'draftclock',
 ] as const;
+export type SceneKey = (typeof SCENES)[number];
+
+/** Scenes with a letter instead of a number: added after the run of show. */
+const LETTER_KEYS: Partial<Record<SceneKey, string>> = { results: 'R', draftboard: 'B', draftclock: 'C' };
 
 /** The panel's hotkey for each scene: 1-9 and 0 in order (the run of show
  *  casters learned), then letters for scenes added later. */
 export const SCENE_HOTKEYS: Record<SceneKey, string> = Object.fromEntries(
-  SCENES.map((s, i) => [s, s === 'results' ? 'R' : i === 9 ? '0' : String(i + 1)]),
+  SCENES.map((s, i) => [s, LETTER_KEYS[s] ?? (i === 9 ? '0' : String(i + 1))]),
 ) as Record<SceneKey, string>;
-export type SceneKey = (typeof SCENES)[number];
+
+/** The live draft scenes (drafts plan D2b2): the pick reveal card fires over
+ *  these by itself, and the Program strip never does. */
+export const DRAFT_SCENES: readonly SceneKey[] = ['draftboard', 'draftclock'];
 
 /** Layers: overlays that are never a scene of their own on the program feed,
  *  but can be added to any OBS scene. */
-export const LAYERS = ['scorebug', 'roundhud', 'lowerthird'] as const;
+export const LAYERS = ['scorebug', 'roundhud', 'lowerthird', 'draftreveal'] as const;
 export type LayerKey = (typeof LAYERS)[number];
 
 export type OverlayKey = SceneKey | LayerKey | 'program';
@@ -36,6 +45,9 @@ export const SCENE_LABELS: Record<SceneKey | LayerKey, string> = {
   scorebug: 'Scorebug',
   roundhud: 'Round HUD',
   lowerthird: 'Lower third',
+  draftboard: 'Draft board',
+  draftclock: 'On the clock',
+  draftreveal: 'Pick reveal',
 };
 
 export const THEMES = ['riverside', 'safehouse', 'night', 'bile'] as const;
@@ -67,6 +79,9 @@ export interface StudioState {
   matchId: number | null;
   /** A booking being followed: its newest game is shown as each one starts. */
   bookingId: number | null;
+  /** A live draft being followed (drafts plan D2b2 Ruling 1), or null.
+   *  Independent of the match: a show can cut between the draft and a game. */
+  draftEventId: number | null;
   scene: SceneKey;
   title: string;
   subtitle: string;
@@ -108,6 +123,9 @@ export interface StudioState {
   /** The on-screen highlight card: `compact` (the default) is a slim
    *  one-line card, `normal` the original big stencil card. */
   calloutSize: 'compact' | 'normal';
+  /** On the Program link, a pick reveal strip over scenes that are not draft
+   *  scenes (Ruling 4). The draft scenes always reveal with their own card. */
+  draftStrip: boolean;
 }
 
 export const HUD_STYLES = ['plate', 'corners', 'rail', 'frame', 'scorebug'] as const;
@@ -198,6 +216,7 @@ export function defaultStudioState(): StudioState {
   return {
     matchId: null,
     bookingId: null,
+    draftEventId: null,
     scene: 'starting',
     title: 'Riverside PUGs',
     subtitle: '',
@@ -214,6 +233,7 @@ export function defaultStudioState(): StudioState {
     callout: null,
     autoCallouts: { on: false, kinds: [...DEFAULT_AUTO_KINDS] },
     calloutSize: 'compact',
+    draftStrip: true,
   };
 }
 
@@ -433,6 +453,53 @@ export interface WitchRecap {
   players: { name: string; dmg: number; share: number }[];
 }
 
+/** A live draft as the overlays get it (drafts plan D2b2 Ruling 3): the
+ *  public room only, built by src/cast/draftView.ts from a whitelist. Never a
+ *  note, a pick list, chemistry or the fairness readout. */
+export type DraftStatus = 'ready' | 'running' | 'paused' | 'done';
+export interface CastDraftPlayer { steamid: string; name: string; avatar: string | null; sr: number }
+export interface CastDraftCard extends CastDraftPlayer {
+  /** Completed PUGs played. */
+  pugs: number;
+  /** Newest first, up to 10. */
+  form: ('W' | 'L' | 'D')[];
+  /** Per completed PUG, one decimal. */
+  survivor: { siDamage: number; commonKills: number };
+  infected: { damageAsSi: number; dpsLanded: number };
+  bestClass: 'hunter' | 'smoker' | 'boomer' | 'tank' | null;
+}
+export interface CastDraftPick { pickNo: number; round: number; captain: string; steamid: string; name: string; auto: boolean; at: string }
+export interface CastDraftTeam {
+  captain: CastDraftPlayer;
+  /** In pick order, so players[r] is the round r + 1 pick. */
+  players: CastDraftPlayer[];
+  /** This team's pick number in each round once the room has started; empty before Start. */
+  slots: number[];
+}
+export interface CastDraftView {
+  eventId: number;
+  eventName: string;
+  status: DraftStatus;
+  /** Server time the running pick ends, or null when not running. */
+  deadlineAt: string | null;
+  /** Time left on the clock while paused, or null. */
+  pausedLeftMs: number | null;
+  pickSeconds: number;
+  totalPicks: number;
+  rounds: number;
+  onClock: { pickNo: number; round: number; captain: string; picker: string } | null;
+  /** Round 1 order. */
+  teams: CastDraftTeam[];
+  /** Live picks, in pick order. */
+  picks: CastDraftPick[];
+  /** A card for every picked player, for the reveal. */
+  cards: Record<string, CastDraftCard>;
+  /** The best free players by SR, highest first. */
+  best: CastDraftCard[];
+  poolLeft: number;
+}
+export const BEST_AVAILABLE = 3;
+
 export interface OverlayFeed {
   rev: number;
   serverNow: number;
@@ -448,4 +515,6 @@ export interface OverlayFeed {
   /** One per studio.casters line: the matched site account's avatar for the
    *  no-camera tile, or null (src/cast/casterAvatars.ts). */
   casterAvatars: (string | null)[];
+  /** The draft the studio follows, when the caster may still follow it (drafts plan D2b2). */
+  draft: CastDraftView | null;
 }
