@@ -2,15 +2,17 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { AdminDraftTeamsView } from '../../../api';
 
-const { mockAdmin, confirmMock } = vi.hoisted(() => ({
-  mockAdmin: { draftTeamsView: vi.fn(), draftMode: vi.fn(), draftBalance: vi.fn(), draftMove: vi.fn(), draftPublishTeams: vi.fn() },
+const { mockAdmin, confirmMock, hub } = vi.hoisted(() => ({
+  mockAdmin: { draftTeamsView: vi.fn(), draftMode: vi.fn(), draftBalance: vi.fn(), draftMove: vi.fn(), draftPublishTeams: vi.fn(), draftRoom: vi.fn(), draftRoomAct: vi.fn(), draftRoomDelegate: vi.fn(), draftRoomSettings: vi.fn() },
   confirmMock: vi.fn(async () => true),
+  hub: { names: [] as string[], fns: [] as Array<() => void> },
 }));
 vi.mock('../../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api')>();
   return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin } };
 });
 vi.mock('../../../components/Confirm', () => ({ confirm: confirmMock }));
+vi.mock('../../../hooks/useHubEvent', () => ({ useHubEvent: (names: string[], fn: () => void) => { hub.names = names; hub.fns.push(fn); } }));
 const { DraftTeamsPanel } = await import('./DraftTeamsPanel');
 const { ApiError } = await import('../../../api');
 
@@ -33,18 +35,48 @@ const made = (over: Partial<AdminDraftTeamsView> = {}): AdminDraftTeamsView => (
 const SOON = new Date(Date.now() + 3_600_000).toISOString();
 const AGO = new Date(Date.now() - 60_000).toISOString();
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); hub.fns.length = 0; });
 
 describe('DraftTeamsPanel', () => {
-  it('offers the two methods before one is chosen, the live one disabled', async () => {
+  it('offers the two methods before one is chosen, and Let captains pick chooses the live room', async () => {
     mockAdmin.draftTeamsView.mockResolvedValue({ mode: null, teamsMadeAt: null, teams: null, fairness: null });
     mockAdmin.draftMode.mockResolvedValue({});
-    render(<DraftTeamsPanel eventId={9} status="registration" startsAt={SOON} canEdit />);
+    render(<DraftTeamsPanel eventId={9} slug="night" status="registration" startsAt={SOON} canEdit />);
     expect(await screen.findByRole('heading', { name: 'Make teams' })).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Let captains pick' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('Coming soon: the live draft room')).toBeTruthy();
+    expect(screen.queryByText('Coming soon: the live draft room')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Let captains pick' }));
+    await waitFor(() => expect(mockAdmin.draftMode).toHaveBeenCalledWith(9, 'live'));
     fireEvent.click(screen.getByRole('button', { name: 'Auto-balance by SR' }));
     await waitFor(() => expect(mockAdmin.draftMode).toHaveBeenCalledWith(9, 'auto'));
+  });
+
+  const doneRoom = () => ({
+    eventId: 9, slug: 'night', eventName: 'Draft Night', status: 'done', teamsMadeAt: null, settings: { firstPick: 'lowest_sr', pickSeconds: 75 },
+    serverNow: new Date().toISOString(), deadlineAt: null, pausedLeftMs: null, totalPicks: 6, order: [], onClock: null, picks: [], delegates: {},
+    teams: [], pool: [], notes: null, me: { role: null, team: null, onClock: false, list: null, chemistry: null }, lists: {}, staff: true,
+  });
+
+  it('in live mode shows the room controls, and the drafted teams with no swaps once the room is done', async () => {
+    mockAdmin.draftTeamsView.mockResolvedValue(made({ mode: 'live' }));
+    mockAdmin.draftRoom.mockResolvedValue(doneRoom());
+    render(<DraftTeamsPanel eventId={9} slug="night" status="registration" startsAt={SOON} canEdit />);
+    expect(await screen.findByText('The draft is over. Check the teams below and publish them.')).toBeTruthy();
+    expect(screen.queryByLabelText('Swap Bob with')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Rebalance' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Publish teams' })).toBeTruthy();
+  });
+
+  it('in live mode reloads the teams when the room broadcasts draft:<id>', async () => {
+    mockAdmin.draftTeamsView.mockResolvedValue(made({ mode: 'live', teams: null, fairness: null }));
+    mockAdmin.draftRoom.mockResolvedValue(doneRoom());
+    render(<DraftTeamsPanel eventId={9} slug="night" status="registration" startsAt={SOON} canEdit />);
+    await screen.findByText('The draft is over. Check the teams below and publish them.');
+    expect(hub.names).toContain('draft:9');
+    expect(screen.queryByRole('button', { name: 'Publish teams' })).toBeNull();
+    mockAdmin.draftTeamsView.mockResolvedValue(made({ mode: 'live' }));
+    for (const fn of hub.fns) fn();
+    expect(await screen.findByRole('button', { name: 'Publish teams' })).toBeTruthy();
+    expect(screen.getByText(/Spread: 25 SR/)).toBeTruthy();
   });
 
   it('balances with no confirm the first time, and Rebalance asks first', async () => {

@@ -214,7 +214,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
         <DraftPanel eventId={ev.id} canEdit={canEdit} signupsCloseAt={ev.fields.draft?.signupsCloseAt ?? null} gen={panelGen} onChange={panelsChanged} />
       )}
       {ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'draft' && ev.cutAt !== null && (
-        <DraftTeamsPanel eventId={ev.id} canEdit={canEdit} status={ev.status} startsAt={ev.fields.startsAt} gen={panelGen} onChange={panelsChanged} />
+        <DraftTeamsPanel eventId={ev.id} slug={ev.slug} canEdit={canEdit} status={ev.status} startsAt={ev.fields.startsAt} gen={panelGen} onChange={panelsChanged} />
       )}
       {ev.status !== 'draft' && ev.status !== 'announced' && hasEntries && (
         <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled && ev.fields.entryKind === 'team'} draft={ev.fields.entryKind === 'draft'} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />

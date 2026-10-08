@@ -1,6 +1,8 @@
 import { adminApi, type DraftTeamView } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
+import { DraftRoomControls } from './DraftRoomControls';
+import { useHubEvent } from '../../../hooks/useHubEvent';
 import { fmtTime, useAction } from '../useAction';
 
 /** The Make teams section of a draft-kind event on the desk (drafts plan
@@ -9,11 +11,13 @@ import { fmtTime, useAction } from '../useAction';
  *  A mod (canEdit false) reads it with no control, and nobody gets one once
  *  the event is cancelled or finished. startsAt lets the publish confirm warn
  *  when the start time has already passed. */
-export function DraftTeamsPanel({ eventId, canEdit, status, startsAt, gen = 0, onChange }: {
-  eventId: number; canEdit: boolean; status: string; startsAt: string; gen?: number; onChange?: () => void;
+export function DraftTeamsPanel({ eventId, slug = '', canEdit, status, startsAt, gen = 0, onChange }: {
+  eventId: number; slug?: string; canEdit: boolean; status: string; startsAt: string; gen?: number; onChange?: () => void;
 }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.draftTeamsView(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(() => { reload(); onChange?.(); });
+  // The clock or a captain can make the last pick: show the teams without a page reload.
+  useHubEvent([`draft:${eventId}`], reload);
   if (loadError) return <Panel><h3>Make teams</h3><p class="error">Could not load the teams.</p></Panel>;
   if (!data) return <Panel><h3>Make teams</h3></Panel>;
   const published = data.teamsMadeAt !== null;
@@ -34,16 +38,17 @@ export function DraftTeamsPanel({ eventId, canEdit, status, startsAt, gen = 0, o
       {!published && data.mode === null && write && (
         <div class="maketeams__modes">
           <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.draftMode(eventId, 'auto'))}>Auto-balance by SR</button>
-          <button class="btn btn--ghost" disabled>Let captains pick</button>
-          <p class="muted">Coming soon: the live draft room</p>
+          <button class="btn btn--ghost" disabled={busy} onClick={() => void run(() => adminApi.draftMode(eventId, 'live'))}>Let captains pick</button>
         </div>
       )}
-      {!published && data.mode === 'live' && <p class="muted">Coming soon: the live draft room</p>}
-      {!published && data.mode !== null && write && (
+      {!published && data.mode === 'live' && (
+        <DraftRoomControls eventId={eventId} slug={slug} canEdit={write} onChange={() => { reload(); onChange?.(); }} />
+      )}
+      {!published && data.mode === 'auto' && write && (
         <div class="inlinerow">
-          {data.mode === 'auto' && (teams === null
+          {teams === null
             ? <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.draftBalance(eventId))}>Balance teams</button>
-            : <button class="btn btn--ghost" disabled={busy} onClick={() => void run(() => adminApi.draftBalance(eventId), 'Rebalance from scratch? Hand moves are lost.')}>Rebalance</button>)}
+            : <button class="btn btn--ghost" disabled={busy} onClick={() => void run(() => adminApi.draftBalance(eventId), 'Rebalance from scratch? Hand moves are lost.')}>Rebalance</button>}
           <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.draftMode(eventId, null), 'Change the method? The balanced teams are cleared.')}>Change method</button>
         </div>
       )}
@@ -60,7 +65,7 @@ export function DraftTeamsPanel({ eventId, canEdit, status, startsAt, gen = 0, o
                   {t.players.map((p) => (
                     <li key={p.steamid}>
                       <span>{p.name}</span> <span class="muted">{Math.round(p.sr)}</span>
-                      {write && !published && (
+                      {write && !published && data.mode === 'auto' && (
                         <select aria-label={`Swap ${p.name} with`} disabled={busy} value=""
                           onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) void run(() => adminApi.draftMove(eventId, p.steamid, v)); }}>
                           <option value="">Swap with...</option>
