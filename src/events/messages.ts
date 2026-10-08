@@ -23,7 +23,7 @@ export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_ro
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
-  | 'draft_captain_set_new' | 'draft_captain_set_old';
+  | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -131,6 +131,10 @@ export function eventMessage(
       content = `${escapeName(getPlayer(db, entry.captain_steamid)?.name ?? entry.captain_steamid)} is now the captain of ${team} in ${event}.`;
       break;
     }
+    case 'draft_room_open':
+      // Plan D2b1 Ruling 11: every captain, once, at Start.
+      content = `The live draft for ${event} has started and you are a captain. If you are not in the room when your turn comes, the site picks for you from your pick list. Join now: ${publicUrl}/event/${ev.slug}/draft`;
+      break;
     case 'draft_captain_offer':
       if (!extra.expiresAt) return null;
       content = `${event} needs another captain and you said you were willing. Accept or decline on the event page by ${discordTime(extra.expiresAt)}: ${publicUrl}/event/${ev.slug}`;
