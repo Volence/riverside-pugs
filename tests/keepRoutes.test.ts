@@ -41,8 +41,8 @@ describe('Keep this team on the event page', () => {
     expect((await post(keep('/start'), four[1]!, { name: 'Night Owls', tag: 'OWL' })).json()).toEqual(text('not_captain'));
     expect((await post(keep('/start'), four[0]!, { name: 'Night Owls', tag: 'OWL' })).statusCode).toBe(200);
     expect((await get(keep(), four[1]!)).json().keep).toMatchObject({ status: 'voting', captain: false, name: 'Night Owls', tag: 'OWL', myAnswer: null });
-    expect((await post(keep('/answer'), four[1]!, { accept: true })).json()).toEqual({ joined: false, teamSlug: null });
-    expect((await post(keep('/answer'), four[2]!, { accept: true })).json()).toEqual({ joined: true, teamSlug: 'night-owls' });
+    expect((await post(keep('/answer'), four[1]!, { accept: true })).json()).toEqual({ joined: false, teamSlug: null, closed: false });
+    expect((await post(keep('/answer'), four[2]!, { accept: true })).json()).toEqual({ joined: true, teamSlug: 'night-owls', closed: false });
     const team = (await get('/api/teams/night-owls', four[3]!)).json();
     expect(team.origin).toEqual({ eventSlug: f.slug, eventName: 'Draft Night', placement: null });
     expect(team.members).toHaveLength(3);
@@ -61,5 +61,19 @@ describe('Keep this team on the event page', () => {
     const { four } = await build();
     await post('/api/teams', four[3]!, { name: 'Site Rats', tag: 'SRAT' });
     expect((await get('/api/teams/site-rats', four[3]!)).json().origin).toBeNull();
+  });
+
+  it('the competitive switch off hides all three routes, and a signed-out visitor gets the same 404 as the event routes', async () => {
+    const { four } = await build();
+    const out = (method: 'GET' | 'POST', url: string) => app.inject({ method, url, payload: method === 'POST' ? { accept: true } : undefined });
+    for (const [method, url] of [['GET', keep()], ['POST', keep('/start')], ['POST', keep('/answer')]] as const) {
+      const r = await out(method, url);
+      expect([r.statusCode, r.json()]).toEqual([404, { error: 'not found' }]);
+    }
+    f.db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
+    for (const r of [await get(keep(), four[0]!), await post(keep('/start'), four[0]!, { name: 'Night Owls', tag: 'OWL' }), await post(keep('/answer'), four[1]!, { accept: true })]) {
+      expect([r.statusCode, r.json()]).toEqual([404, { error: 'not found' }]);
+    }
+    expect(K.keepOf(f.db, K.keepsOf(f.db, f.eventId)[0]!.id)?.status).toBe('offered');
   });
 });

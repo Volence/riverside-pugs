@@ -73,7 +73,8 @@ describe('preferences', () => {
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_offer')).toEqual({ type: 'draft_keep_offer', label: 'Draft: keep my draft team together after the event' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_ask')).toEqual({ type: 'draft_keep_ask', label: 'Draft: my captain wants to keep our draft team' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_made')).toEqual({ type: 'draft_keep_made', label: 'Draft: our kept draft team is made' });
-    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_left_out')).toEqual({ type: 'draft_keep_left_out', label: 'Draft: I was left out of our kept team (team cap)' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_left_out')).toEqual({ type: 'draft_keep_left_out', label: 'Draft: I was not added to our kept team' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_captain_cap')).toEqual({ type: 'draft_keep_captain_cap', label: 'Draft: our kept team waits for me to leave a team' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_closed')).toEqual({ type: 'draft_keep_closed', label: 'Draft: our kept draft team was not made' });
   });
   it('lists the two reschedule DMs (plan T4)', () => {

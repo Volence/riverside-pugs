@@ -44,6 +44,7 @@ export async function handleKeepButton(
     const r = answerKeepFlow(d, { keepId: k.id, steamid: player.steamid, accept: kind === 'a', now });
     if (!r.ok) return say(V.EVENT_ERRORS[r.error].text);
     if (kind === 'd') return say('You declined.');
+    if (r.value.closed) return say('This keep was closed and no team was made.');
     return say(r.value.joined && r.value.teamSlug ? `You are on the team: ${deps.publicUrl}/team/${r.value.teamSlug}` : 'You accepted. The team is made when 3 of the 4 of you accept.');
   }
   return say('That button no longer does anything.');

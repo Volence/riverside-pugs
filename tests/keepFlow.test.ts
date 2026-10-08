@@ -5,6 +5,7 @@ import * as K from '../src/events/keepTeam.js';
 import { answerKeepFlow, startKeepFlow } from '../src/events/keepFlow.js';
 import { handleKeepButton } from '../src/discord/keepButtons.js';
 import * as T from '../src/teams/teams.js';
+import { getEntry } from '../src/events/entries.js';
 import { EVENT_ERRORS } from '../src/events/validate.js';
 import type { Notifier } from '../src/notify/notify.js';
 import type { MessagePayload } from '../src/discord/transport.js';
@@ -69,14 +70,22 @@ describe('Keep, the answers and the DMs', () => {
     const asks = h.of('draft_keep_ask');
     expect(asks.flatMap((d) => d.to).sort()).toEqual(four.slice(1).sort());
     expect(ids(asks[0]!.payload)).toEqual([`dk:a:${k.id}`, `dk:d:${k.id}`, `https://x/event/${f.slug}`]);
-    expect(must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[1]!, accept: true, now: at(3) }))).toEqual({ joined: false, teamSlug: null });
+    expect(must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[1]!, accept: true, now: at(3) }))).toEqual({ joined: false, teamSlug: null, closed: false });
     capped(f, four[1]!, 'AA');
     must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[2]!, accept: true, now: at(3) }));
     expect(h.of('draft_keep_made')).toEqual([]);
-    expect(must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[3]!, accept: true, now: at(4) }))).toEqual({ joined: true, teamSlug: 'night-owls' });
+    expect(must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[3]!, accept: true, now: at(4) }))).toEqual({ joined: true, teamSlug: 'night-owls', closed: false });
     expect(h.of('draft_keep_made').flatMap((d) => d.to).sort()).toEqual([four[0], four[2], four[3]].sort());
     expect(h.of('draft_keep_left_out').flatMap((d) => d.to)).toEqual([four[1]]);
     expect(h.of('draft_keep_made')[0]!.payload.content).toContain('https://x/team/night-owls');
+    expect(h.of('draft_keep_left_out')[0]!.payload.content).toBe(
+      `You were not added to Night Owls [OWL], made from ${getEntry(f.db, k.entry_id)!.name} in Draft Night. If you are on 3 teams already, leave one and ask the captain to add you: https://x/team/night-owls`,
+    );
+    // A tick after the team is made sends no second made DM.
+    h.runner.step(at(5));
+    h.runner.step(at(6));
+    expect(h.of('draft_keep_made')).toHaveLength(1);
+    expect(h.of('draft_keep_left_out')).toHaveLength(1);
   });
 
   it('the tick makes the team when a capped accepter has since left a team', () => {
@@ -135,5 +144,79 @@ describe('a keep closed by its captain\'s standing', () => {
     const closed = h.of('draft_keep_closed');
     expect(closed.flatMap((d) => d.to).sort()).toEqual([...four].sort());
     expect(closed[0]!.payload.content).not.toContain('/team/');
+  });
+});
+
+describe('final review: the DMs a keep owes once', () => {
+  const voting = (f: StandinFixture, h: ReturnType<typeof harness>) => {
+    h.runner.step(at(1));
+    const k = K.keepsOf(f.db, f.eventId)[0]!;
+    const four = K.playersOf(k);
+    must(startKeepFlow(h.deps, { entryId: k.entry_id, steamid: four[0]!, name: 'Night Owls', tag: 'OWL', now: at(2) }));
+    return { k, four };
+  };
+
+  it('the left-out DM names the real team cap', () => {
+    const f = finishedDraft();
+    const h = harness(f);
+    const { k, four } = voting(f, h);
+    must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[1]!, accept: true, now: at(3) }));
+    capped(f, four[1]!, 'AA');
+    // Test setup only: the cap is raised to 4 after the alt reached 3, then
+    // a fourth team is made so they are at the new cap.
+    f.db.prepare("UPDATE settings SET value = '4' WHERE key = 'team_membership_cap'").run();
+    must(T.createTeam(f.db, { creator: four[1]!, name: 'AA Squad 4', tag: 'AA4', now: at(3) }));
+    must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[2]!, accept: true, now: at(3) }));
+    must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[3]!, accept: true, now: at(4) }));
+    expect(h.of('draft_keep_left_out')[0]!.payload.content).toContain('If you are on 4 teams already');
+  });
+
+  it('a captain at the team cap is told once, on the tick, that the keep waits on them', () => {
+    const f = finishedDraft();
+    const h = harness(f);
+    const { k, four } = voting(f, h);
+    capped(f, four[0]!, 'CP');
+    must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[1]!, accept: true, now: at(3) }));
+    must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[2]!, accept: true, now: at(3) }));
+    h.runner.step(at(4));
+    h.runner.step(at(5));
+    const told = h.of('draft_keep_captain_cap');
+    expect(told.map((d) => d.to)).toEqual([[four[0]]]);
+    expect(told[0]!.payload.content).toContain('leave a team');
+    expect(K.keepOf(f.db, k.id)?.status).toBe('voting');
+  });
+
+  it('a vote that ends without enough accepts tells the four once', () => {
+    const f = finishedDraft();
+    const h = harness(f);
+    const { k, four } = voting(f, h);
+    must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[1]!, accept: true, now: at(3) }));
+    h.runner.step(at(2 + 48));
+    h.runner.step(at(2 + 49));
+    const closed = h.of('draft_keep_closed');
+    expect(closed).toHaveLength(1);
+    expect(closed[0]!.to.sort()).toEqual([...four].sort());
+    expect(closed[0]!.payload.content).toBe('Keep this team closed: not enough of you accepted in time.');
+    // An offer the captain never pressed lapses with no DM.
+    expect(K.keepsOf(f.db, f.eventId).filter((x) => x.status === 'lapsed')).toHaveLength(1);
+    h.runner.step(at(7 * 24));
+    expect(h.of('draft_keep_closed')).toHaveLength(1);
+  });
+
+  it('an accept that closes the keep says so on the site reply and the Discord button', async () => {
+    const f = finishedDraft();
+    const h = harness(f);
+    const { k, four } = voting(f, h);
+    must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[1]!, accept: true, now: at(3) }));
+    f.db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(four[0]);
+    expect(must(answerKeepFlow(h.deps, { keepId: k.id, steamid: four[2]!, accept: true, now: at(3) }))).toEqual({ joined: false, teamSlug: null, closed: true });
+    const g = finishedDraft();
+    const hg = harness(g);
+    const v = voting(g, hg);
+    must(answerKeepFlow(hg.deps, { keepId: v.k.id, steamid: v.four[1]!, accept: true, now: at(3) }));
+    g.db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(v.four[0]);
+    const r = await handleKeepButton({ db: g.db, publicUrl: 'https://x', notifier: hg.deps.notifier, now: () => at(3).getTime() },
+      { kind: 'button', customId: `dk:a:${v.k.id}`, userId: discordOf(v.four[2]!) } as never);
+    expect(r.payload.content).toBe('This keep was closed and no team was made.');
   });
 });

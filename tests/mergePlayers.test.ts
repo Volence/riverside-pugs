@@ -556,6 +556,50 @@ describe('mergePlayers', () => {
     expect(db.prepare('SELECT steamid FROM draft_captain_offers').all()).toEqual([{ steamid: MAIN }]);
   });
 
+  it('moves keeps and stand-ins to the surviving account, keeping the main\'s answer and open request where both have one (plans D3a, D3b)', () => {
+    const ev = Number(db.prepare(
+      `INSERT INTO events (slug, name, organizer_steamid, entry_kind, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+       VALUES ('dr', 'Draft', ?, 'draft', '2026-10-10T20:00:00.000Z', '{}', '{}', '{}', 'x', 'x')`,
+    ).run(MAIN).lastInsertRowid);
+    const keep = db.prepare(
+      `INSERT INTO draft_keeps (event_id, entry_id, captain_steamid, players_json, status, offered_at, expires_at)
+       VALUES (?, ?, ?, ?, 'voting', 'x', 'y')`,
+    );
+    const both = Number(keep.run(ev, 1, ALT, JSON.stringify([ALT, MAIN, OTHER])).lastInsertRowid);
+    const alone = Number(keep.run(ev, 2, OTHER, JSON.stringify([OTHER, ALT])).lastInsertRowid);
+    const ans = db.prepare("INSERT INTO draft_keep_answers (keep_id, steamid, answer, answered_at) VALUES (?, ?, ?, 'x')");
+    ans.run(both, ALT, 'decline');
+    ans.run(both, MAIN, 'accept');
+    ans.run(alone, ALT, 'accept');
+    const standin = db.prepare(
+      `INSERT INTO draft_standins (event_id, entry_id, out_steamid, scope, margin, status, requested_by, requested_at, filled_by)
+       VALUES (?, ?, ?, 'match', 100, ?, ?, 'x', ?)`,
+    );
+    const altOpen = Number(standin.run(ev, 1, ALT, 'open', ALT, null).lastInsertRowid);
+    const mainOpen = Number(standin.run(ev, 1, MAIN, 'open', OTHER, null).lastInsertRowid);
+    const filled = Number(standin.run(ev, 2, OTHER, 'filled', ALT, ALT).lastInsertRowid);
+    db.prepare("INSERT INTO draft_standin_offers (request_id, steamid, offered_at, expires_at) VALUES (?, ?, 'x', 'y')").run(filled, ALT);
+
+    const plan = mergePlayers(db, { from: ALT, into: MAIN, dryRun: true });
+    expect(plan.rowsByTable).toMatchObject({ draft_keeps: 2, draft_keep_answers: 2, draft_standins: 4, draft_standin_offers: 1 });
+    mergePlayers(db, { from: ALT, into: MAIN });
+
+    expect(db.prepare('SELECT id, captain_steamid, players_json FROM draft_keeps ORDER BY id').all()).toEqual([
+      { id: both, captain_steamid: MAIN, players_json: JSON.stringify([MAIN, OTHER]) },
+      { id: alone, captain_steamid: OTHER, players_json: JSON.stringify([OTHER, MAIN]) },
+    ]);
+    expect(db.prepare('SELECT keep_id, steamid, answer FROM draft_keep_answers ORDER BY keep_id').all()).toEqual([
+      { keep_id: both, steamid: MAIN, answer: 'accept' },
+      { keep_id: alone, steamid: MAIN, answer: 'accept' },
+    ]);
+    expect(db.prepare('SELECT id, out_steamid, status, requested_by, filled_by FROM draft_standins ORDER BY id').all()).toEqual([
+      { id: altOpen, out_steamid: MAIN, status: 'cancelled', requested_by: MAIN, filled_by: null },
+      { id: mainOpen, out_steamid: MAIN, status: 'open', requested_by: OTHER, filled_by: null },
+      { id: filled, out_steamid: OTHER, status: 'filled', requested_by: MAIN, filled_by: MAIN },
+    ]);
+    expect(db.prepare('SELECT steamid FROM draft_standin_offers').all()).toEqual([{ steamid: MAIN }]);
+  });
+
   it('moves reschedule proposals (proposer and responder) to the surviving account (plan T4)', () => {
     const ev = Number(db.prepare(
       `INSERT INTO events (slug, name, organizer_steamid, entry_kind, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)

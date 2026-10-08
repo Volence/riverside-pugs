@@ -15,20 +15,24 @@ export function startKeepFlow(d: NoticeDeps, o: { entryId: number; steamid: stri
   return r;
 }
 
-export function answerKeepFlow(d: NoticeDeps, o: { keepId: number; steamid: string; accept: boolean; now: Date }): V.Checked<{ joined: boolean; teamSlug: string | null }> {
+/** `closed` is true when this accept's settle closed the keep with no team
+ *  (its captain lost good standing), so the reply can say so. */
+export function answerKeepFlow(d: NoticeDeps, o: { keepId: number; steamid: string; accept: boolean; now: Date }): V.Checked<{ joined: boolean; teamSlug: string | null; closed: boolean }> {
   const r = K.answerKeep(d.db, o);
   if (!r.ok) return r;
   const k = K.keepOf(d.db, o.keepId)!;
   let joined = r.value.joined;
+  let closed = false;
   if (joined) tellKeepJoined(d, k.event_id, k.id, o.steamid);
   if (o.accept && k.status === 'voting') {
     const s = K.settleKeep(d.db, { keepId: k.id, now: o.now });
     if (s.ok) {
       tellKeepSettled(d, k.event_id, k.id, s.value);
       joined = s.value.made && s.value.joined.includes(o.steamid);
+      closed = !s.value.made;
     }
   }
   const after = K.keepOf(d.db, k.id)!;
   const team = after.team_id !== null ? T.getTeam(d.db, after.team_id) : undefined;
-  return V.ok({ joined, teamSlug: joined ? team?.slug ?? null : null });
+  return V.ok({ joined, teamSlug: joined ? team?.slug ?? null : null, closed });
 }

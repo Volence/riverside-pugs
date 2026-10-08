@@ -239,6 +239,7 @@ export const EVENT_ERRORS = {
   keep_name_taken: { status: 409, text: 'Another team already has that name. Choose another.' },
   keep_tag_taken: { status: 409, text: 'Another team already has that tag. Choose another.' },
   keep_waiting: { status: 409, text: 'Fewer than three of the drafted players can join yet.' },
+  keep_cap_told: { status: 409, text: 'The captain was already told the team is waiting on their team cap.' },
   bad_schedule: { status: 400, text: 'A round schedule lists rounds, each with a default time and, on a window stage, a window that starts before it ends and holds the default time; a rolling stage takes a date only.' },
   schedule_locked: { status: 409, text: 'The schedule of a finished stage or event cannot change.' },
   not_schedulable: { status: 409, text: 'This match cannot be rescheduled now: it is not waiting in a window stage with a scheduling window, or its window has passed.' },
