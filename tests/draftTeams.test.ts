@@ -86,10 +86,10 @@ describe('choosing the method and auto-balance', () => {
     expect(D.draftTeamsOf(f.db, f.eventId)).toBeNull();
   });
 
-  it('refuses the live draft room in D2a', () => {
+  it('accepts the live method (plan D2b1) and still refuses an unknown one', () => {
     const f = cutFixture();
-    expect(err(mode(f, 'live'))).toBe('live_draft_later');
-    expect(E.getEvent(f.db, f.eventId)!.team_mode).toBeNull();
+    must(mode(f, 'live'));
+    expect(E.getEvent(f.db, f.eventId)!.team_mode).toBe('live');
     expect(err(D.chooseTeamMode(f.db, { eventId: f.eventId, mode: 'snake' as 'auto', actor: ADMIN, now: LATER }))).toBe('bad_team_mode');
   });
 
@@ -244,7 +244,7 @@ describe('the Make teams desk over HTTP', () => {
 
   it('runs Make teams as an admin, audited, and keeps it off the public page', async () => {
     expect((await post(`${base()}/mode`, ADMIN, { mode: 'nope' })).statusCode).toBe(400);
-    expect((await post(`${base()}/mode`, ADMIN, { mode: 'live' })).statusCode).toBe(409);
+    expect((await post(`${base()}/mode`, ADMIN, { mode: 'live' })).statusCode).toBe(200);
     expect((await post(`${base()}/mode`, ADMIN, { mode: 'auto' })).statusCode).toBe(200);
     expect((await post(`${base()}/balance`, ADMIN)).statusCode).toBe(200);
     const body = (await get(`${base()}/teams`, MOD)).json();
@@ -261,7 +261,7 @@ describe('the Make teams desk over HTTP', () => {
     expect((await post(`${base()}/move`, ADMIN, { a: t0.players[0].steamid, b: t1.players[0].steamid })).statusCode).toBe(200);
     const moved = (await get(`${base()}/teams`, ADMIN)).json();
     expect(moved.teams[1].players.map((p: { steamid: string }) => p.steamid)).toContain(t0.players[0].steamid);
-    expect([audits('event_draft_mode'), audits('event_draft_balance'), audits('event_draft_move')]).toEqual([1, 1, 1]);
+    expect([audits('event_draft_mode'), audits('event_draft_balance'), audits('event_draft_move')]).toEqual([2, 1, 1]);
     for (const as of [P[0], undefined]) {
       const pub = await get(`/api/events/${f.slug}`, as);
       expect(pub.statusCode).toBe(200);

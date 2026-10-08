@@ -482,6 +482,44 @@ CREATE TABLE IF NOT EXISTS draft_captain_offers (
   answered_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS draft_offers_open ON draft_captain_offers (event_id) WHERE answer IS NULL;
+
+-- Drafts plan D2b1: the live draft room. src/events/draftRoom.ts owns every
+-- write. One room per event; status 'ready' before Start (a live draft with
+-- no row reads as ready). A pick is undone by flagging undone_at, never by a
+-- delete; the two partial unique indexes allow one live pick per slot and one
+-- per player. No players foreign keys: the data lives one night and the
+-- account merge needs no case for it (plan Ruling 4).
+CREATE TABLE IF NOT EXISTS draft_rooms (
+  event_id       INTEGER PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+  status         TEXT NOT NULL CHECK (status IN ('ready','running','paused','done')),
+  order_json     TEXT NOT NULL DEFAULT '[]',
+  pick_seconds   INTEGER NOT NULL,
+  deadline_at    TEXT,
+  paused_left_ms INTEGER,
+  started_at     TEXT,
+  finished_at    TEXT,
+  delegates_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS draft_picks (
+  id              INTEGER PRIMARY KEY,
+  event_id        INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  round           INTEGER NOT NULL,
+  pick_no         INTEGER NOT NULL,
+  captain_steamid TEXT NOT NULL,
+  steamid         TEXT NOT NULL,
+  auto            INTEGER NOT NULL DEFAULT 0 CHECK (auto IN (0,1)),
+  at              TEXT NOT NULL,
+  undone_at       TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS draft_picks_live_slot ON draft_picks (event_id, pick_no) WHERE undone_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS draft_picks_live_player ON draft_picks (event_id, steamid) WHERE undone_at IS NULL;
+CREATE TABLE IF NOT EXISTS draft_pick_lists (
+  event_id        INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  captain_steamid TEXT NOT NULL,
+  list_json       TEXT NOT NULL DEFAULT '[]',
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (event_id, captain_steamid)
+);
 -- Tournament matches (spec part 2 section 4; plan T2). One row per pairing of
 -- a stage. Swiss and league rows are written by src/events/play.ts from
 -- src/events/swiss.ts and roundRobin.ts. Elimination and round robin rows

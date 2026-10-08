@@ -427,6 +427,11 @@ describe('event_log guard', () => {
       // Make teams (D2a Task 3).
       chooseTeamMode: { action: 'draft_team_mode', setup: published, run: (f) => D.chooseTeamMode(f.db, { eventId: f.eventId, mode: 'auto', actor: ADMIN, now: NOW }) },
       autoBalance: { action: 'draft_teams_balanced', setup: auto, run: (f) => D.autoBalance(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
+      // Plan D2b1 Task 2: the live room's settings.
+      setRoomSettings: {
+        action: 'draft_room_settings', setup: published,
+        run: (f) => D.setRoomSettings(f.db, { eventId: f.eventId, settings: { firstPick: 'random', pickSeconds: 60 }, actor: ADMIN, now: NOW }),
+      },
       moveDraftPlayers: { action: 'draft_teams_swapped', setup: balanced, run: (f) => D.moveDraftPlayers(f.db, { eventId: f.eventId, ...crossPair(f), actor: ADMIN, now: NOW }) },
     };
     const draftRows = (f: DraftFixture) => JSON.stringify([

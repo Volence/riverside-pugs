@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import * as E from './events.js';
 import { playerFacts } from './entries.js';
 import * as R from './entryRules.js';
-import { cleanNote, cutProblems, defaultRoles, maxTeams, nextOfferee, type CutProblem } from './draftRules.js';
+import { cleanNote, cutProblems, defaultRoles, maxTeams, nextOfferee, parseRoomSettings, type CutProblem, type RoomSettings } from './draftRules.js';
 import { settingNumber } from '../settings.js';
 import { currentSeasonId } from '../players.js';
 import { seasonSr } from '../rating.js';
@@ -523,8 +523,16 @@ function makeTeamsOpen(db: DB, eventId: number): V.Checked<E.EventRow> {
 const clearAssignment = (db: DB, eventId: number) =>
   db.prepare('UPDATE draft_signups SET draft_team = NULL WHERE event_id = ? AND draft_team IS NOT NULL').run(eventId);
 
+/** Whether the live room has started (plan D2b1 Ruling 6): its row exists
+ *  and is past 'ready'. Read only; src/events/draftRoom.ts writes the row. */
+function roomStarted(db: DB, eventId: number): boolean {
+  const r = db.prepare('SELECT status FROM draft_rooms WHERE event_id = ?').get(eventId) as { status: string } | undefined;
+  return r !== undefined && r.status !== 'ready';
+}
+
 /** Staff choose the method, or reset it with null. A change of method clears
- *  the working assignment. 'live' is the D2b draft room: refused here. */
+ *  the working assignment. Leaving 'live' is refused once the room has
+ *  started (plan D2b1 Ruling 6): staff reset the room first. */
 export function chooseTeamMode(db: DB, o: { eventId: number; mode: TeamMode | null; actor: string; now: Date }): V.Checked<null> {
   const at = o.now.toISOString();
   if (o.mode !== null && o.mode !== 'auto' && o.mode !== 'live') return V.fail('bad_team_mode');
@@ -532,7 +540,7 @@ export function chooseTeamMode(db: DB, o: { eventId: number; mode: TeamMode | nu
     const found = makeTeamsOpen(db, o.eventId);
     if (!found.ok) return found;
     const ev = found.value;
-    if (o.mode === 'live') return V.fail('live_draft_later');
+    if (ev.team_mode === 'live' && o.mode !== 'live' && roomStarted(db, ev.id)) return V.fail('room_started');
     if (ev.team_mode !== o.mode) clearAssignment(db, ev.id);
     db.prepare('UPDATE events SET team_mode = ?, updated_at = ? WHERE id = ?').run(o.mode, at, ev.id);
     E.logEvent(db, ev.id, o.actor, 'draft_team_mode', at, { mode: o.mode, from: ev.team_mode });
@@ -575,6 +583,7 @@ export function moveDraftPlayers(db: DB, o: { eventId: number; a: string; b: str
     const found = makeTeamsOpen(db, o.eventId);
     if (!found.ok) return found;
     const ev = found.value;
+    if (ev.team_mode === 'live') return V.fail('live_mode');
     const a = signupOf(db, ev.id, o.a);
     const b = signupOf(db, ev.id, o.b);
     if (!a || !b || a.role !== 'pool' || b.role !== 'pool' || a.draft_team === null || b.draft_team === null || a.draft_team === b.draft_team) {
@@ -585,6 +594,26 @@ export function moveDraftPlayers(db: DB, o: { eventId: number; a: string; b: str
     set.run(a.draft_team, b.id);
     E.logEvent(db, ev.id, o.actor, 'draft_teams_swapped', at, { a: o.a, b: o.b });
     return V.ok(null);
+  })();
+}
+
+/** The live room's settings (plan D2b1 Ruling 5), written into draft_json
+ *  next to the D1 times (updateEvent's merge keeps them), until the room
+ *  starts. Any method: staff may set them before choosing live. */
+export function setRoomSettings(db: DB, o: { eventId: number; settings: unknown; actor: string; now: Date }): V.Checked<RoomSettings> {
+  const at = o.now.toISOString();
+  const s = parseRoomSettings(o.settings);
+  if (!s) return V.fail('bad_room_settings');
+  return db.transaction((): V.Checked<RoomSettings> => {
+    const found = makeTeamsOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    if (roomStarted(db, ev.id)) return V.fail('room_started');
+    const old = ev.draft_json ? (JSON.parse(ev.draft_json) as Record<string, unknown>) : {};
+    db.prepare('UPDATE events SET draft_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify({ ...old, draftFirstPick: s.firstPick, pickSeconds: s.pickSeconds }), at, ev.id);
+    E.logEvent(db, ev.id, o.actor, 'draft_room_settings', at, { ...s });
+    return V.ok(s);
   })();
 }
 

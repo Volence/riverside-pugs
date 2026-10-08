@@ -1,6 +1,6 @@
 import { findSlurs } from '../slurs.js';
 import { DEFAULT_IGNORABLE, hasUnsafeChars } from '../profileFields.js';
-import { NOTE_MAX } from './draftRules.js';
+import { NOTE_MAX, PICK_SECONDS_MAX, PICK_SECONDS_MIN } from './draftRules.js';
 import { parseVetoConfig, presetConfig, vetoFamily, VETO_PRESETS, PRESET_MIN_POOL, type VetoConfig, type VetoPreset } from './vetoConfig.js';
 
 /**
@@ -91,11 +91,28 @@ export const EVENT_ERRORS = {
   cut_not_published: { status: 409, text: 'Publish the cut before making teams.' },
   teams_made: { status: 409, text: 'The teams are published, so they no longer change.' },
   bad_team_mode: { status: 400, text: 'Teams are made by auto-balance or a live captains\' draft.' },
-  live_draft_later: { status: 409, text: 'Coming soon: the live draft room. Use Auto-balance for now.' },
   not_auto_mode: { status: 409, text: 'Choose Auto-balance before balancing the teams.' },
   teams_not_made: { status: 409, text: "Make and publish the draft's teams first." },
   teams_changed: { status: 409, text: 'The teams no longer match the published cut (a team is short or a player is missing). Rebalance if a pool player is unassigned; a missing player needs staff help.' },
   bad_move: { status: 409, text: 'A move swaps two pool players who are on different teams.' },
+  room_started: { status: 409, text: 'The live draft has started. Reset the room on the desk before changing the method or its settings.' },
+  live_mode: { status: 409, text: 'Captains are picking these teams live. Undo a pick in the draft room instead of swapping players.' },
+  bad_room_settings: { status: 400, text: `First pick is lowest SR, highest SR or random, and the pick clock is ${PICK_SECONDS_MIN} to ${PICK_SECONDS_MAX} seconds.` },
+  not_live_mode: { status: 409, text: 'Choose Let captains pick before starting the draft room.' },
+  room_not_ready: { status: 409, text: 'The draft room has already started.' },
+  room_not_running: { status: 409, text: 'The draft is not running right now.' },
+  room_not_paused: { status: 409, text: 'The draft is not paused.' },
+  not_your_pick: { status: 403, text: 'It is not your turn to pick.' },
+  pick_moved: { status: 409, text: 'That pick was already made. The room has moved on.' },
+  not_available: { status: 409, text: 'That player is not in the pool, or was already picked.' },
+  no_picks: { status: 409, text: 'There is no pick to undo.' },
+  no_delegate: { status: 409, text: 'That captain has not drafted anyone yet, so there is nobody to hand picking to.' },
+  bad_captain: { status: 400, text: 'That player is not a captain of this draft.' },
+  not_a_captain: { status: 403, text: 'Only a captain of this draft can do that.' },
+  lists_closed: { status: 409, text: 'The draft is over, so pick lists no longer change.' },
+  bad_list: { status: 400, text: 'A pick list is an ordered list of players from the pool.' },
+  draft_not_done: { status: 409, text: 'The live draft is not finished yet.' },
+  not_due: { status: 409, text: 'No pick is due yet.' },
   offers_on: { status: 409, text: 'Captaincy offers are already running.' },
   offers_off: { status: 409, text: 'Captaincy offers are not running.' },
   offers_not_needed: { status: 409, text: 'The draft already has a captain for every team.' },
