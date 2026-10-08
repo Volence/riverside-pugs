@@ -33,7 +33,7 @@ const view = (over: Partial<DraftRoomView> = {}): DraftRoomView => { const t = D
   pool: [card('p1', 'Bob', 1200), card('p2', 'Cy', 1350), card('p3', 'Di', 1100)],
   notes: null,
   me: { role: null, team: null, onClock: false, list: null, chemistry: null },
-  lists: null, staff: false,
+  lists: null, staff: false, present: ['c1'],
   ...over,
 }; };
 const session = { kind: 'anonymous' } as const;
@@ -75,6 +75,49 @@ describe('EventDraftPage', () => {
     hub.fn!();
     await waitFor(() => expect(mockEvents.draftRoom).toHaveBeenCalledTimes(3));
     expect(pop).toHaveBeenCalledTimes(1);
+  });
+
+  it('beats on the room\'s hub event too, at most once every 3 seconds, so a background tab still reads present', async () => {
+    let clock = 1_000_000;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    mockEvents.draftRoom.mockResolvedValue(view({ me: { role: 'captain', team: 'c1', onClock: false, list: [], chemistry: {} } }));
+    render(<EventDraftPage slug="night" session={session} />);
+    await waitFor(() => expect(mockEvents.draftHeartbeat).toHaveBeenCalledTimes(1));
+    hub.fn!();
+    expect(mockEvents.draftHeartbeat).toHaveBeenCalledTimes(1);
+    clock += 3_000;
+    hub.fn!();
+    hub.fn!();
+    hub.fn!();
+    expect(mockEvents.draftHeartbeat).toHaveBeenCalledTimes(2);
+    clock += 2_999;
+    hub.fn!();
+    expect(mockEvents.draftHeartbeat).toHaveBeenCalledTimes(2);
+    clock += 1;
+    hub.fn!();
+    expect(mockEvents.draftHeartbeat).toHaveBeenCalledTimes(3);
+    now.mockRestore();
+  });
+
+  it('never beats on the hub event for a viewer who does not pick', async () => {
+    mockEvents.draftRoom.mockResolvedValue(view());
+    render(<EventDraftPage slug="night" session={session} />);
+    await screen.findByText('Ann is on the clock');
+    hub.fn!();
+    await waitFor(() => expect(mockEvents.draftRoom).toHaveBeenCalledTimes(2));
+    expect(mockEvents.draftHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it('marks each team on the board as in the room or away', async () => {
+    mockEvents.draftRoom.mockResolvedValue(view({ present: ['c2'] }));
+    render(<EventDraftPage slug="night" session={session} />);
+    expect(await screen.findByLabelText('Ann: Away')).toBeTruthy();
+    expect(screen.getByLabelText('Eve: In the room')).toBeTruthy();
+    cleanup();
+    mockEvents.draftRoom.mockResolvedValue(view({ status: 'done', onClock: null, deadlineAt: null }));
+    render(<EventDraftPage slug="night" session={session} />);
+    await screen.findByText('Ann');
+    expect(screen.queryByText('Away')).toBeNull();
   });
 
   it('shows the server sentence when a pick is refused', async () => {

@@ -15,6 +15,8 @@ const HEARTBEAT_MS = 10_000;
 /** A safety net under the hub push (a dropped socket, a status change made on the desk). */
 const POLL_MS = 15_000;
 const REVEAL_MS = 4_000;
+/** A hub burst (several picks in a row) beats at most this often. */
+const HUB_BEAT_MS = 3_000;
 
 /** The live draft room (drafts plan D2b1 Ruling 13). Everyone can watch; a
  *  captain or delegate also heartbeats, picks on their turn and edits their
@@ -35,6 +37,11 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   const [drawer, setDrawer] = useState(false);
   const seen = useRef<Set<string> | null>(null);
   const wasOnClock = useRef(false);
+  const lastBeat = useRef<number | null>(null);
+  const beat = () => {
+    lastBeat.current = Date.now();
+    void eventsApi.draftHeartbeat(slug).catch(() => {});
+  };
 
   const load = () => eventsApi.draftRoom(slug).then((x) => {
     hasView.current = true;
@@ -57,7 +64,12 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   });
 
   useEffect(() => { void load(); }, [slug]);
-  useHubEvent([v ? `draft:${v.eventId}` : 'draft:none'], () => { void load(); });
+  // A hidden tab's timers run about once a minute, but socket messages are
+  // not throttled: a captain or delegate also beats on the room's broadcast.
+  useHubEvent([v ? `draft:${v.eventId}` : 'draft:none'], () => {
+    if (v?.me.role && (lastBeat.current === null || Date.now() - lastBeat.current >= HUB_BEAT_MS)) beat();
+    void load();
+  });
   useEffect(() => {
     if (!v || v.status === 'done') return undefined;
     const poll = setInterval(() => { void load(); }, POLL_MS);
@@ -73,7 +85,6 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   const role = v?.me.role ?? null;
   useEffect(() => {
     if (!role) return undefined;
-    const beat = () => { void eventsApi.draftHeartbeat(slug).catch(() => {}); };
     beat();
     const t = setInterval(beat, HEARTBEAT_MS);
     // A backgrounded tab throttles its timers: beat and refresh the moment it is seen again.
@@ -148,6 +159,11 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
           {v.teams.map((t) => (
             <div key={t.captain.steamid} class={`draftboard__team${onClock?.captain === t.captain.steamid ? ' is-up' : ''}`}>
               <h4>{t.captain.name}</h4>
+              {(v.status === 'ready' || v.status === 'running' || v.status === 'paused') && (
+                v.present.includes(t.captain.steamid)
+                  ? <span class="chip chip--ok draftboard__here" aria-label={`${t.captain.name}: In the room`}>In the room</span>
+                  : <span class="chip draftboard__away" aria-label={`${t.captain.name}: Away`}>Away</span>
+              )}
               <ol class="draftboard__slots">
                 {[0, 1, 2].map((i) => <li key={i}>{t.players[i]?.name ?? <span class="muted">Open</span>}</li>)}
               </ol>

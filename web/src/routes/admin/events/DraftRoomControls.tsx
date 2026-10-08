@@ -34,12 +34,24 @@ export function DraftRoomControls({ eventId, slug, canEdit, onChange }: { eventI
   const sec = secs ?? String(v.settings.pickSeconds);
   const act = (a: 'start' | 'pause' | 'resume' | 'undo' | 'reset', ask?: Parameters<typeof run>[1]) => void run(() => adminApi.draftRoomAct(eventId, a), ask);
   const started = v.status === 'running' || v.status === 'paused' || v.status === 'done';
+  // Start uses the stored settings, so it waits while the form shows others.
+  const unsaved = fp !== v.settings.firstPick || sec !== String(v.settings.pickSeconds);
+  const saveSettings = async () => {
+    await adminApi.draftRoomSettings(eventId, fp, Number(sec));
+    setFirstPick(null);
+    setSecs(null);
+  };
 
   return (
     <div class="draftcontrols">
       <p><a href={`/event/${slug}/draft`}>Open the draft room</a></p>
       {error && <p class="error" role="alert">{error}</p>}
       <p>{statusLine(v)}</p>
+      {v.status !== 'done' && v.status !== 'none' && (
+        <ul class="draftcontrols__presence" aria-label="Captains in the room">
+          {v.order.map((c) => <li key={c.steamid}>{`${c.name}: ${v.present.includes(c.steamid) ? 'In the room' : 'Away'}`}</li>)}
+        </ul>
+      )}
       {v.status === 'ready' && canEdit && (
         <>
           <div class="inlinerow">
@@ -53,13 +65,14 @@ export function DraftRoomControls({ eventId, slug, canEdit, onChange }: { eventI
               Pick clock (seconds){' '}
               <input type="number" min={30} max={300} value={sec} onInput={(e) => setSecs((e.target as HTMLInputElement).value)} />
             </label>
-            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.draftRoomSettings(eventId, fp, Number(sec)))}>Save settings</button>
+            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(saveSettings)}>Save settings</button>
           </div>
           <div class="inlinerow">
-            <button class="btn" disabled={busy} onClick={() => act('start', {
+            <button class="btn" disabled={busy || unsaved} onClick={() => act('start', {
               title: 'Start the live draft?',
               body: 'Every captain gets a DM with the room link and the first clock starts now. A captain who is not in the room is picked for after 5 seconds.',
             })}>Start draft</button>
+            {unsaved && <span class="muted">Save the settings first: Start uses the saved ones.</span>}
             <button class="btn btn--ghost btn--sm" disabled={busy}
               onClick={() => void run(() => adminApi.draftMode(eventId, null), 'Change the method? The live draft has not started, so nothing is lost.')}>Change method</button>
           </div>
