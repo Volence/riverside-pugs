@@ -9,7 +9,7 @@ const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
     event: vi.fn(), eventOptions: vi.fn(), updateEvent: vi.fn(), addStage: vi.fn(), updateStage: vi.fn(), removeStage: vi.fn(),
     reorderStages: vi.fn(), publishEvent: vi.fn(), openEventRegistration: vi.fn(), cancelEvent: vi.fn(),
     setEventBanner: vi.fn(), removeEventBanner: vi.fn(), deleteEvent: vi.fn(), eventEntries: vi.fn(), eventPlay: vi.fn(), startEvent: vi.fn(),
-    setRoundSchedule: vi.fn(), eventDraft: vi.fn(), draftTeamsView: vi.fn(),
+    setRoundSchedule: vi.fn(), eventStandins: vi.fn(), eventDraft: vi.fn(), draftTeamsView: vi.fn(),
   },
   mockConfirm: vi.fn(),
 }));
@@ -60,6 +60,7 @@ beforeEach(() => {
   for (const f of [...Object.values(mockAdmin), mockConfirm]) f.mockReset();
   mockAdmin.eventOptions.mockResolvedValue(OPTIONS);
   mockAdmin.eventEntries.mockResolvedValue({ lockedAt: null, entries: [] });
+  mockAdmin.eventStandins.mockResolvedValue({ margin: 100, open: true, teams: [], requests: [] });
   mockAdmin.eventPlay.mockResolvedValue({ status: 'registration', lockedAt: null, startsAt: FIELDS.startsAt, seeded: 0, stages: [] });
   mockConfirm.mockResolvedValue(true);
   for (const f of [mockAdmin.updateEvent, mockAdmin.addStage, mockAdmin.updateStage, mockAdmin.removeStage, mockAdmin.reorderStages,

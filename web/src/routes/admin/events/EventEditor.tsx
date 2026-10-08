@@ -11,6 +11,7 @@ import { EventFieldsForm } from './EventFieldsForm';
 import { StageForm } from './StageForm';
 import { RoundScheduleForm } from './RoundScheduleForm';
 import { EntriesPanel } from './EntriesPanel';
+import { StandinsPanel } from './StandinsPanel';
 import { DraftPanel } from './DraftPanel';
 import { DraftTeamsPanel } from './DraftTeamsPanel';
 import { PlayPanel } from './PlayPanel';
@@ -218,6 +219,9 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
       )}
       {ev.status !== 'draft' && ev.status !== 'announced' && hasEntries && (
         <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled && ev.fields.entryKind === 'team'} draft={ev.fields.entryKind === 'draft'} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />
+      )}
+      {ev.fields.entryKind === 'draft' && ev.teamsMadeAt !== null && (
+        <StandinsPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} />
       )}
       {hasEntries && ['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />}
       <Panel>

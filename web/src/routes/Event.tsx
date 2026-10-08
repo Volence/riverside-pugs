@@ -7,6 +7,7 @@ import type { Session } from '../hooks/useLiveState';
 import { STATUS_LABEL, placementText, untilText, whenText } from '../eventFormat';
 import { DraftSignupPanel } from './event/DraftSignupPanel';
 import { DraftIdentityPanel } from './event/DraftIdentityPanel';
+import { StandinPanel } from './event/StandinPanel';
 import { EntryPanel } from './event/EntryPanel';
 import { PrepPanel } from './event/PrepPanel';
 import { StagePlay } from './event/StagePlay';
@@ -185,6 +186,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
         <DraftSignupPanel slug={ev.slug} eventName={ev.name} status={ev.status} lockedAt={ev.lockedAt} draft={ev.draft} view={mine} onChange={bump} />
       )}
       {mine?.captainOf && ev.entryKind === 'draft' && <DraftIdentityPanel slug={ev.slug} mine={mine.captainOf} onChange={bump} />}
+      {mine && ev.entryKind === 'draft' && <StandinPanel slug={ev.slug} />}
       {mine && ev.entryKind === 'team' && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
       {mine && !['finished', 'cancelled'].includes(ev.status) && mine.entries
         .filter((e) => e.manage && (e.status === 'registered' || e.status === 'checked_in'))
