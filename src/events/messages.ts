@@ -13,8 +13,10 @@ import { bookingRules, getBooking } from '../bookings/bookings.js';
 import { getServer } from '../serverPool.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 import { getProposal, scheduleRules } from './schedule.js';
-import { STANDIN_BUTTON_PREFIX, type CutRole } from './draftRules.js';
+import { KEEP_BUTTON_PREFIX, STANDIN_BUTTON_PREFIX, type CutRole } from './draftRules.js';
 import type { ReplaceReason } from './entries.js';
+import { keepOf } from './keepTeam.js';
+import { getTeam } from '../teams/teams.js';
 import { offerOf, requestOf, type StandinRow } from './standins.js';
 
 /** The event DMs (plan T1b Ruling 11, and the two match room DMs of plan
@@ -25,7 +27,8 @@ export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_ro
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
   | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set'
-  | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none';
+  | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none'
+  | 'draft_keep_offer' | 'draft_keep_ask' | 'draft_keep_made' | 'draft_keep_left_out' | 'draft_keep_closed';
 
 /** A reschedule DM's occasion (plan T4 Ruling 11). */
 export type RescheduleNotice = 'proposed' | 'countered' | 'declined' | 'withdrawn' | 'reminder';
@@ -70,7 +73,7 @@ function standinScopeText(db: DB, req: StandinRow): string {
 
 export function eventMessage(
   db: DB, publicUrl: string, eventId: number, type: EventNotifyType,
-  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason; forCaptain?: string; offerId?: number; requestId?: number } = {},
+  extra: { entryId?: number; reason?: R.DropReason; by?: string; role?: R.Role; matchId?: number; why?: 'ready' | 'server' | 'window'; what?: StaffAction | RescheduleNotice | 'staff'; detail?: string; proposalId?: number; removal?: SignupRemoval; cutRole?: CutRole; expiresAt?: string; captain?: boolean; out?: string; in?: string; replaceReason?: ReplaceReason; forCaptain?: string; offerId?: number; requestId?: number; keepId?: number } = {},
 ): MessagePayload | null {
   const ev = E.getEvent(db, eventId);
   if (!ev) return null;
@@ -195,6 +198,60 @@ export function eventMessage(
       if (!req) return null;
       content = `Nobody on the bench took the stand-in for ${nameIn(db, req.out_steamid)} on ${team} in ${event} (${req.scope === 'match' ? 'next match' : 'rest of the event'}). Staff were told and will help: a delay, a wider search, or a forfeit if it comes to that.`;
       break;
+    }
+    case 'draft_keep_offer': {
+      // Plan D3b Ruling 2: the captain, with the Keep button.
+      const k = extra.keepId !== undefined ? keepOf(db, extra.keepId) : undefined;
+      if (!k || !entry) return null;
+      return {
+        content: `${event} is over. Keep ${team} together as a real team? Press Keep this team to ask your three; the team is made when 3 of the 4 of you accept. Open until ${discordTime(k.expires_at)}. To choose another name or tag first, use the event page.`,
+        embeds: [],
+        components: [[
+          { kind: 'button', customId: `${KEEP_BUTTON_PREFIX}k:${k.id}`, label: 'Keep this team', style: 'success' },
+          { kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' },
+        ]],
+        mentionUserIds: [],
+      };
+    }
+    case 'draft_keep_ask': {
+      const k = extra.keepId !== undefined ? keepOf(db, extra.keepId) : undefined;
+      if (!k || k.name === null || k.tag === null) return null;
+      return {
+        content: `${nameIn(db, k.captain_steamid)} wants to keep ${team} from ${event} together as a real team, ${escapeName(k.name)} [${k.tag}]. It is made when 3 of the 4 of you accept, by ${discordTime(k.expires_at)}.`,
+        embeds: [],
+        components: [[
+          { kind: 'button', customId: `${KEEP_BUTTON_PREFIX}a:${k.id}`, label: 'Accept', style: 'success' },
+          { kind: 'button', customId: `${KEEP_BUTTON_PREFIX}d:${k.id}`, label: 'Decline', style: 'secondary' },
+          { kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' },
+        ]],
+        mentionUserIds: [],
+      };
+    }
+    case 'draft_keep_closed': {
+      // The captain lost good standing before the team could be made: nothing was made, so no team link.
+      const k = extra.keepId !== undefined ? keepOf(db, extra.keepId) : undefined;
+      if (!k) return null;
+      return {
+        content: `The keep for ${team} from ${event} was closed and no team was made. Staff can tell you more.`,
+        embeds: [],
+        components: [[{ kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Open the event' }]],
+        mentionUserIds: [],
+      };
+    }
+    case 'draft_keep_made':
+    case 'draft_keep_left_out': {
+      const k = extra.keepId !== undefined ? keepOf(db, extra.keepId) : undefined;
+      const t = k && k.team_id !== null ? getTeam(db, k.team_id) : undefined;
+      if (!k || !t) return null;
+      const url = `${publicUrl}/team/${t.slug}`;
+      return {
+        content: type === 'draft_keep_made'
+          ? `${escapeName(t.name)} [${t.tag}] is a team now, formed at ${event}: ${url}`
+          : `You were not added to ${escapeName(t.name)} [${t.tag}], made from ${team} in ${event}. If you are on three teams already, leave one and ask the captain to add you: ${url}`,
+        embeds: [],
+        components: [[{ kind: 'link', url, label: 'Team page' }]],
+        mentionUserIds: [],
+      };
     }
     case 'draft_captain_offer':
       if (!extra.expiresAt) return null;

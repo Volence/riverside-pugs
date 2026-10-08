@@ -70,6 +70,11 @@ describe('preferences', () => {
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_standin_placed')).toEqual({ type: 'draft_standin_placed', label: 'Draft: I am placed on a team as a stand-in' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_standin_filled')).toEqual({ type: 'draft_standin_filled', label: 'Draft: a stand-in was found for a player on my team' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_standin_none')).toEqual({ type: 'draft_standin_none', label: 'Draft: nobody on the bench took a stand-in my team asked for' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_offer')).toEqual({ type: 'draft_keep_offer', label: 'Draft: keep my draft team together after the event' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_ask')).toEqual({ type: 'draft_keep_ask', label: 'Draft: my captain wants to keep our draft team' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_made')).toEqual({ type: 'draft_keep_made', label: 'Draft: our kept draft team is made' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_left_out')).toEqual({ type: 'draft_keep_left_out', label: 'Draft: I was left out of our kept team (team cap)' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_keep_closed')).toEqual({ type: 'draft_keep_closed', label: 'Draft: our kept draft team was not made' });
   });
   it('lists the two reschedule DMs (plan T4)', () => {
     expect(NOTIFY_TYPES.filter((t) => t.type === 'event_reschedule' || t.type === 'event_match_time')).toEqual([
