@@ -1,4 +1,4 @@
-import type { CastLiveRound, CastMatchView, CastPlayer, CastTeam, OverlayFeed, StudioState } from '../../../src/cast/types';
+import type { CastDraftCard, CastDraftPick, CastDraftPlayer, CastDraftView, CastLiveRound, CastMatchView, CastPlayer, CastTeam, OverlayFeed, StudioState } from '../../../src/cast/types';
 
 /**
  * A made-up match for the producer panel's preview while nothing is on air,
@@ -60,5 +60,38 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     players: [...a.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'a' as const, stats: { sidmg: [930, 610, 420, 300][i] ?? 0, sikill: [9, 6, 4, 3][i] ?? 0, ck: [88, 71, 52, 40][i] ?? 0, skeets: [2, 0, 1, 0][i] ?? 0 } })),
       ...b.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'b' as const, stats: { damage_as_si: [212, 180, 96, 60][i] ?? 0, dps_landed: [1, 0, 0, 0][i] ?? 0, survivors_biled: [0, 3, 0, 1][i] ?? 0, dmg_as_tank: [0, 0, 240, 0][i] ?? 0 } }))],
   };
-  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null), draft: null };
+  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null), draft: sampleDraft(now) };
+}
+
+/** A made-up draft for the panel's preview (drafts plan D2b2 Ruling 12):
+ *  five teams, seven picks, pick 8 on the clock for Captain Three with 42 s
+ *  left. Pick times are fixed, so the preview never fires a reveal. */
+export function sampleDraft(now: number): CastDraftView {
+  const card = (i: number, name: string, sr: number): CastDraftCard => ({
+    steamid: `0000000000000${String(900 + i)}`, name, avatar: null, sr, pugs: 20 + i, form: ['W', 'L', 'W', 'W', 'L'],
+    survivor: { siDamage: 640 + i * 10, commonKills: 88 }, infected: { damageAsSi: 180 + i * 4, dpsLanded: 0.6 }, bestClass: 'hunter',
+  });
+  const strip = (c: CastDraftCard): CastDraftPlayer => ({ steamid: c.steamid, name: c.name, avatar: c.avatar, sr: c.sr });
+  const caps = ['Captain One', 'Captain Two', 'Captain Three', 'Captain Four', 'Captain Five'].map((n, i) => card(i, n, 1500 - i * 40));
+  const pool = Array.from({ length: 15 }, (_, i) => card(10 + i, `Player ${i + 1}`, 1460 - i * 22));
+  const taken = 7;
+  // Snake over five teams: round 1 to teams 0..4, round 2 back from 4 to 0.
+  const picks: CastDraftPick[] = pool.slice(0, taken).map((p, k) => ({
+    pickNo: k + 1, round: k < 5 ? 1 : 2, captain: caps[k < 5 ? k : 9 - k]!.steamid, steamid: p.steamid, name: p.name,
+    auto: k === 4, at: `2026-01-01T00:00:0${k}.000Z`,
+  }));
+  return {
+    eventId: 0, eventName: 'Sample draft', status: 'running', deadlineAt: new Date(now + 42_000).toISOString(), pausedLeftMs: null,
+    pickSeconds: 75, totalPicks: 15, rounds: 3,
+    onClock: { pickNo: 8, round: 2, captain: caps[2]!.steamid, picker: caps[2]!.steamid },
+    teams: caps.map((c, ti) => ({
+      captain: strip(c),
+      players: picks.filter((p) => p.captain === c.steamid).map((p) => strip(pool.find((x) => x.steamid === p.steamid)!)),
+      slots: [ti + 1, 10 - ti, 11 + ti],
+    })),
+    picks,
+    cards: Object.fromEntries(pool.slice(0, taken).map((c) => [c.steamid, c])),
+    best: pool.slice(taken, taken + 3),
+    poolLeft: 15 - taken,
+  };
 }
