@@ -4,7 +4,7 @@ import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import {
-  ENDORSE_ERROR_TEXT, allTitles, endorseState, giveEndorsement, pendingEndorsements,
+  ENDORSE_ERROR_TEXT, allTitles, endorseState, endorsementBoard, giveEndorsement, pendingEndorsements,
 } from '../endorsements.js';
 import { resolveDemoPath } from '../demos.js';
 import { publicUrlFor, type R2Config } from '../r2.js';
@@ -81,6 +81,19 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   });
 
   app.get('/api/seasons', async () => ({ seasons: listSeasons(db) }));
+
+  /** Season endorsement board: counts per kind, the total and how many
+   *  different people gave them. Aggregate only, like the profile: nothing
+   *  here says who endorsed whom. */
+  app.get('/api/leaderboard/endorsements', async (req, reply) => {
+    const raw = (req.query as { season?: string }).season;
+    const seasonId = raw === undefined ? currentSeasonId(db) : Number(raw);
+    const season = Number.isInteger(seasonId)
+      ? db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string } | undefined
+      : undefined;
+    if (!season) return reply.code(404).send({ error: 'no such season' });
+    return { season, rows: endorsementBoard(db, season.id) };
+  });
 
   /** Per-stat ladder. `self`-visibility stats are refused here rather than
    *  filtered later: a "most skeeted" board is exactly what the private

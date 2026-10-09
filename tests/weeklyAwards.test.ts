@@ -173,3 +173,51 @@ describe('shame awards', () => {
     expect(find(r, 'incap_damage', 'single')).toBeUndefined();
   });
 });
+
+describe('endorsement awards', () => {
+  const endorse = (matchId: number, from: string, to: string, kind: string, createdAt: string) =>
+    db.prepare('INSERT INTO endorsements (match_id, from_id, to_id, kind, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(matchId, from, to, kind, createdAt);
+  /** One match per pair so the (match, from, to) key never collides. */
+  const match = (day = 0, extra: Partial<Parameters<typeof seedMatch>[1]> = {}) =>
+    seedMatch(db, { endedAt: at(day), lines: P.map((id, i) => ({ id, team: i < 4 ? 'a' as const : 'b' as const })), ...extra });
+
+  it('goes to the most DIFFERENT people, not the most endorsements', () => {
+    // P[0]: one friend, three matches, three caller endorsements.
+    for (let i = 0; i < 3; i++) endorse(match(), P[7], P[0], 'caller', at(0, '23:00:00'));
+    // P[1]: two different people, one each.
+    const m = match();
+    endorse(m, P[5], P[1], 'caller', at(0, '23:00:00'));
+    endorse(m, P[6], P[1], 'caller', at(0, '23:00:00'));
+    const r = computeWeek(db, W);
+    expect(find(r, 'endorsed_caller', 'single')!.winners.map((w) => [w.steamid, w.value, w.detail])).toEqual([[P[1], 2, '2']]);
+    expect(find(r, 'endorsed_caller', 'single')!.group).toBe('endorsed');
+    // Total counts every kind, by people too: P[1] (2 people) still beats P[0] (1 person, 3 endorsements).
+    expect(find(r, 'endorsed_total', 'single')!.winners.map((w) => w.steamid)).toEqual([P[1]]);
+    expect(find(r, 'endorsed_clutch', 'single')).toBeUndefined();
+  });
+
+  it('a tie on people goes to the bigger count, and a full tie shares it', () => {
+    const m1 = match(); const m2 = match();
+    endorse(m1, P[5], P[0], 'vibes', at(0, '23:00:00'));
+    endorse(m2, P[5], P[0], 'vibes', at(0, '23:00:00'));   // P[0]: 1 person, 2 endorsements
+    endorse(m1, P[6], P[1], 'vibes', at(0, '23:00:00'));   // P[1]: 1 person, 1 endorsement
+    expect(find(computeWeek(db, W), 'endorsed_vibes', 'single')!.winners.map((w) => w.steamid)).toEqual([P[0]]);
+    endorse(m2, P[6], P[1], 'vibes', at(0, '23:00:00'));
+    expect(find(computeWeek(db, W), 'endorsed_vibes', 'single')!.winners.map((w) => w.steamid).sort()).toEqual([P[0], P[1]].sort());
+  });
+
+  it('counts the week the endorsement was GIVEN, and drops voided or non-pug matches', () => {
+    // A Sunday night match of the previous week, endorsed after its week froze.
+    const late = seedMatch(db, { endedAt: '2026-09-21 05:00:00', lines: [{ id: P[0], team: 'a' }, { id: P[5], team: 'a' }] });
+    endorse(late, P[5], P[0], 'clutch', at(0, '13:00:00'));
+    const voided = match(1, { voided: true });
+    endorse(voided, P[6], P[2], 'clutch', at(1, '23:00:00'));
+    endorse(voided, P[7], P[2], 'clutch', at(1, '23:00:00'));
+    const scrim = match(1, { kind: 'scrim' });
+    endorse(scrim, P[6], P[3], 'clutch', at(1, '23:00:00'));
+    endorse(scrim, P[7], P[3], 'clutch', at(1, '23:00:00'));
+    expect(find(computeWeek(db, W), 'endorsed_clutch', 'single')!.winners.map((w) => w.steamid)).toEqual([P[0]]);
+    expect(find(computeWeek(db, '2026-09-14'), 'endorsed_clutch', 'single')).toBeUndefined();
+  });
+});

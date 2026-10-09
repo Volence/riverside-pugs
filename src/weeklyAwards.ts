@@ -2,6 +2,7 @@ import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
 import { displaySr } from './rating.js';
 import { settingNumber } from './settings.js';
+import type { EndorseKind } from './endorsements.js';
 
 /**
  * Weekly awards, computed from the live tables for any week.
@@ -14,7 +15,7 @@ import { settingNumber } from './settings.js';
  * week so later voids cannot rewrite who won.
  */
 
-export type AwardGroup = 'survivor' | 'infected' | 'overall' | 'shame';
+export type AwardGroup = 'survivor' | 'infected' | 'overall' | 'endorsed' | 'shame';
 export type AwardKind = 'avg' | 'total' | 'single';
 export interface Winner { steamid: string; name: string; value: number; games: number; detail: string | null }
 export interface AwardResult { key: string; label: string; group: AwardGroup; kind: AwardKind; winners: Winner[] }
@@ -61,9 +62,18 @@ const SINGLE_AWARDS: AwardDef[] = [
   { key: 'group_hug', label: 'Group hug', group: 'shame' },
 ];
 
+/** Endorsement awards, one per kind plus the total. Order is display order. */
+const ENDORSE_AWARDS: (AwardDef & { kind: EndorseKind | null })[] = [
+  { key: 'endorsed_total', label: 'Most endorsed', group: 'endorsed', kind: null },
+  { key: 'endorsed_caller', label: 'Top caller', group: 'endorsed', kind: 'caller' },
+  { key: 'endorsed_clutch', label: 'Most clutch', group: 'endorsed', kind: 'clutch' },
+  { key: 'endorsed_vibes', label: 'Best vibes', group: 'endorsed', kind: 'vibes' },
+];
+
 export const AWARDS: AwardDef[] = [
   ...STAT_AWARDS.map(({ key, label, group }) => ({ key, label, group })),
   ...SINGLE_AWARDS,
+  ...ENDORSE_AWARDS.map(({ key, label, group }) => ({ key, label, group })),
 ];
 
 export function awardDef(key: string): AwardDef | undefined {
@@ -239,6 +249,46 @@ function computeSingles(db: DB, week: string, games: Map<string, PlayerGames>, m
     .map((a) => ({ key: a.key, label: a.label, group: a.group, kind: 'single' as const, winners: pick[a.key] }));
 }
 
+/**
+ * Endorsement awards go to whoever the most DIFFERENT people endorsed, so two
+ * friends trading endorsements every match cannot buy one; a tie on that goes
+ * to the bigger count. The value is the number of people, the detail the count.
+ *
+ * An endorsement counts for the week it was GIVEN, not the week its match
+ * ended: the window stays open for a day after a match, and the week freezes
+ * at Monday noon, so a Sunday night match's endorsements would otherwise land
+ * after its week was already frozen and never count anywhere.
+ */
+function computeEndorsed(db: DB, week: string, games: Map<string, PlayerGames>): AwardResult[] {
+  const { from, to } = weekBounds(week);
+  const rows = db.prepare(
+    `SELECT e.to_id AS steamid, p.name, e.kind, e.from_id
+     FROM endorsements e
+     JOIN matches m ON m.id = e.match_id AND ${completedPug('m')} AND m.voided_at IS NULL
+     JOIN players p ON p.steamid = e.to_id
+     WHERE e.created_at >= ? AND e.created_at < ?`,
+  ).all(from, to) as { steamid: string; name: string; kind: EndorseKind; from_id: string }[];
+  const out: AwardResult[] = [];
+  for (const a of ENDORSE_AWARDS) {
+    const by = new Map<string, { name: string; count: number; givers: Set<string> }>();
+    for (const r of rows) {
+      if (a.kind && r.kind !== a.kind) continue;
+      const e = by.get(r.steamid) ?? { name: r.name, count: 0, givers: new Set<string>() };
+      e.count++; e.givers.add(r.from_id);
+      by.set(r.steamid, e);
+    }
+    const ranked = [...by].map(([steamid, e]) => ({ steamid, name: e.name, count: e.count, value: e.givers.size }));
+    const most = topOf(ranked);
+    const bestCount = Math.max(0, ...most.map((r) => r.count));
+    const winners = most.filter((r) => r.count === bestCount).map((r): Winner => ({
+      steamid: r.steamid, name: r.name, value: r.value,
+      games: games.get(r.steamid)?.games ?? 0, detail: String(r.count),
+    }));
+    if (winners.length) out.push({ key: a.key, label: a.label, group: a.group, kind: 'single', winners });
+  }
+  return out;
+}
+
 export function computeWeek(db: DB, week: string): AwardResult[] {
   const games = playerGames(db, week);
   const min = weeklyMinGames(db);
@@ -253,5 +303,6 @@ export function computeWeek(db: DB, week: string): AwardResult[] {
     if (tot.length) out.push({ ...base, kind: 'total', winners: tot.map((r) => winner(r.g, r.value)) });
   }
   out.push(...computeSingles(db, week, games, min));
+  out.push(...computeEndorsed(db, week, games));
   return out;
 }
