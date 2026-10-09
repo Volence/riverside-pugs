@@ -57,7 +57,9 @@ char g_sBalFiles[][] = {
 	"cfg/server_shared_convars.cfg",
 	"cfg/local_4v4.cfg",
 	"cfg/riverside/every_map.cfg",
-	"cfg/riverside/family_4v4.cfg"
+	"cfg/riverside/family_4v4.cfg",
+	"cfg/riverside/shared.cfg",
+	"cfg/riverside/plugins_off.cfg"
 };
 
 char g_sBalDirs[][] = {
