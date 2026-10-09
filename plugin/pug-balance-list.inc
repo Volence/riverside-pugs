@@ -54,7 +54,10 @@ char g_sBalFiles[][] = {
 	"cfg/rotoblin_pug_4v4_map.cfg",
 	"cfg/pug_match.cfg",
 	"cfg/Reloadables/server_custom_convars.cfg",
-	"cfg/server_shared_convars.cfg"
+	"cfg/server_shared_convars.cfg",
+	"cfg/local_4v4.cfg",
+	"cfg/riverside/every_map.cfg",
+	"cfg/riverside/family_4v4.cfg"
 };
 
 char g_sBalDirs[][] = {

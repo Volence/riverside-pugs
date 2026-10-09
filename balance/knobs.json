@@ -51,7 +51,10 @@
     { "path": "cfg/rotoblin_pug_4v4_map.cfg", "label": "4v4 per-map config" },
     { "path": "cfg/pug_match.cfg", "label": "PUG match config" },
     { "path": "cfg/Reloadables/server_custom_convars.cfg", "label": "Custom convars" },
-    { "path": "cfg/server_shared_convars.cfg", "label": "Shared convars" }
+    { "path": "cfg/server_shared_convars.cfg", "label": "Shared convars" },
+    { "path": "cfg/local_4v4.cfg", "label": "4v4 overrides" },
+    { "path": "cfg/riverside/every_map.cfg", "label": "Fleet every-map pins" },
+    { "path": "cfg/riverside/family_4v4.cfg", "label": "4v4 family pins" }
   ],
   "dirs": [
     { "path": "addons/stripper/Roto-AZMod/maps", "ext": ".cfg", "label": "Stripper per-map configs" }
