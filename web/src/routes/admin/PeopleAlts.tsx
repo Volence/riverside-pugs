@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { peopleApi, type AltCluster, type AltHold, type AltSignal } from '../../api';
+import { countryName } from '../../countries';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
@@ -49,6 +50,8 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <>
+      <IpWatchPanel />
+
       <Panel class="panel--table">
         <h3>On hold</h3>
         <p class="muted">
@@ -149,5 +152,107 @@ function ClusterCard({ c }: { c: AltCluster }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * The IP watch list (src/ipWatch.ts). A flagged ban evader's connections are
+ * watched, and any other account turning up on one pings the mod call role.
+ * Staff can also watch an address by hand; it is hashed on arrival and never
+ * kept, so the list shows a short fingerprint, not the address.
+ */
+function IpWatchPanel() {
+  const { data, error: loadError, reload } = useFetch((s) => peopleApi.ipWatch(s), []);
+  const { busy, error, run } = useAction(reload);
+  const [ip, setIp] = useState('');
+  const [note, setNote] = useState('');
+
+  const add = () => run(async () => {
+    await peopleApi.watchIp(ip.trim(), note.trim());
+    setIp('');
+    setNote('');
+  });
+
+  return (
+    <Panel class="panel--table">
+      <h3>IP watch list</h3>
+      <p class="muted">
+        Flag a ban evader from the Identity section of their file and every connection they use is watched,
+        including new ones. Any other account connecting from a watched connection pings the mod role in the
+        mod channel. Separately, any account sharing a connection with a banned account gets a plain alert.
+        Nothing here bans or holds anyone.
+      </p>
+      {error && <p class="error">{error}</p>}
+      {loadError && <Empty>Could not load the watch list.</Empty>}
+
+      {data && data.flags.length > 0 && (
+        <>
+          <p><strong>Flagged ban evaders</strong></p>
+          <ul class="admin-list">
+            {data.flags.map((f) => (
+              <li key={f.steamid}>
+                <a href={fileUrl(f.steamid)}>{f.name}</a> <span class="mono muted">{f.steamid}</span>{' '}
+                <span class="muted">{f.reason} · {fmtTime(f.createdAt)}{f.createdByName ? ` by ${f.createdByName}` : ''}</span>{' '}
+                <button class="chip" type="button" disabled={busy}
+                  onClick={() => run(() => peopleApi.clearEvader(f.steamid), {
+                    title: `Clear the flag on ${f.name}?`,
+                    body: 'The connections this flag put on the watch list stop being watched.',
+                    confirmLabel: 'Clear flag',
+                  })}>Clear</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {data && data.entries.length === 0 && <Empty>No connections are being watched.</Empty>}
+      {data && data.entries.length > 0 && (
+        <div class="table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr><th>Connection</th><th>Watched for</th><th>Accounts seen there</th><th /></tr>
+            </thead>
+            <tbody>
+              {data.entries.map((w) => (
+                <tr key={w.ipHash}>
+                  <td>
+                    <span class="mono">{w.ipHash.slice(0, 10)}</span>
+                    {w.country && <div class="muted">{countryName(w.country)}</div>}
+                  </td>
+                  <td>
+                    {w.steamid ? <>Evader <a href={fileUrl(w.steamid)}>{w.name ?? w.steamid}</a></> : 'Added by hand'}
+                    {w.note && <div>{w.note}</div>}
+                    <div class="muted">{fmtTime(w.createdAt)}{w.createdByName ? ` by ${w.createdByName}` : ''}</div>
+                  </td>
+                  <td>
+                    {w.accounts.length === 0 && <span class="muted">nobody yet</span>}
+                    {w.accounts.map((a, i) => (
+                      <span key={a.steamid}>
+                        {i > 0 && ' · '}
+                        <a href={fileUrl(a.steamid)}>{a.name}</a>
+                        {a.banned && <> <span class="admin-status admin-status--banned">banned</span></>}
+                        {a.flagged && <> <span class="chip">flagged</span></>}
+                      </span>
+                    ))}
+                  </td>
+                  <td class="admin-actions">
+                    <button class="btn" type="button" disabled={busy}
+                      onClick={() => run(() => peopleApi.unwatchIp(w.ipHash), 'Stop watching this connection?')}>Remove</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <form class="admin-merge" onSubmit={(e) => { e.preventDefault(); void add(); }}>
+        <input value={ip} placeholder="IPv4 address" aria-label="Address to watch"
+          onInput={(e) => setIp((e.target as HTMLInputElement).value)} />
+        <input value={note} placeholder="Note (who, why)" aria-label="Note" maxLength={200}
+          onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
+        <button class="btn" type="submit" disabled={busy || !/^\d{1,3}(\.\d{1,3}){3}$/.test(ip.trim())}>Watch</button>
+      </form>
+    </Panel>
   );
 }

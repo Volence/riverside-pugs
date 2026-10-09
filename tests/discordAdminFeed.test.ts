@@ -44,6 +44,21 @@ const settled = async () => { await sync.idle(); await feed.idle(); };
 const inFeed = () => t.live().filter((m) => m.channelId === 'admins');
 
 describe('admin feed', () => {
+  it('a watch list hit pings the mod call role; a banned-share alert does not', async () => {
+    setSetting(db, 'mod_call_role_id', '123456789012345678');
+    publishAdminEvent({ kind: 'ip_match', level: 'watch', steamid: IDS[1], others: [IDS[2]], flagged: IDS[2], note: '' });
+    publishAdminEvent({ kind: 'ip_match', level: 'banned', steamid: IDS[3], others: [IDS[2]], flagged: null, note: '' });
+    await settled();
+    const [watch, banned] = inFeed().map((m) => m.payload);
+    expect(watch.content).toBe('<@&123456789012345678>');
+    expect(watch.mentionRoleIds).toEqual(['123456789012345678']);
+    expect(JSON.stringify(watch)).toContain('Watch list hit');
+    expect(JSON.stringify(watch)).toContain('flagged ban evader');
+    expect(banned.content).toBeUndefined();
+    expect(banned.mentionRoleIds ?? []).toEqual([]);
+    expect(JSON.stringify(banned)).toContain('same connection as banned');
+  });
+
   it('team actions read as sentences with the team linked', async () => {
     const team = Number(db.prepare(
       `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by) VALUES ('Rats', 'rats', 'RR', 'RR', 'rats', ?, ?)`,

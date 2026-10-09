@@ -75,12 +75,14 @@ export function hashIp(db: DB, ip: string): string {
   return createHmac('sha256', salt(db)).update(ip).digest('hex');
 }
 
-/** Record one sighting. Repeats bump a counter rather than adding rows. */
+/** Record one sighting. Repeats bump a counter rather than adding rows.
+ *  Returns the address's hash, or null for one that identifies nobody. */
 export function recordPlayerNet(
   db: DB, ev: { steamid: string; ip: string; country: string | null }, now = new Date(),
-): void {
-  if (!usable(ev.ip)) return;
+): string | null {
+  if (!usable(ev.ip)) return null;
   const at = now.toISOString();
+  const ipHash = hashIp(db, ev.ip);
   db.prepare(
     `INSERT INTO player_networks (player_id, ip_hash, country, first_seen, last_seen, seen_count)
      VALUES (?, ?, ?, ?, ?, 1)
@@ -91,7 +93,8 @@ export function recordPlayerNet(
        -- was read once should not be erased by a sighting that could not
        -- read one.
        country    = COALESCE(excluded.country, player_networks.country)`,
-  ).run(ev.steamid, hashIp(db, ev.ip), ev.country, at, at);
+  ).run(ev.steamid, ipHash, ev.country, at, at);
+  return ipHash;
 }
 
 export function networksOf(db: DB, steamid: string): PlayerNetwork[] {

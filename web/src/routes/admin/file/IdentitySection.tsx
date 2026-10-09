@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { adminApi, type FileAction, type MergePlan, type PlayerFileData } from '../../../api';
+import { adminApi, peopleApi, type FileAction, type MergePlan, type PlayerFileData } from '../../../api';
 import { Panel } from '../../../components/bits';
 import { fmtTime, type Run } from '../useAction';
 import { fileUrl } from '../adminRoutes';
@@ -23,6 +23,7 @@ export function IdentitySection(
   const [into, setInto] = useState('');
   const [plan, setPlan] = useState<MergePlan | null>(null);
   const [planError, setPlanError] = useState('');
+  const [evaderReason, setEvaderReason] = useState('');
   const countries = [...new Set(id.networks.map((n) => n.country).filter(Boolean))].map(countryName);
 
   const preview = async () => {
@@ -39,6 +40,31 @@ export function IdentitySection(
   return (
     <Panel class="file-section">
       <h3 id="identity">Identity</h3>
+
+      {id.evaderFlag ? (
+        <p>
+          <span class="admin-status admin-status--banned">ban evader</span>{' '}
+          Every connection this account uses is on the <a href="/admin/people/alts">IP watch list</a>.{' '}
+          <span class="muted">{id.evaderFlag.reason} · {fmtTime(id.evaderFlag.createdAt)}{id.evaderFlag.createdByName ? ` by ${id.evaderFlag.createdByName}` : ''}</span>{' '}
+          {can('looked_at') && (
+            <button class="chip" type="button" disabled={busy}
+              onClick={() => run(() => peopleApi.clearEvader(d.steamid), `Clear the ban evader flag on ${d.header.name}?`)}>Clear flag</button>
+          )}
+        </p>
+      ) : can('looked_at') && (
+        <form class="admin-merge" onSubmit={(e) => {
+          e.preventDefault();
+          void run(() => peopleApi.flagEvader(d.steamid, evaderReason.trim()), {
+            title: `Flag ${d.header.name} as a ban evader?`,
+            body: 'Every connection they have used, and any they use later, goes on the IP watch list. Any other account connecting from one pings the mod role. It does not ban anyone.',
+            confirmLabel: 'Flag',
+          }).then(() => setEvaderReason(''));
+        }}>
+          <input value={evaderReason} placeholder="Why (e.g. dethisa, 4th account)" aria-label="Ban evader reason" maxLength={300}
+            onInput={(e) => setEvaderReason((e.target as HTMLInputElement).value)} />
+          <button class="btn" type="submit" disabled={busy || !evaderReason.trim()}>Flag as ban evader</button>
+        </form>
+      )}
 
       {(id.altHolds?.length ?? 0) > 0 && (
         <>

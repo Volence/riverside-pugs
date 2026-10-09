@@ -70,12 +70,17 @@ export class AdminFeedPoster {
     if (!channelId) return;
     const line = this.line(e);
     if (!line) return;
+    // A line may ask for the mod call role (the IP watch list's loud alert).
+    // Nothing is pinged while that role is unset.
+    const role = line.ping ? (getSetting(this.deps.db, 'mod_call_role_id') ?? '') : '';
     await this.deps.transport.send(channelId, {
+      ...(role ? { content: `<@&${role}>` } : {}),
       embeds: [{ description: line.text, color: line.color }], components: [], mentionUserIds: [],
+      ...(role ? { mentionRoleIds: [role] } : {}),
     });
   }
 
-  private line(e: AdminEvent): { text: string; color: number } | null {
+  private line(e: AdminEvent): { text: string; color: number; ping?: boolean } | null {
     switch (e.kind) {
       case 'report': {
         const link = `[#${e.ticketId}](${this.ticket(e.ticketId)})`;
@@ -288,6 +293,28 @@ export class AdminFeedPoster {
             color: COLOR.problem,
           };
       }
+      case 'ip_match': {
+        const desk = `${this.deps.publicUrl}/admin/people/alts`;
+        const others = e.others.slice(0, 8).map((id) => `${this.name(id)} ([file](${this.file(id)}))`);
+        const more = e.others.length > 8 ? ` and ${e.others.length - 8} more` : '';
+        if (e.level === 'watch') {
+          const source = e.flagged
+            ? `a connection used by flagged ban evader ${this.name(e.flagged)}`
+            : `a watched connection${e.note ? ` (${escapeName(e.note)})` : ''}`;
+          return {
+            text: `🚨 **Watch list hit:** ${this.name(e.steamid)} connected from ${source}.`
+              + `${others.length ? ` Also seen there: ${joinNames(others)}${more}.` : ''}`
+              + ` Nothing was done to the account. [File](${this.file(e.steamid)}) · [Watch list](${desk})`,
+            color: COLOR.problem,
+            ping: true,
+          };
+        }
+        return {
+          text: `🔗 ${this.name(e.steamid)} connected from the same connection as banned ${joinNames(others)}${more}. `
+            + `Same connection is evidence, not proof. [File](${this.file(e.steamid)}) · [Alts](${desk})`,
+          color: COLOR.problem,
+        };
+      }
       case 'rename_digest': {
         // One embed for the day. Discord caps a description at 4096
         // characters, so the lines stop short of that and the rest are
@@ -345,6 +372,10 @@ export class AdminFeedPoster {
       case 'ban': return `${who} banned ${target}: ${escapeName(String(d.reason ?? ''))} (${d.minutes ? fmtMinutes(Number(d.minutes)) : 'permanent'})`;
       case 'unban': return `${who} unbanned ${target}`;
       case 'alt_lift': return `${who} lifted the alt hold on ${target}`;
+      case 'evader_flag': return `${who} flagged ${target} as a ban evader: ${escapeName(String(d.reason ?? ''))}`;
+      case 'evader_clear': return `${who} cleared the ban evader flag on ${target}`;
+      case 'ip_watch_add': return `${who} added a connection to the IP watch list${d.note ? `: ${escapeName(String(d.note))}` : ''}`;
+      case 'ip_watch_remove': return `${who} removed a connection from the IP watch list`;
       case 'alt_ban': return `${who} turned the alt hold on ${target} into a ban: ${escapeName(String(d.reason ?? ''))}`;
       case 'activate': return `${who} activated ${target}`;
       case 'set_admin': return `${who} ${d.isAdmin ? 'made' : 'removed'} ${target} ${d.isAdmin ? 'an admin' : 'as admin'}`;

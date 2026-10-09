@@ -1541,6 +1541,8 @@ export interface PlayerFileData {
       names?: NameHistoryRow[];
       /** Alt holds naming this account on either side. Optional for an older server. */
       altHolds?: AltHold[];
+      /** Set while flagged as a ban evader. Optional for an older server. */
+      evaderFlag?: EvaderFlag | null;
     };
     standing: {
       activeBan: AdminBan | null;
@@ -1623,7 +1625,30 @@ export const peopleApi = {
   liftHold: (id: number) => post<{ ok: true }>(`/api/admin/people/alts/${id}/lift`),
   banFromHold: (id: number, reason: string) => post<{ ok: true }>(`/api/admin/people/alts/${id}/ban`, { reason }),
   pings: (signal?: AbortSignal) => get<PingTable>('/api/admin/people/pings', signal),
+  ipWatch: (signal?: AbortSignal) =>
+    get<{ flags: EvaderFlag[]; entries: WatchEntry[] }>('/api/admin/people/ipwatch', signal),
+  watchIp: (ip: string, note: string) => post<{ ok: true }>('/api/admin/people/ipwatch', { ip, note }),
+  unwatchIp: (hash: string) => post<{ ok: true }>(`/api/admin/people/ipwatch/${encodeURIComponent(hash)}/remove`),
+  flagEvader: (steamid: string, reason: string) =>
+    post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/evader`, { reason }),
+  clearEvader: (steamid: string) => post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/evader/clear`),
 };
+
+/** An account flagged as a ban evader: every connection it uses is watched.
+ *  See src/ipWatch.ts. */
+export interface EvaderFlag {
+  steamid: string; name: string; reason: string;
+  createdAt: string; createdBy: string; createdByName: string | null;
+}
+
+/** One watched connection. The address itself is never stored or shown. */
+export interface WatchEntry {
+  ipHash: string; country: string | null; note: string;
+  /** The flagged account it came from, or null when added by hand. */
+  steamid: string | null; name: string | null;
+  createdAt: string; createdByName: string | null;
+  accounts: { steamid: string; name: string; banned: boolean; flagged: boolean; lastSeen: string }[];
+}
 
 /** Each player's typical ping to each server host (src/serverPick.ts). */
 export interface PingTable {

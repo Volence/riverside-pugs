@@ -26,6 +26,7 @@ import { makeQueueGate } from './queueGate.js';
 import { makeReadyGate } from './readyGate.js';
 import { canonicalise } from './aliases.js';
 import { recordPlayerNet } from './playerNetworks.js';
+import { checkConnection } from './ipWatch.js';
 import { onSourceTv } from './sourcetvSessions.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { activeTimeout, timeoutCause } from './penalties.js';
@@ -1086,7 +1087,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // Cosmetic-adjacent and never on the critical path: a failure here
           // must not take down the listener that also carries match_end.
           try {
-            recordPlayerNet(deps.db, ev);
+            const ipHash = recordPlayerNet(deps.db, ev);
+            if (ipHash) checkConnection(deps.db, ev.steamid, ipHash);
           } catch (err) {
             console.error('[networks] failed to record a connect address:', err);
           }

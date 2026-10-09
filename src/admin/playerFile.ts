@@ -19,6 +19,7 @@ import { banRedactor } from './banRedaction.js';
 import { canOpenFile, fileActions, type FileAction, type FileViewer } from './fileAccess.js';
 import { lastReviewOf, type FileReview } from './reviews.js';
 import { holdsAbout } from '../altHolds.js';
+import { evaderFlagOf } from '../ipWatch.js';
 import { playerFileSummary, type PlayerFileSummary } from './playerFileSummary.js';
 import { playerTimeline } from './playerTimeline.js';
 import type { TimelineItem } from './timeline/types.js';
@@ -85,6 +86,8 @@ function identity(db: DB, steamid: string, viewer: FileViewer) {
     // Alt holds naming this account on either side (src/altHolds.ts). The
     // other side has to be a file this viewer may open, as on the Alts tab.
     altHolds: holdsAbout(db, steamid).filter((h) => canOpenFile(db, viewer, h.steamid) && canOpenFile(db, viewer, h.otherSteamid)),
+    // Flagged as a ban evader: their connections are on the IP watch list.
+    evaderFlag: evaderFlagOf(db, steamid),
   };
 }
 

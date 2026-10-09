@@ -15,6 +15,7 @@ import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
 import { pingPickEnabled, pingTable } from '../serverPick.js';
 import { altClusters, altHolds, banFromHold, holdById, liftAltHold } from '../altHolds.js';
+import { clearEvader, flagEvader, ipWatchView, unwatch, watchAddress } from '../ipWatch.js';
 
 export interface PeopleRouteOpts {
   db: DB;
@@ -182,6 +183,60 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     const text = (typeof reason === 'string' && reason.trim()) || `Alt account of ${other}`;
     banFromHold(db, t.hold.id, t.me, text);
     logAdmin(db, t.me, 'alt_ban', t.hold.steamid, { holdId: t.hold.id, other: t.hold.otherSteamid, reason: text });
+    return { ok: true };
+  });
+
+  /**
+   * The IP watch list (src/ipWatch.ts): flagged ban evaders and every
+   * connection being watched. Moderators run all of it; it only ever posts
+   * alerts, never acts on an account.
+   */
+  app.get('/api/admin/people/ipwatch', async (req, reply) => {
+    if (!requireMod(req, reply)) return reply;
+    return ipWatchView(db);
+  });
+
+  app.post('/api/admin/people/ipwatch', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { ip, note } = (req.body ?? {}) as { ip?: unknown; note?: unknown };
+    if (note !== undefined && (typeof note !== 'string' || note.length > 200)) {
+      return reply.code(400).send({ error: 'a note is up to 200 characters' });
+    }
+    const text = typeof note === 'string' ? note.trim() : '';
+    if (typeof ip !== 'string' || !watchAddress(db, ip, text, me)) {
+      return reply.code(400).send({ error: 'that is not an IPv4 address' });
+    }
+    logAdmin(db, me, 'ip_watch_add', '', { note: text });
+    return { ok: true };
+  });
+
+  app.post('/api/admin/people/ipwatch/:hash/remove', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { hash } = req.params as { hash: string };
+    if (!unwatch(db, hash, me)) return reply.code(404).send({ error: 'that connection is not on the watch list' });
+    logAdmin(db, me, 'ip_watch_remove', '', {});
+    return { ok: true };
+  });
+
+  app.post('/api/admin/people/:steamid/evader', async (req, reply) => {
+    const t = onFile(req, reply, 'looked_at');
+    if (!t) return reply;
+    const { reason } = (req.body ?? {}) as { reason?: unknown };
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 300) {
+      return reply.code(400).send({ error: 'a reason is required (up to 300 characters)' });
+    }
+    flagEvader(db, t.steamid, reason.trim(), t.me);
+    logAdmin(db, t.me, 'evader_flag', t.steamid, { reason: reason.trim() });
+    return { ok: true };
+  });
+
+  app.post('/api/admin/people/:steamid/evader/clear', async (req, reply) => {
+    const t = onFile(req, reply, 'looked_at');
+    if (!t) return reply;
+    if (!clearEvader(db, t.steamid, t.me)) return reply.code(404).send({ error: 'that account is not flagged' });
+    logAdmin(db, t.me, 'evader_clear', t.steamid, {});
     return { ok: true };
   });
 

@@ -54,6 +54,6 @@ describe('feedChannel', () => {
 
   it('the spec\'s table, kind by kind', () => {
     const mod = Object.entries(FEED_DESTINATION).filter(([, d]) => d === 'mod').map(([k]) => k).sort();
-    expect(mod).toEqual(['alt', 'appeal', 'conduct_flag', 'report', 'sourcetv_watch', 'spray_exploit', 'staff_message']);
+    expect(mod).toEqual(['alt', 'appeal', 'conduct_flag', 'ip_match', 'report', 'sourcetv_watch', 'spray_exploit', 'staff_message']);
   });
 });
