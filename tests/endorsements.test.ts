@@ -4,7 +4,7 @@ import { upsertPlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import {
   ENDORSE_ERROR_TEXT, ENDORSE_KINDS, ENDORSE_LABEL,
-  allTitles, endorseState, endorsementSummary, giveEndorsement, pendingEndorsements, titleFromCounts,
+  allTitles, endorseState, endorsementBoard, endorsementSummary, giveEndorsement, pendingEndorsements, titleFromCounts,
 } from '../src/endorsements.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
@@ -202,5 +202,43 @@ describe('pendingEndorsements', () => {
     giveEndorsement(db, { matchId: 2, from: IDS[0], to: IDS[1], kind: 'caller' });
     expect(pendingEndorsements(db, IDS[0])).toEqual([{ matchId: 2, remaining: 1 }]);
     expect(pendingEndorsements(db, OUTSIDER)).toEqual([]);
+  });
+});
+
+describe('endorsementBoard', () => {
+  const give = (matchId: number, from: string, to: string, kind: string) =>
+    db.prepare("INSERT INTO endorsements (match_id, from_id, to_id, kind, created_at) VALUES (?, ?, ?, ?, datetime('now'))")
+      .run(matchId, from, to, kind);
+
+  it('counts each kind, the total and the different people, for one season only', () => {
+    seedMatch(1); seedMatch(2); seedMatch(3);
+    give(1, IDS[1], IDS[0], 'caller');
+    give(2, IDS[1], IDS[0], 'caller');
+    give(1, IDS[2], IDS[0], 'vibes');
+    give(1, IDS[3], IDS[4], 'clutch');
+    db.prepare("INSERT INTO seasons (id, name) VALUES (2, 'Season 2')").run();
+    db.prepare('UPDATE matches SET season_id = 2 WHERE id = 3').run();
+    give(3, IDS[5], IDS[0], 'clutch');
+    expect(endorsementBoard(db, 1)).toEqual([
+      { steamid: IDS[0], name: 'n0', games: 2, caller: 2, clutch: 0, vibes: 1, total: 3, givers: 2 },
+      { steamid: IDS[4], name: 'n4', games: 2, caller: 0, clutch: 1, vibes: 0, total: 1, givers: 1 },
+    ]);
+    expect(endorsementBoard(db, 2).map((r) => [r.steamid, r.clutch, r.games])).toEqual([[IDS[0], 1, 1]]);
+  });
+
+  it('a voided match takes its endorsements and its game with it', () => {
+    seedMatch(1); seedMatch(2);
+    give(1, IDS[1], IDS[0], 'caller');
+    give(2, IDS[2], IDS[0], 'caller');
+    db.prepare("UPDATE matches SET voided_at = datetime('now') WHERE id = 2").run();
+    expect(endorsementBoard(db, 1)).toEqual([
+      { steamid: IDS[0], name: 'n0', games: 1, caller: 1, clutch: 0, vibes: 0, total: 1, givers: 1 },
+    ]);
+  });
+
+  it('never carries who gave what', () => {
+    seedMatch(1);
+    give(1, IDS[1], IDS[0], 'caller');
+    expect(JSON.stringify(endorsementBoard(db, 1))).not.toContain(IDS[1]);
   });
 });

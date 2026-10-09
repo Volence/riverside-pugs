@@ -8,6 +8,7 @@ import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
 import { TitleTag } from '../components/TitleTag';
 import { WeeklyBoard } from './WeeklyBoard';
+import { EndorseBoard } from './EndorseBoard';
 
 /** Columns that are not stats and so are not part of the stat bag.
  *
@@ -48,7 +49,9 @@ export function Leaderboard({ me }: { me: string | null }) {
   // must open the weekly view, so it is read once on mount rather than
   // through the router (this route has no other query params to lose).
   const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
-  const [weekly, setWeekly] = useState(params.has('week'));
+  const [board, setBoard] = useState<'season' | 'week' | 'endorse'>(params.has('week') ? 'week' : 'season');
+  const weekly = board === 'week';
+  const endorse = board === 'endorse';
   const [week, setWeek] = useState<string | undefined>(params.get('week') ?? undefined);
   const [season, setSeason] = useState<number | undefined>(undefined);
   const { data, error } = useFetch((s) => api.leaderboard(s, season), [season]);
@@ -111,8 +114,9 @@ export function Leaderboard({ me }: { me: string | null }) {
         aside={(
           <div class="lb-aside">
             <div class="lb-toggle" role="group" aria-label="Board">
-              <button type="button" class={weekly ? '' : 'is-on'} aria-pressed={!weekly} onClick={() => setWeekly(false)}>Season</button>
-              <button type="button" class={weekly ? 'is-on' : ''} aria-pressed={weekly} onClick={() => setWeekly(true)}>This week</button>
+              <button type="button" class={board === 'season' ? 'is-on' : ''} aria-pressed={board === 'season'} onClick={() => setBoard('season')}>Season</button>
+              <button type="button" class={weekly ? 'is-on' : ''} aria-pressed={weekly} onClick={() => setBoard('week')}>This week</button>
+              <button type="button" class={endorse ? 'is-on' : ''} aria-pressed={endorse} onClick={() => setBoard('endorse')}>Endorsements</button>
             </div>
             {!weekly && (seasons.length > 1 ? (
               <select
@@ -129,7 +133,7 @@ export function Leaderboard({ me }: { me: string | null }) {
           </div>
         )}
       >
-        {!weekly && rows.length > 0 && (
+        {board === 'season' && rows.length > 0 && (
           <Figures>
             <Figure label="Players" value={rows.length} />
             {/* The API's distinct-match count. This was the top player's
@@ -145,10 +149,12 @@ export function Leaderboard({ me }: { me: string | null }) {
         )}
       </PageHeader>
 
-      {!weekly && <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />}
+      {board === 'season' && <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />}
 
       {weekly ? (
         <WeeklyBoard week={week} onWeek={setWeek} />
+      ) : endorse ? (
+        <EndorseBoard season={season} me={me} />
       ) : (
         <div class="lb-layout">
           <Panel class="panel--table">

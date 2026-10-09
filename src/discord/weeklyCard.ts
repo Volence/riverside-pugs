@@ -19,6 +19,7 @@ const GROUPS: { group: AwardGroup; title: string }[] = [
   { group: 'survivor', title: 'Survivor' },
   { group: 'infected', title: 'Infected' },
   { group: 'overall', title: 'Overall' },
+  { group: 'endorsed', title: 'Endorsements' },
   { group: 'shame', title: 'Shame' },
 ];
 
@@ -31,6 +32,13 @@ export function weekLabel(week: string): string {
   return new Date(`${week}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
+/** "9 people, 12 total": value is how many different people,
+ *  detail the endorsement count. WeeklyBoard.tsx mirrors it. */
+export function endorsedValue(w: Winner): string {
+  const count = Number(w.detail ?? w.value);
+  return `${n0(w.value)} ${w.value === 1 ? 'person' : 'people'}, ${n0(count)} total`;
+}
+
 export function formatAwardValue(key: string, kind: AwardKind, w: Winner): string {
   if (kind === 'avg') return `${DAMAGE.has(key) ? n0(w.value) : n1(w.value)}/g`;
   if (kind === 'total') return `${n0(w.value)} total`;
@@ -41,6 +49,8 @@ export function formatAwardValue(key: string, kind: AwardKind, w: Winner): strin
     case 'matches': return `${n0(w.value)} games`;
     case 'win_rate': return w.detail ?? `${Math.round(w.value * 100)}%`;
     case 'slow_ready': return `${n0(w.value)}s per ready-up`;
+    case 'endorsed_total': case 'endorsed_caller': case 'endorsed_clutch': case 'endorsed_vibes':
+      return endorsedValue(w);
     default: return `${DAMAGE.has(key) ? n0(w.value) : n1(w.value)}/g`;
   }
 }

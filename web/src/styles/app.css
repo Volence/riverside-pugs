@@ -2478,7 +2478,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 
 .lb-aside { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 
-/* A two-segment pill beside the season picker. Only one segment is ever "on",
+/* A segmented pill beside the season picker. Only one segment is ever "on",
    so it reads as a single control rather than two independent buttons. */
 .lb-toggle {
   display: inline-flex;
@@ -2498,6 +2498,13 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .lb-toggle button + button { border-left: 1px solid var(--border); }
 .lb-toggle button:hover { color: var(--text); }
 .lb-toggle button.is-on { background: var(--accent); color: var(--accent-ink); }
+/* Three segments do not fit a phone at full tracking: tighten them and let
+   the pill take its own line under the title rather than run off the edge. */
+@media (max-width: 480px) {
+  .page-head__row:has(.lb-aside) { flex-wrap: wrap; }
+  .page-head__aside:has(.lb-aside) { flex-basis: 100%; }
+  .lb-toggle button { padding: var(--sp-1) var(--sp-2); letter-spacing: 0.06em; white-space: nowrap; }
+}
 
 /* ---------- weekly board ---------- */
 

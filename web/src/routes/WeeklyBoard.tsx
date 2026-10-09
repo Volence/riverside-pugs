@@ -6,6 +6,7 @@ const GROUPS = [
   { group: 'survivor', title: 'Survivor' },
   { group: 'infected', title: 'Infected' },
   { group: 'overall', title: 'Overall' },
+  { group: 'endorsed', title: 'Endorsements' },
   { group: 'shame', title: 'Shame' },
 ] as const;
 const DAMAGE = new Set(['si_damage', 'tank_damage', 'damage_as_si', 'pounce_damage', 'hunter_damage', 'smoker_damage', 'friendly_fire']);
@@ -28,6 +29,7 @@ const GLOSSARY: { label: string; text: string }[] = [
   { label: 'Biggest SR climb', text: 'The most SR gained from the start of the week to the end.' },
   { label: 'Best win rate', text: 'Wins and losses from games with a winner; draws do not count.' },
   { label: 'Iron man', text: 'The most games played this week.' },
+  { label: 'Endorsements', text: 'Most endorsed counts every kind. Each award goes to whoever the most different people endorsed that week, so the same friend endorsing you every game counts once; a tie goes to the most endorsements. An endorsement counts for the week it was given.' },
   { label: 'Slowest ready-up', text: 'The longest average time spent not ready before a round.' },
   { label: 'Friendly fire', text: 'The most damage done to teammates, per game.' },
   { label: 'Group hug', text: 'Caught in the most quad caps, per game.' },
@@ -50,6 +52,10 @@ function value(a: WeeklyAward, w: WeeklyWinner): string {
     case 'matches': return `${n0(w.value)} games`;
     case 'win_rate': return w.detail ?? `${Math.round(w.value * 100)}%`;
     case 'slow_ready': return `${n0(w.value)}s per ready-up`;
+    case 'endorsed_total': case 'endorsed_caller': case 'endorsed_clutch': case 'endorsed_vibes': {
+      const count = Number(w.detail ?? w.value);
+      return `${n0(w.value)} ${w.value === 1 ? 'person' : 'people'}, ${n0(count)} total`;
+    }
     default: return `${DAMAGE.has(a.key) ? n0(w.value) : (Math.round(w.value * 10) / 10).toFixed(1)} per game`;
   }
 }

@@ -192,7 +192,7 @@ export interface Leaderboard {
 }
 
 /** Which panel of the weekly board an award sits in. */
-export type AwardGroup = 'survivor' | 'infected' | 'overall' | 'shame';
+export type AwardGroup = 'survivor' | 'infected' | 'overall' | 'endorsed' | 'shame';
 
 export interface WeeklyWinner { steamid: string; name: string; value: number; games: number; detail: string | null }
 
@@ -587,6 +587,14 @@ export interface EndorseState {
 }
 
 export interface PendingEndorsement { matchId: number; remaining: number }
+
+/** One row of the season endorsement board. `givers` is how many different
+ *  people endorsed them, never who. */
+export interface EndorseBoardRow {
+  steamid: string; name: string; games: number;
+  caller: number; clutch: number; vibes: number; total: number; givers: number;
+}
+export interface EndorseBoard { season: { id: number; name: string }; rows: EndorseBoardRow[] }
 
 /** One line of the profile's chemistry panel. `winRate` is 0 to 1. */
 export interface ChemistryLine { steamid: string; name: string; games: number; wins: number; winRate: number }
@@ -3071,6 +3079,8 @@ export const api = {
   leaderboard: (signal?: AbortSignal, season?: number) =>
     get<Leaderboard>(season === undefined ? '/api/leaderboard' : `/api/leaderboard?season=${season}`, signal),
   seasons: (signal?: AbortSignal) => get<{ seasons: Season[] }>('/api/seasons', signal),
+  endorseBoard: (signal?: AbortSignal, season?: number) =>
+    get<EndorseBoard>(season === undefined ? '/api/leaderboard/endorsements' : `/api/leaderboard/endorsements?season=${season}`, signal),
   weekly: (signal?: AbortSignal, week?: string) => get<WeeklyData>(week ? `/api/weekly?week=${week}` : '/api/weekly', signal),
   weeklyWeeks: (signal?: AbortSignal) => get<{ current: string; weeks: string[] }>('/api/weekly/weeks', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),

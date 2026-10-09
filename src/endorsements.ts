@@ -245,3 +245,45 @@ export function pendingEndorsements(db: DB, steamid: string): { matchId: number;
   ).all(steamid, hours) as { matchId: number; used: number }[];
   return rows.filter((r) => r.used < budget).map((r) => ({ matchId: r.matchId, remaining: budget - r.used }));
 }
+
+export interface EndorseBoardRow {
+  steamid: string;
+  name: string;
+  games: number;
+  caller: number;
+  clutch: number;
+  vibes: number;
+  total: number;
+  /** How many different people endorsed this player. A count, never who. */
+  givers: number;
+}
+
+/**
+ * Everyone endorsed in a season, with each kind, the total and how many
+ * different people gave them. A season is the season of the MATCH, so an
+ * endorsement given the morning after a season rolled over still counts for
+ * the season it was earned in. Voided matches take their endorsements with
+ * them, as on the profile.
+ */
+export function endorsementBoard(db: DB, seasonId: number): EndorseBoardRow[] {
+  const rows = db.prepare(
+    `SELECT e.to_id AS steamid, p.name,
+            SUM(e.kind = 'caller') AS caller, SUM(e.kind = 'clutch') AS clutch, SUM(e.kind = 'vibes') AS vibes,
+            COUNT(*) AS total, COUNT(DISTINCT e.from_id) AS givers
+     FROM endorsements e
+     JOIN matches m ON m.id = e.match_id AND ${completedPug('m')} AND m.voided_at IS NULL
+     JOIN players p ON p.steamid = e.to_id
+     WHERE m.season_id = ?
+     GROUP BY e.to_id`,
+  ).all(seasonId) as Omit<EndorseBoardRow, 'games'>[];
+  if (rows.length === 0) return [];
+  const games = new Map((db.prepare(
+    `SELECT mp.player_id AS steamid, COUNT(*) AS games FROM match_players mp
+     JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')} AND m.voided_at IS NULL
+     WHERE m.season_id = ?
+     GROUP BY mp.player_id`,
+  ).all(seasonId) as { steamid: string; games: number }[]).map((r) => [r.steamid, r.games]));
+  return rows
+    .map((r) => ({ ...r, games: games.get(r.steamid) ?? 0 }))
+    .sort((a, b) => b.total - a.total || b.givers - a.givers || a.name.localeCompare(b.name));
+}

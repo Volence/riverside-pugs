@@ -20,6 +20,8 @@ describe('formatAwardValue', () => {
     expect(formatAwardValue('skeets', 'total', w('1', 'a', 1870))).toBe('1,870 total');
     expect(formatAwardValue('sr_climb', 'single', w('1', 'a', 767))).toBe('+767 SR');
     expect(formatAwardValue('win_rate', 'single', w('1', 'a', 0.79, '15-4'))).toBe('15-4');
+    expect(formatAwardValue('endorsed_caller', 'single', w('1', 'a', 9, '12'))).toBe('9 people, 12 total');
+    expect(formatAwardValue('endorsed_total', 'single', w('1', 'a', 1, '1'))).toBe('1 person, 1 total');
     expect(formatAwardValue('slow_ready', 'single', w('1', 'a', 53.8))).toBe('54s per ready-up');
     expect(formatAwardValue('friendly_fire', 'single', w('1', 'a', 21.8))).toBe('22/g');
   });
