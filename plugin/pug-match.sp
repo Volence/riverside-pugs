@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.27"
+#define PLUGIN_VERSION "0.3.28"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -1887,12 +1887,16 @@ public Action Timer_RplFrame(Handle timer)
 		int temp = 0, weaponId = 0, clip = 0, reserve = 0;
 		if (survivor)
 		{
-			// Temporary health decays continuously, so it is a float on the
-			// entity and has to be floored rather than read as an int. It is
-			// carried separately from permanent health because the viewer
-			// draws a two-tone bar, and because a temp health jump is the
-			// signal the deferred pills detection will need.
-			float tempF = GetEntPropFloat(client, Prop_Send, "m_healthBuffer");
+			// Temporary health is carried separately from permanent health
+			// because the viewer draws a two-tone bar, and because a temp
+			// health jump is the signal the deferred pills detection will need.
+			// m_healthBuffer is NOT the current value: the game writes it only
+			// when temp health is given or taken, stamps m_healthBufferTime,
+			// and decays it lazily at pain_pills_decay_rate per second (the
+			// same read as l4d_lib's GetTempHealth). Read raw, it sat at a
+			// resting 1 for every survivor in every replay before 0.3.28.
+			float tempF = GetEntPropFloat(client, Prop_Send, "m_healthBuffer")
+				- (GetGameTime() - GetEntPropFloat(client, Prop_Send, "m_healthBufferTime")) * PillsDecayRate();
 			if (tempF > 0.0) temp = RoundToFloor(tempF);
 
 			int wep = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
@@ -5368,3 +5372,11 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-gg.inc"
 // Last: reads pug-leave.inc's pause state and pug-modcall.inc's cooldown.
 #include "pug-tourney.inc"
+
+/** pain_pills_decay_rate (temp health lost per second), looked up once. */
+float PillsDecayRate()
+{
+	static ConVar cv = null;
+	if (cv == null) cv = FindConVar("pain_pills_decay_rate");
+	return cv == null ? 0.0 : cv.FloatValue;
+}
