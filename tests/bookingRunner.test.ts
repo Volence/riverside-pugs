@@ -45,6 +45,8 @@ const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> =>
     if (c === 'status') return status(b);
     if (c === 'sm_pug_status') return `STATUS ${b.pug} token=(none) campaign=(none) map=${b.map} stopAfterMap=(none)\nSTATUS end`;
     if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
+    const gt = /^sm_cvar l4d_game_type_name "(.*)"$/.exec(c);
+    if (gt) { b.type = gt[1]!; return ''; }
     if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
     if (c === 'l4d_booking_id') return b.bookingPlugin >= '1.4.0' ? `"l4d_booking_id" = "${b.marker}" ( def. "" )` : 'Unknown command "l4d_booking_id"';
     const mk = /^l4d_booking_id "(\d*)"$/.exec(c);
@@ -236,6 +238,20 @@ describe('setup failures', () => {
     await runner.idle();
     expect(getBooking(db, id)).toMatchObject({ state: 'ready', setup_attempts: 1 });
     expect(box.ccc.execs).toBe(2);
+  });
+
+  it('a config that never runs on a box already past Pub is caught (pool boxes boot in 4v4 VS)', async () => {
+    // The old check was "game type no longer says Pub", which any pool box
+    // passes before the exec runs at all. The pending marker cannot pass that way.
+    const restart = async (server: ServerRow) => { restarted.push(server.name); box[server.name].type = 'Roto-AZ / 4v4 VS'; return true; };
+    const r = build({ restart });
+    box.ccc.failExec = 99;
+    const id = book();
+    now = START - 15 * MIN;
+    r.allocate();
+    await r.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'cancelled', end_reason: 'setup_failed' });
+    expect(box.ccc.execs).toBeGreaterThan(1);
   });
 
   it('a cancel during setup stops it and winds the box down', async () => {
