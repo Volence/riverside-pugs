@@ -52,6 +52,8 @@ const fakeRcon = async (server: ServerRow, cmds: string[]): Promise<string[]> =>
   return cmds.map((c) => {
     if (c === 'status') return status(b);
     if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${b.type}" ( def. "" )`;
+    const gt = /^sm_cvar l4d_game_type_name "(.*)"$/.exec(c);
+    if (gt) { b.type = gt[1]!; return ''; }
     if (c === 'l4d_booking_version') return b.plugin ? '"l4d_booking_version" = "1.0.0" ( def. "1.0.0" )' : 'Unknown command "l4d_booking_version"';
     if (c === 'l4d_booking_id') return b.bookingPlugin >= '1.4.0' ? `"l4d_booking_id" = "${b.marker}" ( def. "" )` : 'Unknown command "l4d_booking_id"';
     if (/^sm_pug_(resume|roster)/.test(c)) {

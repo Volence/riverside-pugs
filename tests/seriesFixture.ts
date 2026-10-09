@@ -106,6 +106,8 @@ export async function seriesFixture(o: {
       const tm = /^sm_pug_tournament ([01])$/.exec(c);
       if (tm) box.tournament = tm[1] === '1';
       if (c === 'l4d_game_type_name') return `"l4d_game_type_name" = "${box.type}" ( def. "" )`;
+      const gt = /^sm_cvar l4d_game_type_name "(.*)"$/.exec(c);
+      if (gt) { box.type = gt[1]!; return ''; }
       if (c === 'l4d_booking_version') return '"l4d_booking_version" = "1.4.0" ( def. "1.0.0" )';
       if (c === 'l4d_booking_id') return `"l4d_booking_id" = "${box.marker}" ( def. "" )`;
       const mk = /^l4d_booking_id "(\d*)"$/.exec(c);

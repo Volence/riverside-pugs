@@ -10,7 +10,7 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { getCampaignPool, settingNumber } from '../settings.js';
 import { redactSecrets } from '../redact.js';
 import { TEMPLATES } from '../rulesets.js';
-import { consoleText, cvarValue, quoted, waitForStartup, type BoxRcon } from '../serverSetup.js';
+import { consoleText, cvarValue, quoted, SETUP_PENDING_TYPE, waitForStartup, type BoxRcon } from '../serverSetup.js';
 import { activeMembers } from '../teams/teams.js';
 import type { Notifier } from '../notify/notify.js';
 import { bookingMessage, reviewAskMessage, type BookingNotifyType } from './messages.js';
@@ -673,11 +673,14 @@ export class BookingRunner {
     let seen = '';
     for (let i = 1; i <= CFG_TRIES; i++) {
       try {
-        await this.deps.rcon(server, [`exec ${row.cfg}`]);
+        // The pending marker first: the mode cfg overwrites it with its own
+        // name, so seeing anything else after the exec proves it ran. The old
+        // check ("not Pub") passed on any pool box, which boots in 4v4 VS.
+        await this.deps.rcon(server, [`sm_cvar l4d_game_type_name "${SETUP_PENDING_TYPE}"`, `exec ${row.cfg}`]);
         await this.sleep(SETUP_SETTLE_MS);
         const [reply] = await this.deps.rcon(server, ['l4d_game_type_name']);
         const type = cvarValue(reply, 'l4d_game_type_name') ?? '';
-        if (type !== '' && !type.includes('Pub')) return;
+        if (type !== '' && type !== SETUP_PENDING_TYPE) return;
         seen = `game type "${type}"`;
       } catch (err) {
         seen = `no answer (${err instanceof Error ? err.message : String(err)})`;
