@@ -302,7 +302,7 @@ tree via a `trap` on exit. Must end with `Code size: ...` and 0 errors.
 ### On the server
 
 Same idea as the `l4d_clipvis` workflow (see
-`/home/volence/l4d/l4d_clipvis/NEXT.md`'s "Build loop" section): copy the
+`/home/volence/l4d/archive/l4d_clipvis/NEXT.md`'s "Build loop" section): copy the
 `.sp` up, compile in place with the server's own `spcomp`, then install the
 resulting `.smx`. Gate the install on the compile actually succeeding so a
 failed build doesn't silently leave the previous binary running:
