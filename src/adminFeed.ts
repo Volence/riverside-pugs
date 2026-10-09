@@ -95,6 +95,13 @@ export type AdminEvent =
     kind: 'alt'; steamid: string; discordName: string;
     what: 'hold' | 'moved' | 'discord_swap'; otherSteamid?: string; previousDiscordName?: string;
   }
+  // An account connected from an address tied to someone else (src/ipWatch.ts).
+  // 'watch': the address is on the IP watch list (a flagged ban evader's, or
+  // added by hand), and the post pings the mod call role. 'banned': an
+  // account under an open ban or hold has used it. Once per account, address
+  // and level, ever. `others` is every other account seen there for 'watch',
+  // and the banned ones for 'banned'.
+  | { kind: 'ip_match'; level: 'watch' | 'banned'; steamid: string; others: string[]; flagged: string | null; note: string }
   /** A ban appeal was filed, or denied at once for a slur. Quiet appeals
    *  (by staff, or from a restricted ticket) never publish this. */
   | { kind: 'appeal'; appealId: number; what: 'filed' | 'auto_denied'; name: string; slurs: string[] };
@@ -119,6 +126,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   staff_message: 'admin_feed_staff_messages',
   rename_digest: 'admin_feed_renames',
   alt: 'admin_feed_problems',
+  ip_match: 'admin_feed_problems',
   appeal: 'admin_feed_reports',
 };
 

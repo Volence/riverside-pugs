@@ -8,6 +8,7 @@ import { widenTicketIdentity } from './tickets/identityMigration.js';
 import { deploySlug } from './releaseStage.js';
 import { seedRulesetTemplates } from './rulesets.js';
 import { ensureAppealSchema } from './appeals/schema.js';
+import { ensureIpWatchSchema } from './ipWatch.js';
 
 export type DB = Database.Database;
 
@@ -2736,6 +2737,9 @@ export function openDb(path: string): DB {
 
   // Ban appeals. Last, after widenTicketIdentity has created discord_sanctions.
   ensureAppealSchema(db);
+
+  // Evader flags, the IP watch list and same-connection alerts (src/ipWatch.ts).
+  ensureIpWatchSchema(db);
 
   seed(db);
   return db;
