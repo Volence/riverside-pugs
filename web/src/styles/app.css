@@ -868,6 +868,13 @@ a.ctile { text-decoration: none; }
    target; a tick marks what this browser already downloaded. */
 .l4d2pick { margin: var(--sp-3) 0 var(--sp-4); display: grid; gap: var(--sp-2); }
 .l4d2pick__lede { margin: 0; color: var(--text-muted); }
+/* The shared files: people kept downloading one campaign without them (owner, 2026-10-08), so they sit in a loud box. */
+.l4d2shared { border: 3px solid var(--accent); border-radius: 6px; padding: var(--sp-3); display: grid; gap: var(--sp-2);
+  background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.l4d2shared__label { margin: 0; font-family: var(--font-label); font-size: 1.05rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+.l4d2shared__why { margin: 0; color: var(--text-muted); font-size: 0.875rem; }
+.l4d2fix { border: 1px solid var(--loss); border-left-width: 4px; border-radius: 4px; padding: var(--sp-2) var(--sp-3); margin: var(--sp-3) 0; }
+.l4d2fix pre { margin: var(--sp-2) 0; overflow-x: auto; }
 .l4d2pick__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
 .l4d2pick__row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto 5.5rem; align-items: center; gap: var(--sp-3);
