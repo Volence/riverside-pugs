@@ -105,7 +105,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
               health={overview.data.captureHealth} canManage={isAdmin} onChat={openChat} />
             <AdminQueuePanel queue={overview.data.queue} lobbies={overview.data.lobbies} busy={panels.busy} run={panels.run} />
           </div>
-          <RecentResultsPanel data={overview.data} busy={panels.busy} run={panels.run} />
+          <RecentResultsPanel data={overview.data} busy={panels.busy} run={panels.run} isAdmin={isAdmin} />
         </>
       )}
       {isAdmin && <ActivityPanel />}

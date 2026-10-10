@@ -6,7 +6,8 @@ import { fmtTime, useAction, type Run } from './useAction';
 import { formatTime } from '../../replay/ReplayControls';
 import { SlowToReadyTable } from './SlowToReady';
 import type { ConfirmChoice } from '../../components/Confirm';
-import type { MatchPause, MatchReadyup } from '../../api';
+import type { AbandonRecord, MatchPause, MatchReadyup } from '../../api';
+import { RestoreRating, abandonOutcome, restoredText } from './RestoreRating';
 import { AbortPartyList } from '../../components/AbortPartyList';
 
 /**
@@ -303,7 +304,7 @@ export function AdminQueuePanel({ queue, lobbies = [], busy, run }: {
   );
 }
 
-export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; busy: boolean; run: Run }) {
+export function RecentResultsPanel({ data, busy, run, isAdmin = false }: { data: AdminOverview; busy: boolean; run: Run; isAdmin?: boolean }) {
   const [voiding, setVoiding] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   return (
@@ -317,7 +318,10 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
             <tbody>
               {data.recent.map((m) => (
                 <tr key={m.id}>
-                  <td><a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}</td>
+                  <td>
+                    <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}
+                    {m.abandon && <AbandonLine a={m.abandon} busy={busy} run={run} isAdmin={isAdmin} />}
+                  </td>
                   <td class="num">{m.teamAScore} - {m.teamBScore}</td>
                   {/* Was the result the odds expected? The upset marker is
                       the point of the column: a run of them is what tells
@@ -386,6 +390,7 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
                       })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
                   </>
                 )}
+                {m.abandon && <AbandonLine a={m.abandon} busy={busy} run={run} isAdmin={isAdmin} />}
                 <AbortPartyList parties={m.parties ?? []} />
               </li>
             ))}
@@ -560,6 +565,17 @@ function AdminSyncButton() {
  *  Public once enabled: the broadcast delay is what keeps it fair. */
 /** One pause, in the words an admin settling a dispute wants: who, how long,
  *  which map. A disconnect pause is the plugin's, not a team's. */
+/** Under a match row: the abandon behind it and, for an admin, Restore
+ *  rating while the quitter's loss still stands. */
+function AbandonLine({ a, busy, run, isAdmin }: { a: AbandonRecord; busy: boolean; run: Run; isAdmin: boolean }) {
+  return (
+    <div class="muted">
+      abandoned: {abandonOutcome(a)}, quitter rated a loss{restoredText(a)}
+      {!a.restoredAt && isAdmin && <>{' '}<RestoreRating matchId={a.matchId} who="the quitter" busy={busy} run={run} /></>}
+    </div>
+  );
+}
+
 export function pauseText(p: MatchPause): string {
   const who = p.team ? `Team ${p.team.toUpperCase()}` : p.leave ? 'Reconnect' : 'Admin';
   const length = p.seconds === null ? 'still open' : formatTime(p.seconds * 1000);

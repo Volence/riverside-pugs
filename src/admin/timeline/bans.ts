@@ -1,3 +1,4 @@
+import { abandonOf } from '../matches.js';
 import { WITHHELD_REASON, banIsWithheld } from '../banRedaction.js';
 import { ROW_LIMIT, marks, toIso, type TimelineAdapter, type TimelineItem } from './types.js';
 
@@ -40,7 +41,8 @@ export const bansAdapter: TimelineAdapter = {
         kind: r.lifted_at ? 'lifted' : 'ban',
         summary: `Banned by ${by}, ${fmtBanLength(r.created_at, r.expires_at)}: `
           + `${withheld ? WITHHELD_REASON : r.reason}.`
-          + (r.lifted_at ? ` Lifted ${withheld ? '' : `by ${r.lifted_by_name ?? 'the system'} `}since.` : ''),
+          + (r.lifted_at ? ` Lifted ${withheld ? '' : `by ${r.lifted_by_name ?? 'the system'} `}since.` : '')
+          + restoredNote(db, r.reason),
         matchId: null,
         replay: null,
         ref: { type: 'ban', id: r.id },
@@ -48,3 +50,13 @@ export const bansAdapter: TimelineAdapter = {
     });
   },
 };
+
+/** " Rating loss restored by X: why." on an abandon ban whose loss staff gave
+ *  back (owner ruling 2026-10-10); empty otherwise. */
+function restoredNote(db: Parameters<TimelineAdapter['items']>[0]['db'], reason: string): string {
+  const m = /^Abandoned match #(\d+)$/.exec(reason);
+  if (!m) return '';
+  const a = abandonOf(db, Number(m[1]));
+  if (!a?.restoredAt) return '';
+  return ` Rating loss restored by ${a.restoredByName ?? 'staff'}${a.restoreReason ? `: ${a.restoreReason}` : ''}.`;
+}
