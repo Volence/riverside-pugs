@@ -41,6 +41,10 @@ const PLAIN: [table: string, column: string][] = [
   ['match_survivor_downs', 'attacker'],
   ['admin_actions', 'target'],
   ['bans', 'player_id'],
+  // Abandon rating: who quit (keyed on the match, so it cannot collide) and
+  // the member of staff who restored the loss.
+  ['match_abandons', 'player_id'],
+  ['match_abandons', 'restored_by'],
   ['appeals', 'steamid'],
   ['appeals', 'asked_by'],
   ['appeal_messages', 'author'],

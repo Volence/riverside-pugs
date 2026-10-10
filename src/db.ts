@@ -2749,6 +2749,30 @@ export function openDb(path: string): DB {
   // (src/dataFeeds.ts, docs/data-feeds-2026-10-10.md).
   ensureDataFeedsSchema(db);
 
+  // Abandon rating (owner rulings 2026-10-10, docs/ship-abandon-rating.md):
+  // one row per abandoned PUG, written by src/abandon.ts in the same
+  // transaction as the abandon ban. `decided` is the team that led past the
+  // !gg line when the match was decided at the abandon (it completed with
+  // that team as winner); NULL means it was not, and the match was aborted.
+  // The quitter's rating loss is derived from this row by src/rating.ts on
+  // every path, a season recompute included, until staff restore it
+  // (restored_at, by, why), which an admin_actions row also records.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS match_abandons (
+      match_id       INTEGER PRIMARY KEY REFERENCES matches(id),
+      player_id      TEXT    NOT NULL,
+      team           TEXT    NOT NULL CHECK (team IN ('a','b')),
+      decided        TEXT    CHECK (decided IN ('a','b')),
+      gap            INTEGER,
+      ceiling        INTEGER,
+      created_at     TEXT    NOT NULL,
+      restored_at    TEXT,
+      restored_by    TEXT,
+      restore_reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS match_abandons_player ON match_abandons (player_id);
+  `);
+
   seed(db);
   return db;
 }
