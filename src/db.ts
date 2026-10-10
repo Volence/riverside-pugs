@@ -1478,6 +1478,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // average to mean anything, so the badges used to land on whoever had
   // played least.
   standing_min_games: '10',
+  // Mu the team balancer subtracts for a player's first PUG (newcomerPrior.ts).
+  // 0 is off; the 2026-10-09 audit's fit suggests 8-10, a cautious start is 6.
+  newcomer_balance_offset: '0',
   // Matches in a week before a player's averages, win rate, SR climb or a
   // shame award count for the weekly awards. Five, not three: at three the
   // week of 2026-09-21 gave an average to a four-game player.
