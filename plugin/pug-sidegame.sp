@@ -76,7 +76,7 @@
 #define REQUIRE_PLUGIN
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "0.1.1"
 
 #define TEAM_SPEC 1
 #define TEAM_SURVIVOR 2
@@ -298,12 +298,43 @@ public Action Listen_Ready(int client, const char[] command, int argc)
 	return Plugin_Handled;
 }
 
-void ShowVote(int client)
+/** L4D1's default binds stop at slot5, so the in-game vote never asks for a
+ *  key past 5 (audit 2026-10-09 E1; l4d_practice keeps the same rule). Up to
+ *  five campaigns fit on one menu. A longer pool shows four per page and
+ *  "More campaigns..." as item 5, which goes round to the start after the
+ *  last page. SourceMod's own paging (Back/Next on 8 and 9) is turned off. */
+#define VOTE_PER_PAGE 4
+#define VOTE_MORE "#more"
+
+void ShowVote(int client, int start = 0)
 {
 	if (g_iVoteCount == 0) return;
+	if (start < 0 || start >= g_iVoteCount) start = 0;
 	Menu menu = new Menu(MenuHandler_Vote);
-	menu.SetTitle("Queue popped: campaign vote");
-	for (int i = 0; i < g_iVoteCount; i++) menu.AddItem(g_sVoteSlug[i], g_sVoteName[i]);
+	menu.Pagination = MENU_NO_PAGINATION;
+	int end = g_iVoteCount;
+	bool more = g_iVoteCount - start > 5;
+	if (more) end = start + VOTE_PER_PAGE;
+	if (g_iVoteCount > 5)
+	{
+		// Every page but the last holds four; the last holds up to five.
+		int pages = (g_iVoteCount - 5 + VOTE_PER_PAGE - 1) / VOTE_PER_PAGE + 1;
+		menu.SetTitle("Queue popped: campaign vote (%d/%d)", start / VOTE_PER_PAGE + 1, pages);
+	}
+	else menu.SetTitle("Queue popped: campaign vote");
+	for (int i = start; i < end; i++) menu.AddItem(g_sVoteSlug[i], g_sVoteName[i]);
+	// The last page of a long pool holds up to five, so item 5 is a campaign
+	// there; every other page's item 5 moves on.
+	if (more)
+	{
+		char info[16];
+		Format(info, sizeof(info), "%s:%d", VOTE_MORE, end);
+		menu.AddItem(info, "More campaigns...");
+	}
+	else if (start > 0 && end - start < 5)
+	{
+		menu.AddItem(VOTE_MORE ... ":0", "Back to the first campaigns");
+	}
 	menu.Display(client, 30);
 }
 
@@ -313,6 +344,11 @@ public int MenuHandler_Vote(Menu menu, MenuAction action, int client, int item)
 	if (action != MenuAction_Select || !g_bActive || !g_bPopped) return 0;
 	char slug[64], id[32];
 	menu.GetItem(item, slug, sizeof(slug));
+	if (StrContains(slug, VOTE_MORE ... ":") == 0)
+	{
+		ShowVote(client, StringToInt(slug[strlen(VOTE_MORE) + 1]));
+		return 0;
+	}
 	if (!SideAuthId(client, id, sizeof(id))) return 0;
 	PugLog("PUGSIDE event=vote token=%s steamid=%s campaign=%s", g_sToken, id, slug);
 	PrintToChat(client, "\x04[Side]\x01 Vote sent.");
