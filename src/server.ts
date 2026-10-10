@@ -184,6 +184,8 @@ import type { InstallTarget } from './campaignInstall.js';
 import { notifyDiscord } from './discord.js';
 import { setMissionsDirs } from './campaignRegistry.js';
 import { a2sInfo } from './a2s.js';
+import { ServerLostWatch } from './serverLost.js';
+import { opsReportRoutes } from './opsReport.js';
 
 export interface ServerDeps {
   config: Config;
@@ -1610,7 +1612,32 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     fleetReader.tick(); // boxes never read, or stale, get read once at boot
   }
 
+  // Early, once-per-loss staff alert for a live match whose heartbeat stopped
+  // (match 554). Asks the box once, changes nothing; the reaper below still
+  // aborts at ORPHAN_AFTER_MS. Not in dev mode, where no real box exists.
+  const serverLostWatch = deps.config.devMode ? null : new ServerLostWatch({
+    db: deps.db,
+    status: async (server) => {
+      const exec = deps.serverExec ?? (async (s: ServerRow, commands: string[]) => {
+        const rcon = new RealRcon({ host: s.host, port: s.rcon_port, password: s.rcon_password });
+        const replies: string[] = [];
+        try {
+          await rcon.connect();
+          for (const c of commands) replies.push(await rcon.exec(c));
+        } finally {
+          rcon.close();
+        }
+        return replies;
+      });
+      const replies = await exec(server, ['sm_pug_status']);
+      return Array.isArray(replies) ? (replies[0] ?? '') : '';
+    },
+    a2s: a2sInfo,
+  });
+
   const reaper = setInterval(() => {
+    // Before the orphan reaper, so a match is alerted on while still live.
+    if (serverLostWatch) void serverLostWatch.tick();
     try {
       // Measure rounds nothing has looked at. Until this existed the only
       // caller of the analysis anywhere was a hand-run script, so the board
@@ -1962,6 +1989,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     dm: () => deps.discordDm ?? (bot ? (userId: string, payload: MessagePayload) => bot!.transport.dm(userId, payload) : null),
   });
   await app.register(modCallRoutes, { db: deps.db });
+  await app.register(opsReportRoutes, { secret: deps.config.opsReportSecret });
   await app.register(serverChatRoutes, {
     db: deps.db, rcon: deps.chatRcon ?? realServerRcon,
     notify: () => hub.sendTo('server_chat', (id) => isActiveStaff(deps.db, id)),
