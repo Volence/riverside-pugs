@@ -10,10 +10,10 @@ import { subscribeBanChanges, type BanChange } from './banEvents.js';
  * The website is the source of truth and the boxes are replicas that
  * converge. Three pushes, in order of how much correctness rests on them:
  *
- *   1. The sweep. Every SWEEP_MS, every open ban is re-sent to every enabled
- *      server, unconditionally, with no memory of what a box was told before.
- *      This is what makes the system right: `sm_addban` on an id that is
- *      already banned is harmless, so re-sending is free, and a box that was
+ *   1. The sweep. Every SWEEP_MS, every enabled server is checked against
+ *      the full list, with no memory of what a box was told before: the box
+ *      is asked what it holds and told the difference (see "Diff, not
+ *      rewrite" below). This is what makes the system right: a box that was
  *      offline, restarted or rebuilt heals on its next sweep.
  *   2. The setup push (pushAll), run by the orchestrator on the connection it
  *      already holds before a match goes live, so a box about to host ranked
@@ -30,11 +30,18 @@ import { subscribeBanChanges, type BanChange } from './banEvents.js';
  * `sm_unban` reaches RemoveBan, which issues removeid AND writeid, so a lift
  * persists too. Checked; without it a lift would resurrect on restart.
  *
- * The sweep sends one `sm_addban` per open ban to every enabled server every
- * five minutes, and each one triggers a `writeid` of banned_user.cfg on the
- * box. Trivial at today's ban counts, but worth revisiting (a delta against
- * the box's own list, or a longer interval) if the table grows into the
- * hundreds.
+ * Diff, not rewrite (audit 2026-10-09). The sweep and the setup push first
+ * ask the box for its own list (`listid`, the engine's ban list, which is
+ * what banned_user.cfg is loaded into) and send only what differs: an
+ * `sm_addban` for an open ban the box does not hold permanently, an
+ * `sm_unban` for a lifted ban the box still holds. Sending every open ban and
+ * every unban of the last 30 days every five minutes made basebans log
+ * 26,629 "added ban" / "removed ban" lines on Dallas in one day (2026-10-08),
+ * 91% of that box's SourceMod log. Correctness still rests on the sweep: the
+ * box's list is read fresh each time, so a restarted, rebuilt or edited box
+ * is brought back in line on the next sweep. A reply that cannot be read
+ * (an exec that returns nothing, an engine that words it differently) falls
+ * back to the full set, the old behaviour.
  */
 
 export const SWEEP_MS = 5 * 60 * 1000;
@@ -46,7 +53,29 @@ const REPORT_EVERY_MS = 60 * 60 * 1000;
 
 /** Runs a batch of console commands on one server. Injected so tests never
  *  dial RCON. Must reject on failure; the caller does the logging. */
-export type ServerExec = (server: ServerRow, commands: string[]) => Promise<void>;
+export type ServerExec = (server: ServerRow, commands: string[]) => Promise<string[] | void>;
+
+/** The SteamIDs a box bans permanently, from its `listid` reply, as the
+ *  account part (`Y:Z` of STEAM_X:Y:Z) so the universe digit never matters.
+ *  Null when the reply is not a listid answer at all. A timed entry (an
+ *  in-game `sm_ban 60`) does not count: it is lost on restart, so the site's
+ *  permanent ban is still pushed over it. */
+export function parseListId(reply: string | undefined | null): Set<string> | null {
+  if (typeof reply !== 'string' || !/ID filter list:/i.test(reply)) return null;
+  const out = new Set<string>();
+  for (const line of reply.split(/\r?\n/)) {
+    const m = /\bSTEAM_\d:([01]:\d+)\s*:\s*(.*)$/.exec(line);
+    if (m && /permanent/i.test(m[2]!)) out.add(m[1]!);
+  }
+  return out;
+}
+
+/** The account part of a SteamID64, as parseListId keys it. */
+function accountKey(steamid: string): string {
+  return steam64ToSteam2(steamid).replace(/^STEAM_\d:/, '');
+}
+
+interface Wanted { steamid: string; ban: boolean; reason: string }
 
 /** Quotes and semicolons would end the argument or the command on the
  *  console; newlines would start a new one. Reasons are admin-typed text. */
@@ -86,6 +115,17 @@ export class ServerBanSync {
    * left the alt, the account this person is known to own, free to join.
    */
   commands(): string[] {
+    return this.wanted().map((w) => (w.ban ? banCommand(w.steamid, w.reason) : unbanCommand(w.steamid)));
+  }
+
+  /** Only what this box's own list (parseListId) is missing or still holds. */
+  commandsFor(box: Set<string>): string[] {
+    return this.wanted()
+      .filter((w) => box.has(accountKey(w.steamid)) !== w.ban)
+      .map((w) => (w.ban ? banCommand(w.steamid, w.reason) : unbanCommand(w.steamid)));
+  }
+
+  private wanted(): Wanted[] {
     const nowIso = new Date(this.now()).toISOString();
     const since = new Date(this.now() - UNBAN_WINDOW_MS).toISOString();
     const open = this.deps.db.prepare(
@@ -102,9 +142,9 @@ export class ServerBanSync {
       'SELECT DISTINCT player_id FROM bans WHERE lifted_at IS NOT NULL AND lifted_at >= ? ORDER BY player_id',
     ).all(since) as { player_id: string }[];
     return [
-      ...open.flatMap((r) => this.withAliases(r.player_id).map((id) => banCommand(id, r.reason))),
+      ...open.flatMap((r) => this.withAliases(r.player_id).map((id) => ({ steamid: id, ban: true, reason: r.reason }))),
       ...lifted.filter((r) => !openIds.has(r.player_id))
-        .flatMap((r) => this.withAliases(r.player_id).map((id) => unbanCommand(id))),
+        .flatMap((r) => this.withAliases(r.player_id).map((id) => ({ steamid: id, ban: false, reason: '' }))),
     ];
   }
 
@@ -117,11 +157,15 @@ export class ServerBanSync {
     return [steamid, ...aliases.map((a) => a.steamid)];
   }
 
-  /** The unconditional repair pass. See the class comment. */
+  /** The repair pass: every enabled box gets what its own list lacks. See
+   *  the class comment. Nothing to say, nothing asked. */
   async sweep(): Promise<void> {
-    const cmds = this.commands();
-    if (cmds.length === 0) return;
-    await this.pushToAll(cmds);
+    if (this.wanted().length === 0) return;
+    await this.forEachServer(async (s) => {
+      const box = parseListId((await this.deps.exec(s, ['listid']))?.[0]);
+      const cmds = box ? this.commandsFor(box) : this.commands();
+      if (cmds.length > 0) await this.deps.exec(s, cmds);
+    });
   }
 
   /** One change, now. The sweep will say it again in five minutes anyway. */
@@ -132,14 +176,21 @@ export class ServerBanSync {
 
   /** For a caller that already holds a connection to one box (match setup). */
   async pushAll(exec: (cmd: string) => Promise<unknown>): Promise<void> {
-    for (const c of this.commands()) await exec(c);
+    if (this.wanted().length === 0) return;
+    const reply = await exec('listid');
+    const box = parseListId(typeof reply === 'string' ? reply : null);
+    for (const c of box ? this.commandsFor(box) : this.commands()) await exec(c);
   }
 
   private async pushToAll(cmds: string[]): Promise<void> {
+    await this.forEachServer(async (s) => { await this.deps.exec(s, cmds); });
+  }
+
+  private async forEachServer(job: (s: ServerRow) => Promise<void>): Promise<void> {
     const servers = listServers(this.deps.db).filter((s) => s.enabled === 1);
     await Promise.all(servers.map(async (s) => {
       try {
-        await this.deps.exec(s, cmds);
+        await job(s);
       } catch (err) {
         // Never rethrown: a dead box is out of date until it is back, and
         // that must not stop the other boxes or the caller.
