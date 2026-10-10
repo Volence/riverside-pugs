@@ -121,6 +121,6 @@ export function readingsOf(db: DB): Map<number, Map<string, FileSig> | null> {
 
 export function readingStates(db: DB): { serverId: number; readAt: string | null; attemptAt: string | null; error: string | null }[] {
   return (db.prepare(`SELECT s.id AS serverId, f.read_at AS readAt, f.attempt_at AS attemptAt, f.error AS error
-    FROM servers s LEFT JOIN fleet_readings f ON f.server_id = s.id ORDER BY s.id`).all() as
+    FROM servers s LEFT JOIN fleet_readings f ON f.server_id = s.id WHERE s.retired = 0 ORDER BY s.id`).all() as
     { serverId: number; readAt: string | null; attemptAt: string | null; error: string | null }[]);
 }

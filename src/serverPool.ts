@@ -38,6 +38,9 @@ export interface ServerRow {
   region: string;
   /** Where the box sits in the claim order, lowest first (PICK_ORDER_SQL). */
   pick_order: number | null;
+  /** 1 for a box that is gone for good: kept only so past matches still name
+   *  it, never listed, ordered, enabled or claimed. See retireServer. */
+  retired: number;
 }
 
 /** The order boxes are claimed in: the admin-set pick order, then id. A row
@@ -202,13 +205,22 @@ export function setRestartAfterMatch(db: DB, id: number, on: boolean): void {
   db.prepare('UPDATE servers SET restart_after_match = ? WHERE id = ?').run(on ? 1 : 0, id);
 }
 
+/** A retired box stays disabled: enabling one is a no-op. */
 export function setEnabled(db: DB, id: number, enabled: boolean): void {
-  db.prepare('UPDATE servers SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id);
+  db.prepare('UPDATE servers SET enabled = ? WHERE id = ? AND retired = 0').run(enabled ? 1 : 0, id);
 }
 
-/** Every server, for the admin panel. Ordered by id so the list is stable. */
+/** Take a box out of service for good. Its row stays (matches, pings and
+ *  installs reference it, and foreign keys are on), but it leaves every list
+ *  below and the pick order, and setEnabled can no longer turn it back on. */
+export function retireServer(db: DB, id: number): void {
+  db.prepare('UPDATE servers SET retired = 1, enabled = 0, pick_order = NULL WHERE id = ?').run(id);
+}
+
+/** Every server still in service, for the admin panel. Ordered by id so the
+ *  list is stable. Retired boxes are left out; getServer still finds them. */
 export function listServers(db: DB): ServerRow[] {
-  return db.prepare('SELECT * FROM servers ORDER BY id').all() as ServerRow[];
+  return db.prepare('SELECT * FROM servers WHERE retired = 0 ORDER BY id').all() as ServerRow[];
 }
 
 /** Move a server one place earlier (-1) or later (+1) in the claim order,
@@ -218,7 +230,7 @@ export function listServers(db: DB): ServerRow[] {
  *  False when there is no such server or it is already at that end. */
 export function moveServer(db: DB, id: number, dir: -1 | 1): boolean {
   return db.transaction(() => {
-    const ids = (db.prepare(`SELECT id FROM servers ORDER BY ${PICK_ORDER_SQL}`).all() as { id: number }[])
+    const ids = (db.prepare(`SELECT id FROM servers WHERE retired = 0 ORDER BY ${PICK_ORDER_SQL}`).all() as { id: number }[])
       .map((r) => r.id);
     const at = ids.indexOf(id);
     const to = at + dir;
