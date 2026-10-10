@@ -65,8 +65,10 @@ describe('handleAbandon', () => {
     expect(Math.round((Date.parse(ban.expiresAt!) - Date.now()) / 60_000)).toBe(1440);
     expect(events).toContainEqual(expect.objectContaining({ kind: 'abandon', steamid: IDS[2], matchId, minutes: 1440 }));
     for (const p of IDS.filter((x) => x !== IDS[2])) expect(getPlayer(db, p)?.status).toBe('active');
-    // No rating change for anyone.
-    expect(db.prepare('SELECT COUNT(*) AS n FROM rating_history').get()).toEqual({ n: 0 });
+    // No rating change for anyone but the leaver, who takes a loss (owner
+    // ruling 2026-10-10; tests/abandonRating.test.ts covers the math).
+    expect(db.prepare('SELECT player_id FROM rating_history').all()).toEqual([{ player_id: IDS[2] }]);
+    expect(db.prepare('SELECT wins, losses FROM player_ratings WHERE player_id = ?').get(IDS[2])).toEqual({ wins: 0, losses: 1 });
   });
 
   it('never ends a booked game (a tournament game): no abort, no ban, no release, logged once (T3b final review)', async () => {
