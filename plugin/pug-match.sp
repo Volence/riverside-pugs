@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.28"
+#define PLUGIN_VERSION "0.3.29"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -2157,7 +2157,7 @@ public Action Cmd_Resume(int args)
 {
 	if (args < 5)
 	{
-		PrintToServer("PUGERR usage: sm_pug_resume <matchid> <token> <firstmap> <a|b> <nextseq>");
+		PrintToServer("PUGERR usage: sm_pug_resume <matchid> <token> <firstmap> <a|b> <nextseq> [\"<stop map>\"]");
 		return Plugin_Handled;
 	}
 	char buf[65];
@@ -2179,6 +2179,11 @@ public Action Cmd_Resume(int args)
 	GetCmdArg(5, buf, sizeof(buf));
 	g_iEventSeq = StringToInt(buf) - 1;
 	if (g_iEventSeq < 0) g_iEventSeq = 0;
+	// 0.3.29: the game's stop map, as sm_pug_match takes it. Without it a
+	// resumed tiebreak or short stage game ran on to the finale backstop.
+	if (args >= 6) GetCmdArg(6, g_sStopAfterMap, sizeof(g_sStopAfterMap));
+	if (g_sStopAfterMap[0] != '\0')
+		LogMessage("[pug] resumed match %d stops after %s", matchId, g_sStopAfterMap);
 	g_bSelfStarted = true;
 	g_bResumed = true;
 	g_iResumeFirst = first;

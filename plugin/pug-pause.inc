@@ -403,6 +403,17 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 	// nothing should be charged or refused here.
 	if (LeaveRotoblinPaused()) return Plugin_Continue;
 
+	// Audit 2026-10-09 D2: the other team's !tech is on its way. If Rotoblin
+	// refused that pause, this one would land inside the retry gap and be
+	// taken as their technical pause, charging them and not this team. !tech
+	// refuses the same way while any pause is pending.
+	if (g_iTechPendingTeam != 0 && g_iTechPendingTeam != team
+		&& GetEngineTime() - g_fTechPendingAt <= Tourney_RetryGap())
+	{
+		PrintToChat(client, "\x04[PUG]\x01 The other team's technical pause is on its way. Try !pause again in a few seconds if the game does not pause.");
+		return Plugin_Handled;
+	}
+
 	// Who asked, for the pause ledger. Taken before the budget check so it is
 	// known with the budget off too; a refused pause below never begins, so
 	// a stale value here is overwritten by the next request or cleared when a
@@ -455,6 +466,26 @@ public Action Timer_PauseClock(Handle timer)
 	return Plugin_Continue;
 }
 
+/** Audit 2026-10-09, from ZoneMod pause.sp: an infected ghost holding attack
+ *  as the game pauses keeps IN_ATTACK in its buttons through the pause and
+ *  can bank a spawn for the first unpaused tick. Release it and say why, and
+ *  mark the ghost as seen (the game works m_hasVisibleThreats out again on its
+ *  next think) as ZoneMod does. Runs on the clock tick that first sees the
+ *  pause: no usercmd is processed while paused, so up to a second late is
+ *  still before the unpause. Any pause, whoever caused it. */
+static void PauseReleaseGhostAttack()
+{
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (!IsClientInGame(i) || IsFakeClient(i) || !RplIsGhost(i)) continue;
+		SetEntProp(i, Prop_Send, "m_hasVisibleThreats", 1);
+		int buttons = GetEntProp(i, Prop_Data, "m_nButtons");
+		if (!(buttons & IN_ATTACK)) continue;
+		SetEntProp(i, Prop_Data, "m_nButtons", buttons & ~IN_ATTACK);
+		PrintToChat(i, "\x04[PUG]\x01 Your attack was released for the pause so a ghost cannot bank a spawn. Press it again after the unpause.");
+	}
+}
+
 static void PauseClockTick()
 {
 	bool paused = LeaveRotoblinPaused();
@@ -466,6 +497,7 @@ static void PauseClockTick()
 		g_fPauseHeld = 0.0;
 		g_iPauseWarned = 0;
 		g_bPauseConverted = false;
+		PauseReleaseGhostAttack();
 		// Plan T5: a !tech pause is nobody's tactical pause; it has its own clock.
 		bool tech = Tech_PendingLanded();
 		// A pause the leave module caused is nobody's: not charged, and not

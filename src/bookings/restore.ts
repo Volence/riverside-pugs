@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import { isMapName } from '../campaigns.js';
 import { carryFor, type Carry } from '../events/carry.js';
+import { gameStopMap } from '../events/stopMap.js';
 import { matchPlayersRoster, tournamentRoster } from './tournamentGames.js';
 
 /**
@@ -30,6 +31,8 @@ export interface RestoreSnapshot {
   roster: { steamid: string; team: 'a' | 'b'; joinedMap: number }[];
   /** One above the highest event seq the site holds for this game. */
   nextSeq: number;
+  /** The stop map the game was started with (a tournament game's), else null (audit 2026-10-09 D1). */
+  stopMap: string | null;
 }
 
 /** opts.replayFrom (plan T3c Ruling 12): the desk's "replay a chapter", the
@@ -103,7 +106,7 @@ export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: nu
     .map((r) => ({ ...r, joinedMap: opts.replayFrom !== undefined ? Math.min(r.joinedMap, maps.length) : r.joinedMap }));
   const maxSeq = (db.prepare('SELECT MAX(seq) AS s FROM match_live_events WHERE match_id = ?').get(matchId) as { s: number | null }).s ?? 0;
 
-  return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, carry, roster, nextSeq: maxSeq + 1 };
+  return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, carry, roster, nextSeq: maxSeq + 1, stopMap: gameStopMap(db, matchId) };
 }
 
 /** The chapters of a live game that may be replayed from their start
@@ -119,14 +122,16 @@ export function replayableChapters(db: DB, matchId: number): { ordinal: number; 
   return out;
 }
 
-/** The plugin lines that resume it (pug-match 0.3.19, Task 5). */
+/** The plugin lines that resume it (pug-match 0.3.19, Task 5; the stop map 0.3.29). */
 export function resumeLines(s: RestoreSnapshot): string[] {
   if (!/^[A-Za-z0-9]+$/.test(s.token)) throw new Error('restore token has unexpected characters');
-  for (const x of [s.firstMap, s.map, ...s.maps.map((y) => y.map)]) {
+  for (const x of [s.firstMap, s.map, ...s.maps.map((y) => y.map), ...(s.stopMap ? [s.stopMap] : [])]) {
     if (!isMapName(x)) throw new Error(`restore map ${JSON.stringify(x)} has unexpected characters`);
   }
   return [
-    `sm_pug_resume ${s.matchId} ${s.token} ${s.firstMap} ${s.firstSurv} ${s.nextSeq}`,
+    // The stop map (pug-match 0.3.29; an older plugin ignores the 6th arg),
+    // quoted as orchestrator.ts and gameLinesOf quote it on sm_pug_match.
+    `sm_pug_resume ${s.matchId} ${s.token} ${s.firstMap} ${s.firstSurv} ${s.nextSeq}${s.stopMap ? ` "${s.stopMap}"` : ''}`,
     // Only tournament games carry, and pug-match refuses sm_pug_carry off a
     // tournament box. A recovered srcds has just restarted with the cvar at 0
     // (the booking lines that set it come after this block), so it goes here.
