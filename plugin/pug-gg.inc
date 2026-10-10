@@ -302,11 +302,11 @@ bool Gg_Allowed(int team, char[] msg, int msgLen)
 
 /** Gg_Allowed with the reason as a short code (for the GG line) and the gap
  *  and ceiling it was judged on (-1 when never worked out). */
-bool Gg_Judge(int team, char[] msg, int msgLen, char[] code, int codeLen, int &gapOut, int &bestOut)
+bool Gg_Judge(int team, char[] msg, int msgLen, char[] code, int codeLen, int &gapOut, int &bestOut, bool ignoreEnable = false)
 {
 	gapOut = -1;
 	bestOut = -1;
-	if (!g_cvGgEnable.BoolValue)
+	if (!ignoreEnable && !g_cvGgEnable.BoolValue)
 	{
 		strcopy(msg, msgLen, "Forfeiting is turned off on this server.");
 		strcopy(code, codeLen, "off");
@@ -347,6 +347,44 @@ bool Gg_Judge(int team, char[] msg, int msgLen, char[] code, int codeLen, int &g
 	}
 	strcopy(code, codeLen, "ok");
 	return true;
+}
+
+// ---------- decided: the same rule, read when someone abandons ----------
+//
+// Owner ruling 2026-10-10: an abandon in a match that is already decided does
+// not abort it. "Decided" is exactly the !gg rule above: the trailing team is
+// further behind than its ceiling over the survivor halves it has left. Judged
+// here, on the server, and handed to the site only over rcon (the STATUS gg
+// line of sm_pug_status, and sm_pug_abandon_end refusing anything else), never
+// on a log line. pug_gg_enable is a switch for the VOTE, so it is ignored here.
+
+/** Whether the match is decided right now. Returns false when that cannot be
+ *  worked out yet (a round's score still being read); otherwise true, with
+ *  leader = the pug team (1 = a, 2 = b) that leads past the line, or 0 when
+ *  the match is not decided. gap and best are the trailing team's deficit and
+ *  ceiling, -1 when never worked out. */
+bool Gg_DecidedNow(int &leader, int &gap, int &best)
+{
+	leader = 0;
+	gap = -1;
+	best = -1;
+	// Before go-live (or after the end) nothing is decided.
+	if (g_State != MS_Live) return true;
+	int a, b;
+	Gg_Totals(a, b);
+	if (a == b)
+	{
+		gap = 0;
+		return true;
+	}
+	int trailing = a < b ? 1 : 2;
+	char msg[192], code[16];
+	if (Gg_Judge(trailing, msg, sizeof(msg), code, sizeof(code), gap, best, true))
+	{
+		leader = trailing == 1 ? 2 : 1;
+		return true;
+	}
+	return !StrEqual(code, "unknown");
 }
 
 // ---------- the vote ----------

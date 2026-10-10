@@ -74,8 +74,11 @@ export function winnerLabel(winner: Winner): string {
 }
 
 /** The result with the forfeit noted: "Team A (B forfeited)". */
-export function resultLabel(winner: Winner, forfeitTeam?: 'a' | 'b' | null): string {
+export function resultLabel(winner: Winner, forfeitTeam?: 'a' | 'b' | null, abandonedBy?: string | null): string {
   const w = winnerLabel(winner);
+  // A match someone abandoned after it was already decided (2026-10-10): the
+  // leading team won and it was rated.
+  if (abandonedBy) return `${w} (decided, ${abandonedBy} abandoned)`;
   return forfeitTeam ? `${w} (${forfeitTeam.toUpperCase()} forfeited)` : w;
 }
 

@@ -130,7 +130,10 @@ export class AdminFeedPoster {
         return { text: `⚠️ ${e.text}${e.link ? ` [${e.link.label}](${this.deps.publicUrl}${e.link.path})` : ''}`, color: COLOR.problem };
       case 'abandon':
         return {
-          text: `🚪 ${this.name(e.steamid)} abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). Match ended with no rating change; banned for ${fmtMinutes(e.minutes)}.`,
+          text: `🚪 ${this.name(e.steamid)} abandoned match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) (ran out of reconnect time). ${
+            e.decided
+              ? `It was already decided, so Team ${e.decided.toUpperCase()} wins and it is rated`
+              : 'Match ended with no rating change for anyone else'}; they take a rating loss and are banned for ${fmtMinutes(e.minutes)}.`,
           color: COLOR.problem,
         };
       case 'clock': {
@@ -398,6 +401,7 @@ export class AdminFeedPoster {
       case 'clear_penalty': return `${who} cleared one of ${target}'s penalties`;
       case 'noshow_extend': return `${who} moved match ${match}'s no-show deadline to ${String(d.extraMinutes)} minutes later than usual`;
       case 'cancel_pop': return `${who} cancelled a pop: ${String(d.requeued)} back in the queue${Array.isArray(d.excluded) && d.excluded.length ? `, left out ${d.excluded.map((s) => this.name(String(s))).join(', ')}` : ''}`;
+      case 'restore_abandon_rating': return `${who} restored ${target}'s rating loss from abandoning match [#${String(d.matchId)}](${this.deps.publicUrl}/match/${String(d.matchId)}): ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
       case 'void_match': return `${who} voided match ${match}: ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
       case 'new_season': return `${who} started a new season: **${escapeName(String(d.name ?? ''))}**. Everyone's rating starts fresh.`;
       case 'rename_season': return `${who} renamed season ${e.target} to **${escapeName(String(d.name ?? ''))}**`;

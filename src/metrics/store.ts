@@ -1,3 +1,4 @@
+import { completedPug } from '../matchKinds.js';
 import type { DB } from '../db.js';
 import type { MetricRow } from './registry.js';
 import type { RoundKey } from './types.js';
@@ -14,8 +15,11 @@ export function roundContext(db: DB, key: RoundKey): RoundContext {
     .get(key.matchId, key.ordinal) as { map: string } | undefined)?.map ?? null;
   const r = db.prepare('SELECT surv_team, patch_id FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?')
     .get(key.matchId, key.ordinal, key.half) as { surv_team: 'a' | 'b'; patch_id: number | null } | undefined;
+  // Completed matches only (only PUGs have rating rows anyway): an aborted one carries at most the abandoner's
+  // own loss (src/rating.ts applyAbandonPenalty), which is no team's mean.
   const mu = db.prepare(`SELECT mp.team AS team, AVG(rh.mu_before) AS mu FROM rating_history rh
     JOIN match_players mp ON mp.match_id = rh.match_id AND mp.player_id = rh.player_id
+    JOIN matches m ON m.id = rh.match_id AND ${completedPug('m')}
     WHERE rh.match_id = ? GROUP BY mp.team`).all(key.matchId) as { team: 'a' | 'b'; mu: number }[];
   const muOf = (t: 'a' | 'b') => mu.find((x) => x.team === t)?.mu ?? null;
   const surv = r?.surv_team ?? null;

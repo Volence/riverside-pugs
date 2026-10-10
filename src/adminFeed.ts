@@ -20,7 +20,9 @@ export type AdminEvent =
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
   // `link` is a site path the Discord poster turns into a link.
   | { kind: 'problem'; text: string; matchId?: number; link?: { label: string; path: string } }
-  | { kind: 'abandon'; steamid: string; matchId: number; minutes: number }
+  /** decided: the team that won a match the quitter left already decided
+   *  (it completed and is rated); null or absent: aborted, nobody else rated. */
+  | { kind: 'abandon'; steamid: string; matchId: number; minutes: number; decided?: 'a' | 'b' | null }
   // The live board's clocks. low_allowance: a dropped player is nearly out of
   // reconnect time, once per drop, so an admin can hold the clock before it
   // ends the match. hold_expired: a hold reached its ceiling and released

@@ -66,7 +66,10 @@ export function PeopleBans() {
                     <div class="mono muted">{b.steamid}</div>
                   </td>
                   {/* Staff-written text, rendered as text. */}
-                  <td>{b.hold && <span class="chip">alt hold</span>} {b.reason}</td>
+                  <td>
+                    {b.hold && <span class="chip">alt hold</span>} {b.reason}
+                    {b.abandon?.restoredAt && <div class="muted">rating loss restored{b.abandon.restoredByName ? ` by ${b.abandon.restoredByName}` : ''}{b.abandon.restoreReason ? `: ${b.abandon.restoreReason}` : ''}</div>}
+                  </td>
                   <td>{b.length}</td>
                   <td class="muted">
                     {fmtTime(b.createdAt)}{b.createdByName ? ` by ${b.createdByName}` : ''}

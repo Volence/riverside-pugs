@@ -289,7 +289,7 @@ const STATE_LINE: Record<MatchCardState, string> = {
   waiting: 'Waiting for a server to free up. You will be pinged here when it is ready.',
   live: 'Server is ready. Press **Connect** for the address and password.',
   finished: 'Finished. The result is posted below.',
-  aborted: 'Match aborted. No result, no rating change. The roster and how far it got are on the match page.',
+  aborted: 'Match aborted. No result, no rating change for anyone who stayed. The roster and how far it got are on the match page.',
 };
 
 export function renderMatch(v: MatchView): MessagePayload {
@@ -347,6 +347,9 @@ export interface ResultView {
   winner: 'a' | 'b' | 'draw';
   /** The team that forfeited with !gg, null when the match was played out. */
   forfeit?: 'a' | 'b' | null;
+  /** Who abandoned it after it was already decided (owner ruling
+   *  2026-10-10); null or absent otherwise. */
+  abandonedBy?: string | null;
   teamA: ResultPlayer[];
   teamB: ResultPlayer[];
   /** The winner's lowest win chance when they came back from under 25%
@@ -363,6 +366,7 @@ function srChange(p: ResultPlayer): string {
 
 export function renderResult(v: ResultView): MessagePayload {
   const headline = v.winner === 'draw' ? 'Draw'
+    : v.abandonedBy ? `Team ${v.winner.toUpperCase()} wins (decided, ${v.abandonedBy} abandoned)`
     : v.forfeit ? `Team ${v.winner.toUpperCase()} wins, Team ${v.forfeit.toUpperCase()} forfeited`
       : `Team ${v.winner.toUpperCase()} wins`;
   return {

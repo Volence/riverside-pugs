@@ -41,6 +41,9 @@ const PLAIN: [table: string, column: string][] = [
   ['match_survivor_downs', 'attacker'],
   ['admin_actions', 'target'],
   ['bans', 'player_id'],
+  // Abandon rating: the member of staff who restored a loss. The quitter
+  // column is KEYED below.
+  ['match_abandons', 'restored_by'],
   ['appeals', 'steamid'],
   ['appeals', 'asked_by'],
   ['appeal_messages', 'author'],
@@ -185,6 +188,9 @@ const KEYED: [table: string, column: string][] = [
   // "Your match was aborted" notices. Both accounts on one roster is the
   // alt-account case itself; the survivor's notice is kept.
   ['match_abort_notices', 'player_id'],
+  // One abandon row per quitter per match (2026-10-10). Both accounts
+  // quitting one match is the alt case itself; the survivor's row is kept.
+  ['match_abandons', 'player_id'],
   // A handle per platform. Where both accounts have one, `into` keeps its own.
   ['player_links', 'player_id'],
   // Summed first, below, where both accounts were seen on one address.
