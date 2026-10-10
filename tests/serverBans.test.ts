@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { addServer, setEnabled, type ServerRow } from '../src/serverPool.js';
 import { banPlayer, unbanPlayer } from '../src/admin/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
-import { ServerBanSync, banCommand, unbanCommand, UNBAN_WINDOW_MS } from '../src/serverBans.js';
+import { ServerBanSync, banCommand, parseListId, unbanCommand, UNBAN_WINDOW_MS } from '../src/serverBans.js';
 import { addAlias } from '../src/aliases.js';
 
 // 76561198030413993 is STEAM_1:1:35074132 (the verified pair).
@@ -121,11 +121,11 @@ describe('ServerBanSync pushing', () => {
     ]);
   });
 
-  it('sweep sends the full command set to every enabled server and skips disabled ones', async () => {
+  it('sweep asks each enabled server for its list, skips disabled ones, and sends the full set when the reply is unreadable', async () => {
     banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
     setEnabled(db, s2, false);
     await sync().sweep();
-    expect(sent).toEqual([{ server: 'dallas', commands: [banCommand(P1, 'Griefing')] }]);
+    expect(sent).toEqual([{ server: 'dallas', commands: ['listid'] }, { server: 'dallas', commands: [banCommand(P1, 'Griefing')] }]);
   });
 
   it('sweep sends nothing when there is nothing to say', async () => {
@@ -145,7 +145,7 @@ describe('ServerBanSync pushing', () => {
     banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
     const ran: string[] = [];
     await sync().pushAll(async (c) => { ran.push(c); });
-    expect(ran).toEqual([banCommand(P1, 'Griefing')]);
+    expect(ran).toEqual(['listid', banCommand(P1, 'Griefing')]);
   });
 
   it('a failing server neither throws nor stops the others', async () => {
@@ -155,7 +155,7 @@ describe('ServerBanSync pushing', () => {
       sent.push({ server: server.name, commands });
     };
     await sync({ exec: failing }).sweep();
-    expect(sent.map((s) => s.server)).toEqual(['chicago']);
+    expect(sent.map((s) => s.server)).toEqual(['chicago', 'chicago']);
   });
 
   it('reports a failing server to the admin feed at most once an hour', async () => {
@@ -172,5 +172,112 @@ describe('ServerBanSync pushing', () => {
     expect(events.filter((e) => e.kind === 'problem')).toHaveLength(4);
     expect(events.some((e) => e.kind === 'problem' && /Could not push bans to dallas/.test(e.text))).toBe(true);
     unsub();
+  });
+});
+
+// Audit 2026-10-09: the sweep re-sent every ban and every unban of the last
+// 30 days every five minutes, and basebans logged each one (26,629 lines on
+// Dallas on 10-08). It now reads the box's own list and sends the difference.
+describe('diff against the box\'s own list (listid)', () => {
+  /** A box: the engine ban list keyed STEAM_1:Y:Z -> 'permanent' | '<n> min'. */
+  const box = (initial: Record<string, string> = {}) => {
+    const list = new Map(Object.entries(initial));
+    const log: string[] = [];
+    const answer = (c: string): string => {
+      if (c === 'listid') {
+        if (list.size === 0) return 'ID filter list: empty\n';
+        return `ID filter list: ${list.size} entries\n${[...list].map(([id, t], i) => `${i + 1} ${id} : ${t}`).join('\n')}\n`;
+      }
+      const add = /^sm_addban 0 "(STEAM_[^"]+)"/.exec(c);
+      if (add) { list.set(add[1]!, 'permanent'); log.push(c); return ''; }
+      const rm = /^sm_unban "(STEAM_[^"]+)"/.exec(c);
+      if (rm) { if (list.delete(rm[1]!)) log.push(c); return ''; }
+      return '';
+    };
+    return { list, log, exec: async (_s: ServerRow, commands: string[]) => commands.map(answer), one: async (c: string) => answer(c) };
+  };
+
+  it('parses the engine reply, counting permanent entries only, by account', () => {
+    expect(parseListId('ID filter list: empty\n')).toEqual(new Set());
+    expect(parseListId('ID filter list: 2 entries\n1 STEAM_1:1:35074132 : permanent\n2 STEAM_0:0:1 : 59.500 min\n'))
+      .toEqual(new Set(['1:35074132']));
+    expect(parseListId('Unknown command "listid"')).toBeNull();
+    expect(parseListId('')).toBeNull();
+    expect(parseListId(undefined)).toBeNull();
+  });
+
+  it('a box that already holds every ban is told nothing; a second sweep is silent', async () => {
+    banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
+    banPlayer(db, P2, 'admin', 'recent', null, new Date(clock - 2 * DAY));
+    unbanPlayer(db, P2, 'admin', new Date(clock - DAY));
+    setEnabled(db, s2, false);
+    const b = box({ 'STEAM_1:1:35074132': 'permanent' });
+    const calls: string[][] = [];
+    const s = sync({ exec: async (sv, c) => { calls.push(c); return b.exec(sv, c); } });
+    await s.sweep();
+    await s.sweep();
+    expect(calls).toEqual([['listid'], ['listid']]);
+    expect(b.log).toEqual([]);
+  });
+
+  it('pushes a ban the box lacks and an unban it still holds, and nothing else', async () => {
+    addAlias(db, { steamid: ALT1, canonical: P1, by: 'test' });
+    banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
+    banPlayer(db, P2, 'admin', 'old', null, new Date(clock - 2 * DAY));
+    unbanPlayer(db, P2, 'admin', new Date(clock - DAY));
+    setEnabled(db, s2, false);
+    // P1 is there, its alt is not, and the lifted P2 still is.
+    const b = box({ 'STEAM_1:1:35074132': 'permanent', 'STEAM_1:0:1': 'permanent' });
+    await sync({ exec: b.exec }).sweep();
+    expect(b.log).toEqual([banCommand(ALT1, 'Griefing'), unbanCommand(P2)]);
+    expect([...b.list.keys()].sort()).toEqual(['STEAM_1:0:2', 'STEAM_1:1:35074132']);
+  });
+
+  it('a restarted or rebuilt box with an empty list gets every open ban again', async () => {
+    banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
+    banPlayer(db, P2, 'system', 'Abandoned match #3', 1440, new Date(clock));
+    setEnabled(db, s2, false);
+    const b = box();
+    await sync({ exec: b.exec }).sweep();
+    expect(b.log).toEqual([banCommand(P2, 'Abandoned match #3'), banCommand(P1, 'Griefing')]);
+  });
+
+  it('a timed engine ban (an in-game sm_ban) does not stand in for the site\'s permanent one', async () => {
+    banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
+    setEnabled(db, s2, false);
+    const b = box({ 'STEAM_1:1:35074132': '30.000 min' });
+    await sync({ exec: b.exec }).sweep();
+    expect(b.log).toEqual([banCommand(P1, 'Griefing')]);
+  });
+
+  it('a ban the box holds that the site never made is left alone', async () => {
+    banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
+    setEnabled(db, s2, false);
+    const b = box({ 'STEAM_1:1:35074132': 'permanent', 'STEAM_1:0:9': 'permanent' });
+    await sync({ exec: b.exec }).sweep();
+    expect(b.log).toEqual([]);
+    expect(b.list.has('STEAM_1:0:9')).toBe(true);
+  });
+
+  it('a lift on the site reaches the box through onChange at once, and the sweep after is silent', async () => {
+    banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock - DAY));
+    setEnabled(db, s2, false);
+    const b = box({ 'STEAM_1:1:35074132': 'permanent' });
+    const s = sync({ exec: b.exec });
+    unbanPlayer(db, P1, 'admin', new Date(clock));
+    await s.onChange({ kind: 'unban', steamid: P1 });
+    expect(b.list.size).toBe(0);
+    b.log.length = 0;
+    await s.sweep();
+    expect(b.log).toEqual([]);
+  });
+
+  it('the setup push (pushAll) reads the list on the same connection and sends only the difference', async () => {
+    banPlayer(db, P1, 'admin', 'Griefing', null, new Date(clock));
+    banPlayer(db, P2, 'admin', 'Other', null, new Date(clock));
+    const b = box({ 'STEAM_1:1:35074132': 'permanent' });
+    const ran: string[] = [];
+    await sync().pushAll(async (c) => { ran.push(c); return b.one(c); });
+    expect(ran).toEqual(['listid', banCommand(P2, 'Other')]);
   });
 });

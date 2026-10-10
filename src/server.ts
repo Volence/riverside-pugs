@@ -771,14 +771,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // outside a match; started below once the server list has been reconciled.
   const banSync = new ServerBanSync({
     db: deps.db,
+    // Returns the replies: the sweep reads the box's own list (listid) and
+    // sends only the difference.
     exec: deps.serverExec ?? (async (server, commands) => {
       const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+      const replies: string[] = [];
       try {
         await rcon.connect();
-        for (const c of commands) await rcon.exec(c);
+        for (const c of commands) replies.push(await rcon.exec(c));
       } finally {
         rcon.close();
       }
+      return replies;
     }),
   });
 
