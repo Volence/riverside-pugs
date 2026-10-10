@@ -59,7 +59,7 @@ export function Matches() {
                       <span class="muted match-id"> #{m.id}</span>
                     </td>
                     <td class="num">{m.teamAScore} - {m.teamBScore}</td>
-                    <td>{resultLabel(m.winner, m.forfeitTeam)}</td>
+                    <td>{resultLabel(m.winner, m.forfeitTeam, m.abandonedBy)}</td>
                     <td class="num muted">{fmtDate(m.endedAt)}</td>
                   </tr>
                 ))}

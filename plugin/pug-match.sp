@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.30"
+#define PLUGIN_VERSION "0.3.31"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -118,7 +118,7 @@ int g_iMatchId;
 char g_sToken[65];
 char g_sCampaign[64];
 char g_sStopAfterMap[64];               // backend-supplied last scored map; empty = use NextMapIsFinale
-char g_sEndResult[128];
+char g_sEndResult[192];
 
 // The end-of-match kick, held in its OWN state rather than reading the match
 // state or g_sEndResult.
@@ -133,7 +133,7 @@ char g_sEndResult[128];
 // So the reason lives here, survives ResetMatchState, and is cleared only by
 // CancelEndKick, which the three new-match entry points call deliberately.
 Handle g_hEndKick = null;
-char g_sEndKickReason[128];
+char g_sEndKickReason[192];
 int g_iEndKickTries;
 
 Handle g_hTeardown = null;
@@ -2464,11 +2464,15 @@ void EndMatchNow(const char[] why)
 	Gg_ForfeitWinner(winner, sizeof(winner));
 	char ff[48];
 	Gg_ForfeitTail(ff, sizeof(ff));
-	EmitPug("MATCH_END a=%d b=%d winner=%s%s", a, b, winner, ff);
+	char ab[48];
+	LeaveAbandonTail(ab, sizeof(ab));
+	EmitPug("MATCH_END a=%d b=%d winner=%s%s%s", a, b, winner, ff, ab);
 	PugDebug("ended (%s): a=%d b=%d winner=%s", why, a, b, winner);
 
-	char teamName[32];
+	char teamName[96], quitter[MAX_NAME_LENGTH];
 	if (StrEqual(winner, "draw")) strcopy(teamName, sizeof(teamName), "Draw");
+	else if (LeaveEndedAsDecided(quitter, sizeof(quitter)))
+		Format(teamName, sizeof(teamName), "Team %s wins (decided, %s abandoned)", winner[0] == 'a' ? "A" : "B", quitter);
 	else if (Gg_ForfeitTeam() != 0) Format(teamName, sizeof(teamName), "Team %s wins by forfeit", winner[0] == 'a' ? "A" : "B");
 	else Format(teamName, sizeof(teamName), "Team %s wins", winner[0] == 'a' ? "A" : "B");
 
@@ -3003,7 +3007,7 @@ bool NonceOk(const char[] nonce)
  */
 public Action Cmd_EndKickNow(int args)
 {
-	char reason[128];
+	char reason[192];
 	if (g_sEndKickReason[0] != '\0') strcopy(reason, sizeof(reason), g_sEndKickReason);
 	else strcopy(reason, sizeof(reason), "Match over. The server is restarting; queue again on the site.");
 	int present = CountHumans();
@@ -5336,6 +5340,7 @@ void WriteDump(const char[] nonce)
 			g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatCk[i], g_iStatFf[i], g_iStatRev[i]);
 	}
 	WriteSkillLines();
+	LeaveDumpLines();
 	int a, b;
 	TotalScores(a, b);
 	char winner[8];
@@ -5343,7 +5348,9 @@ void WriteDump(const char[] nonce)
 	Gg_ForfeitWinner(winner, sizeof(winner));
 	char ff[48];
 	Gg_ForfeitTail(ff, sizeof(ff));
-	DumpLine("END winner=%s a=%d b=%d%s%s", winner, a, b, ff, tail);
+	char ab[48];
+	LeaveAbandonTail(ab, sizeof(ab));
+	DumpLine("END winner=%s a=%d b=%d%s%s%s", winner, a, b, ff, ab, tail);
 }
 
 /** choke_start: the smoker has stopped dragging and started choking. The

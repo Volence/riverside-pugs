@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { statusShowsAbandoner } from './abandon.js';
+import { parseAbandonStatus, type AbandonConfirm } from './abandon.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { getSetting, settingNumber } from './settings.js';
 import type { DB } from './db.js';
@@ -386,15 +386,34 @@ export class RealOrchestrator implements Orchestrator {
    *  Keyed on serverId and token rather than a match id because the caller has
    *  already flipped that match out of 'live'. Throws on failure; the caller
    *  must not let that stop the release. */
-  /** Whether the plugin itself records `steamid` as having abandoned the match. */
-  async confirmAbandon(serverId: number, steamid: string): Promise<boolean> {
+  /** Whether the plugin itself records `steamid` as having abandoned the
+   *  match, and whether it judged the match decided then (STATUS gg). */
+  async confirmAbandon(serverId: number, steamid: string): Promise<AbandonConfirm> {
     const server = getServer(this.db, serverId);
-    if (!server) return false;
+    if (!server) return { abandoner: false, abandoners: [], gg: null };
     let rcon: RconClient | null = null;
     try {
       rcon = await this.connectRcon(server);
       const body = await rcon.exec('sm_pug_status');
-      return statusShowsAbandoner(body, steamid);
+      return parseAbandonStatus(body, steamid);
+    } finally {
+      rcon?.close();
+    }
+  }
+
+  /** Ask the plugin to end a match its abandoner left already decided
+   *  (sm_pug_abandon_end, pug-match 0.3.31). 'refused' on anything but PUGOK,
+   *  which includes an older plugin that does not know the command. */
+  async endDecidedAbandon(serverId: number, token: string, steamid: string): Promise<'ok' | 'refused'> {
+    const server = getServer(this.db, serverId);
+    if (!server) return 'refused';
+    let rcon: RconClient | null = null;
+    try {
+      rcon = await this.connectRcon(server);
+      const body = await rcon.exec(`sm_pug_abandon_end ${token} ${steamid}`);
+      if (body.includes('PUGOK')) return 'ok';
+      console.warn(`[orchestrator] sm_pug_abandon_end refused: ${body.trim() || '(no response)'}`);
+      return 'refused';
     } finally {
       rcon?.close();
     }

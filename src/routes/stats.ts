@@ -189,7 +189,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const vis = visibleMatchesSql(v, 'm');
     const matches = db.prepare(
       `SELECT m.id, m.campaign, m.ended_at AS endedAt, m.team_a_score AS teamAScore, m.team_b_score AS teamBScore, m.winner,
-              m.forfeit_team AS forfeitTeam
+              m.forfeit_team AS forfeitTeam,
+              (SELECT GROUP_CONCAT(n, ' and ') FROM (SELECT COALESCE(p.name, a.player_id) AS n FROM match_abandons a
+                 LEFT JOIN players p ON p.steamid = a.player_id
+                 WHERE a.match_id = m.id AND a.decided IS NOT NULL ORDER BY a.player_id)) AS abandonedBy
        FROM matches m WHERE m.state = 'completed' AND ${vis.sql} ORDER BY m.id DESC LIMIT ?`,
     ).all(...vis.params, RECENT_MATCH_LIMIT);
     return { matches };
@@ -227,8 +230,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const match = db.prepare(
       `SELECT id, campaign, state, ended_at AS endedAt, team_a_score AS teamAScore, team_b_score AS teamBScore,
               winner, voided_at AS voidedAt, void_reason AS voidReason, restored_at_map AS restoredAtMap,
-              forfeit_team AS forfeitTeam
-       FROM matches WHERE id = ? AND state IN ('completed', 'aborted')`,
+              forfeit_team AS forfeitTeam,
+              (SELECT GROUP_CONCAT(n, ' and ') FROM (SELECT COALESCE(p.name, a.player_id) AS n FROM match_abandons a
+                 LEFT JOIN players p ON p.steamid = a.player_id
+                 WHERE a.match_id = m.id AND a.decided IS NOT NULL ORDER BY a.player_id)) AS abandonedBy
+       FROM matches m WHERE id = ? AND state IN ('completed', 'aborted')`,
     ).get(id);
     if (!match) return reply.code(404).send({ error: 'no such match' });
     // Per-map player stats come from the end-of-map snapshots kept by the

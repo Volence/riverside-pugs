@@ -8,7 +8,7 @@ import { lookStats } from '../mapLooks.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, moveServer, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
-import { abortMatch, adminOverview, clearNoShowsOf, voidMatch, type BookingGameAborter } from '../admin/matches.js';
+import { abortMatch, adminOverview, clearNoShowsOf, restoreAbandonRating, voidMatch, type BookingGameAborter } from '../admin/matches.js';
 import { holdFor } from '../serverHolds.js';
 import { extendNoShow } from '../noShow.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
@@ -431,6 +431,28 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const r = voidMatch(db, id, reason.trim());
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
     logAdmin(db, adminId, 'void_match', id, { reason: reason.trim() });
+    broadcast('refresh');
+    return { ok: true };
+  });
+
+  /** Give an abandoner back the rating loss of one abandon (owner ruling
+   *  2026-10-10). Admin only, with a reason, and recomputed at once. Lifting
+   *  the ban never does this by itself. The audit row targets the player, so
+   *  it shows on their file as well as in the log. */
+  app.post('/api/admin/matches/:id/restore-abandon-rating', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const { reason, steamid } = (req.body ?? {}) as { reason?: unknown; steamid?: unknown };
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) {
+      return reply.code(400).send({ error: 'a reason is required (up to 500 characters)' });
+    }
+    if (steamid !== undefined && (typeof steamid !== 'string' || !/^\d{17}$/.test(steamid))) {
+      return reply.code(400).send({ error: 'steamid must be a SteamID64' });
+    }
+    const r = restoreAbandonRating(db, id, steamid ?? null, adminId, reason.trim());
+    if (!r.ok) return reply.code(r.status).send({ error: r.error });
+    logAdmin(db, adminId, 'restore_abandon_rating', r.steamid, { matchId: id, reason: reason.trim() });
     broadcast('refresh');
     return { ok: true };
   });

@@ -58,6 +58,8 @@ trap 'rm -f '"$CLEANUP"'; rm -rf "'"$VENDOR_DIR"'"' EXIT
 # for the data feeds; see pug-datafeeds.inc). Never stage that build.
 DEFS=""
 [ "${DF_TEST:-0}" = "1" ] && DEFS="DF_TEST=1"
+# AB_TEST=1 adds the rig-only sm_pug_abtest (pug-leave.inc). Never stage that build either.
+[ "${AB_TEST:-0}" = "1" ] && DEFS="$DEFS AB_TEST=1"
 (cd "$SCRIPTING" && wine ./spcomp.exe pug-match.sp -o pug-match.smx -i"$VENDOR_REL" -iinclude $DEFS)
 mv "$SCRIPTING/pug-match.smx" ./pug-match.smx
 echo "built: $(pwd)/pug-match.smx"
