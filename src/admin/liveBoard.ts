@@ -5,6 +5,7 @@ import { spectateFor, type SpectateInfo } from '../spectate.js';
 import { holdMaxSeconds, lowAlertSeconds, remainingNow, type PresenceRow } from '../presence.js';
 import { noShowClock, signonDropsSincePop, toMs, type NoShowClock } from '../noShow.js';
 import type { LookLayers } from '../logParse.js';
+import { funnelFor, type FunnelState } from '../dataFeeds.js';
 
 /**
  * The admin live board: every ongoing match, who is missing from it, and the
@@ -32,7 +33,10 @@ export type BoardStatus =
   | { kind: 'never_connected'; sincePopS: number; deadlineS: number | null }
   | { kind: 'dropped'; sinceS: number; remainingS: number | null; held: boolean; holdLeftS: number | null };
 
-export interface BoardPlayer { steamid: string; name: string; team: 'a' | 'b'; status: BoardStatus; reason: BoardReason | null }
+/** funnel: where the player is in getting onto the map the server is on, from
+ *  pug-match's CONN lines (src/dataFeeds.ts), and what the site knows of
+ *  their L4D2 map pack. Null with an older plugin or before any line. */
+export interface BoardPlayer { steamid: string; name: string; team: 'a' | 'b'; status: BoardStatus; reason: BoardReason | null; funnel: FunnelState | null }
 
 /** One running clock. Part one has only the abandon allowance; the no-show
  *  clock joins this union in part two. */
@@ -143,6 +147,9 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
       const score = scoreOf.get(m.id) as { a: number; b: number };
 
       const noShow = noShowClock(db, m.id, now);
+      // The newest map the funnel heard of, not match_live's current_map:
+      // that one moves at go-live, and loading is what happens before it.
+      const funnel = funnelFor(db, m.id, null);
       const players = (playersOf.all(m.id) as PlayerRow[]).map((p): BoardPlayer => {
         let status: BoardStatus;
         if (p.state === 'dropped' && p.since) {
@@ -176,7 +183,7 @@ export function buildLiveBoard(db: DB, opts: { voice: VoiceLookup | null; now?: 
           if (drop) reason = { kind: 'signon_drop', at: drop.at };
           else if (opts.voice && p.discordId && opts.voice.inVoice(p.discordId) === false) reason = { kind: 'not_in_voice' };
         }
-        return { steamid: p.steamid, name: p.name, team: p.team, status, reason };
+        return { steamid: p.steamid, name: p.name, team: p.team, status, reason, funnel: funnel.get(p.steamid) ?? null };
       });
 
       const clocks: BoardClock[] = [];

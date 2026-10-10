@@ -1,4 +1,4 @@
-import type { LiveBoardReason } from './api';
+import type { LiveBoardFunnel, LiveBoardReason } from './api';
 
 /** Shown on a disabled clock button, and as its title, when the match's
  *  server cannot do what the button asks. */
@@ -37,6 +37,20 @@ export function reasonText(r: LiveBoardReason | null): string {
   if (r.kind === 'not_in_voice') return 'not in a voice channel';
   const at = new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return `rejected by the file check at ${at}`;
+}
+
+/** One short line from the connection funnel, or '' for nothing worth
+ *  saying: "loading the map" for someone connected but not in game yet, "in
+ *  game, not ready" during a ready-up, and the L4D2 pack when the site has
+ *  seen it missing. Never shown to players; the board is staff only. */
+export function funnelText(f: LiveBoardFunnel | null | undefined, phase: string | null): string {
+  if (!f) return '';
+  const parts: string[] = [];
+  if (f.stage === 'loading') parts.push('loading the map');
+  else if ((f.stage === 'in_game' || f.stage === 'on_team') && phase === 'readyup') parts.push('in game, not ready');
+  if (f.pack === 'missing') parts.push('L4D2 map pack missing');
+  else if (f.pack === 'suspect' && f.stage !== 'ready') parts.push('may lack the L4D2 map pack');
+  return parts.join(', ');
 }
 
 /** The match id in /admin/live?live=81, which is what the admin feed's low

@@ -124,6 +124,8 @@ import { effectiveIgnored } from './balanceIgnore.js';
 import { linkReleaseSighting } from './releaseBalance.js';
 import { expectedPatchFor, confirmOnSighting } from './balanceRollouts.js';
 import { recordRoundMark, recordRoundStat, recordRoundStatsEnd, resetRoundLines, roundOrdinal } from './roundStatLines.js';
+import { isDataFeedEvent } from './dataFeedParse.js';
+import { recordDataFeed, resetRoundFeeds } from './dataFeeds.js';
 import { recordPing } from './serverPick.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { noteMatchAborted, subscribeMatchAborts } from './matchAborts.js';
@@ -1124,6 +1126,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           return;
         }
+        if (isDataFeedEvent(ev)) {
+          // pug-match's data feeds (src/dataFeeds.ts): funnel, downs, round
+          // flow, SI lives. Staff-side data only; a funnel stage nudges the
+          // admin live board. Same guard as the lines around it.
+          try {
+            if (recordDataFeed(deps.db, ev)) hub.broadcast('refresh');
+          } catch (err) {
+            console.error('[datafeeds] failed to record', ev.kind, err);
+          }
+          return;
+        }
         if (ev.kind === 'look') {
           // l4d_nightmode's look for the round (src/mapLooks.ts). Same guard
           // as the chat lines: an unknown source must not take down the
@@ -1315,6 +1328,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // that the round row (and its ordinal) is settled.
             const rs = liveMatchRow(ev.token);
             if (rs) resetRoundLines(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
+            if (rs) resetRoundFeeds(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
             // The caster studio's opponent mark starts over with the half.
             if (rs) liveHudStore.resetReach(ev.token, currentOrdinal(deps.db, rs.id), ev.half);
           }
