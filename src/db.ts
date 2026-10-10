@@ -2510,6 +2510,9 @@ export function openDb(path: string): DB {
   // Why a match was aborted, as one of src/matchAborts.ts's causes. NULL for
   // an abort from before the column, and for a voided match.
   ensureColumn(db, 'matches', 'abort_cause', 'TEXT');
+  // When staff were told this live match's server went quiet (src/serverLost.ts).
+  // Cleared when heartbeats come back, so a second loss is told again.
+  ensureColumn(db, 'matches', 'server_lost_alerted_at', 'TEXT');
   // Competitive platform. Every row that exists today, and every row the queue
   // or an in-game !load creates, is a public PUG; only later code creates
   // other kinds. See src/matchKinds.ts and src/matchVisibility.ts.

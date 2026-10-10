@@ -85,6 +85,9 @@ export interface Config {
   campaignZipDir: string;
   discord: DiscordConfig | null;
   twitch: TwitchConfig | null;
+  /** Shared secret the boxes' ops scripts sign reports with (src/opsReport.ts).
+   *  Null turns POST /api/ops/report off (it answers 404). */
+  opsReportSecret: string | null;
 }
 
 /**
@@ -139,6 +142,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     campaignZipDir: join(dirname(dbPath), 'campaign-zips'),
     discord: loadDiscord(env),
     twitch: loadTwitch(env),
+    opsReportSecret: env.OPS_REPORT_SECRET?.trim() || null,
   };
 }
 
