@@ -1160,7 +1160,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // confirms over rcon before acting.
           const orch = orchestrator as RealOrchestrator;
           void handleAbandon(
-            { db: deps.db, releaser, confirm: (serverId, steamid) => orch.confirmAbandon(serverId, steamid) },
+            {
+              db: deps.db, releaser,
+              confirm: (serverId, steamid) => orch.confirmAbandon(serverId, steamid),
+              // Owner ruling 2026-10-10: a decided match ends with the leader
+              // winning, collected exactly as a MATCH_END would be.
+              endDecided: (serverId, token, steamid) => orch.endDecidedAbandon(serverId, token, steamid),
+              finish: (matchId) => { void finishWithRetry(deps.db, orch, matchId, releaser); },
+            },
             ev.token, ev.steamid,
           ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
             .catch((err) => console.error('[abandon] failed:', err));
