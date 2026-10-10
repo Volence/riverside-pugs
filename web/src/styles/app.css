@@ -3967,3 +3967,16 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .winchart__table { margin-top: var(--sp-3); font-size: var(--fs-dense); }
 .winchart__table summary { cursor: pointer; color: var(--text-muted); }
 .winchart__foot { font-size: var(--fs-dense); margin: var(--sp-3) 0 0; }
+
+/* Live page: both teams' win chance as one split bar, team colors as in the
+ * versus header above it. The numbers are always written out beside it. */
+.liveodds { margin: var(--sp-4) 0; }
+.liveodds__labels {
+  display: flex; justify-content: space-between; gap: var(--sp-3);
+  font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.03em; color: var(--text);
+}
+.liveodds__bar { display: flex; height: 8px; margin-top: var(--sp-1); gap: 2px; }
+.liveodds__a { background: var(--win); transition: width 0.6s ease; }
+.liveodds__b { background: var(--accent); flex: 1; }
+.liveodds__more { margin-top: var(--sp-2); font-size: var(--fs-dense); }
+.liveodds__more summary { cursor: pointer; color: var(--text-muted); }

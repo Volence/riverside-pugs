@@ -7,6 +7,7 @@ import type { LogEvent, Phase } from './logParse.js';
 import type { ServerReleaser } from './serverRelease.js';
 import { archiveAborted } from './matchArchive.js';
 import { noteMatchAborted } from './matchAborts.js';
+import { liveWinLine, type WinLine } from './winProb.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
  *  emits one every 30s, so this tolerates three consecutive losses on a lossy
@@ -108,6 +109,20 @@ export interface LiveMatch {
   spectate: SpectateInfo | null;
   /** What the game is doing, or null until the plugin has reported one. */
   phase: LivePhase | null;
+  /** Win chance after every half so far, priced against the maps still to
+   *  play (src/winProb.ts); null when the plan or the rounds cannot carry one. */
+  winLine: WinLine | null;
+}
+
+/** The odds are decoration on the live page: a fault in them must never take
+ *  the page down with it. */
+function safeWinLine(db: DB, matchId: number, campaign: string): WinLine | null {
+  try {
+    return liveWinLine(db, matchId, campaign);
+  } catch (err) {
+    console.warn(`[live] win line for match ${matchId} failed:`, err);
+    return null;
+  }
 }
 
 /**
@@ -974,6 +989,7 @@ export function getLiveMatches(db: DB, showDiscordNames = false): LiveMatch[] {
       maps,
       teamAScore: maps.reduce((t, x) => t + x.teamAScore, 0),
       teamBScore: maps.reduce((t, x) => t + x.teamBScore, 0),
+      winLine: safeWinLine(db, m.id, m.campaign),
       demos: demosOf.all(m.id) as LiveDemo[],
       events: (eventsOf.all(m.id, LIVE_EVENT_LIMIT) as {
         seq: number; kind: string; actor: string; target: string | null;

@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { buildWinModel, winChance, matchWinLine, winModel, type HalfRow } from '../src/winProb.js';
+import { buildWinModel, winChance, matchWinLine, liveWinLine, winModel, type HalfRow } from '../src/winProb.js';
+import { insertDraft, publishCampaign } from '../src/customCampaigns.js';
+import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
 /** A spread of made and wiped halves on two maps, roughly our real shape:
  *  makes several times a wipe, one map easier than the other. */
@@ -135,5 +137,67 @@ describe('matchWinLine', () => {
     const line = matchWinLine(db, seed(comeback))!;
     expect(line.halves).toBe(16);
     expect(winModel(db)).toBe(winModel(db));
+  });
+});
+
+describe('liveWinLine', () => {
+  let db: DB;
+  let id: number;
+  const model = buildWinModel(history());
+  beforeEach(() => {
+    db = openDb(':memory:');
+    setMissionsDirs([]);
+    invalidateCampaignCache();
+    // Five chapters, so the default stop map is the fourth: m1 m2 m1 m2.
+    insertDraft(db, {
+      slug: 'five', name: 'Five', vpkFilename: 'five.vpk', sizeBytes: 1, sha256: 'a'.repeat(64), uploadedBy: null,
+    }, ['m1', 'm2', 'm1b', 'm2b', 'fin'].map((map, n) => ({ map, display: null, isFinale: n === 4 })));
+    publishCampaign(db, 'five', 'Five');
+    invalidateCampaignCache();
+    id = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'live', 'five')").run().lastInsertRowid);
+  });
+  afterEach(() => { setMissionsDirs([]); invalidateCampaignCache(); });
+
+  const playMap = (ordinal: number, map: string) =>
+    db.prepare('INSERT INTO match_live_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, ?, ?, 0, 0)').run(id, ordinal, map);
+  const half = (ordinal: number, h: number, team: 'a' | 'b', score: number | null) =>
+    db.prepare('INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, ended_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, ordinal, h, team, score ?? 0, score === null ? null : '2026-10-10 00:00:00');
+
+  it('prices the opening point against all four planned maps', () => {
+    const line = liveWinLine(db, id, 'five', model)!;
+    expect(line.points).toHaveLength(1);
+    expect(line.halvesLeft).toBe(8);
+    expect(line.points[0].pA).toBeCloseTo(0.5, 6);
+    expect(line.winnerLow).toBeNull();
+  });
+
+  it('counts the other team\'s half of the current map as still to play, and a half in progress too', () => {
+    playMap(0, 'm1');
+    half(0, 1, 'a', 640);
+    let line = liveWinLine(db, id, 'five', model)!;
+    expect(line.points).toHaveLength(2);
+    expect(line.halvesLeft).toBe(7);
+    expect(line.points[1].pA).toBeGreaterThan(0.5);
+    expect(line.points[1].pA).toBeLessThan(1);
+
+    half(0, 2, 'b', null); // B's half has started but not ended
+    line = liveWinLine(db, id, 'five', model)!;
+    expect(line.points).toHaveLength(2);
+    expect(line.halvesLeft).toBe(7);
+  });
+
+  it('agrees with the same state priced directly', () => {
+    playMap(0, 'm1'); playMap(1, 'm2');
+    half(0, 1, 'a', 640); half(0, 2, 'b', 60); half(1, 1, 'b', 820);
+    const line = liveWinLine(db, id, 'five', model)!;
+    expect(line.points.at(-1)!.pA).toBeCloseTo(winChance(model, 640 - 880, ['m2', 'm1b', 'm2b'], ['m1b', 'm2b']), 9);
+  });
+
+  it('is null when the maps played do not follow the plan, or the plan is unknown', () => {
+    playMap(0, 'somewhere_else');
+    half(0, 1, 'a', 100);
+    expect(liveWinLine(db, id, 'five', model)).toBeNull();
+    expect(liveWinLine(db, id, 'no_such_campaign', model)).toBeNull();
   });
 });

@@ -345,6 +345,9 @@ export interface LiveMatch {
   events: LiveEvent[];
   spectate?: SpectateInfo | null;
   phase?: LivePhase | null;
+  /** Win chance so far (src/winProb.ts); null when it cannot be priced,
+   *  absent from an older server. */
+  winLine?: WinLine | null;
 }
 
 export interface MatchDemo {
@@ -380,6 +383,9 @@ export interface WinLine {
   winnerLow: { index: number; p: number } | null;
   /** How many halves of history the odds come from. */
   halves: number;
+  /** Survivor halves still to play after the last point: 0 once finished.
+   *  Absent from an older server, which only sent finished matches. */
+  halvesLeft?: number;
 }
 
 export interface MatchDetail {
