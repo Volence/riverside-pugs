@@ -57,7 +57,7 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
     `SELECT id, name, host, port, status, enabled, tv_port AS tvPort,
             tv_password AS tvPassword, tv_enabled AS tvEnabled, restart_after_match AS restartAfterMatch,
             log_auth AS logMode, log_secret IS NOT NULL AS hasLogSecret
-     FROM servers ORDER BY ${PICK_ORDER_SQL}`,
+     FROM servers WHERE retired = 0 ORDER BY ${PICK_ORDER_SQL}`,
   ).all() as ({ id: number; logMode: string; hasLogSecret: number } & Record<string, unknown>)[])
     .map(({ logMode, hasLogSecret, ...s }) => ({
       ...s,

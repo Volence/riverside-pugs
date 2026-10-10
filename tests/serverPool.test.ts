@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { addServer, claimIdle, release, markLive, markOffline, getServer, setEnabled, listServers } from '../src/serverPool.js';
+import { addServer, claimIdle, release, markLive, markOffline, getServer, setEnabled, listServers, retireServer, moveServer } from '../src/serverPool.js';
 
 let db: DB;
 beforeEach(() => {
@@ -95,5 +95,37 @@ describe('serverPool enabled flag', () => {
     seedTwo();
     setEnabled(db, 2, false);
     expect(listServers(db).map((s) => [s.id, s.enabled])).toEqual([[1, 1], [2, 0]]);
+  });
+});
+
+describe('serverPool retired flag', () => {
+  it('a retired box keeps its row but leaves the list, the pick order and the pool', () => {
+    seedTwo();
+    addServer(db, { name: 's3', host: '10.0.0.3', port: 27015, rconPort: 27015, rconPassword: 'p3' });
+    retireServer(db, 2);
+    expect(getServer(db, 2)!.name).toBe('s2');
+    expect(getServer(db, 2)!.enabled).toBe(0);
+    expect(listServers(db).map((s) => s.id)).toEqual([1, 3]);
+    expect(claimIdle(db)!.id).toBe(1);
+    expect(claimIdle(db)!.id).toBe(3);
+    expect(claimIdle(db)).toBeNull();
+  });
+
+  it('setEnabled cannot bring a retired box back', () => {
+    seedTwo();
+    retireServer(db, 2);
+    setEnabled(db, 2, true);
+    expect(getServer(db, 2)!.enabled).toBe(0);
+  });
+
+  it('moving servers renumbers only the boxes in service', () => {
+    seedTwo();
+    addServer(db, { name: 's3', host: '10.0.0.3', port: 27015, rconPort: 27015, rconPassword: 'p3' });
+    retireServer(db, 2);
+    expect(moveServer(db, 3, -1)).toBe(true);
+    expect(moveServer(db, 3, -1)).toBe(false);
+    expect(getServer(db, 3)!.pick_order).toBe(1);
+    expect(getServer(db, 1)!.pick_order).toBe(2);
+    expect(getServer(db, 2)!.pick_order).toBeNull();
   });
 });

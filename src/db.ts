@@ -2554,6 +2554,10 @@ export function openDb(path: string): DB {
   // A box a booking judged gone (plan 5 ruling 4): offline until it answers
   // rcon twice in a row, then the runner puts it back to idle by itself.
   ensureColumn(db, 'servers', 'gone_since', 'TEXT');
+  // A box that is gone for good (Chicago, 2026-10-10: the NFO plan ended). The
+  // row stays because past matches point at it; retired takes it off every
+  // admin list and pick order and keeps it disabled. See retireServer.
+  ensureColumn(db, 'servers', 'retired', 'INTEGER NOT NULL DEFAULT 0');
   // Bookings by campaign: a booking is games_allowed campaigns, and ends_at
   // only holds the estimated slot. close_at is the "gg" grace deadline once
   // the last allowed campaign has finished, null when none is running. A
