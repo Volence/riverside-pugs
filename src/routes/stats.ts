@@ -339,7 +339,12 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // Win chance after every half, from the scoreboard alone (both teams start
     // at 50%, ratings play no part), so unlike the forecast above it is
     // public. Null when the score cannot carry a line; see matchWinLine.
-    const winLine = matchWinLine(db, id);
+    let winLine: ReturnType<typeof matchWinLine> = null;
+    try {
+      winLine = matchWinLine(db, id);
+    } catch (err) {
+      req.log.warn({ err, matchId: id }, 'win line failed');
+    }
 
     return {
       ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS, winLine,

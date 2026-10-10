@@ -182,17 +182,6 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
 
 
 /**
- * What the Live page shows when no match is running, which is most of the time.
- *
- * "Nothing being played right now." was a dead end: true, and no reason to
- * still be on the page. This is the same fact plus the two things a reader
- * actually wants next, which is whether a game is close to starting and what
- * the last one was.
- *
- * Fetched here rather than lifted into Live, so the polling loop above is not
- * made to carry data it never uses while a match IS live.
- */
-/**
  * Both teams' chance right now as one split bar, the line so far behind a
  * toggle once a full map has been played. Same model as the finished match
  * page (src/winProb.ts): the scoreboard and the maps still to play, never
@@ -222,6 +211,17 @@ function LiveOdds({ line }: { line: WinLine }) {
   );
 }
 
+/**
+ * What the Live page shows when no match is running, which is most of the time.
+ *
+ * "Nothing being played right now." was a dead end: true, and no reason to
+ * still be on the page. This is the same fact plus the two things a reader
+ * actually wants next, which is whether a game is close to starting and what
+ * the last one was.
+ *
+ * Fetched here rather than lifted into Live, so the polling loop above is not
+ * made to carry data it never uses while a match IS live.
+ */
 function NothingLive() {
   const { data: queue } = useFetch((s) => api.queue(s), []);
   const { data: recent } = useFetch((s) => api.matches(s), []);

@@ -40,6 +40,15 @@ describe('winChance', () => {
     expect(winChance(model, 300, [], ['m1'])).toBeLessThan(winChance(model, 300, ['m1'], ['m1']));
   });
 
+  it('moves smoothly with the gap: a 1 point lead is worth a little, not a whole score bucket', () => {
+    const at = (g: number) => winChance(model, g, ['m1'], ['m1']);
+    expect(at(1) - at(0)).toBeGreaterThan(0);
+    // Before the fix any lead of 1 to 19 counted every tie as a win, so 1 and
+    // 19 scored the same; now 1 point is a small fraction of 19's worth.
+    expect(at(1) - at(0)).toBeLessThan((at(19) - at(0)) / 5);
+    expect(at(1) + at(-1)).toBeCloseTo(1, 9);
+  });
+
   it('treats a lead bigger than any score ever made on the halves left as near certain', () => {
     expect(winChance(model, 2500, [], ['m2'])).toBeGreaterThan(0.999);
   });
@@ -192,6 +201,24 @@ describe('liveWinLine', () => {
     half(0, 1, 'a', 640); half(0, 2, 'b', 60); half(1, 1, 'b', 820);
     const line = liveWinLine(db, id, 'five', model)!;
     expect(line.points.at(-1)!.pA).toBeCloseTo(winChance(model, 640 - 880, ['m2', 'm1b', 'm2b'], ['m1b', 'm2b']), 9);
+  });
+
+  it('counts a finished half 1 before the map row exists, which is how the live feed writes it', () => {
+    // match_live_maps only gains a row at MAP_RESULT, after both halves.
+    half(0, 1, 'a', 640);
+    const line = liveWinLine(db, id, 'five', model)!;
+    expect(line.points).toHaveLength(2);
+    expect(line.points[1]).toMatchObject({ ordinal: 0, half: 1, map: 'm1', scoreA: 640 });
+    expect(line.halvesLeft).toBe(7);
+  });
+
+  it('is null for a score the plugin could not read, and for anything but a PUG', () => {
+    half(0, 1, 'a', 640);
+    db.prepare('UPDATE match_rounds SET reliable = 0 WHERE match_id = ?').run(id);
+    expect(liveWinLine(db, id, 'five', model)).toBeNull();
+    db.prepare('UPDATE match_rounds SET reliable = 1 WHERE match_id = ?').run(id);
+    db.prepare("UPDATE matches SET kind = 'scrim' WHERE id = ?").run(id);
+    expect(liveWinLine(db, id, 'five', model)).toBeNull();
   });
 
   it('is null when the maps played do not follow the plan, or the plan is unknown', () => {
