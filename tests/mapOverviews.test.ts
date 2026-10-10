@@ -5,13 +5,13 @@ import {
 } from '../src/mapTransform.js';
 
 describe('OVERVIEWS', () => {
-  it('covers all 22 maps', () => {
-    expect(Object.keys(OVERVIEWS)).toHaveLength(22);
+  it('covers the 22 L4D1 maps and the 32 L4D2 ones', () => {
+    expect(Object.keys(OVERVIEWS)).toHaveLength(54);
   });
 
-  it('has 182 layers in total', () => {
+  it('has 386 layers in total', () => {
     const n = Object.values(OVERVIEWS).reduce((t, m) => t + m.layers.length, 0);
-    expect(n).toBe(182);
+    expect(n).toBe(386);
   });
 
   // The selection rule walks the array assuming ascending order. A manifest out
@@ -171,16 +171,18 @@ describe('cropping to the content box', () => {
 
   // The clamp is the fallback for a map shaped like a ribbon, and it costs
   // scale when it bites: a clamped canvas letterboxes exactly as the old
-  // fixed one did. Nothing shipped is close to it, and a future map that is
-  // should be a deliberate decision rather than a silent loss of scale.
-  it('needs the aspect clamp for none of the shipped maps', () => {
+  // fixed one did. A map that needs it should be a deliberate decision rather
+  // than a silent loss of scale. Two L4D2 maps are deliberate (2026-10-10):
+  // Cold Stream 4 and The Parish 3 run north-south at about 0.5 wide per tall,
+  // just under MIN_CANVAS_ASPECT, and still draw bigger than uncropped.
+  it('needs the aspect clamp only for the two known tall maps', () => {
     const clamped = Object.values(OVERVIEWS)
       .filter((m) => {
         const { w, h } = boxSpan(m.contentBox);
         return w / h !== canvasAspect(m.contentBox);
       })
       .map((m) => m.map);
-    expect(clamped).toEqual([]);
+    expect(clamped.sort()).toEqual(['c13m4_cutthroatcreek', 'c5m3_cemetery']);
   });
 
   it('draws the median map meaningfully bigger than uncropped', () => {
