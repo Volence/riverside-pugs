@@ -403,6 +403,17 @@ public Action Listener_PugPause(int client, const char[] command, int argc)
 	// nothing should be charged or refused here.
 	if (LeaveRotoblinPaused()) return Plugin_Continue;
 
+	// Audit 2026-10-09 D2: the other team's !tech is on its way. If Rotoblin
+	// refused that pause, this one would land inside the retry gap and be
+	// taken as their technical pause, charging them and not this team. !tech
+	// refuses the same way while any pause is pending.
+	if (g_iTechPendingTeam != 0 && g_iTechPendingTeam != team
+		&& GetEngineTime() - g_fTechPendingAt <= Tourney_RetryGap())
+	{
+		PrintToChat(client, "\x04[PUG]\x01 The other team's technical pause is on its way. Try !pause again in a few seconds if the game does not pause.");
+		return Plugin_Handled;
+	}
+
 	// Who asked, for the pause ledger. Taken before the budget check so it is
 	// known with the budget off too; a refused pause below never begins, so
 	// a stale value here is overwritten by the next request or cleared when a
