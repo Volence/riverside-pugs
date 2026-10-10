@@ -3932,3 +3932,38 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .draftcontrols input[type='number'] { width: 6rem; }
 .draftcontrols__presence { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
 .draftcontrols__delegates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/* ---------- win chance line (match page) ----------
+ * Team A above the 50% rule in the versus header's team A color, team B below
+ * in its team B color. The fills are faint on purpose: position says who was
+ * ahead, the tint only repeats it, and the line and dots wear text ink. */
+.winchart__summary { margin: 0 0 var(--sp-2); }
+.winchart__plot { position: relative; width: 100%; margin-top: var(--sp-3); }
+.winchart__plot svg { display: block; overflow: visible; }
+.winchart__band { fill: rgba(217, 203, 176, 0.035); }
+.winchart__maplabel, .winchart__axis {
+  fill: var(--text-muted); font-family: var(--font-label); font-size: 12px; letter-spacing: 0.03em;
+}
+.winchart__mid { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 4 4; }
+.winchart__edge { stroke: var(--border); stroke-width: 1; }
+.winchart__swatch--a { fill: var(--win); }
+.winchart__swatch--b { fill: var(--accent); }
+.winchart__fill--a { fill: var(--win); fill-opacity: 0.22; }
+.winchart__fill--b { fill: var(--accent); fill-opacity: 0.22; }
+.winchart__line { fill: none; stroke: var(--text-bright); stroke-width: 2; stroke-linejoin: round; }
+.winchart__dot { fill: var(--surface); stroke: var(--text-bright); stroke-width: 2; }
+.winchart__dot.is-hover { fill: var(--text-bright); }
+.winchart__dot--turn { stroke: var(--rating); stroke-width: 2.5; }
+.winchart__note { fill: var(--text); font-family: var(--font-label); font-size: 12px; }
+.winchart__cross { stroke: var(--border-strong); stroke-width: 1; }
+.winchart__hit { fill: transparent; cursor: crosshair; }
+.winchart__tip {
+  position: absolute; transform: translateX(-50%); pointer-events: none; z-index: 2;
+  min-width: 200px; max-width: 240px; padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  font-size: var(--fs-dense); color: var(--text); line-height: 1.4;
+}
+.winchart__tiphead { color: var(--text-bright); margin-bottom: var(--sp-1); }
+.winchart__table { margin-top: var(--sp-3); font-size: var(--fs-dense); }
+.winchart__table summary { cursor: pointer; color: var(--text-muted); }
+.winchart__foot { font-size: var(--fs-dense); margin: var(--sp-3) 0 0; }

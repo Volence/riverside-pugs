@@ -364,6 +364,24 @@ export interface MatchOngoing {
   state: 'waiting' | 'configuring' | 'live';
 }
 
+export interface WinPoint {
+  /** All null for the opening point, before anything was played. */
+  ordinal: number | null; half: number | null; survTeam: Team | null; map: string | null;
+  scoreA: number; scoreB: number;
+  /** Team A's chance of winning after this half. */
+  pA: number;
+}
+
+export interface WinLine {
+  points: WinPoint[];
+  /** Index into points of the biggest swing, null when nothing moved. */
+  turning: number | null;
+  /** The winner's lowest chance and where; null for a draw. */
+  winnerLow: { index: number; p: number } | null;
+  /** How many halves of history the odds come from. */
+  halves: number;
+}
+
 export interface MatchDetail {
   ongoing: false;
   /** `winner` is null on an aborted match: it never reached a result. The
@@ -404,6 +422,9 @@ export interface MatchDetail {
   /** What the ratings said before the match. Admin only: the field is absent
    *  entirely for anyone else, so the page has nothing to hide. */
   forecast?: Forecast;
+  /** Win chance after every half from the scoreboard alone (src/winProb.ts).
+   *  Null when the score cannot carry one; absent from an older server. */
+  winLine?: WinLine | null;
   /** Every SourceTV spectator on the match, admin only, absent entirely for
    *  anyone else. A session is evidence of a connection watching, never proof
    *  of who was behind it. */
