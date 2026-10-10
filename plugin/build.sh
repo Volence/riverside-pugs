@@ -16,6 +16,7 @@ cp pug-modcall.inc "$SCRIPTING/pug-modcall.inc"
 cp pug-staffchat.inc "$SCRIPTING/pug-staffchat.inc"
 cp pug-gg.inc "$SCRIPTING/pug-gg.inc"
 cp pug-tourney.inc "$SCRIPTING/pug-tourney.inc"
+cp pug-datafeeds.inc "$SCRIPTING/pug-datafeeds.inc"
 # Signed log lines: shared with l4d_inputstats, l4d_lilac_report and
 # consistency/plugin/l4d_consistency, which need the same two files beside
 # them when they are compiled.
@@ -27,7 +28,7 @@ cp pug-livepush.inc "$SCRIPTING/pug-livepush.inc"
 # is not already there. Otherwise a build here would overwrite a real copy and
 # then the trap would delete it out from under whatever put it there.
 SKILL_DETECT_INC="$SCRIPTING/include/l4d2_skill_detect.inc"
-CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-balance.inc $SCRIPTING/pug-balance-list.inc $SCRIPTING/pug-roundstats.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc $SCRIPTING/pug-modcall.inc $SCRIPTING/pug-staffchat.inc $SCRIPTING/pug-gg.inc $SCRIPTING/pug-tourney.inc $SCRIPTING/pug-logauth.inc $SCRIPTING/pug-hmac.inc $SCRIPTING/pug-livepush.inc"
+CLEANUP="$SCRIPTING/pug-match.sp $SCRIPTING/pug-stats.inc $SCRIPTING/pug-balance.inc $SCRIPTING/pug-balance-list.inc $SCRIPTING/pug-roundstats.inc $SCRIPTING/pug-leave.inc $SCRIPTING/pug-pause.inc $SCRIPTING/pug-modcall.inc $SCRIPTING/pug-staffchat.inc $SCRIPTING/pug-gg.inc $SCRIPTING/pug-tourney.inc $SCRIPTING/pug-datafeeds.inc $SCRIPTING/pug-logauth.inc $SCRIPTING/pug-hmac.inc $SCRIPTING/pug-livepush.inc"
 if [ ! -e "$SKILL_DETECT_INC" ]; then
 	cp /home/volence/l4d/L4D1_2-Plugins/l4d2_skill_detect/scripting/include/l4d2_skill_detect.inc "$SKILL_DETECT_INC"
 	CLEANUP="$CLEANUP $SKILL_DETECT_INC"
@@ -53,6 +54,10 @@ VENDOR_DIR=$(mktemp -d "$SCRIPTING/pug-vendor-include.XXXXXX")
 cp -r include/. "$VENDOR_DIR/"
 VENDOR_REL=$(basename "$VENDOR_DIR")
 trap 'rm -f '"$CLEANUP"'; rm -rf "'"$VENDOR_DIR"'"' EXIT
-(cd "$SCRIPTING" && wine ./spcomp.exe pug-match.sp -o pug-match.smx -i"$VENDOR_REL" -iinclude)
+# DF_TEST=1 ./build.sh builds a rig-only test plugin (bots get roster slots
+# for the data feeds; see pug-datafeeds.inc). Never stage that build.
+DEFS=""
+[ "${DF_TEST:-0}" = "1" ] && DEFS="DF_TEST=1"
+(cd "$SCRIPTING" && wine ./spcomp.exe pug-match.sp -o pug-match.smx -i"$VENDOR_REL" -iinclude $DEFS)
 mv "$SCRIPTING/pug-match.smx" ./pug-match.smx
 echo "built: $(pwd)/pug-match.smx"

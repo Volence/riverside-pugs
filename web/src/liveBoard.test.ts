@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { chatFromUrl, countdown, countUp, isLow, liveFromUrl, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
+import { chatFromUrl, countdown, countUp, funnelText, isLow, liveFromUrl, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
 
 describe('countdown', () => {
   it('runs down from what the server said, by whole seconds since it said it', () => {
@@ -77,5 +77,24 @@ describe('isLow', () => {
 describe('the old plugin reason', () => {
   it('names the version, so the fix is obvious', () => {
     expect(OLD_PLUGIN_REASON).toContain('0.3.4');
+  });
+});
+
+describe('funnelText', () => {
+  it('says nothing without a funnel (an older server or plugin)', () => {
+    expect(funnelText(undefined, 'readyup')).toBe('');
+    expect(funnelText(null, null)).toBe('');
+  });
+
+  it('tells loading from in game but not ready, the second only in a ready-up', () => {
+    expect(funnelText({ stage: 'loading', pack: 'unknown' }, null)).toBe('loading the map');
+    expect(funnelText({ stage: 'on_team', pack: 'ok' }, 'readyup')).toBe('in game, not ready');
+    expect(funnelText({ stage: 'on_team', pack: 'ok' }, 'live')).toBe('');
+    expect(funnelText({ stage: 'ready', pack: 'ok' }, 'readyup')).toBe('');
+  });
+
+  it('names a missing or doubtful L4D2 pack', () => {
+    expect(funnelText({ stage: 'dropped', pack: 'missing' }, null)).toBe('L4D2 map pack missing');
+    expect(funnelText({ stage: 'loading', pack: 'suspect' }, null)).toBe('loading the map, may lack the L4D2 map pack');
   });
 });

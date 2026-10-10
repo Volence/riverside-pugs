@@ -507,8 +507,8 @@ export function recordLiveEvent(
     .prepare('SELECT COUNT(*) AS n FROM match_live_maps WHERE match_id = ?')
     .get(id) as { n: number };
   db.prepare(
-    `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO match_live_events (match_id, seq, kind, actor, target, value, map_ordinal, half, t_ms, flow, prog, cause)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (match_id, seq) DO UPDATE SET
        kind = excluded.kind, actor = excluded.actor,
        target = excluded.target, value = excluded.value`,
@@ -517,7 +517,8 @@ export function recordLiveEvent(
     // and re-stamping would silently move an old event onto the current map
     // or overwrite its timing with whatever the duplicate happened to carry.
     // The first write is the one that saw the right map and timing.
-  ).run(id, ev.seq, ev.event, ev.actor, ev.target, ev.value, done.n, ev.half, ev.tMs);
+    // flow, prog and cause (data feeds) are NULL from an older plugin.
+  ).run(id, ev.seq, ev.event, ev.actor, ev.target, ev.value, done.n, ev.half, ev.tMs, ev.flow ?? null, ev.prog ?? null, ev.cause ?? null);
   touch(db, id);
 }
 

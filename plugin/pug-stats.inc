@@ -203,6 +203,7 @@ static void CountSkeet(int survivor, int victim, bool isTeamSkeet, PugStat weapo
 	AddStat(survivor, isTeamSkeet ? PS_TeamSkeets : PS_Skeets);
 	if (weaponStat != PS_MAX) AddStat(survivor, weaponStat);
 	AddStat(victim, PS_TimesSkeeted);
+	DataFeeds_MarkSkeet(victim);
 	// One feed entry per skeet, beside the counters rather than instead of
 	// them: the counters stay authoritative for totals, this carries when and
 	// to whom. Emitted here rather than from the six weapon-specific forwards

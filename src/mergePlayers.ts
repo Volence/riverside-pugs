@@ -34,6 +34,11 @@ const PLAIN: [table: string, column: string][] = [
   ['server_chat', 'to_value'],
   ['match_live_events', 'actor'],
   ['match_live_events', 'target'],
+  // Data feeds (src/dataFeeds.ts): who an infected life belonged to and who
+  // ended it, and who put a survivor down. None of these keys on the player.
+  ['match_si_lives', 'steamid'],
+  ['match_si_lives', 'killer'],
+  ['match_survivor_downs', 'attacker'],
   ['admin_actions', 'target'],
   ['bans', 'player_id'],
   ['appeals', 'steamid'],
@@ -213,6 +218,12 @@ const KEYED: [table: string, column: string][] = [
   // One answer per player per keep (drafts plan D3b). Where both accounts
   // answered one keep, the survivor's answer stands and the alt's is dropped.
   ['draft_keep_answers', 'steamid'],
+  // Data feeds (src/dataFeeds.ts). A down is keyed on the survivor and the
+  // moment; a funnel row on the player, map, stage and second; pack status on
+  // the player. Where both accounts hold one, the survivor's is kept.
+  ['match_survivor_downs', 'steamid'],
+  ['match_connect_funnel', 'steamid'],
+  ['player_pack_status', 'steamid'],
 ];
 
 /** A merge that cannot be done because of what was asked for, as opposed to
