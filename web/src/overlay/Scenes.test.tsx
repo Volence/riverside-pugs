@@ -220,6 +220,14 @@ describe('overlay basics', () => {
     expect(none).toContain('Round results');
   });
 
+  it('round results show the win chance from here only when the feed carries one', () => {
+    const lastRound = { mapNumber: 2, map: 'l4d_vs_airport02_offices', half: 1 as const, halves: [{ half: 1 as const, survTeam: 'a' as const, score: 412, alive: 3, seconds: 371 }], players: [] };
+    const withOdds = render(<Overlay which="results" feed={{ ...feed(), match: { ...match, lastRound, winChanceA: 0.735 } }} now={Date.now()} />).container.textContent ?? '';
+    for (const x of ['RAT 74%', '26% CRW', 'Win chance from here']) expect(withOdds).toContain(x);
+    const without = render(<Overlay which="results" feed={{ ...feed(), match: { ...match, lastRound, winChanceA: null } }} now={Date.now()} />).container.textContent ?? '';
+    expect(without).not.toContain('Win chance');
+  });
+
   it('program follows the producer scene', () => {
     const { container } = render(<Overlay which="program" feed={feed({ scene: 'brb' })} now={Date.now()} />);
     expect(container.querySelector('[data-scene="brb"]')).not.toBeNull();

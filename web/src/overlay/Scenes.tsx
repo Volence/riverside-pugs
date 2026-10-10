@@ -2,6 +2,7 @@ import { campaignTint, mapName } from '../format';
 import { useRef } from 'preact/hooks';
 import { Backdrop, Countdown, Title } from './pieces';
 import { DraftBoard, DraftRevealStrip, OnTheClock } from './DraftScenes';
+import { wholePercent } from '../components/WinChart';
 import { emptyReveal, stepReveal, type DraftReveal } from './draftReveal';
 import { camSlots } from '../../../src/cast/layout';
 import { emptyQueue, stepAuto, type AutoCard } from './callouts';
@@ -373,11 +374,29 @@ function Results({ studio, match }: { studio: StudioState; match: CastMatchView 
             <span> · Campaign {match.teams.a.tag} {match.teams.a.score} · {match.teams.b.score} {match.teams.b.tag}</span>
           </p>
         )}
+        {match.winChanceA != null && <WinOdds match={match} p={match.winChanceA} />}
         <div class="ov-results__boxes">
           <RoundBox team={survT} side="survivor" cols={ROUND_SURV_COLS} players={r.players} />
           <RoundBox team={infT} side="infected" cols={ROUND_INF_COLS} players={r.players} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Both teams' chance to win from here, as one split bar in team colours
+ *  with the numbers written at each end. */
+function WinOdds({ match, p }: { match: CastMatchView; p: number }) {
+  const pct = (x: number) => (x < 0.01 ? '<1%' : x > 0.99 ? '>99%' : `${wholePercent(x)}%`);
+  return (
+    <div class="ov-odds">
+      <span class="ov-odds__end">{match.teams.a.tag} {pct(p)}</span>
+      <span class="ov-odds__bar">
+        <span style={{ width: `${Math.round(p * 1000) / 10}%`, background: 'var(--team-a)' }} />
+        <span style={{ flex: 1, background: 'var(--team-b)' }} />
+      </span>
+      <span class="ov-odds__end">{pct(1 - p)} {match.teams.b.tag}</span>
+      <span class="ov-odds__label">Win chance from here</span>
     </div>
   );
 }

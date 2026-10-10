@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { WinLine, WinPoint } from '../api';
-import { describePoint, fmtChance, winSummary } from './WinChart';
+import { describePoint, fmtChance, wholePercent, winSummary } from './WinChart';
 
 const pt = (o: number | null, half: number | null, t: 'a' | 'b' | null, a: number, b: number, pA: number): WinPoint =>
   ({ ordinal: o, half, survTeam: t, map: o === null ? null : 'l4d_vs_airport02_offices', scoreA: a, scoreB: b, pA });
@@ -11,6 +11,12 @@ describe('fmtChance', () => {
     expect(fmtChance(0.996)).toBe('over 99%');
     expect(fmtChance(0.42)).toBe('42%');
     expect(fmtChance(1, true)).toBe('100%');
+  });
+
+  it('rounds both sides the same way, so they add up to 100', () => {
+    for (const p of [0.735, 0.265, 0.125, 0.5, 0.505, 0.995 - 0.5]) {
+      expect(wholePercent(p) + wholePercent(1 - p)).toBe(100);
+    }
   });
 });
 
