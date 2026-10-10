@@ -554,6 +554,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	StaffChat_Init();
 	Gg_Init();
 	Tourney_Init();
+	DataFeeds_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -1012,8 +1013,10 @@ void EmitEvent(const char[] kind, int actor, int target, int value)
 		strcopy(targetId, sizeof(targetId), g_sRosterId[g_iClientRoster[target]]);
 
 	g_iEventSeq++;
-	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d half=%d t=%d",
-		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value, g_iHalf, RoundMs());
+	char tail[64];
+	DataFeeds_EventTail(kind, actor, target, tail, sizeof(tail));
+	EmitPug("EVENT seq=%d kind=%s actor=%s target=%s value=%d half=%d t=%d%s",
+		g_iEventSeq, kind, actorId, targetId[0] == '\0' ? "0" : targetId, value, g_iHalf, RoundMs(), tail);
 }
 
 /** Strip anything that would break the log line, and cap the length.
@@ -3187,6 +3190,7 @@ void ResetMatchState()
 	}
 	ClearFriendlyFire();
 	ResetSkillStats();
+	DataFeeds_Reset();
 
 	// Last, after every field above has been cleared. RplClose can in
 	// principle throw, and an unwind partway through this function would
@@ -4020,6 +4024,7 @@ public void OnMapStart()
 	g_bScoreReadPending = false;
 	// After g_sCurrentMap is set: reads the mission file holding this map.
 	Gg_OnMapStart();
+	DataFeeds_MapStart();
 	g_bHalfWasLive = false;
 
 	// New map of a running match: autorecord has just opened its own file for
@@ -4250,6 +4255,7 @@ public void OnRoundIsLive()
 		g_iTankPasses = 0;
 		g_iTanksInWindow = 0;
 		WitchRecapReset();
+		DataFeeds_RoundLive();
 
 		RosterLateJoiners();
 		CheckRosterMismatch();
@@ -4376,6 +4382,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	// Timer_ReadScore's retry chain (2-8s out) ever fires. See EmitRoundEnd.
 	int half = g_iHalf;
 	EmitRoundStats(half);
+	DataFeeds_RoundEnd(half);
 	char survEnd[2];
 	SurvSideOf(survPug, survEnd, sizeof(survEnd));
 	// Captured here for the same reason as half and survEnd: by the time the
@@ -4751,6 +4758,7 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	if (IsInfectedClient(attacker) && !IsFakeClient(attacker) && IsSurvivorClient(victim))
 	{
 		AddStat(attacker, PS_DamageAsSi, damage);
+		DataFeeds_SiHit(attacker, victim, damage);
 
 		int zc = GetEntProp(attacker, Prop_Send, "m_zombieClass");
 
@@ -4904,6 +4912,7 @@ public void Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast
 	// A tank killed by the world (fall, fire with no owner) has no attacker;
 	// its recap must still go out, so it is ended here, ahead of that return.
 	if (victim > 0 && IsTankClient(victim)) TankRecapEnd(victim);
+	DataFeeds_OnDeath(event, victim, attacker);
 	if (attacker <= 0 || victim <= 0) return;
 
 	// Timeline emissions live here, ahead of the SI-kill stat guards below,
@@ -5242,6 +5251,7 @@ public void Event_Incap(Event event, const char[] name, bool dontBroadcast)
 		g_iPinnedBy[victim] = 0;
 		ClearPinRelease(victim);
 	}
+	DataFeeds_OnIncap(event, victim, attacker);
 	// Actor is the survivor it happened to, so the feed reads
 	// "<name> was incapped by <attacker>".
 	EmitClientEvent("incap", victim, attacker, 0);
@@ -5372,6 +5382,8 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-gg.inc"
 // Last: reads pug-leave.inc's pause state and pug-modcall.inc's cooldown.
 #include "pug-tourney.inc"
+// Flow, cause, SI lives and the connection funnel (docs/data-feeds-2026-10-10.md).
+#include "pug-datafeeds.inc"
 
 /** pain_pills_decay_rate (temp health lost per second), looked up once. */
 float PillsDecayRate()

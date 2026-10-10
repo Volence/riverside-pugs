@@ -12,7 +12,7 @@ import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPane
 import { BookingsPanel } from './BookingsPanel';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
-import { chatFromUrl, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, isLow, liveFromUrl, reasonText } from '../../liveBoard';
+import { chatFromUrl, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, funnelText, isLow, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
  *  the socket was reconnecting must not leave a countdown wrong for long. */
@@ -272,6 +272,7 @@ function PlayerRow({ match: m, player: p, elapsedS, holdMaxMinutes, lowAlertSeco
           );
         })()}
         {p.reason && <span class="live-row__reason muted">{reasonText(p.reason)}</span>}
+        {funnelText(p.funnel, m.phase) && <span class="live-row__reason live-row__funnel muted">{funnelText(p.funnel, m.phase)}</span>}
       </span>
 
       <span class="live-row__actions">

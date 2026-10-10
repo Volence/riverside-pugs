@@ -2,6 +2,7 @@ import { GG_EVENTS, type GgEvent, type GgLine } from './ggVotes.js';
 import type { LiveHudLine, TankDone, WitchDone } from './cast/liveHud.js';
 import { steamId64Of } from './steamId.js';
 import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
+import { eventExtrasOf, parseDataFeedLine, type DataFeedEvent } from './dataFeedParse.js';
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
@@ -208,6 +209,10 @@ export type LogEvent =
       // -1 when the plugin predates round timing. Distinct from 0, which is
       // a real event in the first millisecond of a round.
       half: number; tMs: number;
+      // Data feeds (docs/data-feeds-2026-10-10.md): the survivor's flow %,
+      // the team's, and what caused an incap/death/tank_death. Absent from
+      // an older plugin; null when the plugin sent -1 (unknown).
+      flow?: number | null; prog?: number | null; cause?: string;
     }
   // In-game chat. Its own line type rather than an EVENT because EVENT's
   // fields are kind/actor/target/an integer value, and a message is free text.
@@ -322,7 +327,9 @@ export type LogEvent =
   // plugin's own captain list is only a courtesy. `arg` is free text, at most
   // 64 characters, trimmed; empty when the plugin sent `arg=` with nothing
   // after it.
-  | { kind: 'booking_cmd'; steamid: string; cmd: BookingCmd; arg: string };
+  | { kind: 'booking_cmd'; steamid: string; cmd: BookingCmd; arg: string }
+  // The funnel, survivor downs, round-end flow and SI lives (src/dataFeedParse.ts).
+  | DataFeedEvent;
 
 /** Parse `key=val key=val` pairs from the remainder of a PUG line. */
 /** The phase fields shared by PHASE and HEARTBEAT. Plugin team numbers are
@@ -1125,7 +1132,7 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       // Optional so a staged older plugin still produces usable events.
       const half = halfOf(rest.half) ?? -1;
       const tMs = intOf(rest.t) ?? -1;
-      return { kind: 'live_event', token, seq, event: rest.kind, actor: rest.actor, target, value, half, tMs };
+      return { kind: 'live_event', token, seq, event: rest.kind, actor: rest.actor, target, value, half, tMs, ...eventExtrasOf(rest) };
     }
     case 'CHAT': {
       // The message is taken from the raw line rather than from kv(), because
@@ -1218,7 +1225,10 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       if (half === null || tMs === null || tMs < 0 || !ROUND_MARKS.has(rest.kind ?? '')) return null;
       return { kind: 'round_mark', token, half: half as 1 | 2, mark: rest.kind as 'panic' | 'finale_start' | 'finale_radio', tMs };
     }
-    default:
-      return null;
+    default: {
+      // CONN, MAPLOAD, DOWN, ROUND_FLOW, SILIFE, SILIFE_END.
+      const feed = parseDataFeedLine(token, verb, line);
+      return feed === undefined ? null : feed;
+    }
   }
 }
