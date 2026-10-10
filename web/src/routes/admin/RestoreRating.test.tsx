@@ -8,7 +8,7 @@ afterEach(cleanup);
 describe('RestoreRating', () => {
   it('asks for a reason before it can be sent, then runs the restore', async () => {
     const run = vi.fn(async () => {});
-    render(<RestoreRating matchId={42} who="p1" busy={false} run={run} />);
+    render(<RestoreRating matchId={42} steamid="76561199000000001" who="p1" busy={false} run={run} />);
     fireEvent.click(screen.getByRole('button', { name: 'Restore rating' }));
     const send = screen.getByRole('button', { name: 'Restore' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);

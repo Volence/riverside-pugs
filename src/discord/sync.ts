@@ -285,10 +285,12 @@ export class DiscordSync {
             scoreB: row.team_b_score,
             winner: row.winner,
             forfeit: row.forfeit_team,
+            // Every quitter, "X and Y", for a match left already decided.
             abandonedBy: (db.prepare(
-              `SELECT COALESCE(p.name, a.player_id) AS name FROM match_abandons a LEFT JOIN players p ON p.steamid = a.player_id
-               WHERE a.match_id = ? AND a.decided IS NOT NULL`,
-            ).get(matchId) as { name: string } | undefined)?.name ?? null,
+              `SELECT GROUP_CONCAT(n, ' and ') AS names FROM (SELECT COALESCE(p.name, a.player_id) AS n FROM match_abandons a
+               LEFT JOIN players p ON p.steamid = a.player_id
+               WHERE a.match_id = ? AND a.decided IS NOT NULL ORDER BY a.player_id)`,
+            ).get(matchId) as { names: string | null } | undefined)?.names ?? null,
             teamA: teamA.map((p) => this.resultPlayer(p, matchId)),
             teamB: teamB.map((p) => this.resultPlayer(p, matchId)),
             comebackFrom: comebackFrom(db, matchId),

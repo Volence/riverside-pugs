@@ -443,11 +443,14 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
-    const { reason } = (req.body ?? {}) as { reason?: unknown };
+    const { reason, steamid } = (req.body ?? {}) as { reason?: unknown; steamid?: unknown };
     if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) {
       return reply.code(400).send({ error: 'a reason is required (up to 500 characters)' });
     }
-    const r = restoreAbandonRating(db, id, adminId, reason.trim());
+    if (steamid !== undefined && (typeof steamid !== 'string' || !/^\d{17}$/.test(steamid))) {
+      return reply.code(400).send({ error: 'steamid must be a SteamID64' });
+    }
+    const r = restoreAbandonRating(db, id, steamid ?? null, adminId, reason.trim());
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
     logAdmin(db, adminId, 'restore_abandon_rating', r.steamid, { matchId: id, reason: reason.trim() });
     broadcast('refresh');

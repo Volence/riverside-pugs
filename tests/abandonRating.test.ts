@@ -39,8 +39,9 @@ function newMatch(state: 'live' | 'configuring' = 'live', token = TOKEN): number
   return id;
 }
 
-const status = (decided: 'a' | 'b' | null, extra: Partial<AbandonConfirm['gg'] & object> = {}): AbandonConfirm => ({
-  abandoner: true, gg: { decided, gap: decided ? 3000 : 100, ceiling: decided ? 1650 : 1650, known: true, ...extra },
+/** What sm_pug_status says: the line's player is an abandoner, plus `others`. */
+const status = (decided: 'a' | 'b' | null, others: string[] = []): AbandonConfirm => ({
+  abandoner: true, abandoners: others, gg: { decided, gap: decided ? 3000 : 100, ceiling: 1650, known: true },
 });
 
 function deps(confirm: boolean | AbandonConfirm, endAnswer: 'ok' | 'refused' | Error = 'ok'): AbandonDeps & { asked: () => number } {
@@ -93,7 +94,12 @@ describe('parseAbandonStatus', () => {
   const body = (gg: string) => `STATUS state=live match=1\nSTATUS leave abandoner=${Q_A} budget=300 autounpause=1 paused=1 holdmax=1800\n${gg}\nSTATUS end`;
   it('reads a decided judgement made at the abandon', () => {
     expect(parseAbandonStatus(body('STATUS gg decided=b gap=2400 ceiling=1650 known=1 at=abandon ended=0'), Q_A))
-      .toEqual({ abandoner: true, gg: { decided: 'b', gap: 2400, ceiling: 1650, known: true } });
+      .toEqual({ abandoner: true, abandoners: [Q_A], gg: { decided: 'b', gap: 2400, ceiling: 1650, known: true } });
+  });
+  it('lists every abandoner (0.3.31 STATUS abandon lines), the first included once', () => {
+    const b = body(`STATUS abandon steamid=${Q_A}\nSTATUS abandon steamid=${Q_B}\nSTATUS gg decided=none gap=10 ceiling=1650 known=1 at=abandon ended=0`);
+    expect(parseAbandonStatus(b, Q_B)).toMatchObject({ abandoner: true, abandoners: [Q_A, Q_B] });
+    expect(parseAbandonStatus(b, IDS[0]).abandoner).toBe(false);
   });
   it('treats none, unknown, or a judgement not made at the abandon as not decided', () => {
     expect(parseAbandonStatus(body('STATUS gg decided=none gap=200 ceiling=1650 known=1 at=abandon ended=0'), Q_A).gg?.decided).toBeNull();
@@ -101,7 +107,7 @@ describe('parseAbandonStatus', () => {
     expect(parseAbandonStatus(body('STATUS gg decided=b gap=2400 ceiling=1650 known=1 at=now ended=0'), Q_A).gg?.decided).toBeNull();
   });
   it('an older plugin with no gg line gives gg null; the abandoner must still match', () => {
-    expect(parseAbandonStatus(body(''), Q_A)).toEqual({ abandoner: true, gg: null });
+    expect(parseAbandonStatus(body(''), Q_A)).toEqual({ abandoner: true, abandoners: [Q_A], gg: null });
     expect(parseAbandonStatus(body('STATUS gg decided=b gap=2400 ceiling=1650 known=1 at=abandon ended=0'), Q_B).abandoner).toBe(false);
   });
 });
@@ -246,14 +252,6 @@ describe('decided abandon: completes, the leader wins, the quitter loses', () =>
     expect(db.prepare('SELECT COUNT(*) AS n FROM bans').get()).toEqual({ n: 1 });
   });
 
-  it('a second quitter after the first is ignored: the first abandon stands', async () => {
-    const id = newMatch();
-    await handleAbandon(deps(status('b')), TOKEN, Q_A);
-    expect(await handleAbandon(deps({ abandoner: true, gg: null }), TOKEN, Q_B)).toBeNull();
-    expect(db.prepare('SELECT player_id FROM match_abandons WHERE match_id = ?').pluck().all(id)).toEqual([Q_A]);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM bans').get()).toEqual({ n: 1 });
-  });
-
   it('too few rated players to rate the result: still the quitter loses', async () => {
     const id = newMatch();
     await handleAbandon(deps(status('a')), TOKEN, Q_A);
@@ -322,14 +320,15 @@ describe('recompute, void and restore', () => {
     const want = allRatings();
     db = outer;
 
-    expect(restoreAbandonRating(db, undecided, IDS[0], 'server crashed').ok).toBe(true);
-    expect(restoreAbandonRating(db, decided, IDS[0], 'server crashed').ok).toBe(true);
+    expect(restoreAbandonRating(db, undecided, Q_A, IDS[0], 'server crashed').ok).toBe(true);
+    expect(restoreAbandonRating(db, decided, null, IDS[0], 'server crashed').ok).toBe(true);
     expect(allRatings()).toEqual(want);
     recomputeSeasonRatings(db, 1);
     expect(allRatings()).toEqual(want);
     expect(ratingOf(Q_A)).toMatchObject({ wins: 1, losses: 1 });
-    expect(restoreAbandonRating(db, decided, IDS[0], 'again')).toMatchObject({ ok: false, status: 409 });
-    expect(restoreAbandonRating(db, 99999, IDS[0], 'x')).toMatchObject({ ok: false, status: 404 });
+    expect(restoreAbandonRating(db, decided, Q_A, IDS[0], 'again')).toMatchObject({ ok: false, status: 409 });
+    expect(restoreAbandonRating(db, 99999, null, IDS[0], 'x')).toMatchObject({ ok: false, status: 404 });
+    expect(restoreAbandonRating(db, decided, Q_B, IDS[0], 'x')).toMatchObject({ ok: false, status: 404 });
     expect(abandonsOfPlayer(db, Q_A).map((a) => [a.matchId, a.decided, a.restoreReason])).toEqual([
       [decided, 'a', 'server crashed'], [undecided, null, 'server crashed'],
     ]);
@@ -337,11 +336,117 @@ describe('recompute, void and restore', () => {
 
   it('the People desk ban list shows a restored abandon loss', async () => {
     const { undecided } = await season();
-    restoreAbandonRating(db, undecided, IDS[0], 'our crash');
+    restoreAbandonRating(db, undecided, Q_A, IDS[0], 'our crash');
     const rows = peopleBans(db, { steamid: IDS[0], isAdmin: true, isMod: false } as never);
     const row = rows.find((b) => b.reason === `Abandoned match #${undecided}`)!;
     expect(row.abandon).toMatchObject({ matchId: undecided, restoreReason: 'our crash' });
     expect(row.abandon!.restoredAt).toBeTruthy();
+  });
+});
+
+describe('several quitters (owner ruling 2026-10-10: every quitter loses)', () => {
+  it('two quitters on the SAME team, undecided: both caught by one confirm, both banned, both lose, nobody else moves', async () => {
+    const id = newMatch();
+    const d = deps(status(null, [Q_A, IDS[2]]));
+    expect(await handleAbandon(d, TOKEN, Q_A)).toBe(id);
+    expect(db.prepare('SELECT player_id FROM match_abandons WHERE match_id = ? ORDER BY player_id').pluck().all(id)).toEqual([Q_A, IDS[2]]);
+    expect(db.prepare('SELECT player_id FROM bans ORDER BY player_id').pluck().all()).toEqual([Q_A, IDS[2]]);
+    expect((historyRows() as { player_id: string }[]).map((r) => r.player_id)).toEqual([Q_A, IDS[2]]);
+    const lost = fresh4v4([2, 1]).a;
+    for (const q of [Q_A, IDS[2]]) {
+      expect(ratingOf(q)!.mu).toBeCloseTo(lost.mu, 10);
+      expect(ratingOf(q)).toMatchObject({ wins: 0, losses: 1 });
+    }
+    // The second quitter's own line afterwards changes nothing.
+    expect(await handleAbandon(deps(status(null, [Q_A, IDS[2]])), TOKEN, IDS[2])).toBeNull();
+    expect(historyRows()).toHaveLength(2);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM match_abort_notices WHERE match_id = ? AND role = 'culprit'").get(id)).toEqual({ n: 2 });
+  });
+
+  it('two quitters on OPPOSITE teams, undecided: each loses against the other side', async () => {
+    const id = newMatch();
+    expect(await handleAbandon(deps(status(null, [Q_B])), TOKEN, Q_A)).toBe(id);
+    expect(ratingOf(Q_A)!.mu).toBeCloseTo(fresh4v4([2, 1]).a.mu, 10);
+    expect(ratingOf(Q_B)!.mu).toBeCloseTo(fresh4v4([1, 2]).b.mu, 10);
+    expect(ratingOf(Q_A)!.losses).toBe(1);
+    expect(ratingOf(Q_B)!.losses).toBe(1);
+    const r = allRatings();
+    recomputeSeasonRatings(db, 1);
+    expect(allRatings()).toEqual(r);
+  });
+
+  it('decided, quitters on both teams: the leader wins, the rest rated normally, BOTH quitters lose', async () => {
+    const id = newMatch();
+    // Q_A on the leading team a, Q_B on the trailing team b.
+    expect(await handleAbandon(deps(status('a', [Q_B])), TOKEN, Q_A)).toBe(id);
+    expect(completeMatch(db, id, dumpFor(id, 'a'))).toBe(true);
+    const normal = fresh4v4([1, 2]);
+    for (const p of IDS.filter((x) => x !== Q_A && x !== Q_B)) {
+      expect(ratingOf(p)!.mu).toBeCloseTo((IDS.indexOf(p) < 4 ? normal.a : normal.b).mu, 10);
+    }
+    expect(ratingOf(Q_A)!.mu).toBeCloseTo(fresh4v4([2, 1]).a.mu, 10);
+    expect(ratingOf(Q_B)!.mu).toBeCloseTo(normal.b.mu, 10);
+    expect(ratingOf(Q_A)).toMatchObject({ wins: 0, losses: 1 });
+    expect(ratingOf(Q_B)).toMatchObject({ wins: 0, losses: 1 });
+  });
+
+  it('one quits a decided match, a second is only named by the dump after it ended: both lose, both banned', async () => {
+    const id = newMatch();
+    const events: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => events.push(e));
+    expect(await handleAbandon(deps(status('a')), TOKEN, Q_A)).toBe(id);
+    // The plugin ended the match; its dump names a second quitter (their
+    // ABANDON line raced the end and never reached the site).
+    const dump = { ...dumpFor(id, 'a'), abandoners: [Q_A, IDS[3]] };
+    expect(completeMatch(db, id, dump)).toBe(true);
+    off();
+    expect(db.prepare('SELECT player_id, decided FROM match_abandons WHERE match_id = ? ORDER BY player_id').all(id))
+      .toEqual([{ player_id: Q_A, decided: 'a' }, { player_id: IDS[3], decided: 'a' }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bans WHERE reason = ?').get(`Abandoned match #${id}`)).toEqual({ n: 2 });
+    expect(events.filter((e) => e.kind === 'abandon').map((e) => (e as { steamid: string }).steamid)).toEqual([Q_A, IDS[3]]);
+    const lost = fresh4v4([2, 1]).a;
+    for (const q of [Q_A, IDS[3]]) {
+      expect(ratingOf(q)!.mu).toBeCloseTo(lost.mu, 10);
+      expect(ratingOf(q)).toMatchObject({ wins: 0, losses: 1 });
+    }
+    expect(ratingOf(IDS[0])).toMatchObject({ wins: 1, losses: 0 });
+    // A late line for either quitter after completion does nothing.
+    expect(await handleAbandon(deps(status('a', [IDS[3]])), TOKEN, IDS[3])).toBeNull();
+    const r = allRatings();
+    recomputeSeasonRatings(db, 1);
+    expect(allRatings()).toEqual(r);
+  });
+
+  it('a second quitter whose line arrives while a decided match is still being collected is added and the end retried', async () => {
+    const id = newMatch();
+    await handleAbandon(deps(status('b')), TOKEN, Q_A);
+    expect(await handleAbandon(deps(status(null, [Q_A])), TOKEN, IDS[2])).toBe(id);
+    expect(db.prepare('SELECT player_id, decided FROM match_abandons WHERE match_id = ? ORDER BY player_id').all(id))
+      .toEqual([{ player_id: Q_A, decided: 'b' }, { player_id: IDS[2], decided: 'b' }]);
+    expect(ended.map((e) => e.steamid)).toEqual([Q_A, IDS[2]]);
+  });
+
+  it('a dump naming quitters on a match nobody abandoned (or an undecided one) adds nothing', () => {
+    const id = newMatch();
+    completeMatch(db, id, { ...dumpFor(id, 'a'), abandoners: [Q_A] });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_abandons').get()).toEqual({ n: 0 });
+    expect(ratingOf(Q_A)).toMatchObject({ wins: 1, losses: 0 });
+  });
+
+  it('restore is per quitter: restoring one leaves the other\'s loss, and a recompute keeps it that way', async () => {
+    const id = newMatch();
+    await handleAbandon(deps(status(null, [IDS[2]])), TOKEN, Q_A);
+    expect(restoreAbandonRating(db, id, null, IDS[0], 'x')).toMatchObject({ ok: false, status: 400 });
+    expect(restoreAbandonRating(db, id, Q_A, IDS[0], 'crash').ok).toBe(true);
+    expect(ratingOf(Q_A)).toMatchObject({ wins: 0, losses: 0 });
+    expect(ratingOf(Q_A)!.mu).toBeCloseTo(rating().mu, 10);
+    expect(ratingOf(IDS[2])!.losses).toBe(1);
+    // IDS[2]'s loss is unchanged by the restore: both were judged from the
+    // same pre-match ratings.
+    expect(ratingOf(IDS[2])!.mu).toBeCloseTo(fresh4v4([2, 1]).a.mu, 10);
+    recomputeSeasonRatings(db, 1);
+    expect(ratingOf(Q_A)!.losses).toBe(0);
+    expect(ratingOf(IDS[2])!.losses).toBe(1);
   });
 });
 
@@ -363,9 +468,17 @@ describe('wording', () => {
     expect(p.embeds[0]!.description).toContain('Team A wins (decided, Quitter abandoned)');
   });
 
-  it('the dump parser reads past abandon= on END', () => {
-    const body = 'DUMP match=5 skilldetect=0\nMAP map=m1 a=900 b=100\nEND winner=a a=900 b=100 abandon=76561199000000001';
-    expect(parseDump(body)).toMatchObject({ matchId: 5, winner: 'a', forfeit: null });
+  it('the dump parser reads past abandon= on END and collects ABANDON lines', () => {
+    const body = 'DUMP match=5 skilldetect=0\nMAP map=m1 a=900 b=100\nABANDON steamid=76561199000000001\nABANDON steamid=76561199000000006\nEND winner=a a=900 b=100 abandon=76561199000000001';
+    expect(parseDump(body)).toMatchObject({ matchId: 5, winner: 'a', forfeit: null, abandoners: [Q_A, Q_B] });
+    expect(parseDump('DUMP match=5 skilldetect=0\nABANDON steamid=nope\nEND winner=a a=1 b=0')).toBeNull();
+  });
+  it('the Discord card names every quitter', () => {
+    const p = renderResult({
+      matchId: 9, campaignName: 'Dead Air', publicUrl: 'https://x', scoreA: 3800, scoreB: 200, winner: 'a',
+      abandonedBy: 'p1 and p6', teamA: [], teamB: [],
+    });
+    expect(p.embeds[0]!.description).toContain('Team A wins (decided, p1 and p6 abandoned)');
   });
 });
 
@@ -397,6 +510,6 @@ describe('restore route', () => {
     const list = (await app.inject({ method: 'GET', url: '/api/matches' })).json();
     expect(list.matches[0]).toMatchObject({ id, abandonedBy: 'p1' });
     const overview = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: admin })).json();
-    expect(overview.recent[0].abandon).toMatchObject({ matchId: id, decided: 'a', restoreReason: 'crash' });
+    expect(overview.recent[0].abandons).toEqual([expect.objectContaining({ matchId: id, steamid: Q_A, name: 'p1', decided: 'a', restoreReason: 'crash' })]);
   });
 });

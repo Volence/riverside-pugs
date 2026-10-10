@@ -5340,6 +5340,7 @@ void WriteDump(const char[] nonce)
 			g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatCk[i], g_iStatFf[i], g_iStatRev[i]);
 	}
 	WriteSkillLines();
+	LeaveDumpLines();
 	int a, b;
 	TotalScores(a, b);
 	char winner[8];

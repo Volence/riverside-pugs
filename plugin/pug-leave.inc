@@ -34,7 +34,10 @@ int g_iLeaveWarned[MAX_ROSTER];     // the last warning threshold announced
 char g_sLeaveName[MAX_ROSTER][MAX_NAME_LENGTH];
 bool g_bLeavePaused;                // this module paused the game
 bool g_bLeaveUnpausing;
-char g_sAbandoner[32];              // steamid64 once someone ran out, else ""
+char g_sAbandoner[32];              // steamid64 of the FIRST player who ran out, else ""
+// Owner ruling 2026-10-10: every player who runs out is an abandoner, not only
+// the first. Tracking goes on until the match ends, and each one is reported.
+bool g_bSlotAbandoned[MAX_ROSTER];
 // Owner ruling 2026-10-10: was the match already decided (the !gg rule, see
 // Gg_DecidedNow) when the abandoner ran out? Judged once, at that moment.
 int g_iAbandonLeader;               // pug team leading past the line (1 = a, 2 = b); 0 = not decided
@@ -105,6 +108,7 @@ void LeaveReset()
 	g_bLeavePaused = false;
 	g_bLeaveUnpausing = false;
 	g_sAbandoner[0] = '\0';
+	for (int i = 0; i < MAX_ROSTER; i++) g_bSlotAbandoned[i] = false;
 	g_iAbandonLeader = 0;
 	g_iAbandonGap = -1;
 	g_iAbandonBest = -1;
@@ -119,7 +123,9 @@ bool LeaveTracking()
 		// count as they did before the restart (pause, team pool, forfeit, sub).
 		// Any other resumed booking game stays untracked, as it was.
 		&& (!g_bSelfStarted || (g_bResumed && TourneyOn()))
-		&& g_sAbandoner[0] == '\0'
+		// 0.3.31: not stopped by the first abandon. Anyone else still away
+		// keeps running down their own clock until the match ends.
+		&& !g_bAbandonEnded
 		&& (LeaveTeamMode() || g_cvLeaveBudget.IntValue > 0);
 }
 
@@ -187,7 +193,9 @@ bool LeaveAnyAbsent()
 {
 	for (int i = 0; i < g_iRosterCount; i++)
 	{
-		if (g_fAbsentSince[i] > 0.0) return true;
+		// An abandoner counts as away: the game stays paused until the site
+		// ends or aborts the match.
+		if (g_fAbsentSince[i] > 0.0 || g_bSlotAbandoned[i]) return true;
 	}
 	return false;
 }
@@ -288,8 +296,10 @@ public Action Timer_LeaveClock(Handle timer)
 		int left = LeaveRemaining(i);
 		if (left <= 0)
 		{
+			// Every slot that ran out this tick, not only the first: two
+			// players who left together run out together.
 			LeaveAbandon(i);
-			return Plugin_Continue;
+			continue;
 		}
 		int threshold = left <= 10 ? 10 : left <= 30 ? 30 : left <= 60 ? 60 : 0;
 		if (threshold != 0 && g_iLeaveWarned[i] != threshold)
@@ -362,7 +372,8 @@ static void LeaveTeamForfeit(int team)
 
 void LeaveAbandon(int slot)
 {
-	strcopy(g_sAbandoner, sizeof(g_sAbandoner), g_sRosterId[slot]);
+	if (g_sAbandoner[0] == '\0') strcopy(g_sAbandoner, sizeof(g_sAbandoner), g_sRosterId[slot]);
+	g_bSlotAbandoned[slot] = true;
 	g_fAbsentUsed[slot] = float(g_cvLeaveBudget.IntValue);
 	g_fAbsentSince[slot] = 0.0;
 	LeaveJudgeAbandon();
@@ -374,10 +385,10 @@ void LeaveAbandon(int slot)
 	else
 		PrintToChatAll("\x04[PUG]\x01 %s did not reconnect in time. The match is over and counts as an abandon. Nobody else's rating changes; %s takes a loss and a ban.",
 			g_sLeaveName[slot], g_sLeaveName[slot]);
-	LogMessage("pug-match: %s (%s) abandoned match %d", g_sLeaveName[slot], g_sAbandoner, g_iMatchId);
+	LogMessage("pug-match: %s (%s) abandoned match %d", g_sLeaveName[slot], g_sRosterId[slot], g_iMatchId);
 	// Repeated from the heartbeat until the backend aborts the match: the UDP
 	// log stream is lossy, and this line ends a match.
-	EmitPug("ABANDON steamid=%s", g_sAbandoner);
+	EmitPug("ABANDON steamid=%s", g_sRosterId[slot]);
 }
 
 /** For Timer_Heartbeat. */
@@ -385,7 +396,24 @@ void LeaveHeartbeat()
 {
 	// Not once the site has ended the match as decided: MATCH_END carries it
 	// from there, and a repeat would only make the site ask again.
-	if (g_sAbandoner[0] != '\0' && !g_bAbandonEnded) EmitPug("ABANDON steamid=%s", g_sAbandoner);
+	if (g_bAbandonEnded) return;
+	for (int i = 0; i < g_iRosterCount; i++)
+		if (g_bSlotAbandoned[i]) EmitPug("ABANDON steamid=%s", g_sRosterId[i]);
+}
+
+/** Whether `steamid` ran out of reconnect time in this match. */
+bool LeaveIsAbandoner(const char[] steamid)
+{
+	int slot = RosterIndexOfId(steamid);
+	return slot != -1 && g_bSlotAbandoned[slot];
+}
+
+/** ABANDON lines for the dump, one per abandoner, before END: the site's
+ *  final word on who quit (pug-match 0.3.31; older sites skip the verb). */
+void LeaveDumpLines()
+{
+	for (int i = 0; i < g_iRosterCount; i++)
+		if (g_bSlotAbandoned[i]) DumpLine("ABANDON steamid=%s", g_sRosterId[i]);
 }
 
 /** Judge, once, whether the match was decided when the abandoner ran out.
@@ -418,7 +446,7 @@ public Action Cmd_AbandonEnd(int args)
 	}
 	char id[32];
 	GetCmdArg(2, id, sizeof(id));
-	if (g_sAbandoner[0] == '\0' || !StrEqual(id, g_sAbandoner))
+	if (!LeaveIsAbandoner(id))
 	{
 		PrintToServer("PUGERR not the abandoner");
 		return Plugin_Handled;
@@ -789,6 +817,10 @@ void LeaveStatus()
 			i, g_sRosterId[i], g_fAbsentSince[i] > 0.0 ? 1 : 0, LeaveRemaining(i),
 			g_fHoldSince[i] > 0.0 ? 1 : 0, LeaveHoldLeft(i));
 	}
+	// 0.3.31: every abandoner, the first included (the line above is the first
+	// only, kept for sites older than 0.3.31).
+	for (int i = 0; i < g_iRosterCount; i++)
+		if (g_bSlotAbandoned[i]) DumpLine("STATUS abandon steamid=%s", g_sRosterId[i]);
 	// Owner ruling 2026-10-10: src/abandon.ts reads this in the same confirm.
 	// With an abandoner it is the judgement made when they ran out (at=abandon),
 	// otherwise what the rule says right now (at=now), for staff.

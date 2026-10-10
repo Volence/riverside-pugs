@@ -5,6 +5,7 @@ import { statDef } from './statKeys.js';
 import { canonicaliseDump } from './aliases.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { foldMatchNames } from './playerNames.js';
+import { publishRecorded, recordAbandons, type RecordedAbandon } from './abandon.js';
 
 /** Persist a finished match (result, per-map scores, per-player stats) and
  *  apply ratings, atomically. Returns false when the match is missing or
@@ -36,6 +37,7 @@ export function completeMatch(db: DB, matchId: number, rawDump: Dump): boolean {
   const d = canonicaliseDump(db, rawDump);
   const problems: string[] = [];
   let outcome: RatingOutcome | null = null;
+  let quitters: { decided: 'a' | 'b'; recorded: RecordedAbandon[] } | null = null;
   db.transaction(() => {
     db.prepare(
       "UPDATE matches SET state = 'completed', team_a_score = ?, team_b_score = ?, winner = ?, forfeit_team = ?, forfeit_why = ?, ended_at = datetime('now') WHERE id = ?",
@@ -89,8 +91,21 @@ export function completeMatch(db: DB, matchId: number, rawDump: Dump): boolean {
       }
     }
 
+    // Owner ruling 2026-10-10: every quitter takes the loss. A match ended as
+    // decided after an abandon may have quitters the site has not heard
+    // about yet (their ABANDON line raced the end); the dump, read over rcon,
+    // names them all. Only for a match already on record as a decided
+    // abandon, and before ratings, so they are rated as quitters.
+    const decided = (db.prepare('SELECT decided FROM match_abandons WHERE match_id = ? AND decided IS NOT NULL LIMIT 1')
+      .get(matchId) as { decided: 'a' | 'b' } | undefined)?.decided;
+    if (decided && (d.abandoners ?? []).length > 0) {
+      quitters = { decided, recorded: recordAbandons(db, matchId, d.abandoners!, decided, null) };
+    }
+
     outcome = applyMatchRatings(db, matchId);
   })();
+  const q = quitters as { decided: 'a' | 'b'; recorded: RecordedAbandon[] } | null;
+  if (q) publishRecorded(matchId, q.recorded, q.decided);
   const o = outcome as RatingOutcome | null;
   if (o && !o.applied && o.reason === 'too_few') {
     problems.push(

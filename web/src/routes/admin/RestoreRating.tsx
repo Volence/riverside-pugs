@@ -18,7 +18,7 @@ export function restoredText(a: Pick<AbandonRecord, 'restoredAt' | 'restoredByNa
  * rating loss of one abandon, with a reason. Admin only; the caller decides
  * whether to show it. Lifting the ban does not do this by itself.
  */
-export function RestoreRating({ matchId, who, busy, run }: { matchId: number; who: string; busy: boolean; run: Run }) {
+export function RestoreRating({ matchId, steamid, who, busy, run }: { matchId: number; steamid: string; who: string; busy: boolean; run: Run }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   if (!open) {
@@ -31,7 +31,7 @@ export function RestoreRating({ matchId, who, busy, run }: { matchId: number; wh
   return (
     <form class="admin-form" onSubmit={(e) => {
       e.preventDefault();
-      void run(() => adminApi.restoreAbandonRating(matchId, reason.trim()), {
+      void run(() => adminApi.restoreAbandonRating(matchId, steamid, reason.trim()), {
         title: `Restore ${who}'s rating from match #${matchId}?`,
         body: 'The rating loss for abandoning it is taken out and the season\'s ratings are recomputed. The ban and the match result stay as they are.',
         confirmLabel: 'Restore rating',
