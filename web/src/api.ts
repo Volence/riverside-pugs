@@ -992,8 +992,15 @@ export type LiveBoardStatus =
    *  null when it will not (enough connected, a round played). */
   | { kind: 'never_connected'; sincePopS: number; deadlineS?: number | null }
   | { kind: 'dropped'; sinceS: number; remainingS: number | null; held: boolean; holdLeftS: number | null };
+/** Where a player is in getting onto the server's map (src/dataFeeds.ts
+ *  FunnelState). Optional: an older server sends none. */
+export interface LiveBoardFunnel {
+  stage: 'loading' | 'in_game' | 'on_team' | 'ready' | 'dropped';
+  pack: 'ok' | 'missing' | 'suspect' | 'unknown';
+}
 export interface LiveBoardPlayer {
   steamid: string; name: string; team: 'a' | 'b'; status: LiveBoardStatus; reason: LiveBoardReason | null;
+  funnel?: LiveBoardFunnel | null;
 }
 export interface LiveBoardClock {
   kind: 'abandon'; steamid: string; name: string; remainingS: number; held: boolean; holdLeftS: number | null;

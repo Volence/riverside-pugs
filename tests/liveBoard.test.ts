@@ -8,6 +8,7 @@ import { recordPresenceLine } from '../src/presence.js';
 import { setSetting } from '../src/settings.js';
 import { buildLiveBoard, type BoardPlayer } from '../src/admin/liveBoard.js';
 import { fileCheckRejects } from '../src/noShow.js';
+import { recordDataFeed } from '../src/dataFeeds.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const TOKEN = 'a'.repeat(32);
@@ -212,5 +213,16 @@ describe('a reason, when known and never guessed', () => {
     recordPresenceLine(db, { kind: 'player', token: TOKEN, steamid: IDS[0], event: 'connect' }, at(3));
     const voice = { inVoice: () => false };
     expect(buildLiveBoard(db, { voice, now: NOW }).matches[0].teamA.find((p) => p.steamid === IDS[0])!.reason).toBeNull();
+  });
+
+  it('carries the connection funnel per player, null without any CONN line', () => {
+    const t = 1_791_000_000;
+    recordDataFeed(db, { kind: 'map_load', token: TOKEN, map: 'l4d_vs_airport01_greenhouse', at: t });
+    recordDataFeed(db, { kind: 'conn', token: TOKEN, steamid: IDS[0], stage: 'connect', at: t + 1, map: 'l4d_vs_airport01_greenhouse', team: null, pre: null, secs: null, reason: null });
+    recordDataFeed(db, { kind: 'conn', token: TOKEN, steamid: IDS[1], stage: 'connect', at: t + 1, map: 'l4d_vs_airport01_greenhouse', team: null, pre: null, secs: null, reason: null });
+    recordDataFeed(db, { kind: 'conn', token: TOKEN, steamid: IDS[1], stage: 'ingame', at: t + 30, map: 'l4d_vs_airport01_greenhouse', team: null, pre: null, secs: null, reason: null });
+    expect(find(IDS[0]).funnel).toEqual({ stage: 'loading', pack: 'unknown' });
+    expect(find(IDS[1]).funnel).toEqual({ stage: 'in_game', pack: 'unknown' });
+    expect(find(IDS[2]).funnel).toBeNull();
   });
 });
