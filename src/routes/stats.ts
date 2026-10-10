@@ -30,6 +30,7 @@ import { sameName } from '../identity.js';
 import { sessionsForMatch } from '../sourcetvSessions.js';
 import { abortCauseOf, abortParties } from '../matchAborts.js';
 import { isActiveStaff } from '../serverChat.js';
+import { matchWinLine } from '../winProb.js';
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
@@ -335,8 +336,13 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const abortWho = aborted && viewer && isActiveStaff(db, viewer)
       ? { reason: abortCauseOf(db, id), parties: abortParties(db, id) } : undefined;
 
+    // Win chance after every half, from the scoreboard alone (both teams start
+    // at 50%, ratings play no part), so unlike the forecast above it is
+    // public. Null when the score cannot carry a line; see matchWinLine.
+    const winLine = matchWinLine(db, id);
+
     return {
-      ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS,
+      ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS, winLine,
       ...(forecast ? { forecast } : {}),
       ...(abortWho ? { abortWho } : {}),
       ...(sourcetv ? { sourcetv } : {}),

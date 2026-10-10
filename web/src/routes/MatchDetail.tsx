@@ -15,6 +15,7 @@ import { AbortPartyList } from '../components/AbortPartyList';
 import { sideTotals } from '../matchTotals';
 import { Viewer } from '../replay/Viewer';
 import { DrillThis } from '../replay/DrillThis';
+import { WinChart } from '../components/WinChart';
 
 /**
  * One map's round switch and replay viewer.
@@ -597,6 +598,12 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
       {match.state === 'completed' && me && <EndorsePanel matchId={match.id} />}
 
       <div class="stack">
+        {data.winLine && (
+          <Panel>
+            <h3>Win chance</h3>
+            <WinChart line={data.winLine} />
+          </Panel>
+        )}
         {data.forecast && <ForecastPanel f={data.forecast} winner={match.winner} />}
         {data.sourcetv && <SourceTvPanel sessions={data.sourcetv} />}
 
