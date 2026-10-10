@@ -155,5 +155,6 @@ export function canonicaliseDump(db: DB, d: Dump): Dump {
     }
     for (const [k, v] of Object.entries(s.stats)) seen.stats[k] = (seen.stats[k] ?? 0) + v;
   }
-  return { ...d, players: [...players.values()], skills: [...skills.values()] };
+  const abandoners = d.abandoners ? [...new Set(d.abandoners.map((id) => resolveAlias(db, id)))] : d.abandoners;
+  return { ...d, players: [...players.values()], skills: [...skills.values()], ...(abandoners ? { abandoners } : {}) };
 }

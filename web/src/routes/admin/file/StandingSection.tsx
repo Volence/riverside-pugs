@@ -48,7 +48,7 @@ export function StandingSection(
           {/* Lifting an abandon ban does not give the rating back; staff
               who decide it was not the player's fault do that here too. */}
           {can('ban') && activeAbandon && !activeAbandon.restoredAt && (
-            <>{' '}<RestoreRating matchId={activeAbandon.matchId} who={d.header.name} busy={busy} run={run} /></>
+            <>{' '}<RestoreRating matchId={activeAbandon.matchId} steamid={activeAbandon.steamid} who={d.header.name} busy={busy} run={run} /></>
           )}
         </div>
       ) : can('ban') ? (
@@ -93,7 +93,7 @@ export function StandingSection(
               <li key={a.matchId}>
                 <a href={`/match/${a.matchId}`}>#{a.matchId}</a>: {abandonOutcome(a)}
                 {a.restoredAt ? <span class="muted">{restoredText(a)}</span>
-                  : can('ban') ? <>{' '}<RestoreRating matchId={a.matchId} who={d.header.name} busy={busy} run={run} /></> : null}
+                  : can('ban') ? <>{' '}<RestoreRating matchId={a.matchId} steamid={a.steamid} who={d.header.name} busy={busy} run={run} /></> : null}
               </li>
             ))}
           </ul>

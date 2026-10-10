@@ -78,8 +78,8 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
   // to death, this is the record, and it outlives the live scratch tables.
   ).all() as { id: number }[]).map((m) => ({
     ...m, forecast: matchForecast(db, m.id), pauses: pausesFor(db, m.id), readyups: readyupsFor(db, m.id),
-    // A decided abandon completes, so it is here, with its Restore rating.
-    abandon: abandonOf(db, m.id),
+    // A decided abandon completes, so it is here, with Restore rating per quitter.
+    abandons: abandonsOf(db, m.id),
   }));
   const voided = db.prepare(
     `SELECT id, campaign, voided_at AS voidedAt, void_reason AS voidReason
@@ -108,8 +108,8 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
     ).get(m.id) as { n: number }).n,
     // Who never got in or walked, by name and side, with what it cost them.
     parties: abortParties(db, m.id),
-    // The abandon behind it, if any, for the row's Restore rating.
-    abandon: abandonOf(db, m.id),
+    // The quitters behind it, if any, for the row's Restore rating.
+    abandons: abandonsOf(db, m.id),
   }));
   // The anti-cheat capture pipeline's health sits with the servers it comes
   // from, not on the People queue, which is about people.
@@ -205,7 +205,7 @@ function practiceOn(db: DB, serverId: number): { leaseId: number; kind: 'park' |
  * explicit action, offered beside the ban, on the player's file and on the
  * match's admin row.
  *
- * The match_abandons row is marked restored (who, when, why) and the season is
+ * That quitter's match_abandons row is marked restored (who, when, why) and the season is
  * recomputed, which is the only honest way to take one rating event out: every
  * later rating was computed from it. From then on every path skips the loss,
  * a recompute included, because they all read activeAbandon. The ban, the
@@ -213,18 +213,23 @@ function practiceOn(db: DB, serverId: number): { leaseId: number; kind: 'park' |
  * the recompute). The caller writes the admin_actions row.
  */
 export function restoreAbandonRating(
-  db: DB, matchId: number, by: string, reason: string,
+  db: DB, matchId: number, steamid: string | null, by: string, reason: string,
 ): { ok: true; steamid: string } | { ok: false; status: number; error: string } {
-  const row = db.prepare(
+  // One quitter's row (2026-10-10: a match can have several). With no steamid
+  // given, the match's only quitter, for a caller that knows there is one.
+  const rows = db.prepare(
     `SELECT a.player_id, a.restored_at, m.season_id FROM match_abandons a JOIN matches m ON m.id = a.match_id
      WHERE a.match_id = ?`,
-  ).get(matchId) as { player_id: string; restored_at: string | null; season_id: number } | undefined;
-  if (!row) return { ok: false, status: 404, error: 'nobody abandoned that match' };
+  ).all(matchId) as { player_id: string; restored_at: string | null; season_id: number }[];
+  if (rows.length === 0) return { ok: false, status: 404, error: 'nobody abandoned that match' };
+  if (steamid === null && rows.length > 1) return { ok: false, status: 400, error: 'more than one player abandoned that match; say which' };
+  const row = steamid === null ? rows[0] : rows.find((r) => r.player_id === steamid);
+  if (!row) return { ok: false, status: 404, error: 'that player did not abandon that match' };
   if (row.restored_at) return { ok: false, status: 409, error: 'that rating loss was already restored' };
   db.transaction(() => {
     db.prepare(
-      'UPDATE match_abandons SET restored_at = ?, restored_by = ?, restore_reason = ? WHERE match_id = ? AND restored_at IS NULL',
-    ).run(new Date().toISOString(), by, reason, matchId);
+      'UPDATE match_abandons SET restored_at = ?, restored_by = ?, restore_reason = ? WHERE match_id = ? AND player_id = ? AND restored_at IS NULL',
+    ).run(new Date().toISOString(), by, reason, matchId, row.player_id);
     recomputeSeasonRatings(db, row.season_id);
   })();
   return { ok: true, steamid: row.player_id };
@@ -235,6 +240,8 @@ export function restoreAbandonRating(
 export interface AbandonRecord {
   matchId: number;
   steamid: string;
+  /** The quitter's name, for staff. */
+  name: string;
   /** The team that won a match left already decided; null when it aborted. */
   decided: 'a' | 'b' | null;
   restoredAt: string | null;
@@ -243,18 +250,25 @@ export interface AbandonRecord {
 }
 
 const ABANDON_SELECT = `SELECT a.match_id, a.player_id, a.decided, a.restored_at, a.restore_reason,
-    COALESCE(p.name, a.restored_by) AS restored_by_name
-  FROM match_abandons a LEFT JOIN players p ON p.steamid = a.restored_by`;
+    COALESCE(p.name, a.restored_by) AS restored_by_name, COALESCE(q.name, a.player_id) AS name
+  FROM match_abandons a LEFT JOIN players p ON p.steamid = a.restored_by LEFT JOIN players q ON q.steamid = a.player_id`;
 
-function toRecord(r: { match_id: number; player_id: string; decided: 'a' | 'b' | null; restored_at: string | null; restore_reason: string | null; restored_by_name: string | null }): AbandonRecord {
+function toRecord(r: { match_id: number; player_id: string; name: string; decided: 'a' | 'b' | null; restored_at: string | null; restore_reason: string | null; restored_by_name: string | null }): AbandonRecord {
   return {
-    matchId: r.match_id, steamid: r.player_id, decided: r.decided,
+    matchId: r.match_id, steamid: r.player_id, name: r.name, decided: r.decided,
     restoredAt: r.restored_at, restoredByName: r.restored_at ? r.restored_by_name : null, restoreReason: r.restore_reason,
   };
 }
 
-export function abandonOf(db: DB, matchId: number): AbandonRecord | null {
-  const r = db.prepare(`${ABANDON_SELECT} WHERE a.match_id = ?`).get(matchId) as Parameters<typeof toRecord>[0] | undefined;
+/** Every quitter of one match, in steamid order. */
+export function abandonsOf(db: DB, matchId: number): AbandonRecord[] {
+  return (db.prepare(`${ABANDON_SELECT} WHERE a.match_id = ? ORDER BY a.player_id`).all(matchId) as Parameters<typeof toRecord>[0][])
+    .map(toRecord);
+}
+
+/** One quitter's abandon of one match, or null. */
+export function abandonOf(db: DB, matchId: number, steamid: string): AbandonRecord | null {
+  const r = db.prepare(`${ABANDON_SELECT} WHERE a.match_id = ? AND a.player_id = ?`).get(matchId, steamid) as Parameters<typeof toRecord>[0] | undefined;
   return r ? toRecord(r) : null;
 }
 

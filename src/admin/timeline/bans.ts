@@ -3,7 +3,7 @@ import { WITHHELD_REASON, banIsWithheld } from '../banRedaction.js';
 import { ROW_LIMIT, marks, toIso, type TimelineAdapter, type TimelineItem } from './types.js';
 
 interface Row {
-  id: number; reason: string; created_by: string; created_by_name: string | null;
+  id: number; player_id: string; reason: string; created_by: string; created_by_name: string | null;
   created_at: string; expires_at: string | null; lifted_at: string | null;
   lifted_by_name: string | null; ticket_id: number | null;
 }
@@ -25,7 +25,7 @@ export const bansAdapter: TimelineAdapter = {
   source: 'ban',
   items({ db, ids, viewer }): TimelineItem[] {
     const rows = db.prepare(
-      `SELECT b.id, b.reason, b.created_by, pc.name AS created_by_name, b.created_at,
+      `SELECT b.id, b.player_id, b.reason, b.created_by, pc.name AS created_by_name, b.created_at,
               b.expires_at, b.lifted_at, pl.name AS lifted_by_name, b.ticket_id
        FROM bans b
        LEFT JOIN players pc ON pc.steamid = b.created_by
@@ -42,7 +42,7 @@ export const bansAdapter: TimelineAdapter = {
         summary: `Banned by ${by}, ${fmtBanLength(r.created_at, r.expires_at)}: `
           + `${withheld ? WITHHELD_REASON : r.reason}.`
           + (r.lifted_at ? ` Lifted ${withheld ? '' : `by ${r.lifted_by_name ?? 'the system'} `}since.` : '')
-          + restoredNote(db, r.reason),
+          + restoredNote(db, r.player_id, r.reason),
         matchId: null,
         replay: null,
         ref: { type: 'ban', id: r.id },
@@ -53,10 +53,10 @@ export const bansAdapter: TimelineAdapter = {
 
 /** " Rating loss restored by X: why." on an abandon ban whose loss staff gave
  *  back (owner ruling 2026-10-10); empty otherwise. */
-function restoredNote(db: Parameters<TimelineAdapter['items']>[0]['db'], reason: string): string {
+function restoredNote(db: Parameters<TimelineAdapter['items']>[0]['db'], steamid: string, reason: string): string {
   const m = /^Abandoned match #(\d+)$/.exec(reason);
   if (!m) return '';
-  const a = abandonOf(db, Number(m[1]));
+  const a = abandonOf(db, Number(m[1]), steamid);
   if (!a?.restoredAt) return '';
   return ` Rating loss restored by ${a.restoredByName ?? 'staff'}${a.restoreReason ? `: ${a.restoreReason}` : ''}.`;
 }

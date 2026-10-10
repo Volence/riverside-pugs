@@ -176,18 +176,17 @@ export interface RatingOutcome {
   ratedB: number;
 }
 
-/** The abandon on a match whose quitter takes a rating loss: its
- *  match_abandons row, unless staff restored it. Null for every other match. */
-export function activeAbandon(db: DB, matchId: number): { playerId: string; team: 'a' | 'b'; decided: 'a' | 'b' | null } | null {
-  const row = db.prepare(
-    'SELECT player_id, team, decided FROM match_abandons WHERE match_id = ? AND restored_at IS NULL',
-  ).get(matchId) as { player_id: string; team: 'a' | 'b'; decided: 'a' | 'b' | null } | undefined;
-  if (!row) return null;
-  // The roster row is the authority on the side, as for everyone else; the
-  // abandon row's own team is the fallback for a row that has none.
-  const mp = db.prepare('SELECT team FROM match_players WHERE match_id = ? AND player_id = ?')
-    .get(matchId, row.player_id) as { team: 'a' | 'b' } | undefined;
-  return { playerId: row.player_id, team: mp?.team ?? row.team, decided: row.decided };
+/** The quitters on a match who take a rating loss: their match_abandons
+ *  rows, less any staff restored. Empty for every other match. The roster
+ *  row is the authority on the side, as for everyone else; the abandon row's
+ *  own team is the fallback for a row that has none. */
+export function activeAbandons(db: DB, matchId: number): { playerId: string; team: 'a' | 'b'; decided: 'a' | 'b' | null }[] {
+  return (db.prepare(
+    `SELECT a.player_id, COALESCE(mp.team, a.team) AS team, a.decided FROM match_abandons a
+     LEFT JOIN match_players mp ON mp.match_id = a.match_id AND mp.player_id = a.player_id
+     WHERE a.match_id = ? AND a.restored_at IS NULL ORDER BY a.player_id`,
+  ).all(matchId) as { player_id: string; team: 'a' | 'b'; decided: 'a' | 'b' | null }[])
+    .map((r) => ({ playerId: r.player_id, team: r.team, decided: r.decided }));
 }
 
 /**
@@ -224,45 +223,61 @@ export function quitterLoss(
 }
 
 /**
- * The quitter's loss for an abandon that is not rated as a whole: an
- * undecided abandon (the match aborted, the other seven unchanged), or a
- * decided one that completed with too few rated players to rate. Writes the
- * quitter's player_ratings (a loss) and one rating_history row, nothing for
- * anyone else. Idempotent on that history row, so a repeated call, and a
- * recompute that replays it, apply it exactly once.
+ * The quitters' losses for an abandon that is not rated as a whole: an
+ * undecided abandon (the match aborted, everyone who stayed unchanged), or a
+ * decided one that completed with too few rated players to rate. Writes each
+ * quitter's player_ratings (a loss) and one rating_history row each, nothing
+ * for anyone else. Idempotent per quitter on that history row, so a repeated
+ * call, and a recompute that replays it, apply each exactly once.
  *
  * The lineup is who would have been rated: rated roster rows that played at
- * least half the maps so far (none played counts everyone), plus the quitter
- * whatever they played. Needs someone on the other side to lose to.
+ * least half the maps so far (none played counts everyone), plus every
+ * quitter whatever they played. All quitters are judged from the same
+ * ratings, as they stood before this match (a quitter already applied is
+ * read back from their history row), so the order they are written in and a
+ * recompute cannot change the numbers. A quitter needs someone on the other
+ * side to lose to.
  */
 export function applyAbandonPenalty(db: DB, matchId: number): boolean {
   const match = db.prepare('SELECT season_id, state, kind FROM matches WHERE id = ?')
     .get(matchId) as { season_id: number; state: string; kind: string } | undefined;
   if (!match || match.kind !== 'pug') return false;
   if (match.state !== 'aborted' && match.state !== 'completed') return false;
-  const ab = activeAbandon(db, matchId);
-  if (!ab) return false;
-  if (db.prepare('SELECT 1 FROM rating_history WHERE match_id = ? AND player_id = ?').get(matchId, ab.playerId)) return false;
+  const quitters = activeAbandons(db, matchId);
+  if (quitters.length === 0) return false;
+  const histOf = db.prepare('SELECT mu_before, sigma_before FROM rating_history WHERE match_id = ? AND player_id = ?');
+  const todo = quitters.filter((q) => !histOf.get(matchId, q.playerId));
+  if (todo.length === 0) return false;
 
+  const qids = new Set(quitters.map((q) => q.playerId));
   const all = db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = ? AND rated = 1').all(matchId) as MpRow[];
   const mapsPlayed = (db.prepare('SELECT COUNT(*) AS n FROM match_maps WHERE match_id = ?').get(matchId) as { n: number }).n;
-  const mps = all.filter((r) => r.player_id !== ab.playerId && ratedForMaps(r.joined_map, mapsPlayed));
-  const teamA = mps.filter((r) => r.team === 'a').map((r) => r.player_id);
-  const teamB = mps.filter((r) => r.team === 'b').map((r) => r.player_id);
-  if ((ab.team === 'a' ? teamB : teamA).length === 0) return false;
+  const mps = all.filter((r) => !qids.has(r.player_id) && ratedForMaps(r.joined_map, mapsPlayed));
+  const teamA = [...mps.filter((r) => r.team === 'a').map((r) => r.player_id), ...quitters.filter((q) => q.team === 'a').map((q) => q.playerId)];
+  const teamB = [...mps.filter((r) => r.team === 'b').map((r) => r.player_id), ...quitters.filter((q) => q.team === 'b').map((q) => q.playerId)];
 
-  const before = new Map([...teamA, ...teamB, ab.playerId].map((id) => [id, ensureRating(db, id, match.season_id)]));
-  const after = quitterLoss(teamA, teamB, before, ab.playerId, ab.team);
-  const b = before.get(ab.playerId)!;
+  const before = new Map<string, { mu: number; sigma: number }>();
+  for (const id of [...teamA, ...teamB]) {
+    const h = histOf.get(matchId, id) as { mu_before: number; sigma_before: number } | undefined;
+    before.set(id, h ? { mu: h.mu_before, sigma: h.sigma_before } : ensureRating(db, id, match.season_id));
+  }
+  let applied = false;
   db.transaction(() => {
-    db.prepare('UPDATE player_ratings SET mu = ?, sigma = ?, losses = losses + 1 WHERE player_id = ? AND season_id = ?')
-      .run(after.mu, after.sigma, ab.playerId, match.season_id);
-    db.prepare(
+    const upd = db.prepare('UPDATE player_ratings SET mu = ?, sigma = ?, losses = losses + 1 WHERE player_id = ? AND season_id = ?');
+    const hist = db.prepare(
       `INSERT INTO rating_history (player_id, match_id, season_id, mu_before, sigma_before, mu_after, sigma_after)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(ab.playerId, matchId, match.season_id, b.mu, b.sigma, after.mu, after.sigma);
+    );
+    for (const q of todo) {
+      if ((q.team === 'a' ? teamB : teamA).length === 0) continue;
+      const after = quitterLoss(teamA, teamB, before, q.playerId, q.team);
+      const b = before.get(q.playerId)!;
+      upd.run(after.mu, after.sigma, q.playerId, match.season_id);
+      hist.run(q.playerId, matchId, match.season_id, b.mu, b.sigma, after.mu, after.sigma);
+      applied = true;
+    }
   })();
-  return true;
+  return applied;
 }
 
 /** Apply OpenSkill updates for a completed match: player_ratings mu/sigma/W-L
@@ -289,16 +304,24 @@ export function applyMatchRatings(db: DB, matchId: number): RatingOutcome {
   const mps = all.filter((r) => ratedForMaps(r.joined_map, mapsPlayed));
   const teamA = mps.filter((r) => r.team === 'a').map((r) => r.player_id);
   const teamB = mps.filter((r) => r.team === 'b').map((r) => r.player_id);
-  // An abandon the quitter takes a loss on (owner ruling 2026-10-10).
-  const ab = activeAbandon(db, matchId);
+  // Quitters, who take a loss whatever the result (owner rulings 2026-10-10).
+  const quitters = activeAbandons(db, matchId);
   if (teamA.length < MIN_RATED_PER_TEAM || teamB.length < MIN_RATED_PER_TEAM) {
-    // Nobody is rated on the result, but the quitter still loses.
-    if (ab) applyAbandonPenalty(db, matchId);
+    // Nobody is rated on the result, but every quitter still loses.
+    if (quitters.length > 0) applyAbandonPenalty(db, matchId);
     return { applied: false, reason: 'too_few', ratedA: teamA.length, ratedB: teamB.length };
   }
+  // The lineup a quitter's loss is judged in: the rated lineup plus any
+  // quitter outside it (a late sub, a row marked unrated), on their side.
+  // Only the quitters' own numbers use it, so everyone else is rated exactly
+  // as if nobody had quit.
+  const qA = [...teamA], qB = [...teamB];
+  for (const q of quitters) {
+    if (qA.includes(q.playerId) || qB.includes(q.playerId)) continue;
+    (q.team === 'a' ? qA : qB).push(q.playerId);
+  }
 
-  const before = new Map(mps.map((r) => [r.player_id, ensureRating(db, r.player_id, match.season_id)]));
-  if (ab && !before.has(ab.playerId)) before.set(ab.playerId, ensureRating(db, ab.playerId, match.season_id));
+  const before = new Map([...qA, ...qB].map((id) => [id, ensureRating(db, id, match.season_id)]));
   const rank = match.winner === 'a' ? [1, 2] : match.winner === 'b' ? [2, 1] : [1, 1];
   const [newA, newB] = rate(
     [teamA.map((id) => rating(before.get(id)!)), teamB.map((id) => rating(before.get(id)!))],
@@ -313,24 +336,31 @@ export function applyMatchRatings(db: DB, matchId: number): RatingOutcome {
       `INSERT INTO rating_history (player_id, match_id, season_id, mu_before, sigma_before, mu_after, sigma_after)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
-    // Everyone else is rated on the result with the quitter in the lineup,
-    // as they played it. The quitter alone gets quitterLoss and a loss on
-    // their record, whichever way the result went.
-    const loss = ab ? quitterLoss(teamA, teamB, before, ab.playerId, ab.team) : null;
+    // Everyone else is rated on the result with the quitters in the lineup,
+    // as they played it. Each quitter instead gets quitterLoss and a loss on
+    // their record, whichever way the result went; all of them are judged
+    // from the same pre-match ratings.
+    const losses = new Map(quitters.map((q) => [q.playerId, quitterLoss(qA, qB, before, q.playerId, q.team)]));
     const apply = (ids: string[], rated: { mu: number; sigma: number }[], won: boolean, lost: boolean) => {
       ids.forEach((id, i) => {
         const b = before.get(id)!;
-        if (ab && loss && id === ab.playerId) return;
+        const loss = losses.get(id);
+        if (loss) {
+          upd.run(loss.mu, loss.sigma, 0, 1, id, match.season_id);
+          hist.run(id, matchId, match.season_id, b.mu, b.sigma, loss.mu, loss.sigma);
+          return;
+        }
         upd.run(rated[i].mu, rated[i].sigma, won ? 1 : 0, lost ? 1 : 0, id, match.season_id);
         hist.run(id, matchId, match.season_id, b.mu, b.sigma, rated[i].mu, rated[i].sigma);
       });
     };
     apply(teamA, newA, match.winner === 'a', match.winner === 'b');
     apply(teamB, newB, match.winner === 'b', match.winner === 'a');
-    if (ab && loss) {
-      const b = before.get(ab.playerId)!;
-      upd.run(loss.mu, loss.sigma, 0, 1, ab.playerId, match.season_id);
-      hist.run(ab.playerId, matchId, match.season_id, b.mu, b.sigma, loss.mu, loss.sigma);
+    for (const [id, loss] of losses) {
+      if (teamA.includes(id) || teamB.includes(id)) continue;
+      const b = before.get(id)!;
+      upd.run(loss.mu, loss.sigma, 0, 1, id, match.season_id);
+      hist.run(id, matchId, match.season_id, b.mu, b.sigma, loss.mu, loss.sigma);
     }
   })();
   return { applied: true, ratedA: teamA.length, ratedB: teamB.length };

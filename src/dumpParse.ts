@@ -54,6 +54,9 @@ export interface Dump {
   /** Plan T5 (pug-match 0.3.26): why, null without a forfeit. A forfeit with
    *  no forfeit_why= (every !gg, and any older plugin) is a !gg. */
   forfeitWhy?: ForfeitWhy | null;
+  /** Every player the plugin recorded as running out of reconnect time
+   *  (pug-match 0.3.31 ABANDON lines). Absent or empty from older plugins. */
+  abandoners?: string[];
 }
 
 /** StateName() in pug-match.sp, less `none`: with no match configured
@@ -138,6 +141,7 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
   const maps: DumpMap[] = [];
   const players: DumpPlayer[] = [];
   const skills: DumpSkill[] = [];
+  const abandoners: string[] = [];
   let end: { winner: 'a' | 'b' | 'draw'; totalA: number; totalB: number; forfeit: 'a' | 'b' | null; forfeitWhy: ForfeitWhy | null } | null = null;
 
   for (const line of lines.slice(start + 1)) {
@@ -169,6 +173,9 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
         stats[k] = n;
       }
       skills.push({ steamid: rest.steamid, stats });
+    } else if (verb === 'ABANDON') {
+      if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
+      if (!abandoners.includes(rest.steamid)) abandoners.push(rest.steamid);
     } else if (verb === 'END') {
       const a = intOf(rest.a), b = intOf(rest.b);
       if (a === null || b === null) return null;
@@ -189,5 +196,5 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
   }
 
   if (!end) return null;
-  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state, forfeit: end.forfeit, forfeitWhy: end.forfeitWhy };
+  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state, forfeit: end.forfeit, forfeitWhy: end.forfeitWhy, abandoners };
 }

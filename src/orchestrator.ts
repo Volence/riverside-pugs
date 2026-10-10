@@ -390,7 +390,7 @@ export class RealOrchestrator implements Orchestrator {
    *  match, and whether it judged the match decided then (STATUS gg). */
   async confirmAbandon(serverId: number, steamid: string): Promise<AbandonConfirm> {
     const server = getServer(this.db, serverId);
-    if (!server) return { abandoner: false, gg: null };
+    if (!server) return { abandoner: false, abandoners: [], gg: null };
     let rcon: RconClient | null = null;
     try {
       rcon = await this.connectRcon(server);

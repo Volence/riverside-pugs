@@ -320,7 +320,7 @@ export function RecentResultsPanel({ data, busy, run, isAdmin = false }: { data:
                 <tr key={m.id}>
                   <td>
                     <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}
-                    {m.abandon && <AbandonLine a={m.abandon} busy={busy} run={run} isAdmin={isAdmin} />}
+                    {(m.abandons ?? []).map((a) => <AbandonLine key={a.steamid} a={a} busy={busy} run={run} isAdmin={isAdmin} />)}
                   </td>
                   <td class="num">{m.teamAScore} - {m.teamBScore}</td>
                   {/* Was the result the odds expected? The upset marker is
@@ -390,7 +390,7 @@ export function RecentResultsPanel({ data, busy, run, isAdmin = false }: { data:
                       })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
                   </>
                 )}
-                {m.abandon && <AbandonLine a={m.abandon} busy={busy} run={run} isAdmin={isAdmin} />}
+                {(m.abandons ?? []).map((a) => <AbandonLine key={a.steamid} a={a} busy={busy} run={run} isAdmin={isAdmin} />)}
                 <AbortPartyList parties={m.parties ?? []} />
               </li>
             ))}
@@ -570,8 +570,8 @@ function AdminSyncButton() {
 function AbandonLine({ a, busy, run, isAdmin }: { a: AbandonRecord; busy: boolean; run: Run; isAdmin: boolean }) {
   return (
     <div class="muted">
-      abandoned: {abandonOutcome(a)}, quitter rated a loss{restoredText(a)}
-      {!a.restoredAt && isAdmin && <>{' '}<RestoreRating matchId={a.matchId} who="the quitter" busy={busy} run={run} /></>}
+      {a.name} abandoned: {abandonOutcome(a)}, rated a loss{restoredText(a)}
+      {!a.restoredAt && isAdmin && <>{' '}<RestoreRating matchId={a.matchId} steamid={a.steamid} who={a.name} busy={busy} run={run} /></>}
     </div>
   );
 }

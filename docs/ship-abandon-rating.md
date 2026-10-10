@@ -14,7 +14,10 @@ Branch `abandon-rating`, pug-match 0.3.31. Built and tested locally. Nothing dep
    loss. An undecided abandon still aborts with no rating change for the other
    seven.
 4. The abandon ban ladder is unchanged.
-5. (Later ruling) Lifting an abandon ban does NOT refund the loss. Staff give it
+5. (Later ruling) Two or more quitters: EVERY quitter takes the loss and their
+   own ban. A decided match still goes to the leading team, everyone else is
+   rated normally, and a quitter on the winning team is still a loss.
+6. (Later ruling) Lifting an abandon ban does NOT refund the loss. Staff give it
    back with an explicit, logged admin action, "Restore rating".
 
 ## What changed
@@ -28,6 +31,15 @@ Branch `abandon-rating`, pug-match 0.3.31. Built and tested locally. Nothing dep
   the match was decided and keeps that judgement. `sm_pug_status` prints
   `STATUS gg decided=a|b|none gap=N ceiling=N known=0|1 at=abandon|now ended=0|1`.
   With no abandoner it shows the rule right now (`at=now`) for staff.
+- Every player who runs out of reconnect time is an abandoner, not only the
+  first: leave tracking carries on after the first abandon until the match
+  ends (the game stays paused), every slot that runs out in the same tick is
+  caught, each gets its own ABANDON line and heartbeat repeat, and
+  `sm_pug_status` lists each as `STATUS abandon steamid=...` (the old
+  `STATUS leave abandoner=` line still names the first, for older sites).
+  The dump gets one `ABANDON steamid=...` line per quitter before END.
+  "Decided" is judged once, at the first abandon. `sm_pug_leave` still
+  refuses once someone has abandoned.
 - New `sm_pug_abandon_end <token> <steamid64>`: ends a decided match like a
   !gg forfeit (partial map kept, technical pause closed, `EndMatchNow`). It is
   refused unless this server named that player as the abandoner, judged the
@@ -44,13 +56,20 @@ Branch `abandon-rating`, pug-match 0.3.31. Built and tested locally. Nothing dep
 
 ### Site
 
-- Schema: new table `match_abandons` (match_id PK, player_id, team, decided,
-  gap, ceiling, created_at, restored_at, restored_by, restore_reason). Written
-  with the abandon ban in one transaction. `forfeit_team` is untouched, so a
+- Schema: new table `match_abandons`, one row per quitter per match
+  (PK match_id + player_id; team, decided, gap, ceiling, created_at,
+  restored_at, restored_by, restore_reason). Each row is written with that
+  quitter's ban in one transaction (`recordAbandons`). `forfeit_team` is untouched, so a
   decided abandon is never counted as a forfeit.
 - `src/abandon.ts handleAbandon`: the same rcon confirm now also parses the
-  STATUS gg line (`parseAbandonStatus`). The decided state comes only from
-  rcon, never from the UDP ABANDON line.
+  STATUS gg line and every STATUS abandon line (`parseAbandonStatus`), and
+  records ALL the abandoners the server names, so two players who ran out
+  together are caught by one read. The decided state and the quitters come
+  only from rcon, never from the UDP ABANDON line. A later quitter on a match
+  still being ended as decided is added by their own line; one the site never
+  heard about is added at collection from the dump's ABANDON lines
+  (`completeMatch`, only for a match already on record as a decided abandon,
+  before ratings, ban published after the commit).
   - Decided: row + ban, then `sm_pug_abandon_end`, then the ordinary collector
     (`finishWithRetry`), so completion, demos, replays, release and the result
     card go exactly the way a !gg forfeit does.
@@ -59,20 +78,22 @@ Branch `abandon-rating`, pug-match 0.3.31. Built and tested locally. Nothing dep
   - Box unreachable while ending: the row and ban stand, the next ABANDON line
     retries only the end (no second confirm, no second ban).
 - `src/rating.ts`:
-  - `activeAbandon(matchId)`: the unrestored abandon on a match.
+  - `activeAbandons(matchId)`: the unrestored quitters of a match.
   - `quitterLoss(...)`: the quitter's rating (exact math below).
-  - `applyMatchRatings`: everyone else is rated on the result with the quitter
-    in the lineup as they played; the quitter gets `quitterLoss` and a loss on
-    their W-L. If the match is too small to rate (`too_few`), the quitter
-    still takes the loss.
-  - `applyAbandonPenalty(matchId)`: the quitter alone, for an aborted match.
-    Idempotent on the (match, player) rating_history row.
+  - `applyMatchRatings`: everyone else is rated on the result with the
+    quitters in the lineup as they played; each quitter gets `quitterLoss`
+    and a loss on their W-L. If the match is too small to rate (`too_few`),
+    the quitters still take the loss.
+  - `applyAbandonPenalty(matchId)`: the quitters alone, for an aborted match.
+    All are judged from the same pre-match ratings, so order and recompute do
+    not change the numbers. Idempotent per (match, player) history row.
   - `recomputeSeasonRatings` replays completed PUGs AND aborted PUGs with an
     unrestored abandon, in end order. Recompute neither drops nor doubles the
     loss (tested twice in a row).
 - Restore rating: `POST /api/admin/matches/:id/restore-abandon-rating`
-  (admin only, reason required, 404 nobody abandoned, 409 already restored).
-  Marks the row restored and recomputes the season; audit row
+  with `{ steamid, reason }` (admin only, reason required; steamid may be left
+  out only when the match has one quitter, else 400; 404 not a quitter, 409
+  already restored). Per quitter: marks that row restored and recomputes the season; audit row
   `restore_abandon_rating` with target = the player and detail
   `{ matchId, reason }`, so it shows on their file and in the admin feed.
   UI: beside Unban on the player file when the active ban is an abandon ban,
@@ -123,10 +144,9 @@ no part here.
   plugin only judges a live match). Aborted, quitter's loss against the full
   roster.
 - Booked games (scrims, tournaments): still ignored entirely, no row, no loss.
-- Two quitters: the plugin names one abandoner (leave tracking stops once it
-  has one) and the site keeps the first `match_abandons` row per match; a
-  second player's ABANDON line is ignored. The second absent player is rated
-  normally on a decided result.
+- Two or more quitters: every one is on record, banned on their own ladder
+  and rated a loss; restoring one leaves the others. Someone still away (not
+  yet out of time) when the match ends is not a quitter.
 - Repeat ABANDON lines: one ban, one row, one rating_history row.
 - Void of a decided-abandon match: the result is dropped as usual, the
   quitter's loss stays (voiding is about the result; only Restore rating
@@ -139,8 +159,11 @@ no part here.
 ## How it was tested
 
 - `npx tsc --noEmit -p .` and `-p web/tsconfig.json`: clean.
-- `npx vitest run`: 739 files, 11,287 tests, all passed.
-- New `tests/abandonRating.test.ts` (24 tests): STATUS gg parsing, undecided
+- `npx vitest run`: 739 files, 11,295 tests, all passed.
+- New `tests/abandonRating.test.ts` (33 tests). Several quitters: same team,
+  opposite teams, both teams in a decided match, one in a decided match plus
+  one named only by the dump after it ended, a late line while collecting,
+  a dump on a match nobody abandoned, per-quitter restore. Also: STATUS gg parsing, undecided
   abort + loss with exact OpenSkill numbers, old plugin fallback, configuring,
   repeat lines, booked games, decided with quitter trailing and leading (exact
   numbers for all eight), plugin refusal fallback, unreachable box retry,
@@ -179,6 +202,10 @@ modifiers 1.0/1.2/1.4/1.5/2.0, ceiling 1100 x 5.1 = 5610 for the halves left).
 3. B leads 6000-0 and a player on the LEADING team abandons: `decided=b`,
    `MATCH_END a=0 b=6000 winner=b abandon=76561199000000006`.
 
-Not covered on the rig: the dump's END line (my test used a non-hex nonce and
-the plugin rightly refused it; the END line uses the same `LeaveAbandonTail`
-as MATCH_END), and the in-game chat lines (no clients on the rig).
+4. Two quitters (team B slot 5, then team A slot 1), A leading 6000-0:
+   STATUS lists both (`STATUS abandon steamid=...` x2) with `decided=a`;
+   `sm_pug_abandon_end` for the SECOND quitter ends it (`MATCH_END ... winner=a
+   abandon=<first>`); the dump (hex nonce, state=ended) has an ABANDON line
+   for each and `END winner=a a=6000 b=0 abandon=<first>`.
+
+Not covered on the rig: the in-game chat lines (no clients on the rig).

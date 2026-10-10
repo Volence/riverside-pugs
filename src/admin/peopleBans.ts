@@ -104,7 +104,7 @@ export function peopleBans(
 function abandonFor(db: DB, steamid: string, reason: string): PeopleBanRow['abandon'] {
   const m = /^Abandoned match #(\d+)$/.exec(reason);
   if (!m) return null;
-  const a = abandonOf(db, Number(m[1]));
-  if (!a || a.steamid !== steamid) return null;
+  const a = abandonOf(db, Number(m[1]), steamid);
+  if (!a) return null;
   return { matchId: a.matchId, restoredAt: a.restoredAt, restoredByName: a.restoredByName, restoreReason: a.restoreReason };
 }
