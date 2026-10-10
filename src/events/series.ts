@@ -1,9 +1,8 @@
 import type { DB } from '../db.js';
 import { publishAdminEvent } from '../adminFeed.js';
-import { campaignDisplayName, campaignRegistry } from '../campaignRegistry.js';
+import { campaignDisplayName } from '../campaignRegistry.js';
 import type { Notifier } from '../notify/notify.js';
 import { parseRules, rulesForKind, type MatchRules } from '../rulesets.js';
-import { stopAfterMap } from '../stopPoint.js';
 import { getTeam } from '../teams/teams.js';
 import { getPlayer } from '../players.js';
 import * as B from '../bookings/bookings.js';
@@ -24,6 +23,7 @@ import * as R from './room.js';
 import * as S from './standins.js';
 import * as V from './validate.js';
 import { carryEntries } from './carry.js';
+import { stageStopMap } from './stopMap.js';
 import { autoResultFlow, forfeitMatch } from './flow.js';
 import { tellConnect, tellReadyForfeit, tellSeriesResult, tellStaffAction } from './notices.js';
 import { gameNumberOf, playOrder, seriesResult, seriesVerdict, tiebreakFirstSurvivors, winsLine } from './seriesRules.js';
@@ -340,12 +340,6 @@ export class SeriesEngine {
 
   // ---------- the runner's hooks ----------
 
-  private stopMapFor(stage: E.StageRow, campaign: string): string | null {
-    const s = E.stageSettingsOf(stage);
-    if (s.chapters === null) return stopAfterMap(this.db, campaign);
-    const maps = campaignRegistry(this.db).get(campaign)?.maps ?? [];
-    return maps[Math.min(s.chapters, maps.length) - 1] ?? null;
-  }
   private gameLabel(m: P.MatchRow, g: R.GameRow): string {
     const games = R.seriesGames(this.db, m);
     const n = gameNumberOf(games.find((x) => x.id === g.id)!, games);
@@ -354,7 +348,7 @@ export class SeriesEngine {
   private linesFor(m: P.MatchRow, g: R.GameRow, gameMatchId: number): string[] {
     const stage = E.getStage(this.db, m.stage_id)!;
     const ev = E.getEvent(this.db, m.event_id)!;
-    const stop = g.tiebreak_of !== null ? g.map : this.stopMapFor(stage, g.campaign);
+    const stop = g.tiebreak_of !== null ? g.map : stageStopMap(this.db, stage, g.campaign);
     return gameLinesOf(this.db, { matchId: gameMatchId, stopAfterMap: stop, notice: `${ev.name}: ${this.name(m, 'a')} vs ${this.name(m, 'b')}, ${this.gameLabel(m, g)}` });
   }
   /** gameMatchId is passed in: the caller's row was read before linkGame set its match_id. */
