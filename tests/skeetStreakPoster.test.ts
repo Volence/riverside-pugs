@@ -9,10 +9,15 @@ const PID = 'STEAM_0:0:1';
 let db: DB; let t: FakeTransport; let poster: SkeetStreakPoster;
 const inWeekly = () => t.live().filter((m) => m.channelId === 'weekly');
 
+/** An hour ago, as SQLite text. A fixed date here went stale on 2026-10-06,
+ *  when the poster's 7-day cutoff began skipping it and every test that
+ *  expected a post failed. */
+const recent = () => new Date(Date.now() - 60 * 60_000).toISOString().replace('T', ' ').slice(0, 19);
+
 /** A completed (or otherwise) match with one triple skeet on map 1, half 1,
  *  starting at t=0. Returns the match id. */
 function seedTripleMatch(over: { state?: string; endedAt?: string; voided?: boolean } = {}): number {
-  const { state = 'completed', endedAt = '2026-09-29 12:00:00', voided = false } = over;
+  const { state = 'completed', endedAt = recent(), voided = false } = over;
   const id = Number(db.prepare(
     "INSERT INTO matches (season_id, state, campaign, ended_at, voided_at) VALUES (1, ?, 'no_mercy', ?, ?)",
   ).run(state, endedAt, voided ? endedAt : null).lastInsertRowid);
@@ -54,7 +59,7 @@ describe('SkeetStreakPoster', () => {
   });
 
   it('does not scan a live match, but finds and posts it once it completes', async () => {
-    const id = seedTripleMatch({ state: 'live', endedAt: '2026-09-29 12:00:00' });
+    const id = seedTripleMatch({ state: 'live', endedAt: recent() });
     poster.start(); await poster.idle();
     expect(inWeekly()).toHaveLength(0);
     expect(db.prepare('SELECT COUNT(*) AS n FROM skeet_streak_scans').get()).toEqual({ n: 0 });
