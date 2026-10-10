@@ -15,10 +15,16 @@ const TEAM_NAME: Record<Team, string> = { a: 'Team A', b: 'Team B' };
 /** A chance as the page says it. The ends of a finished match are exact; a
  *  chance along the way never claims certainty it does not have. */
 export function fmtChance(p: number, exact = false): string {
-  if (exact) return `${Math.round(p * 100)}%`;
+  if (exact) return `${wholePercent(p)}%`;
   if (p < 0.01) return 'under 1%';
   if (p > 0.99) return 'over 99%';
-  return `${Math.round(p * 100)}%`;
+  return `${wholePercent(p)}%`;
+}
+
+/** A whole percent that rounds p and 1 - p the same way, so the two teams'
+ *  numbers always add up to 100 (plain rounding gives 74% and 27% for 0.735). */
+export function wholePercent(p: number): number {
+  return p < 0.5 ? 100 - Math.round((1 - p) * 100) : Math.round(p * 100);
 }
 
 /** What a point was, in words: "Map 2 Offices, Team B survivors scored 640".

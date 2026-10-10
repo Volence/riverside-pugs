@@ -11,6 +11,7 @@ import { activeMembers, getTeam } from '../teams/teams.js';
 import { statDef } from '../statKeys.js';
 import { STREAK_MIN, streakRuns } from '../skeetStreaks.js';
 import { boomerRate } from './types.js';
+import { liveWinLine } from '../winProb.js';
 import type {
   CastChapter, CastEvent, CastMatchView, CastRoundResult, CastPlayer, CastRole, CastSide, CastTeam, StudioState, TeamOverride,
 } from './types.js';
@@ -247,14 +248,26 @@ export function buildMatchView(
   const teamOf = new Map(ps.map((p) => [p.steamid, p.team]));
   const events = completed ? [] : highlightEvents(db, matchId, nameOf, teamOf);
 
+  const teams = { a: team('a'), b: team('b') };
+  let winChanceA: number | null = null;
+  if (m.state === 'live' && !teams.a.overridden.includes('score') && !teams.b.overridden.includes('score')) {
+    try {
+      const line = liveWinLine(db, matchId, m.campaign);
+      winChanceA = line ? line.points[line.points.length - 1].pA : null;
+    } catch {
+      // Odds are garnish; a fault here must not blank the overlay.
+    }
+  }
+
   return {
     id: m.id, kind: m.kind, state: m.state, campaign: m.campaign, campaignName: campaignDisplayName(db, m.campaign),
     currentMap, mapNumber, mapCount: chapters.length > 0 ? chapters.length : null,
     half: rip?.half ?? null, phase: phase?.state ?? null, phaseSinceMs: phase?.sinceMs ?? null,
     winner: completed ? m.winner : null,
-    teams: { a: team('a'), b: team('b') },
+    teams,
     chapters, events, game,
     lastRound: lastRoundResult(db, matchId, planned, scored, nameOf, teamOf),
+    winChanceA,
   };
 }
 

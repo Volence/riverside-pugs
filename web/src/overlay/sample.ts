@@ -30,7 +30,7 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
       { number: 3, map: 'l4d_vs_airport03_garage', a: null, b: null, firstSurvivor: null, state: 'next' },
       { number: 4, map: 'l4d_vs_airport04_terminal', a: null, b: null, firstSurvivor: null, state: 'next' },
     ],
-    events: [], game: null, lastRound: null,
+    events: [], game: null, lastRound: null, winChanceA: 0.64,
   };
   const s = (i: number, character: string, health: number, temp: number, extra: Partial<CastLiveRound['survivors'][number]> = {}) => ({
     slot: i, steamid: a.players[i]!.steamid, name: a.players[i]!.name, character, health, temp, alive: true,

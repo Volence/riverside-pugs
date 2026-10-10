@@ -357,6 +357,11 @@ export interface CastMatchView {
   lastRound: CastRoundResult | null;
   /** For a followed booking: which game of how many. */
   game: { number: number; of: number } | null;
+  /** Team A's chance of winning right now from the scoreboard and the maps
+   *  left (src/winProb.ts). Null when it cannot be priced, when the match is
+   *  not live, or when a producer override changed a score, since the odds
+   *  would then disagree with the score on screen. */
+  winChanceA?: number | null;
 }
 
 export interface CastSurvivor {

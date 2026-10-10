@@ -198,6 +198,12 @@
 .ov-results__verdict { margin: 22px 0 0; font: 500 28px var(--font-body); color: var(--bone); }
 .ov-results__verdict span { color: var(--text-muted); }
 .ov-results__boxes { display: flex; gap: 28px; margin-top: 28px; animation: ov-rise 600ms 400ms both; }
+/* Win chance from here (src/winProb.ts): one split bar in team colours. */
+.ov-odds { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 4px 18px; width: 900px; margin: 22px auto 0; animation: ov-rise 600ms 300ms both; }
+.ov-odds__end { font: 400 30px var(--font-display); color: var(--bone); white-space: nowrap; }
+.ov-odds__bar { display: flex; gap: 3px; height: 12px; }
+.ov-odds__bar span { transition: width 800ms ease; }
+.ov-odds__label { grid-column: 1 / -1; text-align: center; font: 500 16px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
 .ov-table.ov-rbox { position: static; width: 820px; border-left: 8px solid var(--c); background: var(--panel); }
 .ov-rbox thead th { font: 500 16px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); padding: 10px 12px; text-align: right; }
 .ov-rbox thead th:first-child { width: 340px; text-align: left; font: 400 26px var(--font-display); letter-spacing: 0.02em; color: var(--bone); }
