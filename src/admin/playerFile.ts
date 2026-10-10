@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { abandonsOfPlayer, type AbandonRecord } from './matches.js';
 import { aliasesOf, resolveAlias } from '../aliases.js';
 import { nameHistory } from '../playerNames.js';
 import { discordHistoryOf, getPlayer } from '../players.js';
@@ -53,6 +54,8 @@ export interface PlayerFile {
       penalties: ReturnType<typeof penaltyHistory>;
       timeout: { until: string; offenses: number; kind: PenaltyKind } | null;
       discordSanctions: SanctionRow[];
+      /** Every abandon, with whether its rating loss was restored. */
+      abandons: AbandonRecord[];
     };
     matches: RecentMatchRow[];
     conduct: ConductSection;
@@ -168,6 +171,7 @@ export function playerFile(
         penalties: penaltyHistory(db, canonical),
         timeout: timeout ? { until: timeout.until.toISOString(), offenses: timeout.offenses, kind: timeout.kind } : null,
         discordSanctions: sanctionsForPlayer(db, canonical).map((s) => redactDiscordSanction(db, s, viewer.steamid)),
+        abandons: abandonsOfPlayer(db, canonical),
       },
       matches,
       conduct: conductOf(db, canonical),

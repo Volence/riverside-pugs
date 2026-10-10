@@ -4,6 +4,7 @@ import { Panel } from '../../../components/bits';
 import { fmtTime, type Run } from '../useAction';
 import { timeoutOffenses } from '../../../format';
 import { sanctionText } from '../AdminTicket';
+import { RestoreRating, abandonOutcome, restoredText } from '../RestoreRating';
 
 const LENGTHS: [value: string, label: string][] = [
   ['', 'Permanent'], ['60', '1 hour'], ['1440', '1 day'], ['10080', '1 week'], ['43200', '30 days'],
@@ -18,6 +19,13 @@ export function StandingSection(
   const s = d.sections.standing;
   const [reason, setReason] = useState('');
   const [minutes, setMinutes] = useState('');
+  const abandons = s.abandons ?? [];
+  // The abandon an "Abandoned match #N" ban was filed for, if it has a record.
+  const abandonOfBan = (reason: string) => {
+    const m = /^Abandoned match #(\d+)$/.exec(reason);
+    return m ? abandons.find((a) => a.matchId === Number(m[1])) ?? null : null;
+  };
+  const activeAbandon = s.activeBan ? abandonOfBan(s.activeBan.reason) : null;
 
   return (
     <Panel class="file-section">
@@ -36,6 +44,11 @@ export function StandingSection(
                 body: 'The ban is lifted here and on every game server.',
                 confirmLabel: 'Unban',
               })}>Unban</button>
+          )}
+          {/* Lifting an abandon ban does not give the rating back; staff
+              who decide it was not the player's fault do that here too. */}
+          {can('ban') && activeAbandon && !activeAbandon.restoredAt && (
+            <>{' '}<RestoreRating matchId={activeAbandon.matchId} who={d.header.name} busy={busy} run={run} /></>
           )}
         </div>
       ) : can('ban') ? (
@@ -65,9 +78,26 @@ export function StandingSection(
             <li key={b.id}>
               {fmtTime(b.createdAt)}: <strong>{b.reason}</strong> ({b.expiresAt ? `until ${fmtTime(b.expiresAt)}` : 'permanent'})
               {b.liftedAt && <span class="muted">, lifted {fmtTime(b.liftedAt)}{b.liftedByName ? ` by ${b.liftedByName}` : ''}</span>}
+              {(() => { const a = abandonOfBan(b.reason); return a?.restoredAt ? <span class="muted">{restoredText(a)}</span> : null; })()}
             </li>
           ))}
         </ul>
+      )}
+
+      {abandons.length > 0 && (
+        <>
+          <h4>Abandons</h4>
+          <p class="muted">Every abandon costs a rating loss. Restore it only when the abandon was not their fault.</p>
+          <ul class="admin-list">
+            {abandons.map((a) => (
+              <li key={a.matchId}>
+                <a href={`/match/${a.matchId}`}>#{a.matchId}</a>: {abandonOutcome(a)}
+                {a.restoredAt ? <span class="muted">{restoredText(a)}</span>
+                  : can('ban') ? <>{' '}<RestoreRating matchId={a.matchId} who={d.header.name} busy={busy} run={run} /></> : null}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       {(s.discordSanctions ?? []).length > 0 && (

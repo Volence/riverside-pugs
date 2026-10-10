@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { abandonOf } from './matches.js';
 import { banIsWithheld, WITHHELD_REASON } from './banRedaction.js';
 import { canOpenFile, type FileViewer } from './fileAccess.js';
 import { fmtBanLength } from './timeline/bans.js';
@@ -27,6 +28,9 @@ export interface PeopleBanRow {
   canOpen: boolean;
   /** An alt hold (src/altHolds.ts), not a ban staff issued. */
   hold: boolean;
+  /** For an abandon ban: the match, and whether its rating loss was
+   *  restored (and by whom). Null for every other ban. */
+  abandon: { matchId: number; restoredAt: string | null; restoredByName: string | null; restoreReason: string | null } | null;
 }
 
 interface Row {
@@ -90,6 +94,17 @@ export function peopleBans(
       withheld,
       canOpen: canOpenFile(db, viewer, r.player_id),
       hold: r.kind === 'alt_hold',
+      abandon: abandonFor(db, r.player_id, r.reason),
     };
   }).filter((b) => (filter === 'all' ? true : filter === 'active' ? b.active : !b.active));
+}
+
+/** The abandon an "Abandoned match #N" ban was filed for, when it has a
+ *  match_abandons row (abandons before 2026-10-10 have none). */
+function abandonFor(db: DB, steamid: string, reason: string): PeopleBanRow['abandon'] {
+  const m = /^Abandoned match #(\d+)$/.exec(reason);
+  if (!m) return null;
+  const a = abandonOf(db, Number(m[1]));
+  if (!a || a.steamid !== steamid) return null;
+  return { matchId: a.matchId, restoredAt: a.restoredAt, restoredByName: a.restoredByName, restoreReason: a.restoreReason };
 }
