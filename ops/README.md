@@ -17,23 +17,6 @@ Install the pull on the workstation (systemd user units in ~/.config/systemd/use
 Restore: stop the site, `gunzip -c pug-....db.gz > /home/pug/app/data/pug.db`,
 remove `pug.db-wal` and `pug.db-shm`, `chown pug:pug`, start the site.
 
-## Chicago (NFO) file pull
-
-`pull-chicago-files.py` runs on the Dallas box as `pug-pull-chicago.timer` (every
-2 minutes). It pulls Chicago's match demos and replay files over FTP into the
-site's demo and replay directories, then deletes them there. Only files whose
-size stopped changing between runs are taken, so a demo still being written is
-left alone. Config: `/etc/pug-chicago.env` (root, 0600).
-
-`src/reindex.ts` links whatever lands to its match, since the files arrive after
-the match ended.
-
-Install:
-
-    scp ops/pull-chicago-files.py root@45.32.199.85:/usr/local/bin/pug-pull-chicago
-    scp ops/pug-pull-chicago.service ops/pug-pull-chicago.timer root@45.32.199.85:/etc/systemd/system/
-    ssh root@45.32.199.85 'chmod +x /usr/local/bin/pug-pull-chicago && systemctl daemon-reload && systemctl enable --now pug-pull-chicago.timer'
-
 ## Retention
 
 Demos and replays are pruned by the web app (daily, and 30 s after boot), with
