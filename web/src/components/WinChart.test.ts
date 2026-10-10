@@ -42,4 +42,13 @@ describe('winSummary', () => {
     expect(winSummary(line)[0]).toBe('Team B were ahead on the odds from the first half to the last.');
     expect(winSummary(line)[1]).toBe("Biggest swing: Team B's survivor half on map 1 (The Crane), which took Team B from 50% to 80%.");
   });
+
+  it('speaks in the present for a match still being played, and never claims a winner', () => {
+    const line: WinLine = { points: points.slice(0, 3), turning: 1, winnerLow: null, halves: 10, halvesLeft: 6 };
+    expect(winSummary(line)).toEqual([
+      'Right now: Team A 52%, Team B 48%, with 6 survivor halves left to play.',
+      "Biggest swing so far: Team A's survivor half on map 1 (The Crane), which took Team B from 50% to 58%.",
+    ]);
+    expect(winSummary({ ...line, halvesLeft: 1 })[0]).toContain('1 survivor half left');
+  });
 });

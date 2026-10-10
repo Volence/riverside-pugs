@@ -13,6 +13,8 @@ import { PageHeader } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed } from '../components/StatTable';
 import { Viewer } from '../replay/Viewer';
+import { WinChart, fmtChance } from '../components/WinChart';
+import type { WinLine } from '../api';
 
 /** Name lookup for the viewer's follow row and timeline rail, from the
  *  rosters this card already has. */
@@ -119,6 +121,7 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
           </>
         }
       />
+      {m.winLine && <LiveOdds line={m.winLine} />}
       {m.spectate && <SpectatePanel spectate={m.spectate} />}
       <Viewer spec={{ kind: 'live-match', matchId: m.id }} live names={namesFor(m)} />
 
@@ -189,6 +192,36 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
  * Fetched here rather than lifted into Live, so the polling loop above is not
  * made to carry data it never uses while a match IS live.
  */
+/**
+ * Both teams' chance right now as one split bar, the line so far behind a
+ * toggle once a full map has been played. Same model as the finished match
+ * page (src/winProb.ts): the scoreboard and the maps still to play, never
+ * the ratings.
+ */
+function LiveOdds({ line }: { line: WinLine }) {
+  const p = line.points[line.points.length - 1].pA;
+  const pctA = Math.round(p * 1000) / 10;
+  return (
+    <div class="liveodds">
+      <div class="liveodds__labels">
+        <span>Team A {fmtChance(p)}</span>
+        <span class="muted">win chance</span>
+        <span>Team B {fmtChance(1 - p)}</span>
+      </div>
+      <div class="liveodds__bar" role="img" aria-label={`Win chance: Team A ${fmtChance(p)}, Team B ${fmtChance(1 - p)}`}>
+        <span class="liveodds__a" style={{ width: `${pctA}%` }} />
+        <span class="liveodds__b" />
+      </div>
+      {line.points.length >= 3 && (
+        <details class="liveodds__more">
+          <summary>The line so far</summary>
+          <WinChart line={line} />
+        </details>
+      )}
+    </div>
+  );
+}
+
 function NothingLive() {
   const { data: queue } = useFetch((s) => api.queue(s), []);
   const { data: recent } = useFetch((s) => api.matches(s), []);

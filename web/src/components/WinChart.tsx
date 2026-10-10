@@ -36,8 +36,20 @@ export function winSummary(line: WinLine): string[] {
   const out: string[] = [];
   const pts = line.points;
   const last = pts[pts.length - 1];
-  const winner: Team | null = last.pA === 1 ? 'a' : last.pA === 0 ? 'b' : null;
   const chanceOf = (t: Team, p: number) => (t === 'a' ? p : 1 - p);
+  if ((line.halvesLeft ?? 0) > 0) {
+    const left = line.halvesLeft!;
+    out.push(`Right now: Team A ${fmtChance(last.pA)}, Team B ${fmtChance(1 - last.pA)}, with ${left} survivor ${left === 1 ? 'half' : 'halves'} left to play.`);
+    if (line.turning !== null) {
+      const before = pts[line.turning - 1];
+      const at = pts[line.turning];
+      const toward: Team = at.pA > before.pA ? 'a' : 'b';
+      out.push(`Biggest swing so far: ${describeShort(at)}, which took ${TEAM_NAME[toward]} from ${
+        fmtChance(chanceOf(toward, before.pA))} to ${fmtChance(chanceOf(toward, at.pA))}.`);
+    }
+    return out;
+  }
+  const winner: Team | null = last.pA === 1 ? 'a' : last.pA === 0 ? 'b' : null;
   if (winner && line.winnerLow) {
     const low = line.winnerLow.p;
     if (low < 0.25) {
@@ -87,9 +99,14 @@ export function WinChart({ line }: { line: WinLine }) {
 
   const pts = line.points;
   const n = pts.length;
+  // A live line's last point is a chance, not a result.
+  const finished = (line.halvesLeft ?? 0) === 0;
   const plotW = width - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
-  const x = (i: number) => PAD.left + (n === 1 ? 0 : (i / (n - 1)) * plotW);
+  // A live line keeps room for the halves still to come, so the line grows
+  // across the match instead of stretching to fill the width.
+  const span = n - 1 + (line.halvesLeft ?? 0);
+  const x = (i: number) => PAD.left + (span === 0 ? 0 : (i / span) * plotW);
   const y = (p: number) => PAD.top + (1 - p) * plotH;
   const mid = y(0.5);
   // A note sits on the far side of its dot from the 50% rule, where the line
@@ -167,9 +184,14 @@ export function WinChart({ line }: { line: WinLine }) {
               {pts[n - 1].pA >= 0.5 ? 'Team A' : 'Team B'} at {fmtChance(low.p)}
             </text>
           )}
+          {!finished && (
+            <text class="winchart__maplabel" x={(x(n - 1) + width - PAD.right) / 2} y={H - PAD.bottom + 18} text-anchor="middle">
+              still to play
+            </text>
+          )}
           {/* Hit targets: a full-height column per point, wider than the dot. */}
           {pts.map((_, i) => {
-            const half = n === 1 ? plotW / 2 : plotW / (n - 1) / 2;
+            const half = span === 0 ? plotW / 2 : plotW / span / 2;
             return (
               <rect key={i} class="winchart__hit" x={x(i) - half} y={0} width={half * 2} height={H}
                     onMouseEnter={() => setHover(i)} onTouchStart={() => setHover(i)} />
@@ -184,8 +206,8 @@ export function WinChart({ line }: { line: WinLine }) {
             <div class="winchart__tiphead">{describePoint(hovered, pts[hover - 1])}</div>
             <div>Score {hovered.scoreA} - {hovered.scoreB}</div>
             <div>
-              Team A {fmtChance(hovered.pA, hover === n - 1)}
-              {' · '}Team B {fmtChance(1 - hovered.pA, hover === n - 1)}
+              Team A {fmtChance(hovered.pA, finished && hover === n - 1)}
+              {' · '}Team B {fmtChance(1 - hovered.pA, finished && hover === n - 1)}
             </div>
           </div>
         )}
@@ -200,8 +222,8 @@ export function WinChart({ line }: { line: WinLine }) {
                 <tr key={i}>
                   <td>{describePoint(pt, pts[i - 1])}</td>
                   <td class="num">{pt.scoreA} - {pt.scoreB}</td>
-                  <td class="num">{fmtChance(pt.pA, i === n - 1)}</td>
-                  <td class="num">{fmtChance(1 - pt.pA, i === n - 1)}</td>
+                  <td class="num">{fmtChance(pt.pA, finished && i === n - 1)}</td>
+                  <td class="num">{fmtChance(1 - pt.pA, finished && i === n - 1)}</td>
                 </tr>
               ))}
             </tbody>

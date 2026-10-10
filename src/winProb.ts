@@ -25,6 +25,8 @@
 import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
 import { unrecordedOrdinals } from './roundStats.js';
+import { campaignRegistry } from './campaignRegistry.js';
+import { stopAfterMap } from './stopPoint.js';
 
 /** Score bucket width. Half scores run 0 to about 1,800; 20 keeps every
  *  convolution small without blurring a lead that decides a match. */
@@ -215,50 +217,33 @@ export interface WinLine {
   /** Index into points of the half with the biggest swing (from the point
    *  before it), or null when nothing moved. */
   turning: number | null;
-  /** The winner's lowest chance along the way, and where; null for a draw. */
+  /** The winner's lowest chance along the way, and where; null for a draw
+   *  and for a match still being played. */
   winnerLow: { index: number; p: number } | null;
   /** How many halves of history the odds come from. */
   halves: number;
+  /** Survivor halves still to play after the last point: 0 once finished. */
+  halvesLeft: number;
 }
 
+/** One survivor half already played, in play order. */
+export interface PlayedHalf { ordinal: number; half: number; survTeam: 'a' | 'b'; score: number; map: string }
+/** One survivor half still to come: whose, and on which map. */
+export interface FutureHalf { team: 'a' | 'b'; map: string }
+
 /**
- * The line for one finished match, or null when its score cannot carry one:
- * not completed, a map without both halves, or a map whose stored score is
- * not a result (see unrecordedOrdinals).
+ * The line through `played`, pricing each point against every later played
+ * half plus `future`. Shared by finished matches (no future) and live ones.
  */
-export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db)): WinLine | null {
-  const match = db.prepare(
-    'SELECT state, winner, team_a_score AS a, team_b_score AS b FROM matches WHERE id = ?',
-  ).get(matchId) as { state: string; winner: string | null; a: number; b: number } | undefined;
-  if (!match || match.state !== 'completed') return null;
-
-  const rounds = db.prepare(
-    `SELECT mr.ordinal, mr.half, mr.surv_team AS survTeam, mr.score, mm.map
-     FROM match_rounds mr
-     JOIN match_maps mm ON mm.match_id = mr.match_id AND mm.ordinal = mr.ordinal
-     WHERE mr.match_id = ? ORDER BY mr.ordinal, mr.half`,
-  ).all(matchId) as { ordinal: number; half: number; survTeam: 'a' | 'b'; score: number; map: string }[];
-  if (rounds.length === 0) return null;
-  const mapCount = (db.prepare('SELECT COUNT(*) AS n FROM match_maps WHERE match_id = ?').get(matchId) as { n: number }).n;
-  if (rounds.length !== mapCount * 2) return null;
-  for (let i = 0; i < rounds.length; i += 2) {
-    const [h1, h2] = [rounds[i], rounds[i + 1]];
-    if (h1.ordinal !== h2.ordinal || h1.half !== 1 || h2.half !== 2 || h1.survTeam === h2.survTeam) return null;
-  }
-  if (unrecordedOrdinals(db, matchId).size > 0) return null;
-  const sumA = rounds.filter((r) => r.survTeam === 'a').reduce((n, r) => n + r.score, 0);
-  const sumB = rounds.filter((r) => r.survTeam === 'b').reduce((n, r) => n + r.score, 0);
-  // The rounds have to add up to the result the page shows, or the line
-  // would end somewhere the scoreboard does not.
-  if (sumA !== match.a || sumB !== match.b) return null;
-
-  const points: WinPoint[] = [];
+export function winLineFrom(model: WinModel, played: PlayedHalf[], future: FutureHalf[]): WinLine {
+  const slots: FutureHalf[] = [...played.map((r) => ({ team: r.survTeam, map: r.map })), ...future];
+  const rest = (from: number, team: 'a' | 'b') => slots.slice(from).filter((x) => x.team === team).map((x) => x.map);
+  const points: WinPoint[] = [
+    { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: winChance(model, 0, rest(0, 'a'), rest(0, 'b')) },
+  ];
   let a = 0;
   let b = 0;
-  const rest = (from: number, team: 'a' | 'b') =>
-    rounds.slice(from).filter((r) => r.survTeam === team).map((r) => r.map);
-  points.push({ ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: winChance(model, 0, rest(0, 'a'), rest(0, 'b')) });
-  rounds.forEach((r, i) => {
+  played.forEach((r, i) => {
     if (r.survTeam === 'a') a += r.score; else b += r.score;
     points.push({
       ordinal: r.ordinal, half: r.half, survTeam: r.survTeam, map: r.map,
@@ -275,12 +260,92 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
   if (biggest < 0.01) turning = null;
 
   let winnerLow: WinLine['winnerLow'] = null;
-  const w = a > b ? 'a' : b > a ? 'b' : null;
+  const w = future.length > 0 ? null : a > b ? 'a' : b > a ? 'b' : null;
   if (w) {
     points.forEach((pt, index) => {
       const p = w === 'a' ? pt.pA : 1 - pt.pA;
       if (!winnerLow || p < winnerLow.p - 1e-9) winnerLow = { index, p };
     });
   }
-  return { points, turning, winnerLow, halves: model.halves };
+  return { points, turning, winnerLow, halves: model.halves, halvesLeft: future.length };
+}
+
+type RoundRow = PlayedHalf & { endedAt: string | null };
+
+function roundsWithMaps(db: DB, matchId: number, table: 'match_maps' | 'match_live_maps'): RoundRow[] {
+  return db.prepare(
+    `SELECT mr.ordinal, mr.half, mr.surv_team AS survTeam, mr.score, mm.map, mr.ended_at AS endedAt
+     FROM match_rounds mr
+     JOIN ${table} mm ON mm.match_id = mr.match_id AND mm.ordinal = mr.ordinal
+     WHERE mr.match_id = ? ORDER BY mr.ordinal, mr.half`,
+  ).all(matchId) as RoundRow[];
+}
+
+/** Whether rounds are whole maps in order (half 1 then half 2, the two
+ *  halves on opposite teams), allowing a lone half 1 at the end only when
+ *  `openEnd` (a live match standing between its halves). */
+function wellFormed(rounds: PlayedHalf[], openEnd: boolean): boolean {
+  for (let i = 0; i < rounds.length; i += 2) {
+    const h1 = rounds[i];
+    const h2 = rounds[i + 1];
+    if (h1.ordinal !== i / 2 || h1.half !== 1) return false;
+    if (!h2) return openEnd;
+    if (h2.ordinal !== h1.ordinal || h2.half !== 2 || h1.survTeam === h2.survTeam) return false;
+  }
+  return true;
+}
+
+/**
+ * The line for one finished match, or null when its score cannot carry one:
+ * not completed, a map without both halves, or a map whose stored score is
+ * not a result (see unrecordedOrdinals).
+ */
+export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db)): WinLine | null {
+  const match = db.prepare(
+    'SELECT state, team_a_score AS a, team_b_score AS b FROM matches WHERE id = ?',
+  ).get(matchId) as { state: string; a: number; b: number } | undefined;
+  if (!match || match.state !== 'completed') return null;
+
+  const rounds = roundsWithMaps(db, matchId, 'match_maps');
+  if (rounds.length === 0) return null;
+  const mapCount = (db.prepare('SELECT COUNT(*) AS n FROM match_maps WHERE match_id = ?').get(matchId) as { n: number }).n;
+  if (rounds.length !== mapCount * 2 || !wellFormed(rounds, false)) return null;
+  if (unrecordedOrdinals(db, matchId).size > 0) return null;
+  const sumA = rounds.filter((r) => r.survTeam === 'a').reduce((n, r) => n + r.score, 0);
+  const sumB = rounds.filter((r) => r.survTeam === 'b').reduce((n, r) => n + r.score, 0);
+  // The rounds have to add up to the result the page shows, or the line
+  // would end somewhere the scoreboard does not.
+  if (sumA !== match.a || sumB !== match.b) return null;
+  return winLineFrom(model, rounds, []);
+}
+
+/**
+ * The line so far for a match being played, priced against the maps it still
+ * has to play: the campaign's chapters up to its stop map (see stopAfterMap).
+ * Null when that plan is unknown (no missions directory, an unregistered
+ * campaign), when the maps played do not follow it, or when the rounds so far
+ * are not whole halves in order. A half in progress counts as still to play.
+ */
+export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db)): WinLine | null {
+  const chapters = campaignRegistry(db).get(campaign)?.maps ?? [];
+  const stop = stopAfterMap(db, campaign);
+  if (chapters.length === 0 || stop === null) return null;
+  const plan = chapters.slice(0, chapters.indexOf(stop) + 1);
+  if (plan.length === 0) return null;
+
+  const played = roundsWithMaps(db, matchId, 'match_live_maps').filter((r) => r.endedAt !== null);
+  if (!wellFormed(played, true)) return null;
+  if (played.some((r) => r.ordinal >= plan.length || plan[r.ordinal].toLowerCase() !== r.map.toLowerCase())) return null;
+
+  const future: FutureHalf[] = [];
+  const last = played[played.length - 1];
+  let nextOrdinal = 0;
+  if (last) {
+    nextOrdinal = last.ordinal + 1;
+    if (last.half === 1) future.push({ team: last.survTeam === 'a' ? 'b' : 'a', map: last.map });
+  }
+  for (let o = nextOrdinal; o < plan.length; o++) {
+    future.push({ team: 'a', map: plan[o] }, { team: 'b', map: plan[o] });
+  }
+  return winLineFrom(model, played, future);
 }
