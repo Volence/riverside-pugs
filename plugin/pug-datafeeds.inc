@@ -736,8 +736,9 @@ public Action DataFeeds_PlayerDisconnect(Event event, const char[] name, bool do
 		g_bDfInGame[client] = false;
 		g_bDfTeamSent[client] = false;
 		g_bDfReadySent[client] = false;
-		// An SI life cannot outlive its player.
-		if (g_iDfOpen[client] != -1 && StatsActive()) DfCloseLife(client, DFE_DISC, -1);
+		// An SI life cannot outlive its player, and the slot's next client
+		// must not inherit it, so this closes whatever the game state.
+		if (g_iDfOpen[client] != -1) DfCloseLife(client, DFE_DISC, -1);
 	}
 	if (slot < 0) return Plugin_Continue;
 	char reason[128];
