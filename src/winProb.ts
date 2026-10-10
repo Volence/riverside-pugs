@@ -159,21 +159,24 @@ export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: 
   const ra = remaining(model, mapsA);
   const rb = remaining(model, mapsB);
   // P(gap + RA*BIN - RB*BIN > 0), summed without building the difference
-  // distribution: for each RA bucket, the RB buckets it beats are a prefix.
+  // distribution. Each bucket stands for scores spread evenly across its
+  // width, so for each RA bucket the RB buckets wholly below team A's total
+  // are a prefix, and the bucket A's total falls inside counts for the part
+  // of it below. A total exactly on a bucket centre takes half: a tie. This
+  // keeps a 1 point lead worth a little, not a whole bucket.
   const cumB = new Float64Array(rb.length + 1);
   for (let j = 0; j < rb.length; j++) cumB[j + 1] = cumB[j] + rb[j];
   const g = gap / BIN;
   let win = 0;
-  let tie = 0;
   for (let i = 0; i < ra.length; i++) {
     if (ra[i] === 0) continue;
-    // A wins when j < i + g; ties when j === i + g (only for a whole g).
     const limit = i + g;
-    const below = Math.min(rb.length, Math.max(0, Math.ceil(limit)));
-    win += ra[i] * cumB[below];
-    if (Number.isInteger(limit) && limit >= 0 && limit < rb.length) tie += ra[i] * rb[limit];
+    if (limit <= -0.5) continue;
+    if (limit >= rb.length - 0.5) { win += ra[i]; continue; }
+    const j0 = Math.round(limit);
+    win += ra[i] * (cumB[j0] + rb[j0] * (limit - j0 + 0.5));
   }
-  const raw = Math.min(1 - 1e-9, Math.max(1e-9, win + tie / 2));
+  const raw = Math.min(1 - 1e-9, Math.max(1e-9, win));
   const z = CALIBRATION * Math.log(raw / (1 - raw));
   return 1 / (1 + Math.exp(-z));
 }
@@ -270,15 +273,19 @@ export function winLineFrom(model: WinModel, played: PlayedHalf[], future: Futur
   return { points, turning, winnerLow, halves: model.halves, halvesLeft: future.length };
 }
 
-type RoundRow = PlayedHalf & { endedAt: string | null };
+type RoundRow = PlayedHalf & { endedAt: string | null; reliable: number };
 
-function roundsWithMaps(db: DB, matchId: number, table: 'match_maps' | 'match_live_maps'): RoundRow[] {
+/** Rounds with their map. For a live match the map row is LEFT joined:
+ *  match_live_maps only gains a map at MAP_RESULT, after both halves, so a
+ *  finished half 1 has no row yet and its map comes back null (the caller
+ *  fills it from the plan). */
+function roundsWithMaps(db: DB, matchId: number, table: 'match_maps' | 'match_live_maps'): (Omit<RoundRow, 'map'> & { map: string | null })[] {
   return db.prepare(
-    `SELECT mr.ordinal, mr.half, mr.surv_team AS survTeam, mr.score, mm.map, mr.ended_at AS endedAt
+    `SELECT mr.ordinal, mr.half, mr.surv_team AS survTeam, mr.score, mm.map, mr.ended_at AS endedAt, mr.reliable
      FROM match_rounds mr
-     JOIN ${table} mm ON mm.match_id = mr.match_id AND mm.ordinal = mr.ordinal
+     ${table === 'match_maps' ? 'JOIN' : 'LEFT JOIN'} ${table} mm ON mm.match_id = mr.match_id AND mm.ordinal = mr.ordinal
      WHERE mr.match_id = ? ORDER BY mr.ordinal, mr.half`,
-  ).all(matchId) as RoundRow[];
+  ).all(matchId) as (Omit<RoundRow, 'map'> & { map: string | null })[];
 }
 
 /** Whether rounds are whole maps in order (half 1 then half 2, the two
@@ -306,7 +313,7 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
   ).get(matchId) as { state: string; a: number; b: number } | undefined;
   if (!match || match.state !== 'completed') return null;
 
-  const rounds = roundsWithMaps(db, matchId, 'match_maps');
+  const rounds = roundsWithMaps(db, matchId, 'match_maps') as RoundRow[];
   if (rounds.length === 0) return null;
   const mapCount = (db.prepare('SELECT COUNT(*) AS n FROM match_maps WHERE match_id = ?').get(matchId) as { n: number }).n;
   if (rounds.length !== mapCount * 2 || !wellFormed(rounds, false)) return null;
@@ -327,15 +334,24 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
  * are not whole halves in order. A half in progress counts as still to play.
  */
 export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db)): WinLine | null {
+  // Scrims and event games choose their own maps (a stage's chapter count, a
+  // tiebreak map), which the campaign's stop map does not know about.
+  const kind = (db.prepare('SELECT kind FROM matches WHERE id = ?').get(matchId) as { kind: string } | undefined)?.kind;
+  if (kind !== 'pug') return null;
   const chapters = campaignRegistry(db).get(campaign)?.maps ?? [];
   const stop = stopAfterMap(db, campaign);
   if (chapters.length === 0 || stop === null) return null;
   const plan = chapters.slice(0, chapters.indexOf(stop) + 1);
   if (plan.length === 0) return null;
 
-  const played = roundsWithMaps(db, matchId, 'match_live_maps').filter((r) => r.endedAt !== null);
+  const rows = roundsWithMaps(db, matchId, 'match_live_maps').filter((r) => r.endedAt !== null);
+  // A score the plugin could not read is stored as a 0; pricing it as a real
+  // 0 would be a confident wrong answer.
+  if (rows.some((r) => r.reliable !== 1)) return null;
+  if (rows.some((r) => r.ordinal >= plan.length)) return null;
+  if (rows.some((r) => r.map !== null && plan[r.ordinal].toLowerCase() !== r.map.toLowerCase())) return null;
+  const played: PlayedHalf[] = rows.map((r) => ({ ...r, map: r.map ?? plan[r.ordinal] }));
   if (!wellFormed(played, true)) return null;
-  if (played.some((r) => r.ordinal >= plan.length || plan[r.ordinal].toLowerCase() !== r.map.toLowerCase())) return null;
 
   const future: FutureHalf[] = [];
   const last = played[played.length - 1];

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import type { Team, WinLine, WinPoint } from '../api';
 import { mapName } from '../format';
 
@@ -94,6 +94,9 @@ export function WinChart({ line }: { line: WinLine }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(720);
   const [hover, setHover] = useState<number | null>(null);
+  // Per chart: the Live page can hold several, and a shared id would point
+  // one chart's fills at another's clip paths.
+  const clip = `winchart-${useId()}`;
 
   useEffect(() => {
     const el = wrap.current;
@@ -125,7 +128,9 @@ export function WinChart({ line }: { line: WinLine }) {
 
   // One band per map: from the point before its first half to its second.
   const maps: { ordinal: number; map: string | null; x0: number; x1: number }[] = [];
-  for (let i = 1; i + 1 < n; i += 2) {
+  // A live line standing between halves ends on a lone half 1; its band
+  // still runs to where half 2 will land.
+  for (let i = 1; i < n; i += 2) {
     maps.push({ ordinal: pts[i].ordinal ?? maps.length, map: pts[i].map, x0: x(i - 1), x1: x(i + 1) });
   }
   const bandLabel = (m: typeof maps[number]) => {
@@ -147,8 +152,8 @@ export function WinChart({ line }: { line: WinLine }) {
              aria-label={`Win chance after every half. ${summary.join(' ')}`}
              onMouseLeave={() => setHover(null)}>
           <defs>
-            <clipPath id="winchart-above"><rect x="0" y="0" width={width} height={mid} /></clipPath>
-            <clipPath id="winchart-below"><rect x="0" y={mid} width={width} height={H - mid} /></clipPath>
+            <clipPath id={`${clip}-above`}><rect x="0" y="0" width={width} height={mid} /></clipPath>
+            <clipPath id={`${clip}-below`}><rect x="0" y={mid} width={width} height={H - mid} /></clipPath>
           </defs>
           {maps.map((m, k) => (
             <g key={k}>
@@ -167,8 +172,8 @@ export function WinChart({ line }: { line: WinLine }) {
           <rect class="winchart__swatch winchart__swatch--b" x={6} y={y(0) - 4} width={8} height={8} />
           <text class="winchart__axis" x={18} y={y(0) + 4}>Team B</text>
 
-          <path class="winchart__fill winchart__fill--a" d={areaPath} clip-path="url(#winchart-above)" />
-          <path class="winchart__fill winchart__fill--b" d={areaPath} clip-path="url(#winchart-below)" />
+          <path class="winchart__fill winchart__fill--a" d={areaPath} clip-path={`url(#${clip}-above)`} />
+          <path class="winchart__fill winchart__fill--b" d={areaPath} clip-path={`url(#${clip}-below)`} />
           <path class="winchart__line" d={linePath} />
 
           {hover !== null && (
