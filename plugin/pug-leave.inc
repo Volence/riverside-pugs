@@ -98,7 +98,10 @@ void LeaveReset()
 bool LeaveTracking()
 {
 	return (g_State == MS_Pending || g_State == MS_Live)
-		&& !g_bSelfStarted
+		// 0.3.29: a resumed tournament game is the site's game, so its drops
+		// count as they did before the restart (pause, team pool, forfeit, sub).
+		// Any other resumed booking game stays untracked, as it was.
+		&& (!g_bSelfStarted || (g_bResumed && TourneyOn()))
 		&& g_sAbandoner[0] == '\0'
 		&& (LeaveTeamMode() || g_cvLeaveBudget.IntValue > 0);
 }
