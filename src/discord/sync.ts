@@ -33,6 +33,7 @@ const ABORT_LINE_TTL_MIN = 5;
  *  lower is dropped rather than queued. */
 const ALERT_COOLDOWN_MS = 10 * 60 * 1000;
 import type { BotTransport, MessagePayload } from './transport.js';
+import { matchWinLine } from '../winProb.js';
 
 /** Team voice channels, plugged in by voice.ts. Kept as a narrow hook so this
  *  file does not depend on how channels are made. */
@@ -286,6 +287,7 @@ export class DiscordSync {
             forfeit: row.forfeit_team,
             teamA: teamA.map((p) => this.resultPlayer(p, matchId)),
             teamB: teamB.map((p) => this.resultPlayer(p, matchId)),
+            comebackFrom: comebackFrom(db, matchId),
           }));
           saveMessage(db, { kind: 'result', ref: m.ref, channelId: resultsChannel, messageId, state: 'done' });
           posted = true;
@@ -585,5 +587,16 @@ export class DiscordSync {
       srBefore: h ? displaySr(h.mu_before, h.sigma_before) : null,
       srAfter: h ? displaySr(h.mu_after, h.sigma_after) : null,
     };
+  }
+}
+
+/** The winner's lowest win chance along the way when it was a real comeback
+ *  (under 25%), else null. Never lets a fault in the odds stop a result card. */
+function comebackFrom(db: DB, matchId: number): number | null {
+  try {
+    const low = matchWinLine(db, matchId)?.winnerLow;
+    return low && low.p < 0.25 ? low.p : null;
+  } catch {
+    return null;
   }
 }
