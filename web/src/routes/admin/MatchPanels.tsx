@@ -396,7 +396,7 @@ export function RecentResultsPanel({ data, busy, run }: { data: AdminOverview; b
         <>
           <h4>Voided</h4>
           <ul class="admin-list">
-            {data.voided.map((v) => <li key={v.id}>#{v.id} {campaignName(v.campaign)}: {v.voidReason} <span class="muted">({fmtTime(v.voidedAt)})</span></li>)}
+            {data.voided.map((v) => <li key={v.id}><a href={`/match/${v.id}`}>#{v.id}</a> {campaignName(v.campaign)}: {v.voidReason} <span class="muted">({fmtTime(v.voidedAt)})</span></li>)}
           </ul>
         </>
       )}
