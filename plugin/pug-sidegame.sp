@@ -538,13 +538,29 @@ public void OnConfigsExecuted()
 	// this side game's players were handed the side password. See the file
 	// header note; this mirrors pug-match's own re-assertion.
 	if (g_sPassword[0] != '\0') ServerCommand("sv_password \"%s\"", g_sPassword);
+	SideAutoTrackOff();
 	char map[64];
 	GetCurrentMap(map, sizeof(map));
 	PugLog("PUGSIDE event=mapstart token=%s map=%s", g_sToken, map);
 }
 
+/** Audit 2026-10-09 E2: riverside/shared.cfg turns sm_pug_auto_track back on
+ *  every map (sm_cvar ... every_map, run from the 2v2/3v3 map cfgs). A side
+ *  game must never be recorded, so while one is armed it is turned off again
+ *  after configs and at every round start (the map cfg's timing against
+ *  OnConfigsExecuted is not something to rely on; round_start is always
+ *  before ready-up goes live, which is when auto-track adopts a game).
+ *  Cmd_Start saved the box's own value; Cmd_Stop puts it back. */
+void SideAutoTrackOff()
+{
+	if (!g_bActive) return;
+	ConVar at = FindConVar("sm_pug_auto_track");
+	if (at != null && at.IntValue != 0) at.IntValue = 0;
+}
+
 public void Event_RoundStart(Event e, const char[] n, bool d)
 {
+	SideAutoTrackOff();
 	g_bRoundEnded = false;
 	g_bHalfWasLive = false;
 	for (int c = 0; c <= MAXPLAYERS; c++) g_iAttempts[c] = 0;
