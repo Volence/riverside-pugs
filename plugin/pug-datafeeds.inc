@@ -729,7 +729,9 @@ public Action DataFeeds_PlayerDisconnect(Event event, const char[] name, bool do
 		slot = DfSlotOfNetworkId(networkid);
 	}
 	bool inGame = client >= 1 && client <= MaxClients && g_bDfInGame[client];
-	int secs = (client >= 1 && client <= MaxClients && IsClientConnected(client)) ? RoundToFloor(GetClientTime(client)) : -1;
+	// L4D1's player_disconnect leaves "bot" false for bots, so the check above
+	// lets them through; GetClientTime throws on a fake client.
+	int secs = (client >= 1 && client <= MaxClients && IsClientConnected(client) && !IsFakeClient(client)) ? RoundToFloor(GetClientTime(client)) : -1;
 	if (client >= 1 && client <= MaxClients)
 	{
 		g_iDfConnSlot[client] = -1;
