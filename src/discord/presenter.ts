@@ -349,6 +349,9 @@ export interface ResultView {
   forfeit?: 'a' | 'b' | null;
   teamA: ResultPlayer[];
   teamB: ResultPlayer[];
+  /** The winner's lowest win chance when they came back from under 25%
+   *  (src/winProb.ts), else null or absent. */
+  comebackFrom?: number | null;
 }
 
 function srChange(p: ResultPlayer): string {
@@ -367,7 +370,8 @@ export function renderResult(v: ResultView): MessagePayload {
       title: `PUG #${v.matchId} result: ${v.campaignName}`,
       url: `${v.publicUrl}/match/${v.matchId}`,
       color: COLOR.win,
-      description: `**${headline}**, ${v.scoreA} to ${v.scoreB}`,
+      description: `**${headline}**, ${v.scoreA} to ${v.scoreB}${
+        v.comebackFrom != null ? ` · comeback from ${Math.max(1, Math.round(v.comebackFrom * 100))}% to win` : ''}`,
       fields: [
         { name: `Team A · ${v.scoreA}`, value: v.teamA.map(srChange).join('\n') || '_nobody_', inline: true },
         { name: `Team B · ${v.scoreB}`, value: v.teamB.map(srChange).join('\n') || '_nobody_', inline: true },

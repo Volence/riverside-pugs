@@ -226,6 +226,17 @@ describe('renderResult', () => {
     expect(buttons(p)).toContainEqual(expect.objectContaining({ url: `${URL_}/match/42` }));
   });
 
+  it('a comeback from under 25% says so, and an ordinary win says nothing', () => {
+    const base = {
+      matchId: 42, campaignName: 'Dead Air', publicUrl: URL_, scoreA: 1269, scoreB: 1175, winner: 'a' as const,
+      teamA: [{ ...alice, srBefore: 1200, srAfter: 1220 }], teamB: [{ ...bob, srBefore: 900, srAfter: 880 }],
+    };
+    expect(renderResult({ ...base, comebackFrom: 0.079 }).embeds[0]!.description).toBe('**Team A wins**, 1269 to 1175 · comeback from 8% to win');
+    expect(renderResult({ ...base, comebackFrom: 0.002 }).embeds[0]!.description).toContain('comeback from 1% to win');
+    expect(renderResult({ ...base, comebackFrom: null }).embeds[0]!.description).toBe('**Team A wins**, 1269 to 1175');
+    expect(renderResult(base).embeds[0]!.description).toBe('**Team A wins**, 1269 to 1175');
+  });
+
   it('a forfeit names the side that forfeited', () => {
     const p = renderResult({
       matchId: 9, campaignName: 'No Mercy', publicUrl: URL_, scoreA: 300, scoreB: 2100, winner: 'b', forfeit: 'a', teamA: [], teamB: [],
