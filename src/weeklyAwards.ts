@@ -199,8 +199,13 @@ function srClimbs(db: DB, week: string): Map<string, number> {
     `SELECT rh.player_id AS steamid, rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
      FROM rating_history rh JOIN matches m ON m.id = rh.match_id
      WHERE m.id IN (${WEEK_MATCHES})
+        -- An abandon loss on a match with no result (2026-10-10) is a rating
+        -- event too: leaving it out would let a week that ends on one read
+        -- as the climb from before it.
+        OR (m.state = 'aborted' AND m.kind = 'pug' AND m.ended_at >= ? AND m.ended_at < ?
+            AND EXISTS (SELECT 1 FROM match_abandons a WHERE a.match_id = m.id AND a.restored_at IS NULL))
      ORDER BY m.ended_at, m.id`,
-  ).all(from, to) as { steamid: string; mu_before: number; sigma_before: number; mu_after: number; sigma_after: number }[];
+  ).all(from, to, from, to) as { steamid: string; mu_before: number; sigma_before: number; mu_after: number; sigma_after: number }[];
   const first = new Map<string, number>(); const last = new Map<string, number>();
   for (const r of rows) {
     if (!first.has(r.steamid)) first.set(r.steamid, displaySr(r.mu_before, r.sigma_before));

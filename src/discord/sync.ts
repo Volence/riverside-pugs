@@ -285,6 +285,10 @@ export class DiscordSync {
             scoreB: row.team_b_score,
             winner: row.winner,
             forfeit: row.forfeit_team,
+            abandonedBy: (db.prepare(
+              `SELECT COALESCE(p.name, a.player_id) AS name FROM match_abandons a LEFT JOIN players p ON p.steamid = a.player_id
+               WHERE a.match_id = ? AND a.decided IS NOT NULL`,
+            ).get(matchId) as { name: string } | undefined)?.name ?? null,
             teamA: teamA.map((p) => this.resultPlayer(p, matchId)),
             teamB: teamB.map((p) => this.resultPlayer(p, matchId)),
             comebackFrom: comebackFrom(db, matchId),
