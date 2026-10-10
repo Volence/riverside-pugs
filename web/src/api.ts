@@ -227,6 +227,9 @@ export interface MatchSummary {
   winner: Winner;
   /** The team that forfeited with !gg, null when the match was played out. */
   forfeitTeam?: 'a' | 'b' | null;
+  /** Who abandoned it after it was already decided (it completed, the
+   *  leading team winning); null otherwise. */
+  abandonedBy?: string | null;
 }
 
 export interface MatchPlayerStats {
@@ -960,7 +963,7 @@ export interface AdminOverview {
      *  Optional only for a browser holding new JS against an older server. */
     practice?: { leaseId: number; kind: PracticeKind; ownerName: string; ending: boolean } | null;
   }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[] }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[]; abandon?: AbandonRecord | null }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
    *  path ended it, and is null for an admin abort or a reaped match. */
   aborted: {
@@ -969,6 +972,8 @@ export interface AdminOverview {
     noShows?: number;
     /** Who it was about and what each got. Optional for an older server. */
     parties?: AbortParty[];
+    /** The abandon behind it, for Restore rating. Optional for an older server. */
+    abandon?: AbandonRecord | null;
   }[];
   voided: { id: number; campaign: string; voidedAt: string; voidReason: string }[];
   queue: NamedPlayer[];
@@ -1593,6 +1598,8 @@ export interface PlayerFileData {
       timeout: AdminPlayerDetail['timeout'];
       /** Optional only for a browser holding new JS against an older server. */
       discordSanctions?: DiscordSanction[];
+      /** Every abandon and whether its rating loss was restored. Optional for an older server. */
+      abandons?: AbandonRecord[];
     };
     matches: AdminPlayerDetail['matches'];
     /** Optional only for a browser holding new JS against an older server. */
@@ -1634,6 +1641,14 @@ export interface NeedsALookRow {
  *  plus the name to print. Mirrors MeasuredRow in src/admin/needsALook.ts. */
 export type MeasuredRow = AnalyzerRank & { name: string };
 
+/** One abandon as staff see it (owner rulings 2026-10-10): `decided` is the
+ *  team that won a match left already decided, null when it aborted. A
+ *  restored one no longer costs the quitter rating. */
+export interface AbandonRecord {
+  matchId: number; steamid: string; decided: 'a' | 'b' | null;
+  restoredAt: string | null; restoredByName: string | null; restoreReason: string | null;
+}
+
 export interface PeopleBan {
   id: number; steamid: string; name: string; reason: string; length: string;
   createdAt: string; expiresAt: string | null; createdByName: string | null;
@@ -1641,6 +1656,8 @@ export interface PeopleBan {
   ticketId: number | null; withheld: boolean; canOpen: boolean;
   /** An alt hold rather than a ban staff issued. Optional for an older server. */
   hold?: boolean;
+  /** An abandon ban's match and whether its rating loss was restored. */
+  abandon?: { matchId: number; restoredAt: string | null; restoredByName: string | null; restoreReason: string | null } | null;
 }
 
 /** The People desk. Moderators may call all of it; the admin-only actions a
@@ -2707,6 +2724,9 @@ export const adminApi = {
   /** Five more minutes on this match's no-show deadline, for everyone missing. */
   noShowExtend: (matchId: number) => post<{ ok: true; extraMinutes: number }>(`/api/admin/live/${matchId}/noshow-extend`),
   voidMatch: (id: number, reason: string) => post(`/api/admin/matches/${id}/void`, { reason }),
+  /** Give an abandoner back one abandon's rating loss; recomputes the season. */
+  restoreAbandonRating: (matchId: number, reason: string) =>
+    post(`/api/admin/matches/${matchId}/restore-abandon-rating`, { reason }),
   serverIdle: (id: number) => post(`/api/admin/servers/${id}/idle`),
   serverEnabled: (id: number, enabled: boolean) => post(`/api/admin/servers/${id}/enabled`, { enabled }),
   serverSourcetv: (id: number, enabled: boolean, port: string, password: string) =>

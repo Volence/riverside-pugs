@@ -513,7 +513,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
   );
   const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
     : aborted ? 'Aborted'
-      : resultLabel(match.winner!, match.forfeitTeam);
+      : resultLabel(match.winner!, match.forfeitTeam, match.abandonedBy);
 
   // An admin integrity clip links here with `?ordinal=&half=&t=`, computed
   // once: it names the round the link was ABOUT, not whatever round is on
@@ -563,7 +563,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
           <p class="muted">
             {aborted
               ? 'This match was cancelled before it finished, so nothing here counts: no winner was '
-                + 'recorded and nobody\u2019s rating moved. The scoreline is how far the two teams got, '
+                + 'recorded and the rating of nobody who stayed moved. The scoreline is how far the two teams got, '
                 + 'and the maps, stats and replays below are whatever was captured up to the moment it ended.'
               : `This match was voided by an admin${match.voidReason ? `: ${match.voidReason}` : ''}. `
                 + 'It no longer counts anywhere, and the season\u2019s ratings were rebuilt without it.'}
