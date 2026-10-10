@@ -3,6 +3,7 @@ import type { DB } from './db.js';
 import { Queue, QUEUE_SIZE } from './queue.js';
 import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase, type PersistedLobby } from './lobby.js';
 import { balanceTeams } from './balance.js';
+import { balanceMu } from './newcomerPrior.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
@@ -502,10 +503,14 @@ export class Matchmaker {
       this.dissolveLobby(id);
       for (const p of result.players) this.sideOptIn.delete(p);
       const ratings = getRatings(this.db, result.players);
+      // A first-time player is balanced as weaker than their starting rating
+      // when newcomer_balance_offset is set (see newcomerPrior.ts); the stored
+      // rating is never changed.
+      const mus = balanceMu(this.db, ratings);
       const { teamA, teamB } = balanceTeams(
         result.players.map((steamid) => {
           const r = ratings.get(steamid)!;
-          return { steamid, mu: r.mu, sigma: r.sigma };
+          return { steamid, mu: mus.get(steamid) ?? r.mu, sigma: r.sigma };
         }),
       );
       const season = currentSeasonId(this.db);
