@@ -56,6 +56,25 @@
  * campaign and, when named, append it to the playlist. !extend still emits
  * cmd=extend, which the site treats as !addcampaign with no name.
  *
+ * 1.4.0 adds l4d_booking_id, the boot marker the site's crash recovery reads.
+ *
+ * 1.5.0 (site plan 2026-10-11, scrims in game): the site pushes the booking's
+ * clock as cvars (l4d_booking_title, _campaign, _ends, _next_at, _next_name,
+ * _close_at; epochs in seconds, 0 for none), and from them this plugin:
+ * answers !time for anyone; counts down to the next campaign and to the close
+ * after the last one, in the center of the screen each second of the last
+ * minute and in chat at 60, 30 and 10 seconds; and re-tells each player the
+ * booking's state once they are in game (5 s after the admin check, once on a
+ * team), after every map load, since lines said during a load are never seen.
+ * A captain's !sub <name> lets someone play for their side (cmd=sub, the
+ * site adds a ringer); !allow now lets someone watch. On a tournament box
+ * !sub belongs to pug-match's pug-tourney.inc and is left alone here. The
+ * epoch cvars are read as strings: a ConVar keeps its number as a float,
+ * which is up to 64 s off at today's epochs.
+ * A list commit also starts the grace for anyone connected who is not on the
+ * new list, so someone removed or replaced on the site mid chapter is not left
+ * playing until the next map.
+ *
  * Build: ./build-booking.sh
  */
 #pragma semicolon 1
@@ -63,7 +82,7 @@
 #include <sourcemod>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "1.4.0"
+#define PLUGIN_VERSION "1.5.0"
 
 /** Longest arg= text on a PUGBOOK line, plus the null terminator. Matches
  *  the site parser's cap (Task 6). */
@@ -75,6 +94,23 @@ ConVar g_cvNotice;
 ConVar g_cvCaptains;
 ConVar g_cvGrace;
 ConVar g_cvBlock;
+ConVar g_cvTitle;
+ConVar g_cvCampaign;
+ConVar g_cvEnds;
+ConVar g_cvNextAt;
+ConVar g_cvNextName;
+ConVar g_cvCloseAt;
+
+/** No countdown mark said yet for the current next_at / close_at. */
+#define MARK_NONE 1000
+/** Seconds after the admin check before a player is told the booking's state. */
+#define TELL_DELAY 5.0
+/** Chat marks of the countdowns, largest first. */
+static const int g_iMarks[] = { 60, 30, 10 };
+int g_iNextSaid = MARK_NONE;
+int g_iCloseSaid = MARK_NONE;
+/** GetEngineTime() from which a client is told the state; 0.0 = nothing pending. */
+float g_fTellAt[MAXPLAYERS + 1];
 
 /** The committed allowlist (SteamID64 -> true) and whether one has ever been
  *  committed. Plugin globals survive map changes; an srcds restart (every
@@ -116,6 +152,19 @@ public void OnPluginStart()
 	// site's setup and recovery, never by its minute re-push. A fresh srcds
 	// starts with it empty, which is how the site tells a restart.
 	CreateConVar("l4d_booking_id", "", "The booking this box was set up for; empty after a server start.", FCVAR_DONTRECORD);
+	// Scrims in game (1.5.0): the booking's clock, pushed by the site with
+	// every booking burst. Epochs in whole seconds; 0 (or empty) for none.
+	g_cvTitle = CreateConVar("l4d_booking_title", "", "The scrim's sides, \"A vs B\"; empty on a tournament box.", FCVAR_DONTRECORD);
+	g_cvCampaign = CreateConVar("l4d_booking_campaign", "", "The name of the campaign on the box.", FCVAR_DONTRECORD);
+	g_cvEnds = CreateConVar("l4d_booking_ends", "0", "Epoch seconds the booked slot ends; 0 when unknown.", FCVAR_DONTRECORD);
+	g_cvNextAt = CreateConVar("l4d_booking_next_at", "0", "Epoch seconds the next campaign loads; 0 for none.", FCVAR_DONTRECORD);
+	g_cvNextName = CreateConVar("l4d_booking_next_name", "", "The next campaign's name.", FCVAR_DONTRECORD);
+	g_cvCloseAt = CreateConVar("l4d_booking_close_at", "0", "Epoch seconds the server closes after the last booked campaign; 0 for none.", FCVAR_DONTRECORD);
+	g_cvNextAt.AddChangeHook(OnClockCvarChanged);
+	g_cvCloseAt.AddChangeHook(OnClockCvarChanged);
+	RegServerCmd("sm_booking_tell", Cmd_Tell, "sm_booking_tell - print the state a player is told on arrival, to the server console");
+	RegServerCmd("sm_booking_time", Cmd_Time, "sm_booking_time - print the !time answer to the server console");
+	CreateTimer(1.0, Timer_Clock, _, TIMER_REPEAT);
 	g_cvPassword.AddChangeHook(OnBookingCvarChanged);
 	g_cvTvPassword.AddChangeHook(OnBookingCvarChanged);
 	g_cvNotice.AddChangeHook(OnBookingCvarChanged);
@@ -197,6 +246,25 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 
 	char chatWord[16];
 	int pos = BreakString(text, chatWord, sizeof(chatWord));
+
+	if (strcmp(chatWord, "!time", false) == 0)
+	{
+		// Next frame, so the answer lands below the player's own !time line.
+		if (client >= 1 && client <= MaxClients && IsClientInGame(client) && !IsFakeClient(client) && !TourneyBox())
+			RequestFrame(Frame_TimeReply, GetClientUserId(client));
+		return Plugin_Continue;
+	}
+
+	if (strcmp(chatWord, "!sub", false) == 0)
+	{
+		// A tournament box's !sub <out> <in> is pug-tourney.inc's.
+		if (TourneyBox()) return Plugin_Continue;
+		char rest[256];
+		if (pos == -1) rest[0] = '\0';
+		else strcopy(rest, sizeof(rest), text[pos]);
+		ChatSub(client, rest);
+		return Plugin_Continue;
+	}
 
 	if (strcmp(chatWord, "!allow", false) == 0)
 	{
@@ -405,7 +473,25 @@ public Action Cmd_AllowCommit(int args)
 	// Someone now on the list is neither blocked nor waiting.
 	int lifted = DropListed(g_hBlocked);
 	DropListed(g_hGrace);
-	PrintToServer("PUGOK booking allow commit ids=%d lifted=%d", g_hAllowed.Size, lifted);
+	// 1.5.0: someone already here who is not on the new list (removed or
+	// replaced on the site mid chapter) gets the grace a fresh connect gets,
+	// rather than playing on until the next map. A grace already running is
+	// kept, so the site's minute re-push restarts nobody's.
+	int graced = 0;
+	if (Enforcing())
+	{
+		char id[32];
+		int until;
+		for (int c = 1; c <= MaxClients; c++)
+		{
+			if (!IsClientInGame(c) || IsExempt(c)) continue;
+			if (!GetClientAuthId(c, AuthId_SteamID64, id, sizeof(id)) || !IsSteamId64(id)) continue;
+			if (IsAllowed(id) || g_hGrace.GetValue(id, until)) continue;
+			StartGrace(c, id);
+			graced++;
+		}
+	}
+	PrintToServer("PUGOK booking allow commit ids=%d lifted=%d graced=%d", g_hAllowed.Size, lifted, graced);
 	return Plugin_Handled;
 }
 
@@ -489,10 +575,19 @@ public Action Cmd_AllowRefuse(int args)
 	return Plugin_Handled;
 }
 
+public void OnClientDisconnect(int client)
+{
+	g_fTellAt[client] = 0.0;
+}
+
 /** Runs on every connect, map changes included (clients re-run admin checks
  *  on each map), which is why a grace already running is kept, not restarted. */
 public void OnClientPostAdminCheck(int client)
 {
+	// Scrims in game: told the booking's state once they are in (Timer_Clock),
+	// on every connect and every map load.
+	if (!IsFakeClient(client) && Booked()) g_fTellAt[client] = GetEngineTime() + TELL_DELAY;
+
 	if (!Enforcing()) return;
 	if (IsExempt(client)) return;
 
@@ -536,7 +631,7 @@ void StartGrace(int client, const char[] id)
 		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
 		char cid[32];
 		if (!GetClientAuthId(i, AuthId_SteamID64, cid, sizeof(cid)) || !IsCaptain(cid)) continue;
-		PrintToChat(i, "[Booking] %s joined and is not on the booking. Type !allow %s within %d seconds to let them play as a ringer.", name, name, grace);
+		PrintToChat(i, "[Booking] %s joined and is not on the booking. Within %d seconds type !allow %s to let them watch, or !sub %s to let them play for your side.", name, grace, name, name);
 	}
 	PrintToChat(client, "[Booking] This server is booked. A captain has %d seconds to let you in.", grace);
 }
@@ -643,4 +738,253 @@ void ChatAllow(int client, const char[] rawQuery)
 	char arg[256];
 	Format(arg, sizeof(arg), "%s %s", id, name);
 	EmitBookingCmd(by, "allow", arg);
+}
+
+// ---------- scrims in game (1.5.0) ----------
+
+/** The box is booked (the site set its password). */
+bool Booked()
+{
+	char pw[64];
+	g_cvPassword.GetString(pw, sizeof(pw));
+	return pw[0] != '\0';
+}
+
+/** sm_pug_tournament 1 (pug-match): a tournament box, where the series engine speaks. */
+bool TourneyBox()
+{
+	ConVar cv = FindConVar("sm_pug_tournament");
+	return cv != null && cv.IntValue == 1;
+}
+
+/** An epoch cvar, read as text: GetInt goes through a float and loses up to 64 s. */
+int CvarEpoch(ConVar cv)
+{
+	char s[16];
+	cv.GetString(s, sizeof(s));
+	return StringToInt(s);
+}
+
+/** Client 0 is the server console (the test commands). */
+void Say(int client, const char[] text)
+{
+	if (client == 0) PrintToServer("%s", text);
+	else PrintToChat(client, "%s", text);
+}
+
+/** Seconds as whole minutes, rounded up, as the site words it: "29 min", "1 h 52 min", "2 h". */
+void LeftText(int seconds, char[] out, int maxlen)
+{
+	int mins = (seconds + 59) / 60;
+	if (mins < 1) mins = 1;
+	if (mins < 60) Format(out, maxlen, "%d min", mins);
+	else if (mins % 60 == 0) Format(out, maxlen, "%d h", mins / 60);
+	else Format(out, maxlen, "%d h %d min", mins / 60, mins % 60);
+}
+
+/** The next load or the close, when one is pending. */
+bool PendingLine(char[] out, int maxlen)
+{
+	int now = GetTime();
+	int next = CvarEpoch(g_cvNextAt);
+	if (next > now)
+	{
+		char name[64];
+		g_cvNextName.GetString(name, sizeof(name));
+		Format(out, maxlen, "[Booking] Next: %s in %d s.", name, next - now);
+		return true;
+	}
+	int close = CvarEpoch(g_cvCloseAt);
+	if (close > now)
+	{
+		char left[32];
+		LeftText(close - now, left, sizeof(left));
+		Format(out, maxlen, "[Booking] Every booked campaign is played. The server closes in %s unless a captain types !addcampaign.", left);
+		return true;
+	}
+	return false;
+}
+
+/** !time: the slot's end in UTC, then anything pending. */
+void TimeReply(int client)
+{
+	int ends = CvarEpoch(g_cvEnds);
+	if (ends <= 0)
+	{
+		Say(client, "[Booking] This server has not been told when the booked slot ends.");
+		return;
+	}
+	int now = GetTime();
+	int day = ends % 86400;
+	char line[192];
+	if (ends > now)
+	{
+		char left[32];
+		LeftText(ends - now, left, sizeof(left));
+		Format(line, sizeof(line), "[Booking] %s left in the booked slot (ends %02d:%02d UTC).", left, day / 3600, (day % 3600) / 60);
+	}
+	else
+	{
+		Format(line, sizeof(line), "[Booking] The booked slot ended at %02d:%02d UTC. A game in progress is finished, then the server closes.", day / 3600, (day % 3600) / 60);
+	}
+	Say(client, line);
+	if (PendingLine(line, sizeof(line))) Say(client, line);
+}
+
+public void Frame_TimeReply(int userid)
+{
+	int client = GetClientOfUserId(userid);
+	if (client > 0 && IsClientInGame(client)) TimeReply(client);
+}
+
+/** What a player is told once they are in: who plays, the campaign, the time
+ *  left, anything pending, and the commands. Nothing on a tournament box. */
+void TellState(int client)
+{
+	char title[128];
+	g_cvTitle.GetString(title, sizeof(title));
+	if (title[0] == '\0') return;
+	char campaign[64], line[256];
+	g_cvCampaign.GetString(campaign, sizeof(campaign));
+	Format(line, sizeof(line), "[Booking] Scrim: %s", title);
+	if (campaign[0] != '\0') Format(line, sizeof(line), "%s | %s", line, campaign);
+	int ends = CvarEpoch(g_cvEnds), now = GetTime();
+	if (ends > now)
+	{
+		char left[32];
+		LeftText(ends - now, left, sizeof(left));
+		Format(line, sizeof(line), "%s | %s left", line, left);
+	}
+	else if (ends > 0) Format(line, sizeof(line), "%s | the booked slot is over", line);
+	Say(client, line);
+	if (PendingLine(line, sizeof(line))) Say(client, line);
+	Say(client, "[Booking] Type !time for the time left. Captains: !nextmap !stay !end !addcampaign !allow !sub");
+}
+
+public void OnClockCvarChanged(ConVar cv, const char[] oldValue, const char[] newValue)
+{
+	// A new time is a new countdown; the same value re-pushed every minute changes nothing.
+	if (cv == g_cvNextAt) g_iNextSaid = MARK_NONE;
+	else g_iCloseSaid = MARK_NONE;
+}
+
+/** One second of a countdown: center text through the last minute, a chat
+ *  line at each mark (the smallest one crossed, once). The site's own line
+ *  when it scheduled the load said "in 60 seconds", so a countdown first seen
+ *  above 50 s starts with that mark already said. Also to the server console,
+ *  for testing. */
+void Countdown(int left, int &said, const char[] name, bool closing)
+{
+	if (left <= 0 || left > g_iMarks[0]) return;
+	if (said == MARK_NONE && !closing && left > 50) said = g_iMarks[0];
+	if (closing) PrintCenterTextAll("Server closes in %d s (!addcampaign for one more)", left);
+	else PrintCenterTextAll("Next campaign: %s in %d s", name, left);
+	int mark = 0;
+	for (int i = 0; i < sizeof(g_iMarks); i++)
+	{
+		if (left <= g_iMarks[i] && said > g_iMarks[i]) mark = g_iMarks[i];
+	}
+	if (mark == 0) return;
+	said = mark;
+	char line[192];
+	if (closing) Format(line, sizeof(line), "[Booking] The server closes in %d s. A captain can type !addcampaign to play one more.", left);
+	else Format(line, sizeof(line), "[Booking] Next: %s in %d s. Captains: !nextmap to pick another, !stay to replay, !end to finish.", name, left);
+	PrintToChatAll("%s", line);
+	PrintToServer("%s", line);
+}
+
+/** Once a second: the arrival tells due, then the two countdowns. */
+public Action Timer_Clock(Handle timer)
+{
+	if (!Booked() || TourneyBox()) return Plugin_Continue;
+	float eng = GetEngineTime();
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (g_fTellAt[c] == 0.0 || eng < g_fTellAt[c]) continue;
+		if (!IsClientInGame(c) || IsFakeClient(c)) { g_fTellAt[c] = 0.0; continue; }
+		if (GetClientTeam(c) == 0) continue; // on no team yet: still loading in
+		g_fTellAt[c] = 0.0;
+		TellState(c);
+	}
+	int now = GetTime();
+	int next = CvarEpoch(g_cvNextAt);
+	if (next > 0)
+	{
+		char name[64];
+		g_cvNextName.GetString(name, sizeof(name));
+		Countdown(next - now, g_iNextSaid, name, false);
+	}
+	int close = CvarEpoch(g_cvCloseAt);
+	if (close > 0 && next <= now) Countdown(close - now, g_iCloseSaid, "", true);
+	return Plugin_Continue;
+}
+
+public Action Cmd_Tell(int args)
+{
+	TellState(0);
+	return Plugin_Handled;
+}
+
+public Action Cmd_Time(int args)
+{
+	TimeReply(0);
+	return Plugin_Handled;
+}
+
+/** !sub <name> from a captain: one connected human whose name contains the
+ *  text (case-insensitive) is let onto the box at once, as !allow does, and
+ *  the site is told (cmd=sub); the site makes them a ringer of the captain's
+ *  side and pug-match places them. Any connected human may match, a watcher
+ *  already on the list included. */
+void ChatSub(int client, const char[] rawQuery)
+{
+	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return;
+	char by[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, by, sizeof(by))) return;
+	if (!IsCaptain(by))
+	{
+		PrintToChat(client, "[Booking] Only a captain can do that.");
+		return;
+	}
+	if (!HasLogSecret())
+	{
+		PrintToChat(client, "[Booking] The site cannot hear this server right now; use the booking page.");
+		return;
+	}
+	char query[MAX_NAME_LENGTH];
+	strcopy(query, sizeof(query), rawQuery);
+	TrimString(query);
+	int match = 0, found = 0;
+	char id[32], name[MAX_NAME_LENGTH];
+	if (query[0] != '\0')
+	{
+		for (int i = 1; i <= MaxClients; i++)
+		{
+			if (!IsClientConnected(i) || IsFakeClient(i) || IsClientSourceTV(i)) continue;
+			if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id))) continue;
+			GetClientName(i, name, sizeof(name));
+			if (StrContains(name, query, false) == -1) continue;
+			match = i;
+			found++;
+		}
+	}
+	if (found == 0)
+	{
+		PrintToChat(client, "[Booking] No one here matches that name.");
+		return;
+	}
+	if (found > 1)
+	{
+		PrintToChat(client, "[Booking] More than one player matches; type more of the name.");
+		return;
+	}
+	GetClientAuthId(match, AuthId_SteamID64, id, sizeof(id));
+	GetClientName(match, name, sizeof(name));
+	g_hAllowed.SetValue(id, true);
+	g_hGrace.Remove(id);
+	g_hBlocked.Remove(id);
+	char arg[256];
+	Format(arg, sizeof(arg), "%s %s", id, name);
+	EmitBookingCmd(by, "sub", arg);
+	PrintToChat(client, "[Booking] Sent to the site.");
 }
