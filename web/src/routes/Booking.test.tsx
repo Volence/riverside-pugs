@@ -89,7 +89,29 @@ describe('Booking page', () => {
 
   it('shows the connect line when ready', async () => {
     render(<Booking id="7" session={session} />);
-    expect(await screen.findByText('connect 1.2.3.4:27015; password abcd2345')).toBeTruthy();
+    // Password first: Source needs it set before the connect (ConnectPanel).
+    expect(await screen.findByText('password abcd2345; connect 1.2.3.4:27015')).toBeTruthy();
+  });
+
+  it('keeps the page up when a refetch fails, and says it is retrying', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockBookings.get.mockResolvedValueOnce(VIEW()).mockRejectedValue(new Error('network'));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('password abcd2345; connect 1.2.3.4:27015')).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await screen.findByText('Lost contact with the site, retrying.')).toBeTruthy();
+      expect(screen.queryByText('No such booking.')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a tournament booking gives its side managers no booking controls', async () => {
+    mockBookings.get.mockResolvedValue(VIEW({ purpose: 'tournament', state: 'active' }));
+    render(<Booking id="7" session={session} />);
+    expect(await screen.findByText(/The event runs this match/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'End now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+1 campaign' })).toBeNull();
   });
 
   it('shows a restart recovery banner', async () => {
@@ -113,11 +135,15 @@ describe('Booking page', () => {
     expect(screen.queryByText(/connect /)).toBeNull();
   });
 
-  it('a manager sees +1 campaign once the booking is running', async () => {
+  it('a manager sees +1 campaign once the booking is running, and no Cancel once its start has passed', async () => {
     mockBookings.get.mockResolvedValue(VIEW({ state: 'ready' }));
     render(<Booking id="7" session={session} />);
+    expect(await screen.findByRole('button', { name: '+1 campaign' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull();
+    cleanup();
+    mockBookings.get.mockResolvedValue(VIEW({ state: 'ready', startsAt: new Date(Date.now() + 3_600_000).toISOString() }));
+    render(<Booking id="7" session={session} />);
     expect(await screen.findByRole('button', { name: 'Cancel booking' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '+1 campaign' })).toBeTruthy();
   });
 
   it('an invited person sees Accept', async () => {
@@ -150,12 +176,14 @@ describe('Booking page', () => {
     const staffView = VIEW({ state: 'scheduled', connect: null, server: null, viewer: { side: null, manages: [], staff: true, invited: false } });
     mockBookings.get.mockResolvedValueOnce(staffView).mockResolvedValueOnce({ ...staffView, state: 'cancelled' });
     mockAdmin.cancelBooking.mockResolvedValue({ ok: true });
+    mockConfirm.mockResolvedValue(true);
     render(<Booking id="7" session={session} />);
     expect(await screen.findByRole('button', { name: 'Cancel booking' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '+1 campaign' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'They did not show' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel booking' }));
     await waitFor(() => expect(mockAdmin.cancelBooking).toHaveBeenCalledWith(7, ''));
+    expect(mockConfirm.mock.calls[0][0]).toMatchObject({ confirmLabel: 'Cancel booking', danger: true });
     await waitFor(() => expect(mockBookings.get).toHaveBeenCalledTimes(2));
   });
 
@@ -244,7 +272,7 @@ describe('Booking page', () => {
       // sideA is 'b': booking side b was match team A (score 3), so booking
       // side a (p0's group) shows the other score, 5.
       expect(await screen.findByText("p0's group 5 : 3 Mice")).toBeTruthy();
-      expect(screen.getByText('completed')).toBeTruthy();
+      expect(screen.getByText('Final')).toBeTruthy();
       const link = screen.getByRole('link', { name: 'View' }) as HTMLAnchorElement;
       expect(link.getAttribute('href')).toBe('/match/55');
       expect(link.closest('li')?.textContent).toContain('No Mercy');

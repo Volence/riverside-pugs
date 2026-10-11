@@ -99,19 +99,36 @@ function enabledServers(db: DB, region: string): number {
  * tournament booking and a scheduled match count toward the room but never
  * toward the scrim cap.
  */
-export function capacityProblem(db: DB, o: { region: string; startMs: number; endMs: number; exceptId?: number; purpose?: BookingPurpose }): number | null {
+/** How long a booking still holding a box past its slot (a game running
+ *  over, Ruling 4, or the close grace) is assumed to keep it from now, and a
+ *  box in its wind-down (restarting before it goes back to the pool). */
+const OVERRUN_HOLD_MS = 30 * 60_000;
+const WIND_DOWN_HOLD_MS = 10 * 60_000;
+
+export function capacityProblem(db: DB, o: { region: string; startMs: number; endMs: number; exceptId?: number; purpose?: BookingPurpose; nowMs?: number }): number | null {
+  const nowMs = o.nowMs ?? Date.now();
   const limits = bookingLimits(db);
   const room = enabledServers(db, o.region) - limits.reserve;
   if (room < 1) return o.startMs;
   const scrim = (o.purpose ?? 'scrim') === 'scrim';
   if (scrim && limits.scrimMax < 1) return o.startMs;
+  // A booking still holding a box counts until it lets go of it, not until
+  // its slot's end: one running over (or winding down) still has the box.
+  const effectiveEnd = (r: { ends_at: string; close_at: string | null; ending_at: string | null; server_id: number | null }): number => {
+    const end = Date.parse(r.ends_at);
+    if (r.server_id === null) return end;
+    if (r.ending_at !== null) return Math.max(end, nowMs + WIND_DOWN_HOLD_MS);
+    if (end > nowMs) return end;
+    return Math.max(r.close_at ? Date.parse(r.close_at) : 0, nowMs + OVERRUN_HOLD_MS);
+  };
   const rows = [
     ...(db.prepare(
-      `SELECT starts_at, ends_at, purpose FROM bookings
-        WHERE region = ? AND state IN ${OPEN_STATES_SQL} AND ending_at IS NULL AND id != ?
-          AND starts_at < ? AND ends_at > ?`,
-    ).all(o.region, o.exceptId ?? 0, iso(o.endMs), iso(o.startMs)) as { starts_at: string; ends_at: string; purpose: BookingPurpose }[])
-      .map((r) => ({ s: Date.parse(r.starts_at), e: Date.parse(r.ends_at), scrim: r.purpose === 'scrim' })),
+      `SELECT starts_at, ends_at, purpose, close_at, ending_at, server_id FROM bookings
+        WHERE region = ? AND id != ? AND starts_at < ?
+          AND ((state IN ${OPEN_STATES_SQL} AND ending_at IS NULL) OR (server_id IS NOT NULL AND ended_at IS NULL))`,
+    ).all(o.region, o.exceptId ?? 0, iso(o.endMs)) as { starts_at: string; ends_at: string; purpose: BookingPurpose; close_at: string | null; ending_at: string | null; server_id: number | null }[])
+      .map((r) => ({ s: Date.parse(r.starts_at), e: effectiveEnd(r), scrim: r.purpose === 'scrim' }))
+      .filter((r) => r.e > o.startMs),
     // Plan T4 Ruling 5: a scheduled tournament match holds a box before it is booked.
     ...scheduledMatchSlots(db, o.region, o.startMs, o.endMs).map((r) => ({ ...r, scrim: false })),
   ];

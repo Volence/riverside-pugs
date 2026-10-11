@@ -116,7 +116,7 @@ describe('EventMatchPage', () => {
       games: [{ id: 1, game: 1, ordinal: 1, tiebreak: false, campaign: 'no_mercy', campaignName: 'No Mercy', map: null, pickedBy: null, sideBy: 'b', firstSurvivors: 'b', matchId: 7, state: 'live', scoreA: null, scoreB: null, winner: null, forfeit: null, live: { map: 'l4d_vs_hospital02_subway', scoreA: 80, scoreB: 120 } }],
     }));
     render(<EventMatchPage slug="cup" id="1" session={{ kind: 'active' } as never} />);
-    expect(await screen.findByText('connect 10.0.0.1:27015; password pw')).toBeTruthy();
+    expect(await screen.findByText('password pw; connect 10.0.0.1:27015')).toBeTruthy();
     expect(screen.getByText('Game 1 · No Mercy · live on l4d_vs_hospital02_subway · Rats 80 - 120 Bats')).toBeTruthy();
     expect(screen.getByText('Live')).toBeTruthy();
   });

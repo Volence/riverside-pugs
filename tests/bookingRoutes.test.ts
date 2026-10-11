@@ -51,6 +51,21 @@ const create = async (as = P[0], opponent: object = { steamid: P[1] }) => {
   return r.json().id as number;
 };
 
+describe('tournament bookings', () => {
+  it('a side captain cannot cancel, end, extend, add or remove people on one from the site', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(id);
+    for (const path of ['cancel', 'end', 'extend', 'no-show', 'people', 'next', 'stay']) {
+      const r = await call('POST', `/api/bookings/${id}/${path}`, P[0], { steamid: P[2], side: 'a', role: 'player' });
+      expect([path, r.statusCode]).toEqual([path, 409]);
+      expect(r.json().error).toMatch(/event runs this/);
+    }
+    expect((await call('POST', `/api/bookings/${id}/people/${P[1]}/remove`, P[0])).statusCode).toBe(409);
+    expect(db.prepare('SELECT state FROM bookings WHERE id = ?').get(id)).toEqual({ state: 'scheduled' });
+  });
+});
+
 describe('the switch', () => {
   it('off hides every route from players; admins-only lets admins through', async () => {
     db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();

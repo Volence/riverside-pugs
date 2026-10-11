@@ -177,9 +177,11 @@ export function createBlocker(db: DB, steamid: string): 'your_cap' | 'created_ca
   return null;
 }
 
-/** A team with a scrim booking still open, or an entry still in an event
- *  that has not finished: closing it would leave the booking or entry with
- *  nobody able to manage it (cancel, check in, pick a lineup). */
+/** A team with a scrim booking still open, or an entry in an event whose
+ *  list is final (locked) and that has not finished: closing it would leave
+ *  the booking or entry with nobody able to manage it (cancel, check in,
+ *  pick a lineup). Before the lock the event runner drops a disbanded
+ *  team's entry itself (dropDisbandedEntry), so that is no reason to wait. */
 export function teamBusy(db: DB, teamId: number): boolean {
   const booking = db.prepare(
     `SELECT 1 FROM bookings b JOIN booking_sides s ON s.booking_id = b.id
@@ -188,7 +190,8 @@ export function teamBusy(db: DB, teamId: number): boolean {
   if (booking) return true;
   return db.prepare(
     `SELECT 1 FROM event_entries e JOIN events v ON v.id = e.event_id
-      WHERE e.team_id = ? AND e.status IN ('registered','checked_in') AND v.status NOT IN ('finished','cancelled') LIMIT 1`,
+      WHERE e.team_id = ? AND e.status IN ('registered','checked_in') AND v.locked_at IS NOT NULL
+        AND v.status NOT IN ('finished','cancelled') LIMIT 1`,
   ).get(teamId) !== undefined;
 }
 

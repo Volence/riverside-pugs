@@ -22,7 +22,7 @@ describe('ServerPanel', () => {
   it('shows the connect line, who is on and the grace to those who may see it, and only the counts to others', () => {
     const server = { state: 'ready' as const, name: 'box', since: '2026-10-06T00:00:00.000Z', connect: { host: '10.0.0.1', port: 27015, password: 'pw' }, present: { a: 4, b: 3 }, graceEndsAt: '2026-10-06T00:15:00.000Z' };
     render(<ServerPanel v={base({ server })} now={NOW} />);
-    expect(screen.getByText('connect 10.0.0.1:27015; password pw')).toBeTruthy();
+    expect(screen.getByText('password pw; connect 10.0.0.1:27015')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
     expect(screen.getByText('On the server: Rats 4 of 4, Bats 3 of 4')).toBeTruthy();
     expect(screen.getByText(/Both teams need four on the server within 10:00/)).toBeTruthy();

@@ -15,7 +15,7 @@ export function ServerPanel({ v, now }: { v: MatchRoomView; now: number }) {
   if (s.state === 'waiting') return <p>{`Waiting for a server since ${hhmm(s.since)}. No box is free in the region right now; staff are told after 10 minutes.`}</p>;
   if (s.state === 'setup') return <p>{`Setting up ${s.name ?? 'the server'}.`}</p>;
   if (s.state === 'ended') return <p>The server is closed.</p>;
-  const line = s.connect ? `connect ${s.connect.host}:${s.connect.port}; password ${s.connect.password}` : null;
+  const line = s.connect ? `password ${s.connect.password}; connect ${s.connect.host}:${s.connect.port}` : null;
   const copy = async () => {
     if (!line) return;
     try {

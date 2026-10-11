@@ -101,7 +101,7 @@ describe('a team with a booked scrim or event entry', () => {
     expect(disbandTeam(db, { teamId: id, by: P[0], now: t0 })).toEqual({ ok: true, value: null });
   });
 
-  it('tournament bookings do not count, live event entries do', () => {
+  it('tournament bookings do not count, entries in a locked event do', () => {
     const id = team(P[0], []);
     booking(id, P[0], [P[0]], 'scheduled', 'tournament');
     expect(teamBusy(db, id)).toBe(false);
@@ -111,6 +111,9 @@ describe('a team with a booked scrim or event entry', () => {
     ).run(P[0], t0.toISOString(), t0.toISOString()).lastInsertRowid);
     db.prepare("INSERT INTO event_entries (event_id, team_id, name, registered_by, created_at) VALUES (?, ?, 'Riverside Rats', ?, ?)")
       .run(ev, id, P[0], t0.toISOString());
+    // Before the list is final the event runner drops the entry on a disband.
+    expect(teamBusy(db, id)).toBe(false);
+    db.prepare("UPDATE events SET status = 'checkin', locked_at = ? WHERE id = ?").run(t0.toISOString(), ev);
     expect(teamBusy(db, id)).toBe(true);
     db.prepare("UPDATE events SET status = 'finished' WHERE id = ?").run(ev);
     expect(teamBusy(db, id)).toBe(false);

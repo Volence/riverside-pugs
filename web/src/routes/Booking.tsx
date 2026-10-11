@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { adminApi, bookingsApi, scrimsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView, type ReviewTag } from '../api';
-import { Empty, Panel } from '../components/bits';
+import { Empty, PageSkeleton, Panel } from '../components/bits';
+import { ConnectPanel } from '../components/ConnectPanel';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { campaignsLabel, localLabel } from '../bookingTime';
-import { campaignName } from '../format';
+import { campaignName, gameStateLabel } from '../format';
 import { notCountedLabel, seriesLine } from '../series';
 import { confirm } from '../components/Confirm';
 import { RecordLine } from '../components/ScrimRecord';
@@ -23,6 +24,7 @@ function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone
   const [found, setFound] = useState<{ steamid: string; name: string }[]>([]);
   const [role, setRole] = useState<BookingRole>('player');
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   useEffect(() => {
     if (q.trim().length < 2) { setFound([]); return; }
     const ctl = new AbortController();
@@ -30,8 +32,10 @@ function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone
     return () => ctl.abort();
   }, [q]);
   const add = async (steamid: string) => {
+    if (adding) return;
     setError(null);
-    try { onDone(await bookingsApi.addPerson(id, side, steamid, role)); setQ(''); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    setAdding(true);
+    try { onDone(await bookingsApi.addPerson(id, side, steamid, role)); setQ(''); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setAdding(false); }
   };
   return (
     <div class="bookingadd">
@@ -39,7 +43,7 @@ function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone
       <select aria-label="Role" value={role} onChange={(e) => setRole((e.target as HTMLSelectElement).value as BookingRole)}>
         {(['player', 'ringer', 'spectator'] as const).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
       </select>
-      <ul>{found.map((p) => <li key={p.steamid}><button class="btn btn--ghost" onClick={() => add(p.steamid)}>{p.name}</button></li>)}</ul>
+      <ul>{found.map((p) => <li key={p.steamid}><button class="btn btn--ghost btn--sm" disabled={adding} aria-label={`Add ${p.name}`} onClick={() => add(p.steamid)}>{p.name}</button></li>)}</ul>
       {error && <p class="error" role="alert">{error}</p>}
     </div>
   );
@@ -56,7 +60,7 @@ function StaffExcuse({ v, side, busy, staffAct }: {
     <p class="bookingexcuse">
       <input aria-label={`Excuse note (${side.name})`} value={note} maxLength={200} placeholder="Note (optional, staff only)"
         onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
-      <button class="btn btn--ghost" disabled={busy} onClick={() => staffAct(() => adminApi.excuseBooking(v.id, side.side, note))}>Excuse</button>
+      <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => staffAct(() => adminApi.excuseBooking(v.id, side.side, note))}>Excuse</button>
     </p>
   );
 }
@@ -91,7 +95,7 @@ function Casters({ v, mySide, open, busy, act }: {
               {/* Withdraw stays after the booking closes: taking back an
                   invite is always this side's to do, and the API allows it. */}
               {mine(c) && (
-                <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.withdrawCaster(v.id, c.steamid))}>Withdraw</button>
+                <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => bookingsApi.withdrawCaster(v.id, c.steamid))}>Withdraw</button>
               )}
             </li>
           ))}
@@ -187,6 +191,10 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   const askedCancel = useRef(false);
   const [v, setV] = useState<BookingView | null>(null);
   const [missing, setMissing] = useState(false);
+  /** A refetch failed (a network blip mid-match): the last view stays up. */
+  const [lost, setLost] = useState(false);
+  const hasView = useRef(false);
+  const errRef = useRef<HTMLParagraphElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState('');
@@ -195,7 +203,15 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   /** The +1 campaign select: empty is "pick later". */
   const [addPick, setAddPick] = useState('');
 
-  const load = () => { bookingsApi.get(id).then(setV, () => setMissing(true)); };
+  // Only a first load that fails is "no such booking"; a failed 15 s
+  // refetch keeps the page and says it is retrying.
+  const load = () => {
+    bookingsApi.get(id).then((nv) => { hasView.current = true; setV(nv); setLost(false); }, () => {
+      if (hasView.current) setLost(true); else setMissing(true);
+    });
+  };
+  // The action buttons sit at the bottom: bring a refusal into view.
+  useEffect(() => { if (error) errRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [error]);
   useEffect(load, [id]);
   // The campaign pool, for the "Play this next" select. Loaded once; nobody
   // needs it until the booking is running anyway, and it costs nothing to
@@ -263,8 +279,9 @@ export function Booking({ id, session }: { id: string; session: Session }) {
     })();
   }, [v, query?.cancel]);
 
-  if (missing || session.kind !== 'active') return <main class="page page--profile bookingpage"><PageHeader title="Booking" /><Empty>No such booking.</Empty></main>;
-  if (!v) return null;
+  if (session.kind !== 'active') return <main class="page page--profile bookingpage"><PageHeader title="Booking" /><Empty>Sign in to see this booking.</Empty></main>;
+  if (missing) return <main class="page page--profile bookingpage"><PageHeader title="Booking" /><Empty>No such booking.</Empty></main>;
+  if (!v) return <PageSkeleton variant="profile" panels={3} />;
   // Re-posting a cancelled scrim (plan 2): unlike act(), this returns the
   // new post's id, not a fresh BookingView, so success routes to the board
   // instead of re-rendering this page; a refusal just shows its text here.
@@ -294,8 +311,11 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   const managesConfirmedSide = v.viewer.manages.some((s) => v.sides.find((side) => side.side === s)?.confirmed);
   // The side this viewer acts for, as the server picks it (actingSides()[0]).
   const actingSide = v.viewer.manages.find((s) => v.sides.find((side) => side.side === s)?.confirmed) ?? null;
-  const playerManage = open && managesConfirmedSide;
-  const staffOnly = open && v.viewer.staff && !playerManage;
+  // A tournament booking is the event's: the series engine runs it and staff
+  // act from the events desk, so no side manager gets the booking controls.
+  const tournament = v.purpose === 'tournament';
+  const playerManage = open && managesConfirmedSide && !tournament;
+  const staffOnly = open && v.viewer.staff && !playerManage && !tournament;
   const canManage = playerManage || staffOnly;
   // Between-games controls (plan 4b): shown once the booking is actually
   // running, with nothing live right now, to whoever may call `!nextmap` /
@@ -305,12 +325,16 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   // is played the box refuses both, so the controls wait for +1 campaign.
   const liveGame = v.games.some((g) => g.state === 'live');
   const allPlayed = v.gamesPlayed >= v.gamesAllowed;
-  const canPlayGames = running && !liveGame && !allPlayed && (managesConfirmedSide || v.viewer.staff);
+  const canPlayGames = running && !liveGame && !allPlayed && !tournament && (managesConfirmedSide || v.viewer.staff);
   // Bookings by campaign: the one to play next (or now, while a game is live),
   // counted from the finished ones.
   const countLine = allPlayed
     ? (v.gamesAllowed === 1 ? 'The booked campaign is played' : `All ${v.gamesAllowed} campaigns played`)
     : `Campaign ${v.gamesPlayed + 1} of ${v.gamesAllowed}`;
+  /** A destructive action, asked once before it runs. */
+  const sure = async (title: string, body: string, label: string, run: () => void) => {
+    if (await confirm({ title, body, confirmLabel: label, cancelLabel: 'Go back', danger: true })) run();
+  };
   const addCampaign = () => {
     const campaign = addPick || undefined;
     setAddPick('');
@@ -327,7 +351,8 @@ export function Booking({ id, session }: { id: string; session: Session }) {
       <PageHeader eyebrow="Booked server" title={`${a.name} vs ${b.name}`}>
         <p>{localLabel(v.startsAt)} to about {localLabel(v.endsAt)} · {campaignsLabel(v.gamesAllowed)}: {v.playlist.map((c) => c.name).join(', ')}</p>
       </PageHeader>
-      {error && <p class="error" role="alert">{error}</p>}
+      {error && <p class="error" role="alert" ref={errRef}>{error}</p>}
+      {lost && <p class="muted" role="status">Lost contact with the site, retrying.</p>}
       <Panel>
         <p>{v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
         {running && <p class="bookingcount">{countLine}</p>}
@@ -341,9 +366,8 @@ export function Booking({ id, session }: { id: string; session: Session }) {
                 : 'The server restarted. Setting it up again; your game comes back on the map it was on.'}
           </p>
         )}
-        {v.connect && (
-          <p class="bookingconnect">In the game console: <code>{`connect ${v.connect.host}:${v.connect.port}; password ${v.connect.password}`}</code></p>
-        )}
+        {v.connect && <ConnectPanel connect={v.connect} />}
+        {tournament && open && <p class="muted">The event runs this match: it starts, ends and picks the campaigns itself. Ask the staff if something is wrong.</p>}
         {showStartNow && (
           <p class="inlinerow">
             {mySide!.startNow ? (
@@ -375,19 +399,19 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         {unconfirmedB && v.viewer.manages.includes('b') && open && (
           <p class="inlinerow">
             <button class="btn" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'confirm'))}>Confirm</button>
-            <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'decline'))}>Decline</button>
+            <button class="btn btn--ghost" disabled={busy} onClick={() => sure('Decline this scrim?', 'The booking is cancelled and the other side is told.', 'Decline', () => act(() => bookingsApi.act(v.id, 'decline')))}>Decline</button>
           </p>
         )}
       </Panel>
       {v.sides.map((s) => (
         <Panel key={s.side}>
-          <h3>{s.name}{!s.confirmed ? ' (not confirmed yet)' : ''}{s.noShow ? ' · no-show' : ''}</h3>
+          <h3>{s.name}{!s.confirmed && <> <span class="teamchip">Not confirmed</span></>}{s.noShow && <> <span class="teamchip teamchip--no_show">No-show</span></>}</h3>
           {s.record && <RecordLine record={s.record} label="Record" />}
           {s.lateCancel && (
             <p class="bookinglate">
               <span>Late cancel by {s.name}</span>
               {s.excused ? <span class="teamchip">Excused</span>
-                : s.canExcuse && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.excuse(v.id))}>All good, no hard feelings</button>}
+                : s.canExcuse && <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => bookingsApi.excuse(v.id))}>All good, no hard feelings</button>}
             </p>
           )}
           {(s.noShow || s.short) && s.excused && !s.lateCancel && <p class="bookinglate"><span class="teamchip">Excused</span></p>}
@@ -397,13 +421,13 @@ export function Booking({ id, session }: { id: string; session: Session }) {
               <li key={p.steamid}>
                 <span>{p.name}</span>
                 <span class="muted"> · {ROLE_LABEL[p.role]}{p.status === 'invited' ? ' · invited' : ''}{p.steamid === s.captain.steamid ? ' · captain' : ''}</span>
-                {open && v.viewer.manages.includes(s.side) && p.steamid !== s.captain.steamid && (
-                  <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.removePerson(v.id, p.steamid))}>Remove</button>
+                {open && !tournament && v.viewer.manages.includes(s.side) && p.steamid !== s.captain.steamid && (
+                  <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => sure(`Remove ${p.name}?`, 'They come off this booking and its server list.', 'Remove', () => act(() => bookingsApi.removePerson(v.id, p.steamid)))}>Remove</button>
                 )}
               </li>
             ))}
           </ul>
-          {open && s.confirmed && v.viewer.manages.includes(s.side) && <AddPerson id={v.id} side={s.side} onDone={setV} />}
+          {open && !tournament && s.confirmed && v.viewer.manages.includes(s.side) && <AddPerson id={v.id} side={s.side} onDone={setV} />}
         </Panel>
       ))}
       {v.games.length > 0 && (() => {
@@ -426,7 +450,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
                   <li key={g.matchId}>
                     <span>{campaignName(g.campaign)}</span>
                     <span>{nameOf(first)} {scores[first]} : {scores[second]} {nameOf(second)}</span>
-                    <span class="muted">{g.state}</span>
+                    <span class="muted">{gameStateLabel(g.state)}</span>
                     {notCounted && <span class="muted">{notCounted}</span>}
                     {g.restoredAtMap !== null && (
                       <span class="muted">Stats from map {g.restoredAtMap + 1} on: the server restarted</span>
@@ -474,22 +498,23 @@ export function Booking({ id, session }: { id: string; session: Session }) {
                 <button class="btn btn--ghost" disabled={busy} onClick={addCampaign}>+1 campaign</button>
               </>
             )}
-            {playerManage && running && <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'end'))}>End now</button>}
-            {staffOnly && running && <button class="btn btn--ghost" disabled={busy} onClick={() => staffAct(() => adminApi.endBooking(v.id))}>End now</button>}
+            {playerManage && running && <button class="btn btn--ghost" disabled={busy} onClick={() => sure('End the booking now?', 'Any game being played stops and the server is given back.', 'End now', () => act(() => bookingsApi.act(v.id, 'end')))}>End now</button>}
+            {staffOnly && running && <button class="btn btn--ghost" disabled={busy} onClick={() => sure('End the booking now?', 'Any game being played stops and the server is given back.', 'End now', () => staffAct(() => adminApi.endBooking(v.id)))}>End now</button>}
             {/* No-show is a side's own call on its opponent; staff clean up
                 through Cancel or End instead, never this button. */}
             {playerManage && running && Date.now() >= Date.parse(v.noShowFrom) && (
-              <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.act(v.id, 'no-show'))}>They did not show</button>
+              <button class="btn btn--ghost" disabled={busy} onClick={() => sure('Mark the other side as a no-show?', 'The booking ends and the no-show goes on their record.', 'They did not show', () => act(() => bookingsApi.act(v.id, 'no-show')))}>They did not show</button>
             )}
           </p>
-          <p class="inlinerow">
+          {!(playerManage && running && Date.now() >= Date.parse(v.startsAt)) && <p class="inlinerow">
             <input aria-label="Cancel reason" value={reason} maxLength={300} placeholder="Reason (optional, only the two sides and staff see it)"
               onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
             <button class="btn btn--danger" disabled={busy}
-              onClick={() => playerManage ? act(() => bookingsApi.cancel(v.id, reason)) : staffAct(() => adminApi.cancelBooking(v.id, reason))}>
+              onClick={() => sure('Cancel this booking?', 'Both sides are told. A cancel close to the start counts as a late cancel on your side.', 'Cancel booking',
+                () => playerManage ? act(() => bookingsApi.cancel(v.id, reason)) : staffAct(() => adminApi.cancelBooking(v.id, reason)))}>
               Cancel booking
             </button>
-          </p>
+          </p>}
         </Panel>
       )}
     </main>
