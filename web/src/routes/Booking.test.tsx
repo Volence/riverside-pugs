@@ -75,7 +75,7 @@ describe('Booking page', () => {
   it('no Start now once the booking cannot start early', async () => {
     mockBookings.get.mockResolvedValue(VIEW({ canStartNow: false }));
     render(<Booking id="7" session={session} />);
-    expect(await screen.findByText('connect 1.2.3.4:27015; password abcd2345')).toBeTruthy();
+    expect(await screen.findByText('password abcd2345; connect 1.2.3.4:27015')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull();
   });
 
