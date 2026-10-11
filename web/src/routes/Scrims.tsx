@@ -7,6 +7,7 @@ import {
 } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel, playMinutes, slotSummary, toUtcIso } from '../bookingTime';
 import { campaignName } from '../format';
@@ -484,6 +485,7 @@ export function Scrims({ session }: { session: Session }) {
 
   return (
     <main class="page page--profile bookingpage">
+      <CompeteTabs active="scrims" />
       <PageHeader eyebrow="Competitive" title="Scrims" />
       {error && <p class="error" role="alert">{error}</p>}
 

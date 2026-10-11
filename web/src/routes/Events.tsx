@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { ApiError, bannerUrl, eventsApi, type EventListItem } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { STATUS_LABEL, whenText } from '../eventFormat';
 
@@ -42,8 +43,9 @@ export function Events({ session }: { session: Session }) {
     return () => ctl.abort();
   }, [session.kind]);
 
-  const head = <PageHeader eyebrow="Competitive" title="Events" />;
-  if (closed) return <main class="page page--list">{head}<Empty>Events are not open yet.</Empty></main>;
+  const header = <PageHeader eyebrow="Competitive" title="Events" />;
+  if (closed) return <main class="page page--list">{header}<Empty>Events are not open yet.</Empty></main>;
+  const head = <><CompeteTabs active="events" />{header}</>;
   if (failed) return <main class="page page--list">{head}<p class="error" role="alert">Could not load events. Try again in a moment.</p></main>;
   if (!events) return <main class="page page--list">{head}</main>;
   const upcoming = events.filter((e) => !OVER.has(e.status));

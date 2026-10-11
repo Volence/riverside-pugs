@@ -3,6 +3,7 @@ import { useLocation } from 'preact-iso';
 import { ApiError, bookingsApi, teamsApi, type BookingOptions, type BookingSummary, type NotifyPref, type ScrimReliability } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { estimateLine, estimateSlot, localLabel, playMinutes, toUtcIso } from '../bookingTime';
 import { RecordLine } from '../components/ScrimRecord';
@@ -175,6 +176,7 @@ export function Bookings({ session }: { session: Session }) {
   }
   return (
     <main class="page page--profile bookingpage">
+      <CompeteTabs active="bookings" />
       <PageHeader eyebrow="Competitive" title="Bookings" />
       {error && <p class="error" role="alert">{error}</p>}
       <Panel>
