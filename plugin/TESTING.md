@@ -1176,3 +1176,60 @@ Owner checks on a live booked scrim (placement needs real SteamID64s, which
    seconds.
 5. [ ] Campaign 2 starts with side a on survivors; `matches.booking_side_a` of
    game 2 is `a` (game 1 `b`).
+
+## Booked scrim clock (l4d_booking 1.5.0)
+
+Local check on the shared test box, port 27055, 0 humans, 2026-10-11. The
+local box had no l4d_booking installed, so the build was loaded from
+`disabled/l4d_booking-scrim.smx` and removed afterwards. L4D1 has no
+`con_logfile`, so srcds was started with `-condebug` and the countdown lines
+were read from `left4dead/console.log`.
+
+```bash
+export RPORT=27055
+R() { python3 /home/volence/l4d/nightmode/rcon.py "$@"; }
+SM=/home/volence/l4d1-ds/server/left4dead/addons/sourcemod/plugins
+cp plugin/l4d_booking.smx "$SM/disabled/l4d_booking-scrim.smx"
+R 'sm plugins load_unlock' 'sm plugins load disabled/l4d_booking-scrim' 'sm plugins load_lock'
+END=$(( $(date +%s) + 6720 ))
+R 'l4d_booking_password "localtest"' 'l4d_booking_title "big BAD boys vs Test"' 'l4d_booking_campaign "Blood Harvest"' "l4d_booking_ends $END"
+R 'sm_booking_tell'; R 'sm_booking_time'; date -u -d "@$END" +%H:%M
+R 'l4d_booking_next_name "Death Toll"' "l4d_booking_next_at $(( $(date +%s) + 45 ))"
+R "l4d_booking_close_at $(( $(date +%s) + 45 ))"
+R "l4d_booking_ends $(( $(date +%s) - 60 ))" 'sm_booking_time'
+R 'sm_booking_status'
+R 'sm_booking_allow_begin' 'sm_booking_allow_add 76561199000000001' 'sm_booking_allow_commit'
+```
+
+- [x] `l4d_booking_version` = `1.5.0` (2026-10-11)
+- [x] `sm_booking_tell` printed `[Booking] Scrim: big BAD boys vs Test | Blood Harvest | 1 h 52 min left`
+  and `[Booking] Type !time for the time left. Captains: !nextmap !stay !end !addcampaign !allow !sub` (2026-10-11)
+- [x] `sm_booking_time` printed `[Booking] 1 h 52 min left in the booked slot (ends 11:49 UTC).`,
+  the same HH:MM as `date -u -d "@$END"` (2026-10-11)
+- [x] Next countdown: chat lines at the 60 mark (first second seen, under 50 s), then
+  `Next: Death Toll in 30 s` and `in 10 s` (2026-10-11)
+- [x] Close countdown at +45: `The server closes in 40 s` (the 60 mark, first second
+  seen), then `in 30 s` and `in 10 s` (2026-10-11)
+- [x] A countdown first seen at or under 30 s says only the 30 mark, not 60 then 30
+  (seen when rcon.py's two-command latency made the close_at land at 30 s) (2026-10-11)
+- [x] `sm_booking_time` after the end: `[Booking] The booked slot ended at 09:58 UTC. A game in progress is finished, then the server closes.` (2026-10-11)
+- [x] `sm_booking_status` still answers (`PUGOK booking status booked=1 loaded=0 ids=0 staged=-1 graces=0 blocks=0`) (2026-10-11)
+- [x] Commit with nobody connected: `PUGOK booking allow commit ids=1 lifted=0 graced=0` (2026-10-11)
+
+Timing note: rcon.py holds each command about 3 s, so a timer tick can land
+between two lines of one call. Set `l4d_booking_next_name` before
+`l4d_booking_next_at`, or the first line reads `Next:  in N s`.
+
+Owner checks on a live booked scrim (`sv_lan 1` gives no SteamID64, so every
+per-player path needs a real box):
+
+1. [ ] `!time` from a non-captain answers with the time left and the end in UTC.
+2. [ ] The center countdown is readable during the finale and does not hide the
+   ready panel.
+3. [ ] Chat marks at 60 (only when the countdown starts below 50 s), 30 and 10 s.
+4. [ ] The re-tell arrives after a slow load and after each map change.
+5. [ ] `!sub` on a watcher lands them on their side.
+6. [ ] `!allow` says "can watch (allowed by ...)".
+7. [ ] Ruling 14: a player removed from the booking on the site while connected
+   gets the "captain has N seconds" notice at the next minute re-push and is
+   kicked after the grace unless a captain types `!allow` or `!sub`.
