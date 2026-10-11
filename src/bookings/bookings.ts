@@ -117,6 +117,7 @@ export const BOOKING_ERRORS = {
   not_caster: { status: 400, text: 'That player is not a caster.' },
   already_excused: { status: 409, text: 'That is already excused.' },
   bad_review: { status: 400, text: 'A review is a thumbs up or down, with tags from the list, each once.' },
+  bad_review_note: { status: 400, text: 'A review note is at most 300 characters.' },
   review_closed: { status: 409, text: 'Reviews close 7 days after the scrim.' },
   // Scrim blocks (Ruling 4): the one refusal a blocked pair gets anywhere,
   // worded so it never says why.
@@ -1206,7 +1207,7 @@ export interface BookingView {
    *  would be reviewing yourself). open says whether the 7 day
    *  window still takes a review; mine is the viewer's own side's review. The
    *  other side's review is never here. */
-  review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[] } | null };
+  review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[]; note: string } | null };
   /** Both sides' single reviews, for staff only. */
   reviews?: StaffReview[];
 }

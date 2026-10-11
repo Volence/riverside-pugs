@@ -7,7 +7,7 @@ import { bookingView, cancelBooking, confirmBooking, createBooking, getBooking, 
 import { reviewAskMessage } from '../src/bookings/messages.js';
 import { NOTIFY_TYPES } from '../src/notify/notify.js';
 import {
-  REVIEW_TAGS, REVIEW_TAG_LABELS, reviewSummary, scrimReviewsOf, staffReviews, submitReview, toxicFlag,
+  REVIEW_TAGS, REVIEW_TAG_LABELS, RETIRED_REVIEW_TAGS, reviewSummary, scrimReviewsOf, staffReviews, submitReview, toxicFlag,
 } from '../src/scrims/reviews.js';
 
 const P = Array.from({ length: 12 }, (_, i) => `765611990000018${String(i).padStart(2, '0')}`);
@@ -68,7 +68,7 @@ describe('submitReview', () => {
   it('a side manager submits, then edits the same row', () => {
     const id = booked(START);
     const end = closed(id);
-    const r = submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags: ['on_time', 'good_comms'], now: new Date(end + HOUR) });
+    const r = submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags: ['on_time', 'flexible'], now: new Date(end + HOUR) });
     expect(r).toEqual({ ok: true, value: { side: 'a' } });
     const r2 = submitReview(db, { bookingId: id, by: P[0], thumbs: -1, tags: ['left_early'], now: new Date(end + 2 * HOUR) });
     expect(r2).toEqual({ ok: true, value: { side: 'a' } });
@@ -115,7 +115,7 @@ describe('submitReview', () => {
     for (const thumbs of [0, 2, '1', null, undefined, true]) {
       expect(submitReview(db, { bookingId: id, by: P[0], thumbs, tags: [], now }), String(thumbs)).toEqual({ ok: false, error: 'bad_review' });
     }
-    for (const tags of ['on_time', ['nice'], ['on_time', 'on_time'], [1], null, { 0: 'toxic' }, [...REVIEW_TAGS, 'toxic']]) {
+    for (const tags of ['on_time', ['nice'], ['on_time', 'on_time'], [1], null, { 0: 'toxic' }, ['good_comms'], [...REVIEW_TAGS, 'toxic']]) {
       expect(submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags, now }), JSON.stringify(tags)).toEqual({ ok: false, error: 'bad_review' });
     }
     expect(submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags: [...REVIEW_TAGS], now }).ok).toBe(true);
@@ -138,9 +138,11 @@ describe('submitReview', () => {
     expect(submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags: [], now: new Date(end + HOUR) })).toEqual({ ok: false, error: 'wrong_state' });
   });
 
-  it('labels every tag', () => {
-    expect(REVIEW_TAGS).toEqual(['on_time', 'good_comms', 'good_sport', 'left_early', 'toxic']);
-    expect(REVIEW_TAGS.map((t) => REVIEW_TAG_LABELS[t])).toEqual(['On time', 'Good comms', 'Good sport', 'Left early', 'Toxic']);
+  it('offers the 2026-10-11 tags and still labels the retired one', () => {
+    expect(REVIEW_TAGS).toEqual(['on_time', 'easy_to_schedule', 'flexible', 'good_sport', 'left_early', 'toxic']);
+    expect(REVIEW_TAGS.map((t) => REVIEW_TAG_LABELS[t])).toEqual(['On time', 'Easy to schedule', 'Flexible', 'Good sport', 'Left early', 'Toxic']);
+    expect(RETIRED_REVIEW_TAGS).toEqual(['good_comms']);
+    expect(REVIEW_TAG_LABELS.good_comms).toBe('Good comms');
   });
 });
 
@@ -185,11 +187,17 @@ describe('reviewSummary', () => {
     expect(reviewSummary(db, { captain: P[1] }, member)).toEqual({ count: 3, positivePct: 67, topTag: 'on_time' });
   });
 
-  it('a team party collects reviews of its team sides, not its captain\'s pickup sides', () => {
+  it('a team party collects reviews of its team sides, not its captain\'s pickup sides; a retired tag still counts', () => {
     const t = team(P[1], 'Rats', 'RR');
-    review(0, 1, ['good_comms'], { opponent: { teamId: t } });
-    review(1, 1, ['good_comms'], { opponent: { teamId: t } });
-    review(2, -1, [], { opponent: { teamId: t } });
+    const stored = (day: number, thumbs: 1 | -1, tags: string[]) => {
+      const id = booked(START + day * DAY, { opponent: { teamId: t } });
+      const end = closed(id);
+      db.prepare("INSERT INTO scrim_reviews (booking_id, by_side, reviewer, thumbs, tags_json, created_at, updated_at) VALUES (?, 'a', ?, ?, ?, ?, ?)")
+        .run(id, P[0], thumbs, JSON.stringify(tags), new Date(end).toISOString(), new Date(end).toISOString());
+    };
+    stored(0, 1, ['good_comms']);
+    stored(1, 1, ['good_comms']);
+    stored(2, -1, []);
     review(3, -1, ['toxic']);
     expect(reviewSummary(db, { teamId: t }, { staff: true })).toEqual({ count: 3, positivePct: 67, topTag: 'good_comms' });
     expect(reviewSummary(db, { captain: P[1] }, { staff: true })).toEqual({ count: 1, positivePct: null, topTag: null });
@@ -252,7 +260,7 @@ describe('bookingView privacy', () => {
     const now = closed(id) + HOUR;
     submitReview(db, { bookingId: id, by: P[0], thumbs: -1, tags: ['toxic'], now: new Date(now) });
     const a = bookingView(db, id, { steamid: P[0], staff: false }, now)!;
-    expect(a.review).toEqual({ open: true, mine: { thumbs: -1, tags: ['toxic'] } });
+    expect(a.review).toEqual({ open: true, mine: { thumbs: -1, tags: ['toxic'], note: '' } });
     expect(a).not.toHaveProperty('reviews');
     const b = bookingView(db, id, { steamid: P[1], staff: false }, now)!;
     expect(b.review).toEqual({ open: true, mine: null });
@@ -269,7 +277,7 @@ describe('bookingView privacy', () => {
     const old = booked(START + DAY);
     const end = closed(old);
     submitReview(db, { bookingId: old, by: P[0], thumbs: 1, tags: [], now: new Date(end) });
-    expect(bookingView(db, old, { steamid: P[0], staff: false }, end + 7 * DAY)!.review).toEqual({ open: false, mine: { thumbs: 1, tags: [] } });
+    expect(bookingView(db, old, { steamid: P[0], staff: false }, end + 7 * DAY)!.review).toEqual({ open: false, mine: { thumbs: 1, tags: [], note: '' } });
     const cancelled = booked(START + 2 * DAY);
     cancelBooking(db, { bookingId: cancelled, by: P[0], now: new Date(START) });
     expect(bookingView(db, cancelled, { steamid: P[0], staff: false }, START + 3 * DAY)).not.toHaveProperty('review');
@@ -285,5 +293,29 @@ describe('the review DM', () => {
     expect(toA.components).toEqual([[{ kind: 'link', url: `https://x.test/booking/${id}`, label: 'Open the booking' }]]);
     expect(reviewAskMessage(db, 'https://x.test', id, 'b')!.content).toBe("How was p0's group? Leave a quick private review on the booking page. Only staff see single reviews.");
     expect(NOTIFY_TYPES.find((n) => n.type === 'scrim_review')?.label).toBe('Review my scrim opponent after a booked scrim');
+  });
+});
+
+describe('the staff-only note (owner, 2026-10-11)', () => {
+  it('is trimmed, at most 300 characters, and stored; staff read it and the reviewer\'s own side reads its own', () => {
+    const t = team(P[1], 'Rats', 'RR', [P[2]]);
+    const id = booked(START, { opponent: { teamId: t } });
+    const now = closed(id) + HOUR;
+    expect(submitReview(db, { bookingId: id, by: P[0], thumbs: -1, tags: [], note: 'x'.repeat(301), now: new Date(now) }))
+      .toEqual({ ok: false, error: 'bad_review_note' });
+    expect(submitReview(db, { bookingId: id, by: P[0], thumbs: -1, tags: [], note: 7, now: new Date(now) }))
+      .toEqual({ ok: false, error: 'bad_review_note' });
+    expect(submitReview(db, { bookingId: id, by: P[0], thumbs: -1, tags: [], note: `  ${'y'.repeat(300)}  `, now: new Date(now) }).ok).toBe(true);
+    expect(staffReviews(db, id)[0].note).toBe('y'.repeat(300));
+    expect(bookingView(db, id, { steamid: P[0], staff: false }, now)!.review!.mine!.note).toBe('y'.repeat(300));
+    // The reviewed side, its plain member, and the aggregate never carry it.
+    expect(JSON.stringify(bookingView(db, id, { steamid: P[1], staff: false }, now))).not.toContain('yyyy');
+    const member = bookingView(db, id, { steamid: P[2], staff: false }, now);
+    expect(member).not.toHaveProperty('review');
+    expect(JSON.stringify(member)).not.toContain('yyyy');
+    expect(JSON.stringify(reviewSummary(db, { teamId: t }, { staff: false }))).not.toContain('yyyy');
+    // An edit without a note clears it.
+    submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags: [], now: new Date(now) });
+    expect(staffReviews(db, id)[0].note).toBe('');
   });
 });

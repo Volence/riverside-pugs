@@ -13,13 +13,25 @@ import { actingSides, getBooking, logBookingEvent, type BookingRow, type Result,
  * Privacy: a single review only ever leaves this module through staffReviews,
  * and the reviewer's own side's row through ownReview. A team sees
  * reviewSummary of the reviews it received; the toxic flag is for staff only.
+ * A review's note goes only to staff (staffReviews) and back to the reviewing
+ * side's own managers (ownReview), who wrote it.
  */
 
-export const REVIEW_TAGS = ['on_time', 'good_comms', 'good_sport', 'left_early', 'toxic'] as const;
-export type ReviewTag = (typeof REVIEW_TAGS)[number];
+/** The tags the review form offers (owner, 2026-10-11): Good comms is gone,
+ *  since the other team never hears a side's voice; Easy to schedule and
+ *  Flexible (OK with a map, side or sub change) are new. */
+export const REVIEW_TAGS = ['on_time', 'easy_to_schedule', 'flexible', 'good_sport', 'left_early', 'toxic'] as const;
+/** No longer offered or accepted, but still on stored reviews: read and
+ *  labelled for staff history and the aggregate. */
+export const RETIRED_REVIEW_TAGS = ['good_comms'] as const;
+export const KNOWN_REVIEW_TAGS = [...REVIEW_TAGS, ...RETIRED_REVIEW_TAGS] as const;
+export type ReviewTag = (typeof KNOWN_REVIEW_TAGS)[number];
 export const REVIEW_TAG_LABELS: Record<ReviewTag, string> = {
-  on_time: 'On time', good_comms: 'Good comms', good_sport: 'Good sport', left_early: 'Left early', toxic: 'Toxic',
+  on_time: 'On time', easy_to_schedule: 'Easy to schedule', flexible: 'Flexible', good_sport: 'Good sport',
+  left_early: 'Left early', toxic: 'Toxic', good_comms: 'Good comms',
 };
+/** A review's optional note for staff, in characters after trimming. */
+export const REVIEW_NOTE_MAX = 300;
 export const REVIEW_WINDOW_DAYS = 7;
 /** Reviews received before a percentage or top tag is shown (Ruling 5). */
 export const SUMMARY_MIN = 3;
@@ -29,7 +41,7 @@ export const TOXIC_DAYS = 60;
 const DAY_MS = 86_400_000;
 
 interface ReviewRow {
-  id: number; booking_id: number; by_side: Side; reviewer: string; thumbs: number; tags_json: string; created_at: string; updated_at: string;
+  id: number; booking_id: number; by_side: Side; reviewer: string; thumbs: number; tags_json: string; note: string; created_at: string; updated_at: string;
 }
 
 /** When the booking closed: ended_at once the box is back, ending_at until then. */
@@ -56,13 +68,21 @@ function parseTags(raw: unknown): ReviewTag[] | null {
 const parseTagsJson = (json: string): ReviewTag[] => {
   try {
     const v = JSON.parse(json) as unknown;
-    return Array.isArray(v) ? v.filter((t): t is ReviewTag => (REVIEW_TAGS as readonly string[]).includes(t as string)) : [];
+    return Array.isArray(v) ? v.filter((t): t is ReviewTag => (KNOWN_REVIEW_TAGS as readonly string[]).includes(t as string)) : [];
   } catch {
     return [];
   }
 };
 
-export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs: unknown; tags: unknown; now?: Date }): Result<{ side: Side }> {
+/** '' for none; null for anything that is not a string of at most REVIEW_NOTE_MAX characters after trimming. */
+function parseReviewNote(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw !== 'string') return null;
+  const note = raw.trim();
+  return [...note].length > REVIEW_NOTE_MAX ? null : note;
+}
+
+export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs: unknown; tags: unknown; note?: unknown; now?: Date }): Result<{ side: Side }> {
   const now = o.now ?? new Date();
   return db.transaction((): Result<{ side: Side }> => {
     const b = getBooking(db, o.bookingId);
@@ -75,13 +95,15 @@ export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs:
     if (!reviewOpen(b, now.getTime())) return { ok: false, error: 'review_closed' };
     const tags = parseTags(o.tags);
     if ((o.thumbs !== 1 && o.thumbs !== -1) || tags === null) return { ok: false, error: 'bad_review' };
+    const note = parseReviewNote(o.note);
+    if (note === null) return { ok: false, error: 'bad_review_note' };
     const t = now.toISOString();
     const edit = db.prepare('SELECT 1 FROM scrim_reviews WHERE booking_id = ? AND by_side = ?').get(b.id, side) !== undefined;
     db.prepare(
-      `INSERT INTO scrim_reviews (booking_id, by_side, reviewer, thumbs, tags_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO scrim_reviews (booking_id, by_side, reviewer, thumbs, tags_json, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (booking_id, by_side) DO UPDATE SET reviewer = excluded.reviewer, thumbs = excluded.thumbs,
-         tags_json = excluded.tags_json, updated_at = excluded.updated_at`,
-    ).run(b.id, side, o.by, o.thumbs, JSON.stringify(tags), t, t);
+         tags_json = excluded.tags_json, note = excluded.note, updated_at = excluded.updated_at`,
+    ).run(b.id, side, o.by, o.thumbs, JSON.stringify(tags), note, t, t);
     // The audit row says who reviewed, never what they said.
     logBookingEvent(db, b.id, o.by, 'reviewed', { side, edit }, now);
     return { ok: true, value: { side } };
@@ -89,20 +111,20 @@ export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs:
 }
 
 /** The review this side wrote on this booking, for its own managers. */
-export function ownReview(db: DB, bookingId: number, side: Side): { thumbs: 1 | -1; tags: ReviewTag[] } | null {
+export function ownReview(db: DB, bookingId: number, side: Side): { thumbs: 1 | -1; tags: ReviewTag[]; note: string } | null {
   const r = db.prepare('SELECT * FROM scrim_reviews WHERE booking_id = ? AND by_side = ?').get(bookingId, side) as ReviewRow | undefined;
-  return r ? { thumbs: r.thumbs as 1 | -1, tags: parseTagsJson(r.tags_json) } : null;
+  return r ? { thumbs: r.thumbs as 1 | -1, tags: parseTagsJson(r.tags_json), note: r.note } : null;
 }
 
 export interface StaffReview {
-  side: Side; reviewer: string; reviewerName: string; thumbs: 1 | -1; tags: ReviewTag[]; createdAt: string; updatedAt: string;
+  side: Side; reviewer: string; reviewerName: string; thumbs: 1 | -1; tags: ReviewTag[]; note: string; createdAt: string; updatedAt: string;
 }
 
 /** Both sides' reviews of one booking. Staff only. */
 export function staffReviews(db: DB, bookingId: number): StaffReview[] {
   return (db.prepare('SELECT * FROM scrim_reviews WHERE booking_id = ? ORDER BY by_side').all(bookingId) as ReviewRow[]).map((r) => ({
     side: r.by_side, reviewer: r.reviewer, reviewerName: getPlayer(db, r.reviewer)?.name ?? r.reviewer,
-    thumbs: r.thumbs as 1 | -1, tags: parseTagsJson(r.tags_json), createdAt: r.created_at, updatedAt: r.updated_at,
+    thumbs: r.thumbs as 1 | -1, tags: parseTagsJson(r.tags_json), note: r.note, createdAt: r.created_at, updatedAt: r.updated_at,
   }));
 }
 
@@ -123,14 +145,14 @@ export interface ReviewSummary { count?: number; positivePct: number | null; top
  *  received. Under SUMMARY_MIN there is no percentage and no top tag, so a
  *  single review cannot be read back out of it, and only staff get the count:
  *  a team watching it tick from 0 to 1 after a scrim would learn that the
- *  opponent reviewed them. Tied tags go to the first in REVIEW_TAGS order. */
+ *  opponent reviewed them. Tied tags go to the first in KNOWN_REVIEW_TAGS order. */
 export function reviewSummary(db: DB, party: Party, viewer: { staff: boolean }): ReviewSummary {
   const rows = received(db, party);
   if (rows.length < SUMMARY_MIN) return viewer.staff ? { count: rows.length, positivePct: null, topTag: null } : { positivePct: null, topTag: null };
   const counts = new Map<ReviewTag, number>();
   for (const r of rows) for (const t of parseTagsJson(r.tags_json)) counts.set(t, (counts.get(t) ?? 0) + 1);
   let topTag: ReviewTag | null = null;
-  for (const t of REVIEW_TAGS) if ((counts.get(t) ?? 0) > (topTag ? counts.get(topTag)! : 0)) topTag = t;
+  for (const t of KNOWN_REVIEW_TAGS) if ((counts.get(t) ?? 0) > (topTag ? counts.get(topTag)! : 0)) topTag = t;
   return {
     count: rows.length,
     positivePct: Math.round((100 * rows.filter((r) => r.thumbs === 1).length) / rows.length),

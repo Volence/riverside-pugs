@@ -170,7 +170,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
   action('excuse', (me, id, req) => B.excuseMark(db, { bookingId: id, by: me, note: body(req).note }));
   // Plan 2 Ruling 5: a manager's private review of the other side. The
   // answer is the viewer's own view, which carries only their side's review.
-  action('review', (me, id, req) => submitReview(db, { bookingId: id, by: me, thumbs: body(req).thumbs, tags: body(req).tags }));
+  action('review', (me, id, req) => submitReview(db, { bookingId: id, by: me, thumbs: body(req).thumbs, tags: body(req).tags, note: body(req).note }));
   // +1 campaign (Ruling 5); the path keeps its old name.
   action('extend', (me, id, req) => B.addCampaign(db, { bookingId: id, by: me, campaign: body(req).campaign }), (_me, id) => runner?.onExtended(id));
   action('no-show', (me, id) => B.claimNoShow(db, { bookingId: id, by: me }),
