@@ -2372,6 +2372,8 @@ export interface ScrimReviews {
 }
 export interface BookingPerson { steamid: string; name: string; avatar: string | null; role: BookingRole; status: 'invited' | 'accepted' }
 export interface BookingSideView {
+  /** Start now: this side pressed it. */
+  startNow?: boolean;
   side: BookingSide; name: string; team: { id: number; slug: string; name: string; tag: string; logoKey: string | null } | null;
   captain: { steamid: string; name: string }; confirmed: boolean; peakPresent: number; noShow: boolean; people: BookingPerson[];
   /** This side cancelled late (plan 2), and whether its mark is excused. */
@@ -2395,6 +2397,8 @@ export interface BookingGameView {
   winner?: 'a' | 'b' | 'draw' | null; voided?: boolean;
 }
 export interface BookingView {
+  /** Start now may be pressed (a scrim, both sides confirmed, before its start). */
+  canStartNow?: boolean;
   id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean;
   /** The close has finished; ending stays true for ever after it. */
   ended: boolean;
@@ -2457,6 +2461,9 @@ export const bookingsApi = {
    *  playlist one when omitted), or replay the last game's campaign. */
   next: (id: number, campaign?: string) => post<BookingView>(`/api/bookings/${id}/next`, campaign ? { campaign } : undefined),
   stay: (id: number) => post<BookingView>(`/api/bookings/${id}/stay`),
+  /** Start now (both captains press it; the second press moves the slot up to now). */
+  startNow: (id: number) => post<BookingView>(`/api/bookings/${id}/start-now`),
+  withdrawStartNow: (id: number) => post<BookingView>(`/api/bookings/${id}/start-now/withdraw`),
   /** Casters (plan 4c): who may be invited, and a side's half of an invite. */
   casters: (signal?: AbortSignal) => get<{ casters: { steamid: string; name: string; avatar: string | null }[] }>('/api/bookings/casters', signal),
   inviteCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters`, { steamid }),

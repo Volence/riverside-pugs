@@ -4,7 +4,7 @@ import { LocationProvider } from 'preact-iso';
 
 const { mockBookings, mockAdmin, mockScrims, mockConfirm } = vi.hoisted(() => ({
   mockBookings: {
-    get: vi.fn(), act: vi.fn(), addCampaign: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(),
+    get: vi.fn(), act: vi.fn(), addCampaign: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(), startNow: vi.fn(), withdrawStartNow: vi.fn(),
     casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(), excuse: vi.fn(), review: vi.fn(),
   },
   mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn(), excuseBooking: vi.fn() },
@@ -51,6 +51,42 @@ beforeEach(() => {
 });
 
 describe('Booking page', () => {
+  it('a manager presses Start now before the start, sees the wait, and can take it back', async () => {
+    const pre = { state: 'scheduled', connect: null, server: null, canStartNow: true };
+    mockBookings.get.mockResolvedValue(VIEW(pre));
+    mockBookings.startNow.mockResolvedValue(VIEW({ ...pre, sides: VIEW().sides.map((s) => ({ ...s, startNow: s.side === 'a' })) }));
+    mockBookings.withdrawStartNow.mockResolvedValue(VIEW(pre));
+    render(<Booking id="7" session={session} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start now' }));
+    await waitFor(() => expect(mockBookings.startNow).toHaveBeenCalledWith(7));
+    expect(await screen.findByText('Waiting for the other captain to press Start now.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Take it back' }));
+    await waitFor(() => expect(mockBookings.withdrawStartNow).toHaveBeenCalledWith(7));
+    expect(await screen.findByRole('button', { name: 'Start now' })).toBeTruthy();
+  });
+
+  it('says when the other side pressed Start now', async () => {
+    mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null, canStartNow: true,
+      sides: VIEW().sides.map((s) => ({ ...s, startNow: s.side === 'b' })) }));
+    render(<Booking id="7" session={session} />);
+    expect(await screen.findByText(/Mice pressed Start now/)).toBeTruthy();
+  });
+
+  it('no Start now once the booking cannot start early', async () => {
+    mockBookings.get.mockResolvedValue(VIEW({ canStartNow: false }));
+    render(<Booking id="7" session={session} />);
+    expect(await screen.findByText('connect 1.2.3.4:27015; password abcd2345')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull();
+  });
+
+  it('a refused Start now shows the reason', async () => {
+    mockBookings.get.mockResolvedValue(VIEW({ state: 'scheduled', connect: null, server: null, canStartNow: true }));
+    mockBookings.startNow.mockRejectedValue(new Error('No server is free right now. Try again in a minute.'));
+    render(<Booking id="7" session={session} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start now' }));
+    expect(await screen.findByText('No server is free right now. Try again in a minute.')).toBeTruthy();
+  });
+
   it('shows the connect line when ready', async () => {
     render(<Booking id="7" session={session} />);
     expect(await screen.findByText('connect 1.2.3.4:27015; password abcd2345')).toBeTruthy();
