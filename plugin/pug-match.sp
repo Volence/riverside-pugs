@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.32"
+#define PLUGIN_VERSION "0.3.33"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -554,6 +554,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	StaffChat_Init();
 	Gg_Init();
 	Tourney_Init();
+	Book_Init();
 	DataFeeds_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
@@ -3609,6 +3610,7 @@ public void OnClientPostAdminCheck(int client)
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
 	if (IsFakeClient(client)) return;
+	Book_OnClientPostAdminCheck(client);
 	char id[32];
 	bool haveId = GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id));
 
@@ -3664,6 +3666,7 @@ public void OnClientDisconnect(int client)
 	Gg_OnDisconnect(client);
 	StaffChat_OnDisconnect(client);
 	Tourney_OnDisconnect(client);
+	Book_OnDisconnect(client);
 	int slot = g_iClientRoster[client];
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
@@ -3704,7 +3707,9 @@ bool TeamLockActive()
 	// starts, which have no authority: their "roster" is just whoever happened
 	// to be on each side. A backend-issued roster is authoritative and must be
 	// enforced even while auto_track is on, which it always is on the live box.
-	if (g_cvAutoTrack.BoolValue && g_bSelfStarted) return false;
+	// So is an auto-tracked game on a booked scrim's box (pug-booking.inc):
+	// the booking placed each side before go-live, so the snapshot is right.
+	if (g_cvAutoTrack.BoolValue && g_bSelfStarted && !Book_Active()) return false;
 	return true;
 }
 
@@ -3818,6 +3823,9 @@ void CaptureNextMapOrder(int survPug)
  *     a direct sm_sur from the infected side can silently fail to stick. */
 public Action Timer_TeamLock(Handle timer)
 {
+	// A booked scrim's placement (pug-booking.inc) runs in every state,
+	// before a game is tracked too.
+	Book_Pass();
 	if (g_State == MS_None || g_State == MS_Ended) return Plugin_Continue;
 
 	int straight, inverted;
@@ -5394,6 +5402,8 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-gg.inc"
 // Last: reads pug-leave.inc's pause state and pug-modcall.inc's cooldown.
 #include "pug-tourney.inc"
+// Booked scrims: each booking side on its own team (reads the roster and g_iPugSide).
+#include "pug-booking.inc"
 // Flow, cause, SI lives and the connection funnel (docs/data-feeds-2026-10-10.md).
 #include "pug-datafeeds.inc"
 
