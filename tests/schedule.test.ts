@@ -325,3 +325,20 @@ describe('final review fixes (plan T4)', () => {
     expect(JSON.parse((f.db.prepare('SELECT detail FROM event_log ORDER BY id DESC LIMIT 1').get() as { detail: string }).detail)).toMatchObject({ reason: 'room_opened' });
   });
 });
+
+describe('the ready check in a window room (2026-10-11 sweep)', () => {
+  it('runs until the ready minutes past the agreed time, not just past the opening', async () => {
+    const f = await windowFixture();
+    // Agreed for 20 minutes from now; the room opens now (its lead).
+    f.db.prepare("UPDATE event_matches SET scheduled_at = ?, schedule_source = 'agreed' WHERE id = ?").run(new Date(NOW.getTime() + 20 * 60_000).toISOString(), f.matchId);
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW });
+    expect(P.getMatch(f.db, f.matchId)!.deadline).toBe(new Date(NOW.getTime() + 30 * 60_000).toISOString());
+  });
+
+  it('with no agreed time, counts from the opening', async () => {
+    const f = await windowFixture();
+    f.db.prepare('UPDATE event_matches SET scheduled_at = NULL WHERE id = ?').run(f.matchId);
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS, now: NOW });
+    expect(P.getMatch(f.db, f.matchId)!.deadline).toBe(new Date(NOW.getTime() + 10 * 60_000).toISOString());
+  });
+});

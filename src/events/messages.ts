@@ -339,7 +339,7 @@ export function eventMessage(
       const a = escapeName(getEntry(db, m.entry_a)?.name ?? 'Team A');
       const b = escapeName(getEntry(db, m.entry_b)?.name ?? 'Team B');
       if (type === 'event_match_room') {
-        content = `${a} vs ${b} in ${event}: the match room is open. A captain or co-captain of each team presses Ready within ${roomTimers(db).readyMinutes} minutes; a team that does not loses by forfeit.`;
+        content = `${a} vs ${b} in ${event}: the match room is open. A captain or co-captain of each team presses Ready ${m.deadline ? `by ${discordTime(m.deadline)}` : `within ${roomTimers(db).readyMinutes} minutes`}; a team that does not loses by forfeit.`;
       } else {
         const winner = m.winner_entry === m.entry_a ? a : b;
         const loser = m.winner_entry === m.entry_a ? b : a;

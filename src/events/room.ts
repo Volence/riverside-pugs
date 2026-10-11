@@ -172,6 +172,16 @@ function advance(db: DB, matchId: number, timers: RoomTimers, now: Date): void {
   }
 }
 
+/** When the ready check closes. A window room opens its lead before the
+ *  agreed time, so counting the ready minutes from the opening alone would
+ *  forfeit a team that turns up at the time it agreed to: the check runs at
+ *  least until the ready minutes past the scheduled time. */
+function readyDeadline(now: Date, scheduledAt: string | null, readyMinutes: number): string {
+  const fromOpen = now.getTime() + readyMinutes * 60_000;
+  const fromAgreed = scheduledAt !== null ? Date.parse(scheduledAt) + readyMinutes * 60_000 : 0;
+  return new Date(Math.max(fromOpen, fromAgreed)).toISOString();
+}
+
 export function openRoom(db: DB, o: { matchId: number; by: string | null; higher: Side; seed: number; timers: RoomTimers; now?: Date }): V.Checked<P.MatchRow> {
   const now = o.now ?? new Date();
   const at = iso(now);
@@ -185,7 +195,7 @@ export function openRoom(db: DB, o: { matchId: number; by: string | null; higher
     db.prepare(
       `UPDATE event_matches SET status = 'veto', room_opened_at = ?, room_higher = ?, room_seed = ?, ready_a_at = NULL, ready_b_at = NULL,
          deadline = ?, hold_reason = NULL WHERE id = ?`,
-    ).run(at, o.higher, o.seed, plus(now, o.timers.readyMinutes * 60_000), m.id);
+    ).run(at, o.higher, o.seed, readyDeadline(now, m.scheduled_at, o.timers.readyMinutes), m.id);
     E.logEvent(db, ev.id, o.by, 'room_opened', at, { matchId: m.id, higher: o.higher });
     return V.ok(P.getMatch(db, m.id)!);
   })();
