@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { logoUrl, teamsApi } from '../api';
+import { ApiError, logoUrl, teamsApi } from '../api';
 import type { Session } from '../hooks/useLiveState';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
@@ -8,7 +8,7 @@ import { PageHeader } from '../components/PageHeader';
 /** Mirrors src/teams/teams.ts. */
 const ROSTER_MAX = 8;
 
-type JoinInfo = { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string };
+type JoinInfo = { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string; member?: boolean };
 
 export function TeamJoin({ token, session }: { token: string; session: Session }) {
   const { route } = useLocation();
@@ -22,7 +22,13 @@ export function TeamJoin({ token, session }: { token: string; session: Session }
     // signed in yet, so this skips the fetch rather than report it as the
     // link being off.
     if (!signedIn) return;
-    teamsApi.joinInfo(token).then(setTeam, () => setError('That join link is turned off or was replaced. Ask the captain for a new one.'));
+    teamsApi.joinInfo(token).then(setTeam, (e) => {
+      // The server words a turned-off link itself; anything else (teams not
+      // open yet, a server error) must not read as the link being off.
+      if (e instanceof ApiError && e.status === 404 && /join link/.test(e.message)) setError(`${e.message} Ask the captain for a new one.`);
+      else if (e instanceof ApiError && e.status === 404) setError('Teams are not open yet.');
+      else setError('Could not load this join link. Try again in a moment.');
+    });
   }, [token, signedIn]);
   const join = async () => {
     setError(null);
@@ -59,6 +65,17 @@ export function TeamJoin({ token, session }: { token: string; session: Session }
       </main>
     );
   }
+  if (error && !team) {
+    return (
+      <main class="page page--play teampage">
+        <PageHeader title="Join a team" />
+        <Panel>
+          <p class="error" role="alert">{error}</p>
+          <a class="btn btn--ghost" href="/teams">See all teams</a>
+        </Panel>
+      </main>
+    );
+  }
   return (
     <main class="page page--play teampage">
       {error && <p class="error" role="alert">{error}</p>}
@@ -74,11 +91,18 @@ export function TeamJoin({ token, session }: { token: string; session: Session }
               <p class="teamhead__line">Captain {team.captainName} · {team.members} / {ROSTER_MAX} players</p>
             </div>
           </header>
-          <div class="teamconfirm teamjoincard__actions">
-            <button class="btn" disabled={busy || team.members >= ROSTER_MAX} onClick={join}>Join {team.name}</button>
-            <a class="btn btn--ghost" href={`/team/${team.slug}`}>See the team first</a>
-          </div>
-          {team.members >= ROSTER_MAX && <p class="teamnote">The roster is full right now.</p>}
+          {team.member ? (
+            <div class="teamconfirm teamjoincard__actions">
+              <p class="teamnote">You are already on this team.</p>
+              <a class="btn" href={`/team/${team.slug}`}>Go to the team</a>
+            </div>
+          ) : (
+            <div class="teamconfirm teamjoincard__actions">
+              <button class="btn" disabled={busy || team.members >= ROSTER_MAX} onClick={join}>Join {team.name}</button>
+              <a class="btn btn--ghost" href={`/team/${team.slug}`}>See the team first</a>
+            </div>
+          )}
+          {team.members >= ROSTER_MAX && !team.member && <p class="teamnote">The roster is full right now.</p>}
         </section>
       ) : !error && <Empty>Loading...</Empty>}
     </main>

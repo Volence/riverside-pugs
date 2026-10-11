@@ -13,6 +13,7 @@ import { estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel
 import { campaignName } from '../format';
 import { TeamBadge } from './Teams';
 import { reliableBadge } from '../components/ScrimRecord';
+import { confirm as confirmDialog } from '../components/Confirm';
 
 /** The board's SR range select (spec part 4): open, or one of a few common
  *  widths. The server accepts any integer 50..1000 (scrim_sr_range), but the
@@ -276,7 +277,14 @@ function MyPostPanel({
         extra={[showSr ? `SR ${post.sr} (${srRangeLabel(post.srRange)})` : null, post.challenge ? `challenged ${post.challenge.name}` : null]}
       />
       <p class="inlinerow">
-        <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onWithdraw(post.id)}>Withdraw</button>
+        <button class="btn btn--ghost btn--sm" disabled={busy} onClick={async () => {
+          // Every pending offer on it is declined, so this asks first.
+          const pending = post.accepts?.length ?? 0;
+          if (pending === 0 || await confirmDialog({
+            title: 'Withdraw this post?', body: `The ${pending === 1 ? 'pending offer on it is' : `${pending} pending offers on it are`} declined.`,
+            confirmLabel: 'Withdraw', cancelLabel: 'Keep it', danger: true,
+          })) void onWithdraw(post.id);
+        }}>Withdraw</button>
       </p>
       {post.accepts && post.accepts.length > 0 && (
         <ul class="scrimaccepts">
@@ -325,10 +333,12 @@ function BlockedPanel({ options }: { options: ScrimOptions }) {
   const [q, setQ] = useState('');
   const [found, setFound] = useState<{ steamid: string; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = (signal?: AbortSignal) => {
-    scrimsApi.blocks(side, signal).then((r) => { if (!signal || !signal.aborted) setBlocks(r.blocks); }, () => {});
+    setFailed(false);
+    scrimsApi.blocks(side, signal).then((r) => { if (!signal || !signal.aborted) setBlocks(r.blocks); }, () => { if (!signal?.aborted) setFailed(true); });
   };
   // A side switch clears the list right away and cancels the request for the
   // side just left, so a slow response for it can never land after the
@@ -369,7 +379,7 @@ function BlockedPanel({ options }: { options: ScrimOptions }) {
           <option value="">A pickup group (just me for now)</option>
         </select>
       </label>
-      {blocks === null ? null : blocks.length === 0
+      {blocks === null ? (failed ? <p class="error" role="alert">Could not load your blocks.</p> : <Empty>Loading…</Empty>) : blocks.length === 0
         ? <Empty>No blocks.</Empty>
         : (
           <ul class="teamlist">
@@ -388,8 +398,8 @@ function BlockedPanel({ options }: { options: ScrimOptions }) {
           </ul>
         )}
       <p class="inlinerow">
-        <button class={`btn btn--sm${mode === 'team' ? '' : ' btn--ghost'}`} type="button" onClick={() => setMode('team')}>Team</button>
-        <button class={`btn btn--sm${mode === 'player' ? '' : ' btn--ghost'}`} type="button" onClick={() => setMode('player')}>Player</button>
+        <button class={`btn btn--sm${mode === 'team' ? '' : ' btn--ghost'}`} type="button" aria-pressed={mode === 'team'} onClick={() => setMode('team')}>Team</button>
+        <button class={`btn btn--sm${mode === 'player' ? '' : ' btn--ghost'}`} type="button" aria-pressed={mode === 'player'} onClick={() => setMode('player')}>Player</button>
       </p>
       {mode === 'team'
         ? (
@@ -438,13 +448,20 @@ export function Scrims({ session }: { session: Session }) {
   const [error, setError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<{ acceptId: number; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The board or the form options failed to load (not a 404): said once, with a retry. */
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = () => {
     if (!signedIn) return;
-    scrimsApi.board(showSr && fitsOnly).then((r) => { setPosts(r.posts); setNight(r.night); setShowSr(r.showSr); }, (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
+    scrimsApi.board(showSr && fitsOnly).then((r) => { setPosts(r.posts); setNight(r.night); setShowSr(r.showSr); setLoadFailed(false); }, (e) => {
+      if (e instanceof ApiError && e.status === 404) setClosed(true); else setLoadFailed(true);
+    });
+  };
+  const loadOptions = () => {
+    if (signedIn) scrimsApi.options().then(setOptions, (e) => { if (!(e instanceof ApiError && e.status === 404)) setLoadFailed(true); });
   };
   useEffect(load, [signedIn, fitsOnly]);
-  useEffect(() => { if (signedIn) scrimsApi.options().then(setOptions, () => {}); }, [signedIn]);
+  useEffect(loadOptions, [signedIn]);
 
   const highlightId = (() => {
     const raw = (query as Record<string, string> | undefined)?.post;
@@ -524,7 +541,10 @@ export function Scrims({ session }: { session: Session }) {
             Fits my SR
           </label>
         )}
-        {posts === null || options === null ? null : posts.length === 0
+        {loadFailed && (
+          <p class="error" role="alert">Could not load the board. <button class="btn btn--ghost btn--sm" onClick={() => { setLoadFailed(false); load(); if (!options) loadOptions(); }}>Try again</button></p>
+        )}
+        {posts === null || options === null ? (loadFailed ? null : <Empty>Loading the board…</Empty>) : posts.length === 0
           ? <Empty>No open scrims right now.</Empty>
           : (
             <ul class="scrimrows">
