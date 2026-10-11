@@ -393,7 +393,8 @@ export class SeriesEngine {
     try { this.deps.registerToken?.(g.token); } catch (err) { console.error(`[series] registering the token of game ${g.matchId} failed:`, err); }
     console.log(`[series] match ${m.id}: game ${due.ordinal} is match ${g.matchId} on ${campaign}`);
     this.push(m.id);
-    return [...this.linesFor(m, due, g.matchId), `say [Match] ${this.startText(m, due, g.matchId)}`];
+    // The entry names are team names (free text): consoleText, as every other line.
+    return [...this.linesFor(m, due, g.matchId), `say [Match] ${consoleText(this.startText(m, due, g.matchId), 200)}`];
   }
 
   /** A game pushed but not heard from yet: its burst again (no chat line). */
