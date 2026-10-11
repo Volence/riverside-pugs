@@ -47,6 +47,25 @@ describe('capacity', () => {
     expect(capacityProblem(db, { region: 'na', startMs: T0 - H, endMs: T0 })).toBeNull();
   });
 
+  it('a booking still on its box past its slot keeps counting, and a box in its wind-down for a few minutes', () => {
+    servers(2);
+    db.prepare("INSERT INTO servers (name, host, port, rcon_port, rcon_password, status) VALUES ('held', 'h', 2, 1, 'pw', 'live')").run();
+    const held = (db.prepare("SELECT id FROM servers WHERE name = 'held'").get() as { id: number }).id;
+    // Three boxes, the reserve of two: room for one booking at a time.
+    // 19:00-20:00 slot, its game still running at 20:05.
+    const over = book(T0 - H, T0, { state: 'active', serverId: held });
+    const now = T0 + 5 * 60_000;
+    expect(capacityProblem(db, { region: 'na', startMs: T0 + 10 * 60_000, endMs: T0 + H, nowMs: now })).toBe(T0 + 10 * 60_000);
+    expect(capacityProblem(db, { region: 'na', startMs: T0 + H, endMs: T0 + 2 * H, nowMs: now })).toBeNull();
+    // Winding down: the box comes back within minutes.
+    db.prepare("UPDATE bookings SET state = 'ended', ending_at = ? WHERE id = ?").run(new Date(now).toISOString(), over);
+    expect(capacityProblem(db, { region: 'na', startMs: now + 5 * 60_000, endMs: T0 + H, nowMs: now })).toBe(now + 5 * 60_000);
+    expect(capacityProblem(db, { region: 'na', startMs: now + 20 * 60_000, endMs: T0 + H, nowMs: now })).toBeNull();
+    // Without a box it never counts past its slot.
+    db.prepare('UPDATE bookings SET server_id = NULL WHERE id = ?').run(over);
+    expect(capacityProblem(db, { region: 'na', startMs: now + 5 * 60_000, endMs: T0 + H, nowMs: now })).toBeNull();
+  });
+
   it('checks the busiest moment, not just the start', () => {
     servers(4); // room for 2
     book(T0, T0 + H);

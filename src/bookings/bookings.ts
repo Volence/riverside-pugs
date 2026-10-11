@@ -119,6 +119,7 @@ export const BOOKING_ERRORS = {
   no_invite: { status: 410, text: 'That invite is no longer open.' },
   is_captain: { status: 400, text: "A side's captain cannot be removed." },
   too_early: { status: 409, text: 'The other side still has time to arrive.' },
+  started: { status: 409, text: 'The scrim has started. Use End now, or They did not show if the other side never came.' },
   not_shown: { status: 409, text: 'Your side has to be on the server first.' },
   they_showed: { status: 409, text: 'The other side is on the server.' },
   not_caster: { status: 400, text: 'That player is not a caster.' },
@@ -341,7 +342,7 @@ export function createBooking(db: DB, o: {
     const endMs = startMs + minutes * 60_000;
     if (bookedDuring(db, aParty, startMs, endMs)) return fail('busy_us');
     if (bookedDuring(db, bParty, startMs, endMs)) return fail('busy_them');
-    if (capacityProblem(db, { region, startMs, endMs }) !== null) return fail('no_capacity');
+    if (capacityProblem(db, { region, startMs, endMs, nowMs }) !== null) return fail('no_capacity');
     const id = Number(db.prepare(
       `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, ruleset_id, playlist_json, games_allowed, created_by, created_at)
        VALUES ('scrim', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -503,7 +504,7 @@ export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?:
     const slot = [Date.parse(b.starts_at), Date.parse(b.ends_at)] as const;
     if (bookedDuring(db, party, slot[0], slot[1], b.id)) return fail('busy_us');
     if (bookedDuring(db, partyOf(sideRow(db, b.id, 'a')!), slot[0], slot[1], b.id)) return fail('busy_them');
-    if (capacityProblem(db, { region: b.region, startMs: Date.parse(b.starts_at), endMs: Date.parse(b.ends_at), exceptId: b.id, purpose: b.purpose }) !== null) {
+    if (capacityProblem(db, { region: b.region, startMs: Date.parse(b.starts_at), endMs: Date.parse(b.ends_at), exceptId: b.id, purpose: b.purpose, nowMs: now.getTime() }) !== null) {
       return fail('no_capacity');
     }
     db.prepare("UPDATE booking_sides SET confirmed_at = ? WHERE booking_id = ? AND side = 'b'").run(now.toISOString(), b.id);
@@ -789,6 +790,10 @@ export function cancelBooking(db: DB, o: { bookingId: number; by: string; staff?
     if (!isOpen(b)) return fail('wrong_state');
     const mine = actingSides(db, b.id, o.by);
     if (!o.staff && mine.length === 0) return fail('not_manager');
+    // Once the box is up and the start has passed, a side's cancel would mark
+    // that side late and clear the side that never came: End and the no-show
+    // claim are the honest ways out by then.
+    if (!o.staff && (b.state === 'ready' || b.state === 'active') && now.getTime() >= Date.parse(b.starts_at)) return fail('started');
     // Staff cancels belong to no side (scrim spec 3a: never counted against anyone).
     const side = o.staff ? null : mine[0];
     close(db, b.id, 'cancelled', o.staff ? 'staff' : 'cancelled', now, { cancelledBy: o.by, cancelSide: side, cancelReason: reason });
@@ -914,8 +919,10 @@ export function addCampaign(db: DB, o: {
     // After the gate, so a stranger learns nothing from a bad slug.
     if (campaign !== null && !isPoolCampaign(db, campaign)) return fail('bad_campaign');
     const minutes = addCampaignMinutes(db, campaign);
-    const from = Date.parse(b.ends_at);
-    if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + minutes * 60_000, exceptId: b.id, purpose: b.purpose }) !== null) {
+    // From the slot's end, or from now when a game ran past it: a +1 bought
+    // at 23:10 on a slot that ended 21:30 must not end at 23:00.
+    const from = Math.max(Date.parse(b.ends_at), now.getTime());
+    if (capacityProblem(db, { region: b.region, startMs: from, endMs: from + minutes * 60_000, exceptId: b.id, purpose: b.purpose, nowMs: now.getTime() }) !== null) {
       return fail('no_campaign_room');
     }
     const endsAt = iso(from + minutes * 60_000);
@@ -1020,7 +1027,7 @@ export function startBookingNow(db: DB, o: { bookingId: number; side?: Side; now
     if (!startNowOpen(b, nowMs) || sidesOf(db, b.id).some((s) => s.start_now_at === null)) return fail('wrong_state');
     const shift = Date.parse(b.starts_at) - nowMs;
     const endMs = Date.parse(b.ends_at) - shift;
-    if (capacityProblem(db, { region: b.region, startMs: nowMs, endMs, exceptId: b.id, purpose: b.purpose }) !== null) return fail('no_capacity');
+    if (capacityProblem(db, { region: b.region, startMs: nowMs, endMs, exceptId: b.id, purpose: b.purpose, nowMs }) !== null) return fail('no_capacity');
     // One side, one slot: the earlier slot must not run into a side's other booking.
     for (const s of sidesOf(db, b.id)) {
       if (bookedDuring(db, partyOf(s), nowMs, endMs, b.id)) return fail(o.side === undefined || s.side === o.side ? 'busy_us' : 'busy_them');

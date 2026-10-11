@@ -106,7 +106,7 @@ export function nearestFreeSlot(
   const maxSteps = Math.floor(SEARCH_WINDOW_MINUTES / STEP_MINUTES);
   const maxStartMs = nowMs + bookingLimits(db).daysAhead * 86_400_000;
   const inWindow = (ms: number): boolean => ms > nowMs && ms <= maxStartMs;
-  const free = (ms: number): boolean => capacityProblem(db, { region, startMs: ms, endMs: ms + durationMs }) === null;
+  const free = (ms: number): boolean => capacityProblem(db, { region, startMs: ms, endMs: ms + durationMs, nowMs }) === null;
   const offer = (ms: number): string | null => (inWindow(ms) && free(ms)) ? iso(ms) : null;
 
   const exact = offer(startMs);

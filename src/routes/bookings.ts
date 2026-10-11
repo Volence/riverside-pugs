@@ -31,6 +31,13 @@ export interface BookingRoutesOpts {
 
 const NOT_FOUND = { error: 'not found' };
 const NO_RUNNER = { error: 'Booking game control is not available on this server.' };
+/** A tournament booking belongs to its event: the series engine starts,
+ *  ends and fills it, and staff act on it from the events desk. In game the
+ *  same refusal reads "The site runs this tournament match" (runner.ts). */
+const EVENT_RUNS = { error: 'The event runs this tournament match. Ask the staff on the event desk.' };
+/** What a player may still do on a tournament booking's page: take or turn
+ *  down their own place, and the casters' halves of an invite. */
+const TOURNAMENT_OK = new Set(['accept', 'leave', 'casters', 'review']);
 
 /**
  * Server bookings for players (plan 4a). Every route answers 404 to a viewer
@@ -139,11 +146,18 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     return view(v.me, v.id);
   });
 
+  const eventRuns = (id: number, reply: FastifyReply): boolean => {
+    if (B.getBooking(db, id)?.purpose !== 'tournament') return false;
+    reply.code(409).send(EVENT_RUNS);
+    return true;
+  };
+
   /** One POST action on a booking: run it, then the follow-up, then the fresh view. */
   const action = (path: string, run: (me: string, id: number, req: FastifyRequest) => B.Result<unknown>, after?: (me: string, id: number, value: unknown, req: FastifyRequest) => void) => {
     app.post(`/api/bookings/:id/${path}`, async (req, reply) => {
       const v = visible(req, reply);
       if (!v) return;
+      if (!TOURNAMENT_OK.has(path) && eventRuns(v.id, reply)) return;
       const r = run(v.me, v.id, req);
       if (!r.ok) return refuse(reply, r.error);
       after?.(v.me, v.id, r.value, req);
@@ -222,6 +236,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
   app.post('/api/bookings/:id/people/:steamid/remove', async (req, reply) => {
     const v = visible(req, reply);
     if (!v) return;
+    if (eventRuns(v.id, reply)) return;
     const r = B.removePerson(db, { bookingId: v.id, by: v.me, steamid: (req.params as { steamid: string }).steamid });
     if (!r.ok) return refuse(reply, r.error);
     return view(v.me, v.id);
@@ -237,6 +252,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     const v = visible(req, reply);
     if (!v) return;
     if (!runner) return reply.code(503).send(NO_RUNNER);
+    if (eventRuns(v.id, reply)) return;
     const staff = isStaff(v.me);
     const campaign = body(req).campaign;
     const r = runner.chooseNext(v.id, v.me, typeof campaign === 'string' ? campaign : null, staff);
@@ -249,6 +265,7 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
     const v = visible(req, reply);
     if (!v) return;
     if (!runner) return reply.code(503).send(NO_RUNNER);
+    if (eventRuns(v.id, reply)) return;
     const staff = isStaff(v.me);
     const r = runner.stay(v.id, v.me, staff);
     if (!r.ok) return reply.code(409).send({ error: r.error });

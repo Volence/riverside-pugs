@@ -242,6 +242,23 @@ describe('people', () => {
 });
 
 describe('cancel, extend, end, no-show', () => {
+  it('a side cannot cancel once the box is up and the start has passed; staff still can', () => {
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    expect(holdBox(db, id, servers[3], at(START, -15))).toBe(true);
+    db.prepare("UPDATE bookings SET state = 'active' WHERE id = ?").run(id);
+    expect(cancelBooking(db, { bookingId: id, by: P[0], now: at(START, 10) })).toEqual({ ok: false, error: 'started' });
+    expect(cancelBooking(db, { bookingId: id, by: P[0], now: at(START, -5) }).ok).toBe(true);
+  });
+
+  it('staff cancel after the start', () => {
+    const id = create();
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    expect(holdBox(db, id, servers[3], at(START, -15))).toBe(true);
+    db.prepare("UPDATE bookings SET state = 'active' WHERE id = ?").run(id);
+    expect(cancelBooking(db, { bookingId: id, by: P[9], staff: true, now: at(START, 10) }).ok).toBe(true);
+  });
+
   it('rights follow the current team roles', () => {
     const rats = team(P[0], 'Rats', 'RR', [P[2]]);
     setRole(db, { teamId: rats, by: P[0], target: P[2], role: 'cocaptain' });
@@ -279,6 +296,14 @@ describe('cancel, extend, end, no-show', () => {
       .toEqual({ ok: true, value: { gamesAllowed: 3, endsAt: '2026-10-03T00:30:00.000Z', campaign: null } });
     expect(getBooking(db, id)).toMatchObject({ games_allowed: 3, extended_minutes: 90, warned_minutes: null });
     expect(JSON.parse(getBooking(db, id)!.playlist_json)).toEqual(['no_mercy', 'death_toll']);
+  });
+
+  it('+1 campaign on a game running past the slot ends that long after now, not after the old end', () => {
+    const id = create(); // 20:00 to 23:00
+    setSetting(db, 'pug_reserve_servers', '1');
+    const late = new Date('2026-10-02T23:40:00.000Z');
+    expect(addCampaign(db, { bookingId: id, by: P[9], staff: true, now: late }))
+      .toEqual({ ok: true, value: { gamesAllowed: 3, endsAt: '2026-10-03T01:10:00.000Z', campaign: null } });
   });
 
   it('+1 campaign checks the caller before the campaign, so a stranger learns nothing from a bad slug', () => {

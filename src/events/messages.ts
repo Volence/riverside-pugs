@@ -313,7 +313,7 @@ export function eventMessage(
         const first = g1?.first_survivors === m.entry_a ? a : g1?.first_survivors === m.entry_b ? b : null;
         const game = g1 ? `Game 1: ${escapeName(campaignDisplayName(db, g1.campaign))}${first ? `, ${first} start as survivors` : ''}. ` : '';
         const grace = bookingRules(bk)?.noShowGraceMinutes ?? 15;
-        content = `${a} vs ${b} in ${event}: your server is ready. In the game console:\n\`connect ${s.host}:${s.port}; password ${bk.password}\`\n${game}Both teams must have their four on the server within ${grace} minutes; a team that does not loses by forfeit.`;
+        content = `${a} vs ${b} in ${event}: your server is ready. In the game console:\n\`password ${bk.password}; connect ${s.host}:${s.port}\`\n${game}Both teams must have their four on the server within ${grace} minutes; a team that does not loses by forfeit.`;
       } else {
         const v = seriesVerdict(E.stageSettingsOf(E.getStage(db, m.stage_id)!).veto, seriesGames(db, m));
         if (v.winner === null) return null;

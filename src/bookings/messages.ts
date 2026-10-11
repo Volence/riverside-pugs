@@ -49,7 +49,7 @@ export function bookingMessage(
     case 'booking_ready': {
       const s = b.server_id !== null ? getServer(db, b.server_id) : undefined;
       content = s
-        ? `Your server for ${vs} is ready. In the game console:\n\`connect ${s.host}:${s.port}; password ${b.password}\``
+        ? `Your server for ${vs} is ready. In the game console:\n\`password ${b.password}; connect ${s.host}:${s.port}\``
         : `Your server for ${vs} is ready.`;
       break;
     }
@@ -73,7 +73,7 @@ export function bookingMessage(
         ? `The server for ${vs} went down, so the booking moved to another server.`
         : `The server for ${vs} restarted and is set up again.`;
       const game = extra.restored ? ` ${escapeName(extra.restored)}.` : '';
-      content = s ? `${head}${game} Reconnect in the game console:\n\`connect ${s.host}:${s.port}; password ${b.password}\`` : `${head}${game}`;
+      content = s ? `${head}${game} Reconnect in the game console:\n\`password ${b.password}; connect ${s.host}:${s.port}\`` : `${head}${game}`;
       break;
     }
   }

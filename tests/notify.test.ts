@@ -132,6 +132,6 @@ describe('booking messages', () => {
     markSetup(db, id, now);
     markReady(db, id, now);
     const pw = (db.prepare('SELECT password FROM bookings WHERE id = ?').get(id) as { password: string }).password;
-    expect(bookingMessage(db, 'https://x', id, 'booking_ready')!.content).toContain(`connect 10.0.0.9:27018; password ${pw}`);
+    expect(bookingMessage(db, 'https://x', id, 'booking_ready')!.content).toContain(`password ${pw}; connect 10.0.0.9:27018`);
   });
 });
