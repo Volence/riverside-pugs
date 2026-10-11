@@ -94,7 +94,9 @@ export function recordInputBurst(
   const id = Number(info.lastInsertRowid);
   // A repeat needs a match to repeat within, and the group query below is only
   // worth running when this burst could have moved a count.
-  if (b.matchId === null || !SIGNATURES.some((s) => s.qualifies(b, thresholds))) {
+  // A ground-0 hop is the only bhop line that can move the autobhop count.
+  const couldMatter = SIGNATURES.some((s) => s.qualifies(b, thresholds)) || (b.kind === 'bhop' && b.groundTicks === 0);
+  if (b.matchId === null || !couldMatter) {
     return { id, detections: [], created: [] };
   }
   const created = evaluateGroup(db, b.matchId, b.steamid, thresholds);
@@ -103,6 +105,7 @@ export function recordInputBurst(
 
 interface GroupRow {
   id: number; kind: string; weapon: string; intervals: string; at: string; wire: number; holds: string | null;
+  groundTicks: number; serverTick: number;
 }
 
 /**
@@ -132,8 +135,8 @@ function evaluateGroup(
   db: DB, matchId: number, steamid: string, thresholds: Thresholds,
 ): { signature: string; note: string }[] {
   const rows = db.prepare(
-    `SELECT id, kind, weapon, intervals, at, wire, holds FROM input_bursts
-     WHERE match_id = ? AND steamid = ? ORDER BY id`,
+    `SELECT id, kind, weapon, intervals, at, wire, holds, ground_ticks AS groundTicks, server_tick AS serverTick
+     FROM input_bursts WHERE match_id = ? AND steamid = ? ORDER BY id`,
   ).all(matchId, steamid) as GroupRow[];
   const bursts = rows.flatMap((r) => {
     const intervals = decodeIntervals(String(r.intervals));
@@ -141,13 +144,17 @@ function evaluateGroup(
   });
   const created: { signature: string; note: string }[] = [];
   for (const d of matchDetections(bursts, thresholds)) {
-    const sig = SIGNATURES.find((s) => s.name === d.signature)!;
     const evidence = d.qualifying.map((i) => bursts[i]);
     // The burst that COMPLETED the repeat count dates and anchors the row, so
-    // a rebuild from history lands on the same burst and the same time.
-    const completing = evidence[sig.repeats - 1];
+    // a rebuild from history lands on the same burst and the same time. A
+    // match signature says which one that was itself.
+    const completing = d.completing !== undefined
+      ? bursts[d.completing]
+      : evidence[SIGNATURES.find((s) => s.name === d.signature)!.repeats - 1];
     const ids = JSON.stringify(evidence.map((e) => e.id));
-    const note = evidenceNote(evidence);
+    // Hold labels describe press timing, which says nothing about where on the
+    // ground a hop landed, so a match signature brings its own note.
+    const note = d.note ?? evidenceNote(evidence);
     const existing = db.prepare(
       'SELECT id, note FROM input_detections WHERE match_id = ? AND steamid = ? AND signature = ?',
     ).get(matchId, steamid, d.signature) as { id: number; note: string } | undefined;

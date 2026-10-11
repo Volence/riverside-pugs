@@ -304,6 +304,11 @@ export interface SignatureBurst {
   kind: string;
   weapon: string;
   intervals: readonly number[];
+  /** Bhop lines only: usercmds on the ground before the jump, and the server
+   *  tick the line was sent on. Optional because only the match-level
+   *  signatures read them. */
+  groundTicks?: number;
+  serverTick?: number;
 }
 
 /** Rates are presses per second, because that is the unit the measurements
@@ -462,10 +467,85 @@ export const SIGNATURES: readonly Signature[] = [
   { name: 'pistol_rate', repeats: PISTOL_REPEATS, qualifies: (b, t) => pistolRate(b, t.pistolMinRate) },
 ];
 
+/**
+ * `autobhop`: a jump script. The bhop line carries how many usercmds the
+ * player stood on the ground before jumping again; a script jumps on the tick
+ * it lands, every time, so its chained hops land on ground 0.
+ *
+ * Calibrated on the first confirmed cheater (yes / Bella<3, match 631,
+ * Aimware, confessed 2026-10-10) against every bhop line on record (2,331
+ * player-matches with 20+ chained hops):
+ *
+ *   share of chained hops on ground 0   Bella 0.72   next highest 0.54   median 0.12
+ *
+ * Simple rates do NOT separate a script from a legal scroll-wheel jump bind:
+ * a wheel is 100% one-tick holds too, and its ground-0 share reaches 0.38
+ * over all hops. Chaining is what does it: a wheel spun at a landing still
+ * misses the landing tick about half the time.
+ *
+ * A hop is CHAINED when it comes within AUTOBHOP_CHAIN_TICKS of the previous
+ * one, i.e. the player is bunnyhopping rather than jumping once.
+ */
+export function autobhop(bursts: readonly SignatureBurst[]): { qualifying: number[]; completing: number; chained: number; perfect: number; longestRun: number } | null {
+  const hops = bursts.flatMap((b, i) => (b.kind === 'bhop' && b.groundTicks !== undefined && b.serverTick !== undefined ? [{ i, g: b.groundTicks, t: b.serverTick }] : []));
+  let chained = 0, perfect = 0, run = 0, longestRun = 0, completing = -1;
+  const qualifying: number[] = [];
+  for (let k = 1; k < hops.length; k++) {
+    const dt = hops[k].t - hops[k - 1].t;
+    // A server tick that runs backwards is a new map: never the same chain.
+    if (dt <= 0 || dt >= AUTOBHOP_CHAIN_TICKS) { run = 0; continue; }
+    chained++;
+    if (hops[k].g === 0) {
+      perfect++;
+      qualifying.push(hops[k].i);
+      longestRun = Math.max(longestRun, ++run);
+    } else {
+      run = 0;
+    }
+    // The hop that first carried the match over the line dates the row, so a
+    // rebuild from history lands on the same hop.
+    if (completing < 0 && chained >= AUTOBHOP_MIN_CHAINED && perfect >= AUTOBHOP_SHARE * chained) completing = hops[k].i;
+  }
+  if (chained < AUTOBHOP_MIN_CHAINED || perfect < AUTOBHOP_SHARE * chained) return null;
+  // Over the line at the end but never at a hop it reached: the first hop
+  // after the minimum stands in.
+  if (completing < 0) completing = qualifying[qualifying.length - 1];
+  return { qualifying, completing, chained, perfect, longestRun };
+}
+
+/** 1.2 s at 100 tick. A bunnyhop lands and leaves again well inside it. */
+export const AUTOBHOP_CHAIN_TICKS = 120;
+/** Fewer chained hops and the share is a handful of samples. */
+export const AUTOBHOP_MIN_CHAINED = 20;
+/** Between the honest maximum (0.54) and the confirmed script (0.72). */
+export const AUTOBHOP_SHARE = 0.65;
+
+/** Signatures read over the whole match in order, not burst by burst. */
+export interface MatchSignature {
+  name: string;
+  detect(bursts: readonly SignatureBurst[]): { qualifying: number[]; completing: number; note: string } | null;
+}
+
+export const MATCH_SIGNATURES: readonly MatchSignature[] = [
+  {
+    name: 'autobhop',
+    detect: (bursts) => {
+      const r = autobhop(bursts);
+      return r && {
+        qualifying: r.qualifying, completing: r.completing,
+        note: `${Math.round(r.perfect / r.chained * 100)}% of ${r.chained} chained hops on the landing tick, longest run ${r.longestRun}`,
+      };
+    },
+  },
+];
+
 export interface MatchDetection {
   signature: string;
   /** Indexes into the bursts passed in, in order, of every one that qualified. */
   qualifying: number[];
+  /** Match signatures: the index that completed it, and what it saw. */
+  completing?: number;
+  note?: string;
 }
 
 /**
@@ -479,6 +559,10 @@ export function matchDetections(bursts: readonly SignatureBurst[], t: Thresholds
     const qualifying: number[] = [];
     bursts.forEach((b, i) => { if (sig.qualifies(b, t)) qualifying.push(i); });
     if (qualifying.length >= sig.repeats) out.push({ signature: sig.name, qualifying });
+  }
+  for (const sig of MATCH_SIGNATURES) {
+    const d = sig.detect(bursts);
+    if (d) out.push({ signature: sig.name, ...d });
   }
   return out;
 }
