@@ -7,6 +7,6 @@ export function seriesLine(first: string, firstWins: number, secondWins: number,
 
 export function notCountedLabel(g: { state: string; voided?: boolean }): string | null {
   if (g.voided) return 'Voided, not counted';
-  if (g.state === 'completed' || g.state === 'live') return null;
+  if (g.state === 'completed' || g.state === 'live' || g.state === 'pending' || g.state === 'configuring') return null;
   return 'Not finished, not counted';
 }

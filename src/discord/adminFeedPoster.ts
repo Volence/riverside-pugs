@@ -220,7 +220,9 @@ export class AdminFeedPoster {
       case 'conduct_flag': {
         // Quoted exactly, as inline code so Discord renders nothing inside it:
         // an admin judging a slur needs the letters the player typed.
-        const quoted = '`' + e.text.replace(/`/g, "'").slice(0, 200) + '`';
+        // Newlines and other control characters become spaces: a note may be
+        // multi-line, and the quote has to stay one line of inline code.
+        const quoted = '`' + e.text.replace(/\p{Cc}/gu, ' ').replace(/`/g, "'").slice(0, 200) + '`';
         const server = e.serverId === null ? null : (this.deps.db.prepare('SELECT name FROM servers WHERE id = ?')
           .get(e.serverId) as { name: string } | undefined)?.name ?? null;
         const where = [

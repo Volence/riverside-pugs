@@ -1196,7 +1196,8 @@ export interface BookingView {
   viewer: { side: Side | null; manages: Side[]; staff: boolean; invited: boolean };
   games: BookingGameView[];
   /** The series so far from the games above (src/bookings/series.ts); null
-   *  for a viewer who does not see the games. */
+   *  for a viewer who does not see the games, and for a tournament booking
+   *  (the series engine decides that result). */
   series: SeriesTally | null;
   /** Casters either side invited, and which halves are set (plan 4c). */
   casters: CasterView[];
@@ -1282,7 +1283,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
       ? { since: b.recovering_at, moved: b.recover_reason === 'gone', waiting: b.server_id === null } : null,
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },
     games,
-    series: seesGames ? seriesTally(games) : null,
+    series: seesGames && b.purpose === 'scrim' ? seriesTally(games) : null,
     casters: castersOf(db, id),
     repost: {
       // Also not once the start is inside the acceptance cutoff, nor once

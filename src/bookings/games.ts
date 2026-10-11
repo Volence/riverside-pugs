@@ -95,7 +95,8 @@ export function liveBookingGame(db: DB, bookingId: number): { id: number; token:
 export interface TeamScrim {
   bookingId: number; purpose: 'scrim' | 'tournament'; opponent: string; startsAt: string; state: string;
   games: { matchId: number; campaign: string; state: string; us: number; them: number; counted: boolean; voided: boolean }[];
-  series: { us: number; them: number; draws: number; counted: number };
+  /** Null for a tournament booking: the series engine decides its result. */
+  series: { us: number; them: number; draws: number; counted: number } | null;
 }
 
 /** A team's Scrims tab (plan 4c, ruling 5): every booking the team was a
@@ -120,7 +121,7 @@ export function teamScrims(db: DB, teamId: number): TeamScrim[] {
         them: g.sideA === r.side ? g.scoreB : g.scoreA,
         counted: countsInSeries(g), voided: g.voided,
       })),
-      series: (() => {
+      series: r.purpose !== 'scrim' ? null : (() => {
         const t = seriesTally(games);
         return { us: t.wins[r.side], them: t.wins[r.side === 'a' ? 'b' : 'a'], draws: t.draws, counted: t.counted };
       })(),

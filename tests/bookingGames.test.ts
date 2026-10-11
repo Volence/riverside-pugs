@@ -430,6 +430,18 @@ describe('teamScrims', () => {
     expect(scrims.map((s) => [s.bookingId, s.purpose])).toEqual([[cupId, 'tournament'], [scrimId, 'scrim']]);
   });
 
+  it('gives a tournament booking no series, though its games are listed', () => {
+    const alpha = createTeam(db, { creator: P[0], name: 'Team Alpha', tag: 'ALF' });
+    if (!alpha.ok) throw new Error(alpha.error);
+    const cupId = teamBooking({ by: P[0], teamId: alpha.value.id, opponent: { steamid: P[5] }, startsAt: START });
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(cupId);
+    const won = insertGame(cupId, 'completed', 'a', 30, 10, 'cup1');
+    db.prepare("UPDATE matches SET winner = 'a' WHERE id = ?").run(won);
+    const [s] = teamScrims(db, alpha.value.id);
+    expect(s.series).toBeNull();
+    expect(s.games).toHaveLength(1);
+  });
+
   it('never lists another team\'s bookings', () => {
     const alpha = createTeam(db, { creator: P[0], name: 'Team Alpha', tag: 'ALF' });
     const bravo = createTeam(db, { creator: P[1], name: 'Team Bravo', tag: 'BRV' });

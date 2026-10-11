@@ -830,9 +830,9 @@ export class BookingRunner {
    *  own result notices. Once per booking: claimResultNotice writes the
    *  result_sent event. Never throws, like tell(). */
   private announceResult(id: number): void {
-    const b = getBooking(this.db, id);
-    if (!b || b.purpose !== 'scrim') return;
     try {
+      const b = getBooking(this.db, id);
+      if (!b || b.purpose !== 'scrim') return;
       if (seriesTally(bookingGames(this.db, id)).counted === 0) return;
       if (!claimResultNotice(this.db, id, new Date(this.now()))) return;
       const people = acceptedPeople(this.db, id);

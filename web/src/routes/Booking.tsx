@@ -171,7 +171,7 @@ function StaffReviews({ v }: { v: BookingView }) {
               <span>{v.sides.find((s) => s.side === r.side)?.name ?? r.side}</span>
               <span>{r.thumbs === 1 ? 'Thumbs up' : 'Thumbs down'}</span>
               {r.tags.length > 0 && <span class="muted">{r.tags.map((t) => REVIEW_TAG_LABELS[t]).join(', ')}</span>}
-              {r.note && <span class="muted">Note: {r.note}</span>}
+              {r.note && <span class="muted bookingreviews__note">Note: {r.note}</span>}
               <span class="muted">by {r.reviewerName}</span>
             </li>
           ))}
