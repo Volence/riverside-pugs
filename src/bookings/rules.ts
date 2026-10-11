@@ -151,6 +151,20 @@ export function upcomingCount(db: DB, party: Party): number {
   ).get(w.arg) as { n: number }).n;
 }
 
+/** Whether the party is a confirmed side of an open booking (any purpose)
+ *  whose slot overlaps [startMs, endMs), leaving out booking `exceptId`.
+ *  Half-open, as capacityProblem: back to back is not an overlap. One side
+ *  never holds two slots at once (owner, 2026-10-11); an invite the side has
+ *  not confirmed yet does not count against it. */
+export function bookedDuring(db: DB, party: Party, startMs: number, endMs: number, exceptId = 0): boolean {
+  const w = partyWhere(party);
+  return db.prepare(
+    `SELECT 1 FROM bookings b JOIN booking_sides s ON s.booking_id = b.id
+      WHERE ${w.sql} AND s.confirmed_at IS NOT NULL AND b.state IN ${OPEN_STATES_SQL} AND b.ending_at IS NULL
+        AND b.id != ? AND b.starts_at < ? AND b.ends_at > ? LIMIT 1`,
+  ).get(w.arg, exceptId, iso(endMs), iso(startMs)) !== undefined;
+}
+
 export function recentNoShows(db: DB, party: Party, nowMs: number): number {
   const w = partyWhere(party);
   return (db.prepare(
