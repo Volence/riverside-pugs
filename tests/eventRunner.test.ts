@@ -1,3 +1,4 @@
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { describe, it, expect, vi } from 'vitest';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
@@ -154,12 +155,20 @@ describe('EventRunner.play (plan T2)', () => {
     expect(E.eventLog(f.db, f.eventId).at(-1)).toMatchObject({ action: 'event_started', actor: null });
   });
 
-  it('leaves an event with fewer than 2 entries waiting, writing nothing', async () => {
+  it('leaves an event with fewer than 2 entries waiting, writing nothing, and tells staff once', async () => {
     const f = playFixture({ stages: [SE()], entries: 1 });
     const logs = E.eventLog(f.db, f.eventId).length;
-    await runner(f.db).play(START_AT);
+    const seen: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => seen.push(e));
+    try {
+      const r = runner(f.db);
+      await r.play(START_AT);
+      await r.play(new Date(START_AT.getTime() + 60_000));
+    } finally { off(); }
     expect(E.getEvent(f.db, f.eventId)!.status).toBe('checkin');
     expect(E.eventLog(f.db, f.eventId)).toHaveLength(logs);
+    const problems = seen.filter((e) => e.kind === 'problem' && /cannot begin/.test(e.text));
+    expect(problems).toHaveLength(1);
   });
 
   it('with check-in off, closes the list and starts in the same tick', async () => {
