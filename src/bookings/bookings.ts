@@ -596,6 +596,35 @@ export function allowList(db: DB, bookingId: number): string[] {
   return [...ids].sort();
 }
 
+/** Who plays for each side and who may only watch, for pug-match's
+ *  placement (scrims in game Ruling 1): accepted players and ringers by
+ *  side, accepted spectators of either side as watchers, never anyone
+ *  barredFromBox. Each list sorted, so a re-push sends the same lines. */
+export function bookRoster(db: DB, bookingId: number): { a: string[]; b: string[]; watch: string[] } {
+  const now = new Date();
+  const out = { a: [] as string[], b: [] as string[], watch: [] as string[] };
+  for (const p of acceptedPeople(db, bookingId)) {
+    if (!/^\d{17}$/.test(p.steamid) || barredFromBox(db, p.steamid, now)) continue;
+    (p.role === 'spectator' ? out.watch : out[p.side]).push(p.steamid);
+  }
+  out.a.sort();
+  out.b.sort();
+  out.watch.sort();
+  return out;
+}
+
+/** The booking side that starts as survivors on the first map of the next
+ *  campaign, after `played` finished games (scrims in game Ruling 2): the
+ *  ruleset's sideRule picks campaign 1 (non_picker_chooses: side b, since
+ *  side a made the booking and its campaigns and the site cannot ask;
+ *  higher_seed_chooses: side a, scrims have no seeds; coin: the booking id,
+ *  odd for side a), then the sides alternate. Unreadable rules: side a. */
+export function firstSurvivorSide(b: BookingRow, played: number): Side {
+  const rule = bookingRules(b)?.sideRule;
+  const base: Side = rule === 'non_picker_chooses' ? 'b' : rule === 'coin' ? (b.id % 2 === 1 ? 'a' : 'b') : 'a';
+  return played % 2 === 0 ? base : base === 'a' ? 'b' : 'a';
+}
+
 /** Who belongs in each side's private voice channel (plan 4c, ruling 2):
  *  the allowlist's people without staff (staff come in through the staff
  *  role), that is the accepted people who are not barred, and only those with

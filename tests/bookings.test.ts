@@ -5,7 +5,7 @@ import { setSetting } from '../src/settings.js';
 import { createTeam, invitePlayer, respondInvite, setRole, transferCaptain } from '../src/teams/teams.js';
 import { currentSeasonId } from '../src/players.js';
 import {
-  BOOKING_ERRORS, addPerson, allowInGame, allowList, bookingView, bumpBooking, bumpReason, cancelBooking, claimNoShow, closeBooking, confirmBooking,
+  BOOKING_ERRORS, bookRoster, firstSurvivorSide, type BookingRow, addPerson, allowInGame, allowList, bookingView, bumpBooking, bumpReason, cancelBooking, claimNoShow, closeBooking, confirmBooking,
   createBooking, createTournamentBooking, declineBooking,
   addCampaign, endBooking, expireUnconfirmed, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
   myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
@@ -14,6 +14,7 @@ import { isLateCancel } from '../src/bookings/rules.js';
 import { bookingMessage } from '../src/bookings/messages.js';
 import { acceptPost, confirmAccept, createPost, repostFromBooking } from '../src/scrims/scrims.js';
 import { blockTarget } from '../src/scrims/blocks.js';
+import { TEMPLATES } from '../src/rulesets.js';
 
 const P = Array.from({ length: 14 }, (_, i) => `765611990000007${String(i).padStart(2, '0')}`);
 const NOW = new Date('2026-10-01T12:00:00.000Z');
@@ -550,6 +551,20 @@ describe('who may be on the box (plan 4b2)', () => {
   const ban = (steamid: string) => db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'system', ?)")
     .run(steamid, '2026-09-01T00:00:00.000Z');
 
+  it('bookRoster splits the accepted people by side, watchers apart, never the barred or the invited', () => {
+    const id = running();
+    const accept = (side: 'a' | 'b', by: string, steamid: string, role: string) => {
+      addPerson(db, { bookingId: id, by, side, steamid, role, now: NOW });
+      respondPerson(db, { bookingId: id, steamid, accept: true, now: NOW });
+    };
+    accept('a', P[0], P[5], 'spectator');
+    accept('b', P[1], P[6], 'ringer');
+    accept('a', P[0], P[7], 'player');
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[8], role: 'player', now: NOW }); // invited only
+    ban(P[7]);
+    expect(bookRoster(db, id)).toEqual({ a: [P[0]], b: [P[1], P[6]], watch: [P[5]] });
+  });
+
   it('allowList is the accepted people plus staff in good standing, sorted, no invited people, no banned admin', () => {
     const id = running();
     addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'player', now: NOW }); // invited
@@ -817,5 +832,25 @@ describe('one side, one slot (owner, 2026-10-11)', () => {
     confirmBooking(db, { bookingId: theirs, by: P[0], now: NOW });
     db.prepare("UPDATE bookings SET state = 'scheduled', ending_at = NULL WHERE id = ?").run(invite);
     expect(confirmBooking(db, { bookingId: invite, by: P[1], now: NOW })).toEqual({ ok: false, error: 'busy_them' });
+  });
+});
+
+describe('firstSurvivorSide (scrims in game Ruling 2)', () => {
+  const withRule = (sideRule: string, id = 7) =>
+    ({ id, purpose: 'scrim', rules_json: JSON.stringify({ ...TEMPLATES['Casual Scrim'], sideRule }) }) as unknown as BookingRow;
+
+  it('non_picker_chooses: side b survives first in campaign 1, then the sides alternate', () => {
+    expect([0, 1, 2, 3].map((n) => firstSurvivorSide(withRule('non_picker_chooses'), n))).toEqual(['b', 'a', 'b', 'a']);
+  });
+
+  it('higher_seed_chooses starts with side a; coin goes by the booking id', () => {
+    expect(firstSurvivorSide(withRule('higher_seed_chooses'), 0)).toBe('a');
+    expect(firstSurvivorSide(withRule('coin', 7), 0)).toBe('a');
+    expect(firstSurvivorSide(withRule('coin', 8), 0)).toBe('b');
+    expect(firstSurvivorSide(withRule('coin', 8), 1)).toBe('a');
+  });
+
+  it('unreadable rules start with side a', () => {
+    expect(firstSurvivorSide({ id: 1, purpose: 'scrim', rules_json: '{' } as unknown as BookingRow, 0)).toBe('a');
   });
 });
