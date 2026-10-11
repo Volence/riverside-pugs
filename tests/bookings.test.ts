@@ -717,6 +717,13 @@ describe('who may be on the box (plan 4b2)', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'person_subbed_in_game'").get()).toEqual({ n: 3 });
   });
 
+  it("subInGame refuses an open spectator invite from the other side instead of taking it over", () => {
+    const id = running();
+    addPerson(db, { bookingId: id, by: P[1], side: 'b', steamid: P[7], role: 'spectator', now: NOW }); // invited on b
+    expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[7], name: 'n', now: NOW })).toEqual({ ok: false, error: 'invited_elsewhere' });
+    expect(peopleOf(db, id).find((p) => p.steamid === P[7])).toMatchObject({ side: 'b', role: 'spectator', status: 'invited' });
+  });
+
   it('subInGame refuses a non-captain, a banned id and a booking that is not running, like allowInGame', () => {
     const id = create();
     expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[7], name: 'n', now: NOW })).toEqual({ ok: false, error: 'wrong_state' });

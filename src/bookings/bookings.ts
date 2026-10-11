@@ -725,6 +725,8 @@ export function subInGame(db: DB, o: { bookingId: number; by: string; steamid: u
       logEvent(db, b.id, o.by, 'person_subbed_in_game', { steamid, side, change: 'accepted' }, now);
       return ok({ side, change: 'accepted' });
     }
+    // The other side's open watcher invite is theirs to answer on the site.
+    if (row && row.side !== side && row.status === 'invited') return fail('invited_elsewhere');
     const playing = (db.prepare("SELECT COUNT(*) AS n FROM booking_people WHERE booking_id = ? AND side = ? AND role <> 'spectator'").get(b.id, side) as { n: number }).n;
     if (playing >= PEOPLE_PER_SIDE) return fail('side_full');
     if (row) {
@@ -1029,6 +1031,40 @@ export function startBookingNow(db: DB, o: { bookingId: number; now?: Date }): R
     const minutes = Math.round(shift / 60_000);
     logEvent(db, b.id, null, 'started_early', { from: b.starts_at, to: startsAt, minutes }, now);
     return ok({ startsAt, endsAt, minutes });
+  })();
+}
+
+/** The slot as it was before startBookingNow moved it, so a start that took
+ *  no box can be rolled back exactly (NULL stays NULL). */
+export type StartNowSnapshot = Pick<BookingRow, 'starts_at' | 'ends_at' | 'warned_minutes' | 'reminded_60_at' | 'reminded_15_at'>
+  & { presses: { side: Side; at: string | null }[] };
+
+export function startNowSnapshot(db: DB, id: number): StartNowSnapshot | null {
+  const b = getBooking(db, id);
+  if (!b) return null;
+  return {
+    starts_at: b.starts_at, ends_at: b.ends_at, warned_minutes: b.warned_minutes, reminded_60_at: b.reminded_60_at, reminded_15_at: b.reminded_15_at,
+    presses: sidesOf(db, id).map((s) => ({ side: s.side, at: s.start_now_at })),
+  };
+}
+
+/** allocate() gave the box to a booking ahead of this one after the slot
+ *  moved up: put the slot back as it was and keep only the earlier press
+ *  (the completing side's press is taken back). Only while the booking is
+ *  still waiting with no box. */
+export function undoStartNow(db: DB, o: { bookingId: number; by: string; prev: StartNowSnapshot; now?: Date }): boolean {
+  const now = o.now ?? new Date();
+  return db.transaction((): boolean => {
+    const b = getBooking(db, o.bookingId);
+    if (!b || b.server_id !== null || b.state !== 'scheduled') return false;
+    const side = actingSides(db, b.id, o.by)[0] ?? null;
+    const p = o.prev;
+    db.prepare('UPDATE bookings SET starts_at = ?, ends_at = ?, warned_minutes = ?, reminded_60_at = ?, reminded_15_at = ? WHERE id = ?')
+      .run(p.starts_at, p.ends_at, p.warned_minutes, p.reminded_60_at, p.reminded_15_at, b.id);
+    const setPress = db.prepare('UPDATE booking_sides SET start_now_at = ? WHERE booking_id = ? AND side = ?');
+    for (const press of p.presses) setPress.run(press.side === side ? null : press.at, b.id, press.side);
+    logEvent(db, b.id, o.by, 'start_now_undone', { side, from: b.starts_at, to: p.starts_at }, now);
+    return true;
   })();
 }
 
