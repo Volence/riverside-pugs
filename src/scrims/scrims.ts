@@ -385,7 +385,7 @@ export function createPost(db: DB, o: {
     // A side holding a booked slot posts nothing that overlaps it (owner, 2026-10-11).
     if (bookedDuring(db, partyOf(side), startMs, startMs + minutes * 60_000)) return fail('booked_then');
     if (openPostCount(db, side) >= SCRIM_MAX_OPEN_POSTS) return fail('too_many_posts');
-    if (capacityProblem(db, { region, startMs, endMs: startMs + minutes * 60_000 }) !== null) return fail('no_capacity');
+    if (capacityProblem(db, { region, startMs, endMs: startMs + minutes * 60_000, nowMs }) !== null) return fail('no_capacity');
     if (outOfAllowance(db, partyOf(side), nowMs)) return fail('allowance');
     const id = Number(db.prepare(
       `INSERT INTO scrim_posts (side_kind, team_id, captain_steamid, region, starts_at, block_minutes, campaigns_json, sr_range, note, created_at, target_team_id)
