@@ -133,6 +133,8 @@ export const CLEAR_LINES: readonly string[] = [
   'sm_pug_tournament 0',
   // Plan T5: a tournament box's match-rule cvars back to pug-match's defaults.
   ...TOURNAMENT_RULE_CLEAR,
+  // Scrims in game: l4d_booking's clock, so a skipped restart cannot leave a countdown running.
+  'l4d_booking_title ""', 'l4d_booking_campaign ""', 'l4d_booking_ends 0', 'l4d_booking_next_at 0', 'l4d_booking_next_name ""', 'l4d_booking_close_at 0',
 ];
 
 /** The series engine's hand on a tournament booking (tournaments plan T3b). */
@@ -214,19 +216,56 @@ export interface BookingRunnerDeps {
  *  box, plan 2026-10-11 Task 2). */
 export const quietLines = (lines: string[]): string[] => ['sv_rcon_log 0', ...lines, 'sv_rcon_log 1'];
 
+/** An ISO time (or null) as whole epoch seconds for a plugin cvar; 0 for none. */
+const epochOf = (t: string | null): number => (t === null ? 0 : Math.floor(Date.parse(t) / 1000));
+
+/** The campaign the box is on: the last one the runner loaded
+ *  (campaign_loaded), else the playlist's current one (setup loads
+ *  playlist[playlist_pos] without that event). */
+function currentCampaign(db: DB, b: BookingRow): string | null {
+  const row = db.prepare("SELECT detail FROM booking_events WHERE booking_id = ? AND event = 'campaign_loaded' ORDER BY id DESC LIMIT 1")
+    .get(b.id) as { detail: string } | undefined;
+  const loaded = row ? (JSON.parse(row.detail) as { campaign?: string | null }).campaign ?? null : null;
+  return loaded ?? (JSON.parse(b.playlist_json) as string[])[b.playlist_pos] ?? null;
+}
+
+/** The booking's clock for l4d_booking 1.5.0 (scrims in game): its `!time`,
+ *  the countdowns before the next campaign and the close, and the state it
+ *  re-tells each player once they are in game all come from these, so the
+ *  site never repeats chat over rcon. Epochs in whole seconds, 0 for none.
+ *  An older plugin answers "Unknown command" to each, which nothing reads. */
+function stateLines(db: DB, b: BookingRow): string[] {
+  const [a, bs] = sidesOf(db, b.id);
+  const registry = campaignRegistry(db);
+  const nameOf = (slug: string | null) => consoleText(slug === null ? '' : registry.get(slug)?.name ?? slug, 60);
+  return [
+    `l4d_booking_title ${quoted(consoleText(`${sideName(db, a)} vs ${sideName(db, bs)}`, 100))}`,
+    `l4d_booking_campaign ${quoted(nameOf(currentCampaign(db, b)))}`,
+    `l4d_booking_ends ${epochOf(b.ends_at)}`,
+    `l4d_booking_next_at ${epochOf(b.next_at)}`,
+    `l4d_booking_next_name ${quoted(nameOf(b.next_campaign))}`,
+    `l4d_booking_close_at ${epochOf(b.close_at)}`,
+  ];
+}
+
 /** The lines that make a box the booking's: the plugin's cvars (which put
- *  the values back after every map load) and the engine cvars themselves. */
+ *  the values back after every map load) and the engine cvars themselves.
+ *  On a scrim, the booking's clock for l4d_booking 1.5.0 (stateLines). */
 export function bookingLines(db: DB, b: BookingRow): string[] {
   if (!/^[a-z0-9]+$/.test(b.password) || !/^[a-z0-9]+$/.test(b.tv_password)) throw new Error('booking password has unexpected characters');
   const [a, bs] = sidesOf(db, b.id);
   const notice = consoleText(`Booked: ${sideName(db, a)} vs ${sideName(db, bs)} until ${b.ends_at.slice(11, 16)} UTC`, 120);
-  return quietLines([
-    `l4d_booking_tv_password ${quoted(b.tv_password)}`,
-    `l4d_booking_notice ${quoted(notice)}`,
-    `l4d_booking_password ${quoted(b.password)}`,
-    `sm_cvar sv_password ${quoted(b.password)}`,
-    `sm_cvar tv_password ${quoted(b.tv_password)}`,
-  ]);
+  return [
+    ...quietLines([
+      `l4d_booking_tv_password ${quoted(b.tv_password)}`,
+      `l4d_booking_notice ${quoted(notice)}`,
+      `l4d_booking_password ${quoted(b.password)}`,
+      `sm_cvar sv_password ${quoted(b.password)}`,
+      `sm_cvar tv_password ${quoted(b.tv_password)}`,
+    ]),
+    // T3b Ruling 10: the series engine speaks on a tournament box; the plugin's clock stays empty there.
+    ...(b.purpose === 'tournament' ? [] : stateLines(db, b)),
+  ];
 }
 
 /** The lines that make the box record the booking's games (plan 4b), and
