@@ -203,7 +203,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
       }),
       former: T.formerMembers(db, t.id).map((f) => ({ steamid: f.steamid, name: nameOf(f.steamid), leftAt: f.left_at })),
       viewer: { role, staff },
-      ...(manager && !t.disbanded_at ? { captainAway: !inGoodStanding(db, t.captain_steamid) } : {}),
+      ...(manager && !t.disbanded_at ? { captainAway: T.outForGood(db, t.captain_steamid) } : {}),
       manage: manager && !t.disbanded_at
         ? {
             invites: T.openInvitesOf(db, t.id).map((i) => ({ id: i.id, steamid: i.steamid, name: nameOf(i.steamid), createdAt: i.created_at })),

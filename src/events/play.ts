@@ -75,8 +75,8 @@ export function totalRounds(stage: E.StageRow): number | null {
 }
 
 /** Whether round `round` of the event's stage `ordinal` is played: the
- *  stage finished, a later stage started, or every main-bracket match of
- *  that round has a result. Feeds an `after_round` roster lock. */
+ *  stage finished, a later stage started, or every match of that round has
+ *  a result (the main bracket's, in an elimination stage). Feeds an `after_round` roster lock. */
 export function roundPlayed(db: DB, eventId: number, ordinal: number, round: number): boolean {
   const stages = db.prepare('SELECT id, ordinal, status FROM event_stages WHERE event_id = ? ORDER BY ordinal').all(eventId) as
     { id: number; ordinal: number; status: string }[];
@@ -84,7 +84,11 @@ export function roundPlayed(db: DB, eventId: number, ordinal: number, round: num
   if (!stage) return false;
   if (stage.status === 'finished' || stages.some((s) => s.ordinal > ordinal && s.status !== 'pending')) return true;
   if (stage.status !== 'live') return false;
-  const ms = matchesOf(db, stage.id).filter((m) => m.grp === 1 && m.round === round);
+  // Elimination: the main bracket's round. A round robin's groups play
+  // their rounds side by side, so every group must be done with it.
+  const type = E.stageSettingsOf(E.getStage(db, stage.id)!).type;
+  const elim = type === 'single_elim' || type === 'double_elim';
+  const ms = matchesOf(db, stage.id).filter((m) => (!elim || m.grp === 1) && m.round === round);
   return ms.length > 0 && ms.every((m) => RESOLVED.has(m.status));
 }
 
@@ -113,12 +117,16 @@ const NO_STAMP: Stamp = { not_before: null, scheduled_at: null, source: null, fr
  *  the other groups have their own round numbers, so reading their row by
  *  round alone gave a grand final round 1's window (held as "window
  *  expired" the moment it was ready) and lower rounds past the upper count
- *  no time at all. A lower-bracket round k follows upper round k/2 + 1
- *  (rounded down), capped at the upper final; the third-place match and the
- *  grand final go with the upper final. */
+ *  no time at all. Lower round 2j - 2 takes upper round j's losers and the
+ *  odd lower rounds are played inside the lower bracket, so lower round k
+ *  goes with upper round k/2 + 1 (rounded up), at most two lower rounds per
+ *  row, capped at the upper final; the third-place match and the grand
+ *  final go with the upper final. Round robin groups are pools played side
+ *  by side, so they keep their round. */
 export function scheduleRound(type: V.StageType, group: number, round: number, upperRounds: number): number {
-  if (group <= 1 || upperRounds < 1) return round;
-  if (type === 'double_elim' && group === 2) return Math.min(upperRounds, Math.floor(round / 2) + 1);
+  // A round robin's groups are parallel pools, each with the same rounds.
+  if (group <= 1 || upperRounds < 1 || (type !== 'single_elim' && type !== 'double_elim')) return round;
+  if (type === 'double_elim' && group === 2) return Math.min(upperRounds, Math.ceil(round / 2) + 1);
   return upperRounds;
 }
 

@@ -212,7 +212,8 @@ export function Booking({ id, session }: { id: string; session: Session }) {
   };
   // The action buttons sit at the bottom: bring a refusal into view.
   useEffect(() => { if (error) errRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [error]);
-  useEffect(load, [id]);
+  // A new id starts over: its first failed load is "no such booking", not a lost refetch.
+  useEffect(() => { hasView.current = false; setMissing(false); setLost(false); load(); }, [id]);
   // The campaign pool, for the "Play this next" select. Loaded once; nobody
   // needs it until the booking is running anyway, and it costs nothing to
   // have it ready before then.

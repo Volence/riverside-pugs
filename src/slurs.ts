@@ -61,6 +61,10 @@ const LOOKALIKE: Record<string, string> = {
   'ɡ': 'g', 'ı': 'i',
 };
 
+/** A Cyrillic or Greek letter that is NOT a lookalike: the word is really
+ *  in that script. */
+const OTHER_SCRIPT = new RegExp(`[^\\s${Object.keys(LOOKALIKE).join('')}](?<=[\\u0370-\\u03ff\\u0400-\\u052f])`, 'u');
+
 /** Map lookalike letters to the Latin letter they imitate; everything else
  *  is left alone. Team names key on this too, so "Rіverside" (Cyrillic і)
  *  cannot sit next to "Riverside". */
@@ -73,7 +77,12 @@ export function foldLookalikes(text: string): string {
 /** Lowercase, strip accents, map the stand-ins. Characters that are not
  *  letters after that become separators. */
 function letters(text: string): string {
-  const base = foldLookalikes(text.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase());
+  // Lookalikes fold only in a word written in them alone, or mixed into a
+  // Latin one: a real Ukrainian or Greek word ("як", "це") keeps its other
+  // letters, so it never breaks into stray single Latin letters that the
+  // spelled-out joiner would glue into a slur ("як і як" read as "kik").
+  const base = text.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .split(/(\s+)/).map((w) => (OTHER_SCRIPT.test(w) ? w : foldLookalikes(w))).join('');
   let out = '';
   for (const ch of base) out += LEET[ch] ?? (/[a-z]/.test(ch) ? ch : ' ');
   return out;

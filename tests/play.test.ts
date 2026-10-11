@@ -257,10 +257,12 @@ describe('play writer', () => {
     expect(P.applySchedule(f.db, { stageId: 999, by: ADMIN, now: NOW })).toEqual({ ok: false, error: 'stage_not_found' });
   });
 
-  it('scheduleRound: lower-bracket rounds follow the upper round they come after; the third place and grand final go with the upper final', () => {
+  it('scheduleRound: lower-bracket rounds follow the upper round they come after; the third place and grand final go with the upper final; round robin groups keep their round', () => {
     expect([1, 2, 3].map((r) => P.scheduleRound('single_elim', 1, r, 3))).toEqual([1, 2, 3]);
     expect(P.scheduleRound('single_elim', 2, 1, 3)).toBe(3);
-    expect([1, 2, 3, 4].map((r) => P.scheduleRound('double_elim', 2, r, 3))).toEqual([1, 2, 2, 3]);
+    expect([1, 2, 3, 4].map((r) => P.scheduleRound('double_elim', 2, r, 3))).toEqual([2, 2, 3, 3]);
+    // Round robin groups are parallel pools.
+    expect([1, 2, 3].map((r) => P.scheduleRound('round_robin', 2, r, 3))).toEqual([1, 2, 3]);
     expect(P.scheduleRound('double_elim', 3, 1, 3)).toBe(3);
     expect(P.scheduleRound('double_elim', 3, 2, 3)).toBe(3);
   });
