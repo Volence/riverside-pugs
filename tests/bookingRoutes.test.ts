@@ -341,10 +341,10 @@ describe('private reviews (plan 2, Task 4)', () => {
     expect(bad.json().error).toBe('A review is a thumbs up or down, with tags from the list, each once.');
     const r = await call('POST', `/api/bookings/${id}/review`, P[0], { thumbs: -1, tags: ['toxic', 'left_early'] });
     expect(r.statusCode).toBe(200);
-    expect(r.json().review).toEqual({ open: true, mine: { thumbs: -1, tags: ['toxic', 'left_early'] } });
+    expect(r.json().review).toEqual({ open: true, mine: { thumbs: -1, tags: ['toxic', 'left_early'], note: '' } });
     expect(r.json().reviews).toBeUndefined();
     const edit = await call('POST', `/api/bookings/${id}/review`, P[0], { thumbs: 1, tags: ['toxic'] });
-    expect(edit.json().review.mine).toEqual({ thumbs: 1, tags: ['toxic'] });
+    expect(edit.json().review.mine).toEqual({ thumbs: 1, tags: ['toxic'], note: '' });
     // The reviewed side: its own (empty) review slot, and nothing of the other.
     const other = await call('GET', `/api/bookings/${id}`, P[1]);
     expect(other.json().review).toEqual({ open: true, mine: null });

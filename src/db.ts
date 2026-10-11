@@ -2617,6 +2617,10 @@ export function openDb(path: string): DB {
   // !gg: the pug team that forfeited ('a' or 'b'), null for a match played
   // out. Rated like any other result; the column only drives the FF tag.
   ensureColumn(db, 'matches', 'forfeit_team', 'TEXT');
+  // Scrim reviews (owner, 2026-10-11): an optional note for staff only, at
+  // most 300 characters (src/scrims/reviews.ts REVIEW_NOTE_MAX). Never shown
+  // to the reviewed side; '' when none.
+  ensureColumn(db, 'scrim_reviews', 'note', "TEXT NOT NULL DEFAULT ''");
   db.prepare(
     "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
   ).run();
