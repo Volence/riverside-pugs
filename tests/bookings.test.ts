@@ -426,17 +426,18 @@ describe('views', () => {
     const id = create();
     expect(bookingView(db, id, { steamid: P[0], staff: false })!.games).toEqual([]);
     const insertGame = (state: string, token: string, a: number, b: number): number => Number(db.prepare(
-      `INSERT INTO matches (season_id, state, campaign, token, origin, kind, visibility, booking_id, booking_side_a, team_a_score, team_b_score)
-       VALUES (?, ?, 'no_mercy', ?, 'in_game', 'scrim', 'participants', ?, 'a', ?, ?)`,
-    ).run(currentSeasonId(db), state, token, id, a, b).lastInsertRowid);
+      `INSERT INTO matches (season_id, state, campaign, token, origin, kind, visibility, booking_id, booking_side_a, team_a_score, team_b_score, winner)
+       VALUES (?, ?, 'no_mercy', ?, 'in_game', 'scrim', 'participants', ?, 'a', ?, ?, ?)`,
+    ).run(currentSeasonId(db), state, token, id, a, b, state === 'completed' ? 'a' : null).lastInsertRowid);
     const first = insertGame('completed', 't1', 300, 200);
     const second = insertGame('live', 't2', 10, 5);
     const v = bookingView(db, id, { steamid: P[0], staff: false })!;
     expect(v.games.map((g) => g.matchId)).toEqual([first, second]);
     expect(v.games).toEqual([
-      { matchId: first, campaign: 'no_mercy', state: 'completed', scoreA: 300, scoreB: 200, sideA: 'a', startedAt: expect.any(String), endedAt: null, restoredAtMap: null },
-      { matchId: second, campaign: 'no_mercy', state: 'live', scoreA: 10, scoreB: 5, sideA: 'a', startedAt: expect.any(String), endedAt: null, restoredAtMap: null },
+      { matchId: first, campaign: 'no_mercy', state: 'completed', scoreA: 300, scoreB: 200, sideA: 'a', winner: 'a', voided: false, startedAt: expect.any(String), endedAt: null, restoredAtMap: null },
+      { matchId: second, campaign: 'no_mercy', state: 'live', scoreA: 10, scoreB: 5, sideA: 'a', winner: null, voided: false, startedAt: expect.any(String), endedAt: null, restoredAtMap: null },
     ]);
+    expect(v.series).toEqual({ wins: { a: 1, b: 0 }, draws: 0, counted: 1 });
   });
 
   it('bookingView counts campaigns: allowed, finished games played (an abort or a live game is not one), and the close deadline', () => {

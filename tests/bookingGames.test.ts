@@ -437,4 +437,16 @@ describe('teamScrims', () => {
     teamBooking({ by: P[1], teamId: bravo.value.id, opponent: { steamid: P[4] }, startsAt: START });
     expect(teamScrims(db, alpha.value.id)).toEqual([]);
   });
+
+  it('tallies each booking from the team\'s own side, counting only completed games', () => {
+    const alpha = createTeam(db, { creator: P[0], name: 'Team Alpha', tag: 'ALF' });
+    if (!alpha.ok) throw new Error(alpha.error);
+    const id = teamBooking({ by: P[5], opponent: { teamId: alpha.value.id }, startsAt: START }); // Alpha is side b
+    const won = insertGame(id, 'completed', 'b', 30, 10, 't1');
+    db.prepare("UPDATE matches SET winner = 'a' WHERE id = ?").run(won); // match team a = booking side b = Alpha
+    insertGame(id, 'aborted', 'a', 0, 99, 't2');
+    const s = teamScrims(db, alpha.value.id)[0];
+    expect(s.series).toEqual({ us: 1, them: 0, draws: 0, counted: 1 });
+    expect(s.games.map((x) => [x.state, x.counted, x.voided])).toEqual([['completed', true, false], ['aborted', false, false]]);
+  });
 });

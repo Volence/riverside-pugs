@@ -15,6 +15,7 @@ import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
 import { bookingGames, gamesPlayed, liveBookingGame, type BookingGameView } from './games.js';
 import { ACCEPT_CUTOFF_MS, nearestFreeSlot, openPostAt } from '../scrims/rules.js';
+import { seriesTally, type SeriesTally } from './series.js';
 import { castersOf, type CasterView } from './casters.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
@@ -1194,6 +1195,9 @@ export interface BookingView {
   recovery: { since: string; moved: boolean; waiting: boolean } | null;
   viewer: { side: Side | null; manages: Side[]; staff: boolean; invited: boolean };
   games: BookingGameView[];
+  /** The series so far from the games above (src/bookings/series.ts); null
+   *  for a viewer who does not see the games. */
+  series: SeriesTally | null;
   /** Casters either side invited, and which halves are set (plan 4c). */
   casters: CasterView[];
   /** Re-posting a cancelled scrim in one click (plan 2 Ruling 4): true only
@@ -1243,6 +1247,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
   // games from the team's Scrims section instead, never this page.
   const seesGames = viewer.staff || me?.status === 'accepted'
     || sidesOf(db, id).some((s) => s.confirmed_at !== null && manages.includes(s.side));
+  const games = seesGames ? bookingGames(db, id) : [];
   return {
     id: b.id, purpose: b.purpose, state: b.state, ending: b.ending_at !== null, ended: b.ended_at !== null, startsAt: b.starts_at, endsAt: b.ends_at,
     extendedMinutes: b.extended_minutes, createdAt: b.created_at,
@@ -1276,7 +1281,8 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     recovery: b.recovering_at !== null && b.ending_at === null
       ? { since: b.recovering_at, moved: b.recover_reason === 'gone', waiting: b.server_id === null } : null,
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },
-    games: seesGames ? bookingGames(db, id) : [],
+    games,
+    series: seesGames ? seriesTally(games) : null,
     casters: castersOf(db, id),
     repost: {
       // Also not once the start is inside the acceptance cutoff, nor once
