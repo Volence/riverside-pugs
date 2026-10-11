@@ -10,6 +10,7 @@ import * as K from './keepTeam.js';
 import { KEEP_OFFER_DAYS } from './draftRules.js';
 import { tellCaptainOffer, tellCheckinOpen, tellDropped, tellKeepCaptainCap, tellKeepLapsed, tellKeepOffer, tellKeepSettled } from './notices.js';
 import { publishAdminEvent } from '../adminFeed.js';
+import { EVENT_ERRORS } from './validate.js';
 
 export const TICK_MS = 60_000;
 
@@ -25,6 +26,8 @@ export const TICK_MS = 60_000;
  */
 export class EventRunner {
   private ticking = false;
+  /** Events whose start was refused, so the staff alert goes out once. */
+  private startRefused = new Set<number>();
   private readonly now: () => number;
 
   constructor(private readonly deps: { db: DB; notifier: Notifier; publicUrl: string; now?: () => number }) {
@@ -60,7 +63,20 @@ export class EventRunner {
     ).all(now.toISOString()) as { id: number }[];
     for (const { id } of due) {
       try {
-        await startEventFlow(db, { eventId: id, by: null, now });
+        const r = await startEventFlow(db, { eventId: id, by: null, now });
+        // A refusal (fewer than 2 entries kept, a stage chain that will not
+        // build) repeats every minute; staff hear of it once, since a locked
+        // team event cannot be edited and only they can sort it out.
+        if (!r.ok && !this.startRefused.has(id)) {
+          this.startRefused.add(id);
+          const ev = E.getEvent(db, id);
+          publishAdminEvent({
+            kind: 'problem',
+            text: `Event ${ev?.name ?? `#${id}`} is past its start but cannot begin: ${EVENT_ERRORS[r.error].text} Check its entries and stages, or cancel it.`,
+            link: { label: 'Open the event desk', path: `/admin/events/${id}` },
+          });
+        }
+        if (r.ok) this.startRefused.delete(id);
       } catch (err) {
         console.error(`[events] start of event ${id} failed:`, err instanceof Error ? err.message : err);
       }
