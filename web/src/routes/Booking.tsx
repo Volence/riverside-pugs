@@ -316,6 +316,11 @@ export function Booking({ id, session }: { id: string; session: Session }) {
     setAddPick('');
     if (playerManage) act(() => bookingsApi.addCampaign(v.id, campaign)); else staffAct(() => adminApi.extendBooking(v.id, campaign));
   };
+  // Start now (scrims in game): both captains press it before the start; the
+  // slot moves up to now and keeps its length, so it ends early too.
+  const mySide = actingSide ? v.sides.find((s) => s.side === actingSide) ?? null : null;
+  const theirSide = actingSide ? v.sides.find((s) => s.side !== actingSide) ?? null : null;
+  const showStartNow = !!v.canStartNow && playerManage && mySide !== null && theirSide !== null;
 
   return (
     <main class="page page--profile bookingpage">
@@ -338,6 +343,25 @@ export function Booking({ id, session }: { id: string; session: Session }) {
         )}
         {v.connect && (
           <p class="bookingconnect">In the game console: <code>{`connect ${v.connect.host}:${v.connect.port}; password ${v.connect.password}`}</code></p>
+        )}
+        {showStartNow && (
+          <p class="inlinerow">
+            {mySide!.startNow ? (
+              <>
+                <span>Waiting for the other captain to press Start now.</span>
+                <button class="btn btn--ghost" disabled={busy} onClick={() => act(() => bookingsApi.withdrawStartNow(v.id))}>Take it back</button>
+              </>
+            ) : (
+              <>
+                <button class="btn" disabled={busy} onClick={() => act(() => bookingsApi.startNow(v.id))}>Start now</button>
+                <span class="muted">
+                  {theirSide!.startNow
+                    ? `${theirSide!.name} pressed Start now. Press it too and the server is set up right away.`
+                    : 'Everyone here early? Both captains press Start now. The slot keeps its length, so it ends early too.'}
+                </span>
+              </>
+            )}
+          </p>
         )}
         {v.repost.allowed && (
           <p><button class="btn" disabled={busy} onClick={repost}>Re-post this scrim</button></p>
