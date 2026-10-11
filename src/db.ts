@@ -1280,6 +1280,25 @@ CREATE TABLE IF NOT EXISTS input_caps (
 );
 CREATE INDEX IF NOT EXISTS input_caps_steamid ON input_caps(steamid, at);
 
+-- Stalls (l4d_inputstats 0.3.0): a live player's usercmds stopped for gap
+-- server ticks, then cmds ran in one tick. The raw shape, kept so the fakelag
+-- signature (src/inputStalls.ts) can be recalibrated and re-run over history.
+CREATE TABLE IF NOT EXISTS input_stalls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER,
+  server_id INTEGER,
+  steamid TEXT NOT NULL,
+  server_tick INTEGER NOT NULL,
+  gap INTEGER NOT NULL,
+  missed INTEGER NOT NULL,
+  cmds INTEGER NOT NULL,
+  team INTEGER NOT NULL,
+  cls INTEGER NOT NULL,
+  lunging INTEGER NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS input_stalls_match ON input_stalls(match_id, steamid);
+
 -- One row per signature that fired on a burst. Separate from the burst so that
 -- re-running an improved signature adds rows without rewriting the evidence.
 CREATE TABLE IF NOT EXISTS input_detections (

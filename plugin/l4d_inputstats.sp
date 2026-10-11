@@ -20,7 +20,7 @@
 #include <sdktools>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.2.1"
+#define PLUGIN_VERSION "0.3.0"
 
 /** A burst closes after this much silence. 30 ticks at 100 tick = 300ms.
  *  Measured, not guessed: a human sample containing one 31-second idle gap had
@@ -35,6 +35,13 @@
  *  actually generated, survives loss (it skips, the hook does not fire for a
  *  command that never arrived) and is the clock the button samples are on. */
 #define BURST_GAP_TICKS 30
+
+/** A stall shorter than this is ordinary choke and not worth a line; longer
+ *  than STALL_MAX_TICKS is a hitch, a load or a pause, not a cheat setting. */
+#define STALL_MIN_TICKS 8
+#define STALL_MAX_TICKS 100
+/** Stall lines per player per round, so a dying connection cannot flood. */
+#define STALL_BUDGET 200
 
 /** Must match the newest `v` src/logParse.ts accepts. 2: intervals in
  *  usercmds, `ct` really is the client tickcount, `sp` added. */
@@ -139,6 +146,26 @@ int g_iAirStartSeq[MAXPLAYERS + 1];
 int g_iAirFirstTick[MAXPLAYERS + 1];
 int g_iAirLastTick[MAXPLAYERS + 1];
 char g_sAirWeapon[MAXPLAYERS + 1][32];
+
+// Stalls, the `stall` line (0.3.0): a stretch of server ticks in which a live
+// player's usercmds stopped arriving, then arrived all at once. The server does
+// not move a player it has no commands for, so they hang in place, even in the
+// air, and the backlog runs in one tick: a warp nobody can shoot. A bad
+// connection does it now and then on either team. Fakelag (Aimware's choke,
+// confessed by the first confirmed cheater, match 631) does it on purpose, as
+// infected, in the middle of a pounce: 29 of their stalls were mid-pounce,
+// against at most 4 for anyone else on the fleet's l4d_cmd_budget logs.
+// Only the shape is captured here; what counts as fakelag is the web's call.
+int  g_iStTick[MAXPLAYERS + 1];		// server tick of the last usercmd, 0 = none this life
+int  g_iStSeq[MAXPLAYERS + 1];		// its cmdnum
+bool g_bStOpen[MAXPLAYERS + 1];		// a stall just ended; counting the backlog
+int  g_iStGap[MAXPLAYERS + 1];		// ticks with no usercmd
+int  g_iStMissed[MAXPLAYERS + 1];	// cmdnums skipped across it (lost, not held back)
+int  g_iStCmds[MAXPLAYERS + 1];		// usercmds run in the tick it ended
+int  g_iStTeam[MAXPLAYERS + 1];
+int  g_iStClass[MAXPLAYERS + 1];
+int  g_iStLunging[MAXPLAYERS + 1];
+int  g_iStallsThisRound[MAXPLAYERS + 1];
 
 // Ground phase, the `bhop` anchor: how long a player stays on the ground before
 // jumping again. A script jumps on the exact tick of landing, every time.
@@ -267,6 +294,7 @@ void ResetBudget(int c)
 		g_iBurstsThisRound[c][k] = 0;
 		g_bCapSent[c][k] = false;
 	}
+	g_iStallsThisRound[c] = 0;
 }
 
 /** Emit whatever this client has in flight. Safe on anyone: a client with
@@ -277,6 +305,8 @@ void FlushAll(int client)
 	FlushFire(client);
 	if (!g_bPrevGround[client]) FlushAir(client, g_iAirLastSeq[client]);
 	FlushHop(client);
+	// A stall that ended on the last tick of a life still goes out.
+	if (g_bStOpen[client]) EmitStall(client);
 }
 
 void ResetClient(int c)
@@ -297,6 +327,58 @@ void ResetCapture(int c)
 	g_iAtkHoldSlot[c] = -1; g_iAirHoldSlot[c] = -1;
 	g_bGroundTimed[c] = false;
 	g_bHopPending[c] = false;
+	// A stall is measured inside one life: the gap across a death or a ghost
+	// phase is not a stall.
+	g_iStTick[c] = 0;
+	g_bStOpen[c] = false;
+}
+
+/**
+ * Called once per usercmd. The first command of a new server tick closes the
+ * previous one: if a stall ended there, its backlog is now counted and the
+ * line goes out. A tick that runs backwards is a new map, never a stall.
+ */
+void TrackStall(int client, int tick, int seq)
+{
+	if (tick != g_iStTick[client]) {
+		if (g_bStOpen[client]) EmitStall(client);
+		int gap = tick - g_iStTick[client] - 1;
+		if (g_iStTick[client] > 0 && gap >= STALL_MIN_TICKS && gap <= STALL_MAX_TICKS && seq > g_iStSeq[client]) {
+			g_bStOpen[client] = true;
+			g_iStGap[client] = gap;
+			g_iStMissed[client] = seq - g_iStSeq[client] - 1;
+			g_iStCmds[client] = 0;
+			g_iStTeam[client] = GetClientTeam(client);
+			// Read before the backlog runs: this is the state they hung in.
+			g_iStClass[client] = g_iStTeam[client] == TEAM_INFECTED ? GetEntProp(client, Prop_Send, "m_zombieClass") : 0;
+			g_iStLunging[client] = g_iStClass[client] == 3 ? Lunging(client) : -1;
+		}
+		g_iStTick[client] = tick;
+	}
+	g_iStSeq[client] = seq;
+	if (g_bStOpen[client]) g_iStCmds[client]++;
+}
+
+/** 1 mid-pounce, 0 not, -1 unknown (not a hunter, or no ability entity). */
+int Lunging(int client)
+{
+	int ability = GetEntPropEnt(client, Prop_Send, "m_customAbility");
+	if (ability <= MaxClients || !IsValidEntity(ability) || !HasEntProp(ability, Prop_Send, "m_isLunging")) return -1;
+	return GetEntProp(ability, Prop_Send, "m_isLunging");
+}
+
+void EmitStall(int client)
+{
+	g_bStOpen[client] = false;
+	if (g_iStallsThisRound[client] >= STALL_BUDGET) return;
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) {
+		if (!GetClientAuthId(client, AuthId_Steam2, id, sizeof(id))) return;
+	}
+	g_iStallsThisRound[client]++;
+	PugLog("L4DM id=%s k=stall st=%d gap=%d miss=%d cmds=%d team=%d cls=%d lunge=%d v=%d",
+		id, g_iStTick[client], g_iStGap[client], g_iStMissed[client], g_iStCmds[client],
+		g_iStTeam[client], g_iStClass[client], g_iStLunging[client], WIRE_VERSION);
 }
 
 /**
@@ -356,6 +438,7 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 		ResetCapture(client);
 		g_bCapturing[client] = true;
 	}
+	TrackStall(client, tick, seq);
 
 	// Release edges first, so a press let go on this usercmd has its hold
 	// written before anything below decides to emit the burst it belongs to.

@@ -5,6 +5,7 @@ import { sweepReplays } from './replayOffload.js';
 import { r2FromEnv } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
 import { claimNewcomerPosts } from './integrity/newcomer.js';
+import { recordInputStall } from './inputStalls.js';
 import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job.js';
 import { reaperRoundLimit, runMetricsPass } from './metrics/job.js';
 import { handleAbandon } from './abandon.js';
@@ -1006,6 +1007,25 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             });
           } catch (err) {
             console.error('[inputstats] failed to record a capture cap:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'input_stall') {
+          // Same rules as a burst: evidence only, live matches only, never on
+          // the critical path.
+          try {
+            const serverId = serverOf(source, meta);
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
+            if (matchId === null) return;
+            const { created } = recordInputStall(deps.db, {
+              matchId, serverId, steamid: ev.steamid, serverTick: ev.serverTick, gap: ev.gap, missed: ev.missed,
+              cmds: ev.cmds, team: ev.team, cls: ev.cls, lunging: ev.lunging,
+            });
+            if (created) {
+              publishAdminEvent({ kind: 'input_flag', steamid: ev.steamid, matchId, signature: 'fakelag', detail: created });
+            }
+          } catch (err) {
+            console.error('[inputstats] failed to record a stall:', err);
           }
           return;
         }
