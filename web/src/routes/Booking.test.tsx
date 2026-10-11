@@ -455,7 +455,7 @@ describe('Booking page', () => {
         state: 'ended', connect: null, review: { open: true, mine: { thumbs: 1, tags: ['on_time'] } },
       }));
       mockBookings.review.mockResolvedValue(VIEW({
-        state: 'ended', connect: null, review: { open: true, mine: { thumbs: 1, tags: ['on_time', 'good_comms'] } },
+        state: 'ended', connect: null, review: { open: true, mine: { thumbs: 1, tags: ['on_time', 'flexible'] } },
       }));
       render(<Booking id="7" session={session} />);
       expect(await screen.findByText('Review Mice')).toBeTruthy();
@@ -463,10 +463,42 @@ describe('Booking page', () => {
       expect(up.getAttribute('aria-pressed')).toBe('true');
       const onTime = screen.getByRole('button', { name: 'On time' });
       expect(onTime.getAttribute('aria-pressed')).toBe('true');
-      fireEvent.click(screen.getByRole('button', { name: 'Good comms' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Flexible' }));
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-      await waitFor(() => expect(mockBookings.review).toHaveBeenCalledWith(7, 1, ['on_time', 'good_comms']));
+      await waitFor(() => expect(mockBookings.review).toHaveBeenCalledWith(7, 1, ['on_time', 'flexible'], ''));
       expect(await screen.findByText('Saved. Only staff see single reviews.')).toBeTruthy();
+    });
+
+    it('offers no Good comms; a stored Good comms is dropped from the form, not sent; the note is sent', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        state: 'ended', connect: null, review: { open: true, mine: { thumbs: 1, tags: ['on_time', 'good_comms'], note: 'old note' } },
+      }));
+      mockBookings.review.mockResolvedValue(VIEW({ state: 'ended', connect: null, review: { open: true, mine: { thumbs: 1, tags: ['on_time'], note: 'they subbed late' } } }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText('Review Mice');
+      expect(screen.queryByRole('button', { name: 'Good comms' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Easy to schedule' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Flexible' }).getAttribute('title')).toBe('OK with map, side or sub changes');
+      const note = screen.getByLabelText('Note for staff (optional)') as HTMLTextAreaElement;
+      expect(note.value).toBe('old note');
+      expect(note.maxLength).toBe(300);
+      expect(screen.getByText('Only staff ever see this note.')).toBeTruthy();
+      fireEvent.input(note, { target: { value: 'they subbed late' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(mockBookings.review).toHaveBeenCalledWith(7, 1, ['on_time'], 'they subbed late'));
+    });
+
+    it('the staff block shows each note and labels a retired tag', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        state: 'ended', connect: null, viewer: { side: null, manages: [], staff: true, invited: false },
+        reviews: [
+          { side: 'a', reviewer: 'x1', reviewerName: 'p1', thumbs: -1, tags: ['good_comms'], note: 'no voice at all', createdAt: '2026-10-02T22:00:00.000Z', updatedAt: '2026-10-02T22:00:00.000Z' },
+        ],
+      }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText('Reviews (staff only)')).toBeTruthy();
+      expect(screen.getByText('Good comms')).toBeTruthy();
+      expect(screen.getByText('Note: no voice at all')).toBeTruthy();
     });
 
     it('no review card once the window has closed', async () => {
@@ -482,7 +514,7 @@ describe('Booking page', () => {
       mockBookings.get.mockResolvedValue(VIEW({
         state: 'ended', connect: null, viewer: { side: null, manages: [], staff: true, invited: false },
         reviews: [
-          { side: 'a', reviewer: 'x1', reviewerName: 'p1', thumbs: 1, tags: ['on_time'], createdAt: '2026-10-02T22:00:00.000Z', updatedAt: '2026-10-02T22:00:00.000Z' },
+          { side: 'a', reviewer: 'x1', reviewerName: 'p1', thumbs: 1, tags: ['on_time'], note: '', createdAt: '2026-10-02T22:00:00.000Z', updatedAt: '2026-10-02T22:00:00.000Z' },
         ],
       }));
       render(<Booking id="7" session={session} />);

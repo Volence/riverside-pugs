@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import type { ReviewTag } from '../api';
 import { opponentsReviewLine, reviewSummaryText } from './ReviewSummary';
 
-const s = (positivePct: number | null, topTag: 'on_time' | 'good_comms' | 'good_sport' | 'left_early' | 'toxic' | null, count = 3) =>
+const s = (positivePct: number | null, topTag: ReviewTag | null, count = 3) =>
   ({ count, positivePct, topTag });
 
 describe('review summary text (plan 2 Ruling 5)', () => {
@@ -13,6 +14,11 @@ describe('review summary text (plan 2 Ruling 5)', () => {
   it('gives the percentage and top tag label at the minimum', () => {
     expect(reviewSummaryText(s(67, 'on_time'))).toBe('67% positive, top tag: On time');
     expect(reviewSummaryText(s(100, 'toxic'))).toBe('100% positive, top tag: Toxic');
+  });
+
+  it('labels a retired tag in the aggregate', () => {
+    expect(reviewSummaryText(s(80, 'good_comms'))).toBe('80% positive, top tag: Good comms');
+    expect(reviewSummaryText(s(80, 'easy_to_schedule'))).toBe('80% positive, top tag: Easy to schedule');
   });
 
   it('the team page line prefixes "Opponents\' reviews:" only when there is enough', () => {
