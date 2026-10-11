@@ -262,7 +262,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		char rest[256];
 		if (pos == -1) rest[0] = '\0';
 		else strcopy(rest, sizeof(rest), text[pos]);
-		ChatSub(client, rest);
+		CaptainLetIn(client, rest, "sub", false);
 		return Plugin_Continue;
 	}
 
@@ -271,7 +271,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 		char rest[256];
 		if (pos == -1) rest[0] = '\0';
 		else strcopy(rest, sizeof(rest), text[pos]);
-		ChatAllow(client, rest);
+		CaptainLetIn(client, rest, "allow", true);
 		return Plugin_Continue;
 	}
 
@@ -487,7 +487,7 @@ public Action Cmd_AllowCommit(int args)
 			if (!IsClientInGame(c) || IsExempt(c)) continue;
 			if (!GetClientAuthId(c, AuthId_SteamID64, id, sizeof(id)) || !IsSteamId64(id)) continue;
 			if (IsAllowed(id) || g_hGrace.GetValue(id, until)) continue;
-			StartGrace(c, id);
+			StartGrace(c, id, true);
 			graced++;
 		}
 	}
@@ -550,7 +550,7 @@ bool IsExempt(int client)
 }
 
 /** sm_booking_allow_refuse <steamid64>: the site refused a captain's !allow
- *  that ChatAllow had already let through. Off the active list again, and if
+ *  that CaptainLetIn had already let through. Off the active list again, and if
  *  they are still here (and not exempt) their grace starts over, with the
  *  notices of a fresh connect, rather than an outright kick. */
 public Action Cmd_AllowRefuse(int args)
@@ -619,8 +619,9 @@ public void OnClientPostAdminCheck(int client)
 	StartGrace(client, id);
 }
 
-/** A fresh grace for this player, told to every captain here and to them. */
-void StartGrace(int client, const char[] id)
+/** A fresh grace for this player, told to every captain here and to them.
+ *  removed: they were here already and a list commit no longer carries them. */
+void StartGrace(int client, const char[] id, bool removed = false)
 {
 	int grace = g_cvGrace.IntValue;
 	g_hGrace.SetValue(id, GetTime() + grace);
@@ -631,7 +632,7 @@ void StartGrace(int client, const char[] id)
 		if (!IsClientInGame(i) || IsFakeClient(i)) continue;
 		char cid[32];
 		if (!GetClientAuthId(i, AuthId_SteamID64, cid, sizeof(cid)) || !IsCaptain(cid)) continue;
-		PrintToChat(i, "[Booking] %s joined and is not on the booking. Within %d seconds type !allow %s to let them watch, or !sub %s to let them play for your side.", name, grace, name, name);
+		PrintToChat(i, "[Booking] %s %s on the booking. Within %d seconds type !allow %s to let them watch, or !sub %s to let them play for your side.", name, removed ? "is no longer" : "joined and is not", grace, name, name);
 	}
 	PrintToChat(client, "[Booking] This server is booked. A captain has %d seconds to let you in.", grace);
 }
@@ -679,9 +680,15 @@ int FindClientById(const char[] id64)
 	return 0;
 }
 
-/** !allow <name> from chat: one waiting player, matched case-insensitively
- *  by substring, is added to the active list at once and the site is told. */
-void ChatAllow(int client, const char[] rawQuery)
+/** A captain's !allow <name> (waitingOnly: one player in a grace, to watch)
+ *  or !sub <name> (any connected human, to play for the captain's side; the
+ *  site makes them a ringer and pug-match places them), matched
+ *  case-insensitively by substring. The match is let onto the box at once
+ *  and the site is told (cmd=allow or cmd=sub). Someone already on the list
+ *  is left as they are: the site may refuse the !sub, and the refusal must
+ *  not take a properly booked player off the list (the site sends no
+ *  sm_booking_allow_refuse for them either). */
+void CaptainLetIn(int client, const char[] rawQuery, const char[] cmdWord, bool waitingOnly)
 {
 	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return;
 	char by[32];
@@ -710,8 +717,9 @@ void ChatAllow(int client, const char[] rawQuery)
 	{
 		for (int i = 1; i <= MaxClients; i++)
 		{
-			if (!IsClientConnected(i) || IsFakeClient(i)) continue;
-			if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id)) || !g_hGrace.GetValue(id, until)) continue;
+			if (!IsClientConnected(i) || IsFakeClient(i) || IsClientSourceTV(i)) continue;
+			if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id))) continue;
+			if (waitingOnly && !g_hGrace.GetValue(id, until)) continue;
 			GetClientName(i, name, sizeof(name));
 			if (StrContains(name, query, false) == -1) continue;
 			match = i;
@@ -720,7 +728,7 @@ void ChatAllow(int client, const char[] rawQuery)
 	}
 	if (found == 0)
 	{
-		PrintToChat(client, "[Booking] No one waiting matches that name.");
+		PrintToChat(client, waitingOnly ? "[Booking] No one waiting matches that name." : "[Booking] No one here matches that name.");
 		return;
 	}
 	if (found > 1)
@@ -731,13 +739,18 @@ void ChatAllow(int client, const char[] rawQuery)
 
 	GetClientAuthId(match, AuthId_SteamID64, id, sizeof(id));
 	GetClientName(match, name, sizeof(name));
-	g_hAllowed.SetValue(id, true);
-	g_hGrace.Remove(id);
-	g_hBlocked.Remove(id);
+	if (!IsAllowed(id))
+	{
+		g_hAllowed.SetValue(id, true);
+		g_hGrace.Remove(id);
+		g_hBlocked.Remove(id);
+	}
 
 	char arg[256];
 	Format(arg, sizeof(arg), "%s %s", id, name);
-	EmitBookingCmd(by, "allow", arg);
+	EmitBookingCmd(by, cmdWord, arg);
+	// !allow's answer is the site's own "can watch" line; !sub says it went.
+	if (!waitingOnly) PrintToChat(client, "[Booking] Sent to the site.");
 }
 
 // ---------- scrims in game (1.5.0) ----------
@@ -929,62 +942,4 @@ public Action Cmd_Time(int args)
 {
 	TimeReply(0);
 	return Plugin_Handled;
-}
-
-/** !sub <name> from a captain: one connected human whose name contains the
- *  text (case-insensitive) is let onto the box at once, as !allow does, and
- *  the site is told (cmd=sub); the site makes them a ringer of the captain's
- *  side and pug-match places them. Any connected human may match, a watcher
- *  already on the list included. */
-void ChatSub(int client, const char[] rawQuery)
-{
-	if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client)) return;
-	char by[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, by, sizeof(by))) return;
-	if (!IsCaptain(by))
-	{
-		PrintToChat(client, "[Booking] Only a captain can do that.");
-		return;
-	}
-	if (!HasLogSecret())
-	{
-		PrintToChat(client, "[Booking] The site cannot hear this server right now; use the booking page.");
-		return;
-	}
-	char query[MAX_NAME_LENGTH];
-	strcopy(query, sizeof(query), rawQuery);
-	TrimString(query);
-	int match = 0, found = 0;
-	char id[32], name[MAX_NAME_LENGTH];
-	if (query[0] != '\0')
-	{
-		for (int i = 1; i <= MaxClients; i++)
-		{
-			if (!IsClientConnected(i) || IsFakeClient(i) || IsClientSourceTV(i)) continue;
-			if (!GetClientAuthId(i, AuthId_SteamID64, id, sizeof(id))) continue;
-			GetClientName(i, name, sizeof(name));
-			if (StrContains(name, query, false) == -1) continue;
-			match = i;
-			found++;
-		}
-	}
-	if (found == 0)
-	{
-		PrintToChat(client, "[Booking] No one here matches that name.");
-		return;
-	}
-	if (found > 1)
-	{
-		PrintToChat(client, "[Booking] More than one player matches; type more of the name.");
-		return;
-	}
-	GetClientAuthId(match, AuthId_SteamID64, id, sizeof(id));
-	GetClientName(match, name, sizeof(name));
-	g_hAllowed.SetValue(id, true);
-	g_hGrace.Remove(id);
-	g_hBlocked.Remove(id);
-	char arg[256];
-	Format(arg, sizeof(arg), "%s %s", id, name);
-	EmitBookingCmd(by, "sub", arg);
-	PrintToChat(client, "[Booking] Sent to the site.");
 }

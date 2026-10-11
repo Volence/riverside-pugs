@@ -423,6 +423,8 @@ describe('the plugin clock lines (scrims in game, items 4, 5 and 8)', () => {
     let lines = bookingLines(db, getBooking(db, id)!);
     expect(lines).toContain(`l4d_booking_next_at ${epochOf(at)}`);
     expect(lines).toContain('l4d_booking_next_name "Death Toll"');
+    // The name goes first, so the plugin's countdown never starts without it.
+    expect(lines.indexOf('l4d_booking_next_name "Death Toll"')).toBeLessThan(lines.indexOf(`l4d_booking_next_at ${epochOf(at)}`));
     advancePlaylist(db, id, 1, new Date(now));
     lines = bookingLines(db, getBooking(db, id)!);
     expect(lines).toContain('l4d_booking_campaign "Death Toll"');
@@ -1959,6 +1961,16 @@ describe('booked games (plan 4b)', () => {
       log.mockRestore();
       expect(cmds()).toEqual(['say [Booking] Only a captain or co-captain of that side can do that.', 'sm_booking_allow_refuse 76561199222222222']);
       expect(db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, '76561199222222222')).toBeUndefined();
+    });
+
+    it('a refused !sub on someone already on the booking says the reason and never takes them off the box\'s list', async () => {
+      await running();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      // P[1] captains side b: a side a captain cannot make them a sub.
+      runner.onCommand(3, P[0], 'sub', `${P[1]} p1`);
+      await flush();
+      log.mockRestore();
+      expect(cmds()).toEqual(['say [Booking] They already play for the other side.']);
     });
 
     it('a non-captain cannot !sub anyone either, and the box takes back what its plugin let in', async () => {

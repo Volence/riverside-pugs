@@ -271,8 +271,10 @@ function stateLines(db: DB, b: BookingRow): string[] {
     `l4d_booking_title ${quoted(consoleText(`${sideName(db, a)} vs ${sideName(db, bs)}`, 100))}`,
     `l4d_booking_campaign ${quoted(nameOf(currentCampaign(db, b)))}`,
     `l4d_booking_ends ${epochOf(b.ends_at)}`,
-    `l4d_booking_next_at ${epochOf(b.next_at)}`,
+    // The name before the time: the plugin's countdown starts on next_at, and
+    // a tick between the two lines would show it with no name.
     `l4d_booking_next_name ${quoted(nameOf(b.next_campaign))}`,
+    `l4d_booking_next_at ${epochOf(b.next_at)}`,
     `l4d_booking_close_at ${epochOf(b.close_at)}`,
   ];
 }
@@ -2200,13 +2202,16 @@ export class BookingRunner {
    *  the box is told `sm_booking_allow_refuse <id>` (1.2.1): it takes them
    *  back off and restarts their grace. Through push, so a failure logs the
    *  line as a count (hideAllowIds), never the id. A malformed target gets
-   *  the reason alone. */
+   *  the reason alone, and so does someone already on the booking's list: a
+   *  refused !sub can name a properly booked player (l4d_booking 1.5.0 lets
+   *  any connected human be named), and taking them off would start their
+   *  grace and kick them. */
   private refuseAllow(id: number, serverId: number, arg: string, reason: string): void {
     const server = getServer(this.db, serverId);
     if (!server) return;
     const target = allowTarget(arg);
     const lines = [`say [Booking] ${consoleText(reason, 150)}`];
-    if (target) lines.push(`sm_booking_allow_refuse ${target}`);
+    if (target && !allowList(this.db, id).includes(target)) lines.push(`sm_booking_allow_refuse ${target}`);
     void this.push(id, server, () => lines, 'the !allow refusal');
   }
 
