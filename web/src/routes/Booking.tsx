@@ -8,7 +8,7 @@ import { campaignsLabel, localLabel } from '../bookingTime';
 import { campaignName } from '../format';
 import { confirm } from '../components/Confirm';
 import { RecordLine } from '../components/ScrimRecord';
-import { REVIEW_TAGS, REVIEW_TAG_LABELS } from '../components/ReviewSummary';
+import { REVIEW_TAGS, REVIEW_TAG_LABELS, REVIEW_TAG_HINTS, REVIEW_NOTE_MAX } from '../components/ReviewSummary';
 
 const STATE_LINE: Record<BookingView['state'], string> = {
   scheduled: 'Booked. The server is taken and set up 15 minutes before the start.',
@@ -111,20 +111,23 @@ function Casters({ v, mySide, open, busy, act }: {
 
 /** The viewer's own private review of the other side (plan 2 Ruling 5): a
  *  thumbs up or down plus tags, pre-filled from `mine`, editable until the
- *  7 day window closes. Only this side's own review is ever in this card. */
+ *  7 day window closes, plus an optional note only staff (and this side)
+ *  ever see. Only this side's own review is ever in this card. */
 function ReviewCard({ v, mySide, busy, act }: {
   v: BookingView; mySide: BookingSide; busy: boolean; act: (fn: () => Promise<BookingView>) => void;
 }) {
   const other = v.sides.find((s) => s.side !== mySide)!;
   const mine = v.review?.mine ?? null;
   const [thumbs, setThumbs] = useState<1 | -1 | null>(mine?.thumbs ?? null);
-  const [tags, setTags] = useState<ReviewTag[]>(mine?.tags ?? []);
+  // A retired tag (Good comms) is dropped rather than sent: the server refuses it now.
+  const [tags, setTags] = useState<ReviewTag[]>((mine?.tags ?? []).filter((t) => REVIEW_TAGS.includes(t)));
+  const [note, setNote] = useState(mine?.note ?? '');
   const [saved, setSaved] = useState(false);
   const pick = (t: 1 | -1) => { setSaved(false); setThumbs(t); };
   const toggleTag = (t: ReviewTag) => { setSaved(false); setTags((ts) => (ts.includes(t) ? ts.filter((x) => x !== t) : [...ts, t])); };
   const save = () => {
     if (thumbs === null) return;
-    act(async () => { const r = await bookingsApi.review(v.id, thumbs, tags); setSaved(true); return r; });
+    act(async () => { const r = await bookingsApi.review(v.id, thumbs, tags, note); setSaved(true); return r; });
   };
   return (
     <Panel>
@@ -135,11 +138,16 @@ function ReviewCard({ v, mySide, busy, act }: {
       </p>
       <p class="bookingreview">
         {REVIEW_TAGS.map((t) => (
-          <button key={t} type="button" class={`chip${tags.includes(t) ? ' is-on' : ''}`} aria-pressed={tags.includes(t)} disabled={busy} onClick={() => toggleTag(t)}>
+          <button key={t} type="button" class={`chip${tags.includes(t) ? ' is-on' : ''}`} aria-pressed={tags.includes(t)} title={REVIEW_TAG_HINTS[t]} disabled={busy} onClick={() => toggleTag(t)}>
             {REVIEW_TAG_LABELS[t]}
           </button>
         ))}
       </p>
+      <label class="teamfield">Note for staff (optional)
+        <textarea aria-label="Note for staff (optional)" value={note} maxLength={REVIEW_NOTE_MAX} rows={3}
+          onInput={(e) => { setSaved(false); setNote((e.target as HTMLTextAreaElement).value); }} />
+      </label>
+      <p class="muted">Only staff ever see this note.</p>
       <p class="bookingreview">
         <button class="btn" disabled={busy || thumbs === null} onClick={save}>Save</button>
         {saved && <span class="muted">Saved. Only staff see single reviews.</span>}
@@ -162,6 +170,7 @@ function StaffReviews({ v }: { v: BookingView }) {
               <span>{v.sides.find((s) => s.side === r.side)?.name ?? r.side}</span>
               <span>{r.thumbs === 1 ? 'Thumbs up' : 'Thumbs down'}</span>
               {r.tags.length > 0 && <span class="muted">{r.tags.map((t) => REVIEW_TAG_LABELS[t]).join(', ')}</span>}
+              {r.note && <span class="muted">Note: {r.note}</span>}
               <span class="muted">by {r.reviewerName}</span>
             </li>
           ))}

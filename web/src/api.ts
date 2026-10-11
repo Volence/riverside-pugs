@@ -2352,13 +2352,17 @@ export interface ScrimRecord {
   teams: { teamId: number; slug: string; name: string; tag: string; record: ScrimReliability }[];
 }
 /** Mirrors src/scrims/reviews.ts's REVIEW_TAGS (plan 2 Ruling 5). */
-export type ReviewTag = 'on_time' | 'good_comms' | 'good_sport' | 'left_early' | 'toxic';
+/** Mirrors src/scrims/reviews.ts's KNOWN_REVIEW_TAGS: the six offered since
+ *  2026-10-11 and the retired good_comms, still on stored reviews. */
+export type ReviewTag = 'on_time' | 'easy_to_schedule' | 'flexible' | 'good_sport' | 'left_early' | 'toxic' | 'good_comms';
 /** A review aggregate: under SUMMARY_MIN (3) there is no percentage or top
  *  tag, and no count unless the viewer is staff. */
 export interface ReviewSummary { count?: number; positivePct: number | null; topTag: ReviewTag | null }
 /** A single side's review of the other, staff only. */
 export interface StaffReview {
   side: BookingSide; reviewer: string; reviewerName: string; thumbs: 1 | -1; tags: ReviewTag[]; createdAt: string; updatedAt: string;
+  /** Staff only; '' when none. */
+  note: string;
 }
 /** A player's review aggregates and toxic flags (plan 2 Ruling 6), as a
  *  pickup captain and each current team's. Staff only. */
@@ -2416,7 +2420,7 @@ export interface BookingView {
   /** Plan 2 Ruling 5: present only when the viewer manages exactly one
    *  confirmed side of a scrim that closed as ended or no_show. open says whether the 7 day
    *  window still takes a review; mine is the viewer's own side's review. */
-  review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[] } | null };
+  review?: { open: boolean; mine: { thumbs: 1 | -1; tags: ReviewTag[]; note?: string } | null };
   /** Both sides' single reviews, staff only. */
   reviews?: StaffReview[];
 }
@@ -2454,7 +2458,7 @@ export const bookingsApi = {
   inviteCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters`, { steamid }),
   withdrawCaster: (id: number, steamid: string) => post<BookingView>(`/api/bookings/${id}/casters/${enc(steamid)}/withdraw`),
   /** The viewer's own private review of the other side (plan 2 Ruling 5). */
-  review: (id: number, thumbs: 1 | -1, tags: ReviewTag[]) => post<BookingView>(`/api/bookings/${id}/review`, { thumbs, tags }),
+  review: (id: number, thumbs: 1 | -1, tags: ReviewTag[], note: string) => post<BookingView>(`/api/bookings/${id}/review`, { thumbs, tags, note }),
 };
 
 // ---------- scrims (the /scrims board, scrim board plan 1) ----------
