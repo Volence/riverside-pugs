@@ -145,8 +145,9 @@ function hiddenScores(
   hid: { h: HiddenMetrics; map: string | null | undefined }[],
   k: (map: string | null | undefined) => number,
   part: (h: HiddenMetrics) => { scoreable: number; fidSum: number; occ: OccResult | null; reveals: number; revealOn: number },
+  minRounds: number = TUNING.MIN_BOARD_ROUNDS,
 ): ClassScores & { scoreable: number; reveals: number } {
-  const enough = hid.length >= TUNING.MIN_BOARD_ROUNDS;
+  const enough = hid.length >= minRounds;
   const parts = hid.map((x) => ({ p: part(x.h), map: x.map }));
   const scoreable = parts.reduce((a, x) => a + x.p.scoreable, 0);
   const fidSum = parts.reduce((a, x) => a + x.p.fidSum, 0);
@@ -182,7 +183,10 @@ function hiddenScores(
  *  MAP across all history; this removes what was normal for this ROUND,
  *  including whatever the director happened to do. Both are means over
  *  rounds, because a single high occupancy round really can be luck. */
-export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
+export function aggregate(rows: ScoreRow[], opts: { minRounds?: number } = {}): PlayerAgg[] {
+  // The board's minimum unless told otherwise. The newcomer check scores ONE
+  // match per row (src/integrity/newcomer.ts), which never reaches eight.
+  const minRounds = opts.minRounds ?? TUNING.MIN_BOARD_ROUNDS;
   const k = calibrate(rows);
   const kHidden = calibrate(rows, (m) => m.hidden?.occ);
   const kClass = new Map(TRACKED_CLASSES.map((c) => [c, calibrate(rows, (m) => m.hidden?.byClass[c].occ)]));
@@ -219,7 +223,7 @@ export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
       teamGap: meanOrNull(list.map(gapOf)),
       ...(() => {
         const hid = list.flatMap((r) => (r.metrics.hidden ? [{ h: r.metrics.hidden, map: r.map }] : []));
-        const all = hiddenScores(hid, kHidden, (h) => h);
+        const all = hiddenScores(hid, kHidden, (h) => h, minRounds);
         return {
           losRounds: hid.length,
           hiddenScoreable: all.scoreable,
@@ -228,7 +232,7 @@ export function aggregate(rows: ScoreRow[]): PlayerAgg[] {
           reveals: all.reveals,
           revealShare: all.revealShare,
           byClass: Object.fromEntries(TRACKED_CLASSES.map((c) => {
-            const s = hiddenScores(hid, kClass.get(c)!, (h) => h.byClass[c]);
+            const s = hiddenScores(hid, kClass.get(c)!, (h) => h.byClass[c], minRounds);
             return [c, { hiddenShare: s.hiddenShare, hiddenOccZ: s.hiddenOccZ, revealShare: s.revealShare }];
           })) as Record<InfectedClass, ClassScores>,
         };

@@ -184,6 +184,14 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'newcomer_flag': {
+        // Worded as something to watch: an honest player can top one match.
+        return {
+          text: `🔭 ${this.name(e.steamid)} is too new for the analyzer board, but match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}) `
+            + `scored in the top 1% of every match on record (${e.detail}). Watch the replay before deciding anything. [File](${this.file(e.steamid)})`,
+          color: COLOR.problem,
+        };
+      }
       case 'cvar_flag': {
         // Worded by what the plugin did. With the ready gate on, a Low player
         // cannot ready, so `held` is the common case and nobody has played on

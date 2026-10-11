@@ -9,6 +9,7 @@ import { deploySlug } from './releaseStage.js';
 import { seedRulesetTemplates } from './rulesets.js';
 import { ensureAppealSchema } from './appeals/schema.js';
 import { ensureIpWatchSchema } from './ipWatch.js';
+import { ensureNewcomerSchema } from './integrity/newcomer.js';
 import { ensureDataFeedsSchema } from './dataFeeds.js';
 
 export type DB = Database.Database;
@@ -2751,6 +2752,7 @@ export function openDb(path: string): DB {
 
   // Evader flags, the IP watch list and same-connection alerts (src/ipWatch.ts).
   ensureIpWatchSchema(db);
+  ensureNewcomerSchema(db);
 
   // pug-match's data feeds: connection funnel, survivor downs, SI lives
   // (src/dataFeeds.ts, docs/data-feeds-2026-10-10.md).

@@ -23,6 +23,8 @@ export const FEED_DESTINATION: Record<AdminEvent['kind'], 'mod' | 'admin'> = {
   clock: 'admin',
   signon_drop: 'admin',
   input_flag: 'admin',
+  // Mods act on cheating reports, and the case this exists for was theirs.
+  newcomer_flag: 'mod',
   cvar_flag: 'admin',
   conduct_flag: 'mod',
   lilac_flag: 'admin',
