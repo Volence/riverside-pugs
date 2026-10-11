@@ -7,7 +7,10 @@ import { standings, type TableResult } from './standings.js';
  * top, each team with the first one below it it has not met, backtracking
  * when the rest cannot be paired; only when no repeat-free pairing exists at
  * all is a rematch allowed (Ruling 11). With an odd count the bye goes first,
- * to the lowest-ranked entry among those with the fewest byes (Ruling 10).
+ * to the lowest-ranked entry among those with the fewest byes (Ruling 10);
+ * when that bye leaves no repeat-free pairing, the next such entry up takes
+ * it instead, and only when none does are rematches allowed, as few as the
+ * top-down pass can manage rather than straight 1v2, 3v4.
  */
 
 export interface Pairing { pairs: [number, number][]; bye: number | null }
@@ -25,24 +28,43 @@ export function pairSwiss(entries: { id: number; seed: number }[], results: Tabl
     ? [...entries].sort((x, y) => x.seed - y.seed).map((e) => e.id)
     : standings('swiss', entries.map((e) => ({ ...e, out: false })), mine, { rounds }).map((s) => s.entryId);
 
-  let bye: number | null = null;
+  // Bye candidates, best first: the fewest byes, lowest-ranked first.
+  let candidates: (number | null)[] = [null];
   if (order.length % 2 === 1) {
     const byes = new Map<number, number>();
     for (const r of mine) if (r.b === null) byes.set(r.a, (byes.get(r.a) ?? 0) + 1);
     const fewest = Math.min(...order.map((id) => byes.get(id) ?? 0));
-    for (let i = order.length - 1; i >= 0; i--) {
-      if ((byes.get(order[i]!) ?? 0) === fewest) { bye = order[i]!; break; }
-    }
-    order.splice(order.indexOf(bye!), 1);
+    candidates = [...order].reverse().filter((id) => (byes.get(id) ?? 0) === fewest);
   }
+  const without = (bye: number | null) => (bye === null ? order : order.filter((id) => id !== bye));
 
   if (first) {
-    const half = order.length / 2;
-    return { pairs: order.slice(0, half).map((a, i): [number, number] => [a, order[half + i]!]), bye };
+    const bye = candidates[0]!;
+    const rest = without(bye);
+    const half = rest.length / 2;
+    return { pairs: rest.slice(0, half).map((a, i): [number, number] => [a, rest[half + i]!]), bye };
   }
   const met = new Set<string>();
   for (const r of mine) if (r.b !== null) { met.add(`${r.a}:${r.b}`); met.add(`${r.b}:${r.a}`); }
-  return { pairs: pairOff(order, met) ?? pairOff(order, new Set())!, bye };
+  for (const bye of candidates) {
+    const pairs = pairOff(without(bye), met);
+    if (pairs) return { pairs, bye };
+  }
+  return { pairs: fewestRematches(without(candidates[0]!), met), bye: candidates[0]! };
+}
+
+/** Top down, each team with the first one below it it has not met, else
+ *  the first one left: used only when no repeat-free pairing exists. */
+function fewestRematches(order: number[], met: Set<string>): [number, number][] {
+  const left = [...order];
+  const out: [number, number][] = [];
+  while (left.length > 1) {
+    const a = left.shift()!;
+    const k = left.findIndex((b) => !met.has(`${a}:${b}`));
+    const [b] = left.splice(k === -1 ? 0 : k, 1);
+    out.push([a, b!]);
+  }
+  return out;
 }
 
 function pairOff(order: number[], met: Set<string>): [number, number][] | null {
