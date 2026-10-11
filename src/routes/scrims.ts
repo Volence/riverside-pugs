@@ -12,7 +12,7 @@ import { canUse, seesBooking } from '../bookings/bookings.js';
 import type { BookingRunner } from '../bookings/runner.js';
 import type { Notifier } from '../notify/notify.js';
 import * as S from '../scrims/scrims.js';
-import { scrimMessage, scrimSideManagers, teamManagers, type ScrimNotifyType } from '../scrims/messages.js';
+import { scrimMessage, scrimSideManagers, sendWithdrawnNotices, teamManagers, type ScrimNotifyType } from '../scrims/messages.js';
 import { nightWindow } from '../scrims/night.js';
 import { showSr } from '../scrims/rules.js';
 import { BLOCK_ERRORS, blocksOf, blockTarget, managesBlockParty, unblock, type BlockParty } from '../scrims/blocks.js';
@@ -285,19 +285,7 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     }
     // Owner ruling 2026-10-11: both sides are booked now, so their other
     // overlapping posts and acceptances were withdrawn; each side is told why.
-    const BOOKED_ELSEWHERE = 'your side booked another scrim at that time';
-    for (const postId of withdrawn.posts) {
-      const wp = S.getPost(db, postId);
-      if (wp) tell(scrimSideManagers(db, wp), 'scrim_withdrawn', postId, { reason: BOOKED_ELSEWHERE });
-    }
-    for (const acceptId of withdrawn.postAccepts) {
-      const wa = S.getAccept(db, acceptId);
-      if (wa) tell(scrimSideManagers(db, wa), 'scrim_declined', wa.post_id, { reason: 'the posting side booked another scrim at that time' });
-    }
-    for (const acceptId of withdrawn.accepts) {
-      const wa = S.getAccept(db, acceptId);
-      if (wa) tell(scrimSideManagers(db, wa), 'scrim_withdrawn', wa.post_id, { acceptId, reason: BOOKED_ELSEWHERE });
-    }
+    sendWithdrawnNotices(db, notifier, publicUrl, withdrawn);
     return reply.code(200).send({ bookingId });
   });
 }

@@ -5,7 +5,7 @@ import { setSetting } from '../src/settings.js';
 import { createTeam, disbandTeam, invitePlayer, respondInvite, setRole } from '../src/teams/teams.js';
 import { BOOKING_ERRORS, cancelBooking, confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
 import {
-  acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, SCRIM_ERRORS, withdrawAccept, withdrawPost,
+  acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, SCRIM_ERRORS, withdrawAccept, withdrawForBooking, withdrawPost,
   type ScrimResult,
 } from '../src/scrims/scrims.js';
 import { blockTarget } from '../src/scrims/blocks.js';
@@ -1002,7 +1002,7 @@ describe('one side, one slot on the board (owner, 2026-10-11)', () => {
     value(withdrawPost(db, { postId: first, by: P[0], now: NOW }));
     expect(err(createPost(db, postInput()))).toBe('ok');
     expect(SCRIM_ERRORS.duplicate_post.text).toBe('That side already has an open post starting at that time.');
-    expect(SCRIM_ERRORS.booked_then.text).toBe('That side already has a booked scrim at that time.');
+    expect(SCRIM_ERRORS.booked_then.text).toBe('That side already has a booking at that time.');
   });
 
   it('a side the poster declined waits an hour before accepting the same post again; withdrawing your own has no wait', () => {
@@ -1046,6 +1046,19 @@ describe('a confirm withdraws what overlaps the booked slot (owner, 2026-10-11)'
     expect(postRow(a).status).toBe('booked');
   });
 
+  it("leaves the other booked side's acceptances of a withdrawn post out of postAccepts: they are that side's own withdrawn accepts", () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const mice = team(P[1], 'Mice', 'MM');
+    const a = post({ teamId: rats });
+    const b = post({ teamId: rats, startsAt: '2026-10-02T21:00:00.000Z' });
+    const miceOnB = accept(b, P[1], { teamId: mice });
+    const otherOnB = accept(b, P[6]);
+    const chosen = accept(a, P[1], { teamId: mice });
+    const r = value(confirmAccept(db, { acceptId: chosen, by: P[0], now: NOW }));
+    expect(r.withdrawn).toEqual({ posts: [b], postAccepts: [otherOnB], accepts: [miceOnB] });
+    expect(acceptRow(miceOnB).status).toBe('withdrawn');
+  });
+
   it('a second poster cannot then book the same side over that time', () => {
     const one = post({ by: P[0] });
     const two = post({ by: P[2], startsAt: '2026-10-02T21:00:00.000Z' });
@@ -1069,5 +1082,36 @@ describe('a confirm withdraws what overlaps the booked slot (owner, 2026-10-11)'
       .toEqual({ ok: false, error: 'busy_them', text: 'The accepting side already has a booking at that time.' });
     expect(bookingCount()).toBe(before);
     expect(acceptRow(a).status).toBe('pending');
+  });
+});
+
+describe('a direct booking withdraws what overlaps it once both sides confirm (owner, 2026-10-11)', () => {
+  const direct = (startsAt: string) => {
+    const r = createBooking(db, { by: P[0], opponent: { steamid: P[1] }, startsAt, minutes: 120, playlist: ['no_mercy'], now: NOW });
+    if (!r.ok) throw new Error(r.error);
+    return r.value.id;
+  };
+
+  it("withdraws the side's overlapping open post with its pending acceptance, keeps a non-overlapping post, and does nothing until both confirm", () => {
+    const overlapping = post({ by: P[0] });
+    const elsewhere = post({ by: P[0], startsAt: '2026-10-04T20:00:00.000Z' });
+    const held = accept(overlapping, P[6]);
+    const id = direct('2026-10-02T21:00:00.000Z');
+    expect(withdrawForBooking(db, id, NOW)).toEqual({ posts: [], postAccepts: [], accepts: [] });
+    expect(postRow(overlapping).status).toBe('pending');
+    value(confirmBooking(db, { bookingId: id, by: P[1], now: NOW }) as ScrimResult<null>);
+    expect(withdrawForBooking(db, id, NOW)).toEqual({ posts: [overlapping], postAccepts: [held], accepts: [] });
+    expect(postRow(overlapping).status).toBe('withdrawn');
+    expect(acceptRow(held)).toMatchObject({ status: 'withdrawn', responded_at: NOW.toISOString() });
+    expect(postRow(elsewhere).status).toBe('open');
+  });
+
+  it("withdraws the other side's pending acceptance of someone else's overlapping post", () => {
+    const theirs = post({ by: P[5] });
+    const mine = accept(theirs, P[1]);
+    const id = direct('2026-10-02T21:00:00.000Z');
+    value(confirmBooking(db, { bookingId: id, by: P[1], now: NOW }) as ScrimResult<null>);
+    expect(withdrawForBooking(db, id, NOW)).toEqual({ posts: [], postAccepts: [], accepts: [mine] });
+    expect(postRow(theirs).status).toBe('open');
   });
 });

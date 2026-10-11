@@ -2177,7 +2177,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   releaser.onFreed(() => bookingRunner.allocate());
   const bookingTick = setInterval(() => { void bookingRunner.tick(); }, BOOKING_TICK_MS);
   bookingTick.unref();
-  await app.register(bookingRoutes, { db: deps.db, runner: bookingRunner });
+  await app.register(bookingRoutes, { db: deps.db, runner: bookingRunner, notifier, publicUrl: deps.config.publicUrl });
   await app.register(adminBookingRoutes, { db: deps.db, runner: bookingRunner });
 
   // Tournaments plan T3a: the match room clock. Overdue deadlines from

@@ -12,6 +12,9 @@ import { activeCasters, inviteCaster, withdrawCaster } from '../bookings/casters
 import { bookingLimits, estimateOptions, typicalCampaignMinutes } from '../bookings/rules.js';
 import { isNotifyType, prefsOf, setPref } from '../notify/notify.js';
 import type { BookingRunner } from '../bookings/runner.js';
+import type { Notifier } from '../notify/notify.js';
+import { withdrawForBooking } from '../scrims/scrims.js';
+import { sendWithdrawnNotices } from '../scrims/messages.js';
 import { hasPickupBookings, reliability, reliabilityPublic } from '../scrims/reliability.js';
 import { submitReview } from '../scrims/reviews.js';
 import { logAdmin } from '../admin/audit.js';
@@ -21,6 +24,9 @@ export interface BookingRoutesOpts {
   db: DB;
   /** Null only in tests that build the routes bare. */
   runner: BookingRunner | null;
+  /** The scrim notices a confirm sends (withdrawn posts); absent in tests that build the routes bare. */
+  notifier?: Notifier;
+  publicUrl?: string;
 }
 
 const NOT_FOUND = { error: 'not found' };
@@ -34,7 +40,7 @@ const NO_RUNNER = { error: 'Booking game control is not available on this server
  * The domain module decides everything; these only translate.
  */
 export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpts): Promise<void> {
-  const { db, runner } = opts;
+  const { db, runner, notifier, publicUrl } = opts;
   const optionalViewer = makeOptionalViewer(db);
   const requireActive = makeRequireActive(db);
   const isStaff = (steamid: string): boolean => {
@@ -147,6 +153,15 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
 
   action('confirm', (me, id) => B.confirmBooking(db, { bookingId: id, by: me }), (_me, id) => {
     runner?.onConfirmed(id);
+    // Owner ruling 2026-10-11: a side holding a booked slot keeps no open
+    // post or pending acceptance over it. Like allocate() below, a failure
+    // here must not cost the response.
+    try {
+      const withdrawn = withdrawForBooking(db, id);
+      if (notifier) sendWithdrawnNotices(db, notifier, publicUrl ?? '', withdrawn);
+    } catch (err) {
+      console.error(`[booking] ${id}: withdrawing overlapping scrim posts after confirm failed:`, err instanceof Error ? err.message : err);
+    }
     // A throw here must not cost the response: the booking is already
     // committed, so the view below (and any notices onConfirmed just sent)
     // still need to go out.

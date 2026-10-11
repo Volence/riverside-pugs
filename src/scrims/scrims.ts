@@ -59,7 +59,7 @@ export const SCRIM_ERRORS = {
   too_late: { status: 409, text: 'Too close to the start: an acceptance needs at least 30 minutes to be answered.' },
   too_many_posts: { status: 409, text: 'That side already has 3 open scrim posts. Withdraw one first.' },
   // One side, one slot (owner, 2026-10-11), and the acceptance limits that came with it.
-  booked_then: { status: 409, text: 'That side already has a booked scrim at that time.' },
+  booked_then: { status: 409, text: 'That side already has a booking at that time.' },
   duplicate_post: { status: 409, text: 'That side already has an open post starting at that time.' },
   accept_cooldown: { status: 409, text: 'The poster declined that side less than an hour ago. Try again later, or accept another post.' },
   too_many_accepts: { status: 409, text: 'That side already has 3 pending acceptances. Withdraw one first.' },
@@ -237,13 +237,17 @@ function withdrawOverlaps(db: DB, sides: SideRef[], startMs: number, endMs: numb
     const s = Date.parse(startsAt);
     return s < endMs && s + minutes * 60_000 > startMs;
   };
+  const same = (x: SideRef, y: SideRef): boolean => (x.team_id !== null ? x.team_id === y.team_id : y.team_id === null && x.captain_steamid === y.captain_steamid);
   for (const s of sides) {
+    const other = sides.find((x) => x !== s);
     const where = (x: string) => (s.team_id !== null ? `${x}team_id = ?` : `${x}team_id IS NULL AND ${x}captain_steamid = ?`);
     const arg = s.team_id ?? s.captain_steamid;
     const posts = db.prepare(`SELECT * FROM scrim_posts WHERE status IN ('open','pending') AND ${where('')} ORDER BY id`).all(arg) as PostRow[];
     for (const p of posts.filter((x) => overlaps(x.starts_at, x.block_minutes))) {
       out.posts.push(p.id);
-      out.postAccepts.push(...pendingAccepts(db, p.id).map((a) => a.id));
+      // The other booked side's acceptances of this post are that side's own
+      // withdrawn acceptances, not the posting side's doing to a stranger.
+      for (const a of pendingAccepts(db, p.id)) (other && same(other, a) ? out.accepts : out.postAccepts).push(a.id);
       closePost(db, p.id, t);
     }
     const accepts = db.prepare(
@@ -258,6 +262,24 @@ function withdrawOverlaps(db: DB, sides: SideRef[], startMs: number, endMs: numb
   }
   for (const k of ['posts', 'postAccepts', 'accepts'] as const) out[k].sort((x, y) => x - y);
   return out;
+}
+
+/**
+ * A direct booking (not made through the board) just had both sides confirm:
+ * each side's open or pending posts and pending acceptances overlapping its
+ * slot are withdrawn, exactly as confirmAccept does (owner ruling
+ * 2026-10-11). Empty until both sides have confirmed. The caller sends the
+ * notices for what comes back.
+ */
+export function withdrawForBooking(db: DB, bookingId: number, now: Date = new Date()): Withdrawn {
+  return db.transaction((): Withdrawn => {
+    const b = getBooking(db, bookingId);
+    const sa = sideRow(db, bookingId, 'a');
+    const sb = sideRow(db, bookingId, 'b');
+    if (!b || !sa || !sb || sa.confirmed_at === null || sb.confirmed_at === null) return { posts: [], postAccepts: [], accepts: [] };
+    if (!['scheduled', 'held', 'setup', 'ready', 'active'].includes(b.state)) return { posts: [], postAccepts: [], accepts: [] };
+    return withdrawOverlaps(db, [sa, sb], Date.parse(b.starts_at), Date.parse(b.ends_at), now.toISOString());
+  })();
 }
 
 /** Decline an acceptance a confirm can never book (NEVER_CLEARS), after the
