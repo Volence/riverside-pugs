@@ -62,4 +62,13 @@ describe('Headliner', () => {
     rerender(<Headliner eyebrow="Rating" name="bob" rating={1000} stats={[]} />);
     expect(screen.queryByText('Caller')).toBeNull();
   });
+
+  it('shows the badges slot under the name, and nothing without it', () => {
+    const { container, rerender } = render(
+      <Headliner eyebrow="Rating" name="v" rating={1000} stats={[]} badges={<span class="probe">team</span>} />,
+    );
+    expect(container.querySelector('.headliner__badges .probe')?.textContent).toBe('team');
+    rerender(<Headliner eyebrow="Rating" name="v" rating={1000} stats={[]} />);
+    expect(container.querySelector('.headliner__badges')).toBeNull();
+  });
 });

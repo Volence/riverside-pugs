@@ -1,20 +1,17 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { ApiError, logoUrl, teamsApi, type MyTeamItem, type TeamInviteItem, type TeamListItem } from '../api';
+import { ApiError, teamsApi, type MyTeamItem, type TeamInviteItem, type TeamListItem } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
+import { TeamBadge } from '../components/TeamBadge';
+// Scrims.tsx imports TeamBadge from here; kept so that file need not change.
+export { TeamBadge };
 
 /** Mirrors src/teams/teams.ts: a full roster, and the players an event needs. */
 const ROSTER_MAX = 8;
 const ENTRY_MIN = 4;
 const ROLE_LABEL = { captain: 'Captain', cocaptain: 'Co-captain', member: 'Member' } as const;
-
-export function TeamBadge({ tag, logoKey, size = 40 }: { tag: string; logoKey: string | null; size?: number }) {
-  return logoKey
-    ? <img class="teambadge" src={logoUrl(logoKey)} alt="" width={size} height={size} />
-    : <span class="teambadge teambadge--tag" aria-hidden="true">{tag}</span>;
-}
 
 /** "5 / 8 players", plus where the roster stands for events. */
 function rosterLine(members: number): string {

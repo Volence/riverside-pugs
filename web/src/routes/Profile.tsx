@@ -5,6 +5,7 @@ import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, l
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
+import { TeamChips } from '../components/TeamChips';
 import { Figures, Figure, RankBadge } from '../components/PageHeader';
 import { DiscordLinkCard } from '../components/DiscordLink';
 import { ProfileEdit } from '../components/ProfileEdit';
@@ -78,6 +79,7 @@ export function Profile(
           bio={player.bio}
           title={data.endorsements?.title}
           aka={data.alsoKnownAs}
+          badges={data.teams && data.teams.length > 0 ? <TeamChips teams={data.teams} /> : undefined}
           rating={rating ? rating.sr : null}
           delta={lastDelta}
           stats={rating ? [

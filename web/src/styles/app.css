@@ -3239,6 +3239,20 @@ tbody tr.is-lifted td { opacity: 0.55; }
   background: var(--surface-2);
   font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em; color: var(--text-muted); text-transform: uppercase;
 }
+/* A player's teams in their profile header (components/TeamChips.tsx). The
+ * name truncates and the row wraps, so a 24 character team name fits 390 px. */
+.headliner__badges { margin-top: var(--sp-2); }
+.teamchips { list-style: none; display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0; padding: 0; }
+.teamchips > li { min-width: 0; max-width: 100%; }
+.teamchips__chip {
+  display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 100%;
+  padding: 2px var(--sp-2) 2px 2px; border: 1px solid var(--border); color: var(--text); font-size: var(--fs-dense);
+}
+a.teamchips__chip:hover { border-color: var(--border-strong); text-decoration: none; }
+.teamchips__chip .teambadge { width: 28px; height: 28px; }
+.teamchips__chip .teambadge--tag { font-size: 0.625rem; letter-spacing: 0; }
+.teamchips__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-bright); }
+.teamchips__role { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
 
 /* ---- Teams list (/teams) and join link (/team/join/:token) ---------- */
 .teamrows { list-style: none; margin: 0; padding: 0; }
