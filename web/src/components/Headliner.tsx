@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import type { EndorseKind } from '../api';
 import { fmtDelta, deltaClass } from '../format';
 import { TitleTag } from './TitleTag';
@@ -14,7 +15,7 @@ import { TitleTag } from './TitleTag';
 export function Headliner(
   {
     eyebrow, name, rating, delta, stats, avatar, avatarHref,
-    pronouns, countryCode, countryLabel, countryFlag, bio, title, aka,
+    pronouns, countryCode, countryLabel, countryFlag, bio, title, aka, badges,
   }: {
     eyebrow: string;
     name: string;
@@ -36,6 +37,9 @@ export function Headliner(
     /** Other names the player has played matches under, shown under the
      *  name so somebody who renamed is still recognisable. */
     aka?: { name: string; matches: number }[];
+    /** Under the identity line: the profile passes the player's team chips.
+     *  The leaderboard's side card has none. */
+    badges?: ComponentChildren;
   },
 ) {
   const hasIdentity = Boolean(countryFlag || pronouns);
@@ -77,6 +81,7 @@ export function Headliner(
           {pronouns && <span class="headliner__pronouns">{pronouns}</span>}
         </div>
       )}
+      {badges && <div class="headliner__badges">{badges}</div>}
       {bio && <p class="headliner__bio">{bio}</p>}
       <div class="headliner__row">
         {rating === null

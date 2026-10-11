@@ -651,6 +651,9 @@ export interface EndorsementSummary {
   title: EndorseKind | null;
 }
 
+/** A team the player is on, as a chip in their profile header (src/teams/teams.ts TeamChip). */
+export interface ProfileTeam { slug: string; name: string; tag: string; logoKey: string | null; role: 'captain' | 'cocaptain' | 'member' }
+
 export interface Profile {
   player: {
     steamid: string;
@@ -700,6 +703,9 @@ export interface Profile {
   /** Other names played under in matches, most played first, never the
    *  current one. Optional only for a server older than the feature. */
   alsoKnownAs?: { name: string; matches: number }[];
+  /** The teams they are on, one per team. Empty for a viewer the competitive
+   *  switch keeps out. Optional only for a server older than the feature. */
+  teams?: ProfileTeam[];
 }
 
 /** One name from a player's name history (src/playerNames.ts). `name` is the
