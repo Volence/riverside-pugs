@@ -126,30 +126,55 @@ describe('Nav', () => {
     expect(screen.queryByRole('link', { name: 'Cast' })).toBeNull();
   });
 
-  it('offers Teams, Bookings, Scrims and Events only to a viewer the competitive switch lets in', () => {
+  it('offers one Compete item, only to a viewer the competitive switch lets in', () => {
     const inCompetitive = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, teams: true };
     const { unmount } = render(
       <LocationProvider><Nav session={{ kind: 'active', me: inCompetitive }} state={null} /></LocationProvider>,
     );
-    expect((screen.getByRole('link', { name: 'Teams' }) as HTMLAnchorElement).getAttribute('href')).toBe('/teams');
-    expect((screen.getByRole('link', { name: 'Bookings' }) as HTMLAnchorElement).getAttribute('href')).toBe('/bookings');
-    expect((screen.getByRole('link', { name: 'Scrims' }) as HTMLAnchorElement).getAttribute('href')).toBe('/scrims');
-    expect((screen.getByRole('link', { name: 'Events' }) as HTMLAnchorElement).getAttribute('href')).toBe('/events');
+    expect(screen.getByRole('link', { name: 'Compete' })).toBeTruthy();
+    for (const gone of ['Teams', 'Bookings', 'Scrims', 'Events']) expect(screen.queryByRole('link', { name: gone })).toBeNull();
+    // Where the four were: right after Matches.
+    const labels = screen.getAllByRole('link').map((a) => a.textContent);
+    expect(labels[labels.indexOf('Matches') + 1]).toBe('Compete');
     unmount();
     const outside = { steamid: '2', name: 'bob', avatar: null, status: 'active', isAdmin: false };
     render(<LocationProvider><Nav session={{ kind: 'active', me: outside }} state={null} /></LocationProvider>);
-    expect(screen.queryByRole('link', { name: 'Teams' })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Bookings' })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Scrims' })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Events' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Compete' })).toBeNull();
   });
 
-  it('keeps Events current on an event page', () => {
-    history.replaceState(null, '', '/event/riverside-cup');
-    const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, teams: true };
-    render(<LocationProvider><Nav session={{ kind: 'active', me }} state={null} /></LocationProvider>);
-    expect(screen.getByRole('link', { name: 'Events' }).getAttribute('aria-current')).toBe('page');
-    history.replaceState(null, '', '/');
+  it('lands Compete on Events while a tournament is near, and on Scrims otherwise', () => {
+    const me = (competeHome?: 'events' | 'scrims') =>
+      ({ steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, teams: true, competeHome });
+    const { unmount } = render(<LocationProvider><Nav session={{ kind: 'active', me: me('events') }} state={null} /></LocationProvider>);
+    expect(screen.getByRole('link', { name: 'Compete' }).getAttribute('href')).toBe('/events');
+    unmount();
+    const second = render(<LocationProvider><Nav session={{ kind: 'active', me: me('scrims') }} state={null} /></LocationProvider>);
+    expect(screen.getByRole('link', { name: 'Compete' }).getAttribute('href')).toBe('/scrims');
+    second.unmount();
+    // A server from before the field: Scrims.
+    render(<LocationProvider><Nav session={{ kind: 'active', me: me() }} state={null} /></LocationProvider>);
+    expect(screen.getByRole('link', { name: 'Compete' }).getAttribute('href')).toBe('/scrims');
+  });
+
+  it('links Your team for one team, Your teams for several, and nothing for none', () => {
+    const me = (myTeams: { slug: string; name: string }[], teams = true) =>
+      ({ steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, teams, myTeams });
+    const { unmount } = render(
+      <LocationProvider><Nav session={{ kind: 'active', me: me([{ slug: 'rats', name: 'Rats' }]) }} state={null} /></LocationProvider>,
+    );
+    const one = screen.getByRole('link', { name: 'Your team' });
+    expect(one.getAttribute('href')).toBe('/team/rats');
+    expect(one.getAttribute('title')).toBe('Rats');
+    unmount();
+    const two = render(<LocationProvider><Nav session={{ kind: 'active', me: me([{ slug: 'rats', name: 'Rats' }, { slug: 'owls', name: 'Owls' }]) }} state={null} /></LocationProvider>);
+    expect(screen.getByRole('link', { name: 'Your teams' }).getAttribute('href')).toBe('/teams');
+    two.unmount();
+    const none = render(<LocationProvider><Nav session={{ kind: 'active', me: me([]) }} state={null} /></LocationProvider>);
+    expect(screen.queryByRole('link', { name: /Your team/ })).toBeNull();
+    none.unmount();
+    // The switch closed: no link, whatever the list says.
+    render(<LocationProvider><Nav session={{ kind: 'active', me: me([{ slug: 'rats', name: 'Rats' }], false) }} state={null} /></LocationProvider>);
+    expect(screen.queryByRole('link', { name: /Your team/ })).toBeNull();
   });
 
   it('offers it to a pending or banned account too, and to nobody signed out', () => {
@@ -186,5 +211,28 @@ describe('Nav current page', () => {
     expect(at('/maps')).toEqual(['Campaigns']);
     cleanup();
     expect(at('/')).toEqual(['Play']);
+  });
+});
+
+describe('Nav current page in the competitive section', () => {
+  const at = (path: string) => {
+    history.replaceState(null, '', path);
+    const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false, teams: true, competeHome: 'events' as const };
+    render(<LocationProvider><Nav session={{ kind: 'active', me }} state={null} /></LocationProvider>);
+    return screen.getAllByRole('link')
+      .filter((a) => a.getAttribute('aria-current') === 'page')
+      .map((a) => a.textContent);
+  };
+  afterEach(() => history.replaceState(null, '', '/'));
+
+  it.each([
+    '/scrims', '/bookings', '/booking/7', '/teams', '/team/rats', '/team/join/abc123',
+    '/events', '/event/riverside-cup', '/event/riverside-cup/draft', '/event/riverside-cup/match/12',
+  ])('marks Compete current on %s', (path) => {
+    expect(at(path)).toEqual(['Compete']);
+  });
+
+  it('leaves Compete alone elsewhere', () => {
+    expect(at('/matches')).toEqual(['Matches']);
   });
 });
