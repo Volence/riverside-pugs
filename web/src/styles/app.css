@@ -551,8 +551,14 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
 .page-head { margin-bottom: var(--sp-5); border-bottom: 2px solid var(--rule); padding-bottom: var(--sp-4); }
 .page-head__row { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
 .page-head__eyebrow { margin: 0 0 var(--sp-1); }
-.page-head__title { font-size: var(--fs-title); }
+.page-head__title { font-size: var(--fs-title); overflow-wrap: anywhere; }
+.page-head__row > :first-child { min-width: 0; }
 .page-head__aside { color: var(--text-muted); font-family: var(--font-label); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.16em; text-align: right; }
+@media (max-width: 560px) {
+  /* A long team name beside a phase chip must not push past the page edge. */
+  .page-head__row { flex-wrap: wrap; }
+  .page-head__aside { text-align: left; }
+}
 
 .figures { display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-6); margin-top: var(--sp-4); }
 .figure { min-width: 0; }
@@ -3533,11 +3539,11 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftpanel__pref { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .draftpanel__note { width: 100%; max-width: none; box-sizing: border-box; }
 /* Drafts plan D3a: stand-ins on the event page and the desk. */
-.standinpanel__ask { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin-bottom: 0.75rem; }
-.standinpanel__ask fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.standinpanel__ask { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: end; margin-bottom: var(--sp-3); }
+.standinpanel__ask fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .standinpanel__ask select { max-width: 100%; }
 .standinrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.standinoffers { flex-basis: 100%; margin: 0; padding: 0 0 0 1rem; font-size: 0.9em; }
+.standinoffers { flex-basis: 100%; margin: 0; padding: 0 0 0 var(--sp-4); font-size: var(--fs-dense); }
 .standinoffers li { border: 0; padding: 0; }
 .draftsection .eventpool { min-width: 0; overflow-wrap: anywhere; }
 .draftsection h4 { margin: var(--sp-3) 0 0; }
@@ -3563,7 +3569,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .rosterpick__name { overflow-wrap: anywhere; }
 .rosterpick__why { grid-column: 1 / -1; color: var(--loss); font-size: var(--fs-dense); }
 .evententry { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); padding: var(--sp-1) 0; }
-.evententry__logo { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.evententry__logo { width: 28px; height: 28px; border-radius: var(--radius); object-fit: cover; flex-shrink: 0; }
 .evententry__players { flex: 1 0 100%; font-size: var(--fs-dense); overflow-wrap: anywhere; }
 .evententry__name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .evententry__logo--none {
@@ -3669,8 +3675,8 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .eventform__labelrow { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
 .eventform__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-5); }
 /* A stage's form opens inside its row of the stage list: inset it. */
-.eventform--stage { margin: var(--sp-3) 0 var(--sp-2); padding: 0 var(--sp-4) var(--sp-4); border: 1px solid var(--border); background: var(--surface-2); font-size: var(--fs-body); }
-.eventform--stage .eventform__group:first-of-type { margin-top: var(--sp-4); }
+.eventform--stage, .eventform--schedule { margin: var(--sp-3) 0 var(--sp-2); padding: 0 var(--sp-4) var(--sp-4); border: 1px solid var(--border); background: var(--surface-2); font-size: var(--fs-body); }
+.eventform--stage .eventform__group:first-of-type, .eventform--schedule .eventform__group:first-of-type { margin-top: var(--sp-4); }
 @media (max-width: 640px) { .eventform--stage { padding: 0 var(--sp-3) var(--sp-3); } }
 /* A stage in the editor's stage list: its summary, and its buttons at the right. */
 .eventstage__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); padding: var(--sp-1) 0; }
@@ -3690,7 +3696,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 /* Plan T2: brackets, standings and rounds on the event page. */
 .bracket { display: flex; gap: var(--sp-3); overflow-x: auto; padding-bottom: var(--sp-1); }
 .bracket__round { display: flex; flex-direction: column; justify-content: space-around; gap: var(--sp-2); min-width: 180px; }
-.matchcard { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; position: relative; }
+.matchcard { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; position: relative; }
 .matchcard__side { display: flex; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); }
 .matchcard__side + .matchcard__side { border-top: 1px solid var(--border); }
 .matchcard__side--won { font-weight: 700; }
@@ -3703,8 +3709,8 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 a.matchcard--link { display: block; color: inherit; text-decoration: none; }
 a.matchcard--link:hover { border-color: var(--border-strong); }
 .matchcard__phase {
-  position: absolute; top: var(--sp-1); right: var(--sp-1);
-  display: inline-block; padding: 1px var(--sp-1); border: 1px solid var(--border-strong); background: var(--surface);
+  /* In the flow above the sides: absolutely placed it sat over side A's score. */
+  display: inline-block; margin: var(--sp-1) var(--sp-2) 0; padding: 1px var(--sp-1); border: 1px solid var(--border-strong); background: var(--surface);
   font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
 }
 /* Plan T4: a match's own time, shown only when it differs from its round's default. */
@@ -3728,7 +3734,7 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .room__games { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 .room__log { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
 /* Plan T4: the Schedule panel's open proposal. */
-.roomschedule__proposal { margin: var(--sp-2) 0; padding: var(--sp-2); border: 1px solid var(--border); border-radius: 6px; }
+.roomschedule__proposal { margin: 0; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius); }
 /* Reuses the event status chip's border/colour roles: ready and veto read
    as live, lineup as checkin, server and hold as a warning, done as finished.
    Plan T3b: connect and live (the between-game pick step) read as live too;
@@ -3947,7 +3953,8 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 @media (max-width: 600px) { .studio__rect { grid-template-columns: repeat(4, minmax(0, 1fr)); } .studio__rect .eyebrow { grid-column: 1 / -1; } }
 
 /* Plan T2: the league season calculator. */
-.seasoncalc { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+.seasoncalc { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-1) 0 var(--sp-2); }
+.seasoncalc__line { margin: 0; font-size: var(--fs-dense); }
 .seasoncalc input[type='number'] { width: 5em; }
 
 .draftcontrols { display: flex; flex-direction: column; gap: var(--sp-3); }
@@ -4004,3 +4011,29 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .liveodds__b { background: var(--accent); flex: 1; }
 .liveodds__more { margin-top: var(--sp-2); font-size: var(--fs-dense); }
 .liveodds__more summary { cursor: pointer; color: var(--text-muted); }
+
+/* ---------- Competitive pages: spacing and labels (2026-10-11 sweep) ---------- */
+/* Events and an event's page stack their panels like the booking page;
+   .panel has no margin of its own, so they sat flush. */
+.eventpage, .eventspage { display: flex; flex-direction: column; gap: var(--sp-4); }
+.eventpage .panel, .eventspage .panel { margin: 0; }
+.eventpage__countdown { color: var(--accent); font-family: var(--font-label); letter-spacing: 0.06em; }
+/* Sub-headings inside event panels read as the site's small caps labels
+   (.teamsub), not as browser-default bold text. */
+.draftsection h4, .bracketgroup h4, .playround h4, .stageplay h4, .prep h4, .entrypanel__team h4, .playpanel h4 {
+  margin: var(--sp-4) 0 var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); font-weight: 500;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);
+}
+.bracketgroup + .bracketgroup { margin-top: var(--sp-5); }
+.roomschedule { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.roomschedule p { margin: 0; }
+.bookingcount { margin: var(--sp-2) 0 0; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-bright); }
+/* Static good / bad labels (a pool name, an eligibility check), in the
+   teamchip shape: .chip is the clickable control and grows to 44px on phones. */
+.teamchip--ok { border-color: var(--win); color: var(--win); }
+.teamchip--bad { border-color: var(--loss); color: var(--loss); }
+.teamchip--scheduled { color: var(--text); }
+.matchcard--veto, .matchcard--lineup, .matchcard--booking, .matchcard--connect, .matchcard--live, .matchcard--confirming { border-color: var(--rule); }
+.matchcard--bye { opacity: 0.6; }
+/* "Pickup" and five-letter tags are wider than the 40px badge square. */
+.scrimside .teambadge--tag { width: auto; min-width: 40px; padding: 0 var(--sp-1); }
