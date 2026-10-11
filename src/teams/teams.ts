@@ -174,6 +174,23 @@ export function myTeams(db: DB, steamid: string): (TeamRow & { role: TeamRole })
   ).all(steamid) as (TeamRow & { role: TeamRole })[];
 }
 
+/** A team as a chip: the profile header and the nav's Your team link. */
+export interface TeamChip { slug: string; name: string; tag: string; logoKey: string | null; role: TeamRole }
+const ROLE_RANK: Record<TeamRole, number> = { captain: 0, cocaptain: 1, member: 2 };
+
+/** A player's live teams, one per team, oldest membership first. Two active
+ *  rows on one team should be impossible (team_members_active), but if one
+ *  ever slips through the team still shows once, under the higher role. */
+export function teamChipsOf(db: DB, steamid: string): TeamChip[] {
+  const byTeam = new Map<number, TeamChip>();
+  for (const t of myTeams(db, steamid)) {
+    const seen = byTeam.get(t.id);
+    if (seen && ROLE_RANK[seen.role] <= ROLE_RANK[t.role]) continue;
+    byTeam.set(t.id, { slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, role: t.role });
+  }
+  return [...byTeam.values()];
+}
+
 /** A live name or tag held by a team other than `except`. */
 export function nameTaken(db: DB, key: string, except = 0): boolean {
   return db.prepare('SELECT 1 FROM teams WHERE name_key = ? AND disbanded_at IS NULL AND id != ?').get(key, except) !== undefined;

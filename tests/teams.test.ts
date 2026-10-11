@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import {
   activeMembers, canCreate, createTeam, getTeamBySlug, myTeams, normalizeName, normalizeTag, roleOf,
   invitePlayer, respondInvite, cancelInvite, openInvitesOf, pendingInvitesFor, setJoinLink, teamByJoinToken, joinByLink,
-  leaveTeam, kickMember, setRole, transferCaptain, renameTeam, disbandTeam, setLogoKey, formerMembers,
+  leaveTeam, kickMember, setRole, transferCaptain, renameTeam, disbandTeam, setLogoKey, formerMembers, teamChipsOf,
 } from '../src/teams/teams.js';
 
 export const P = Array.from({ length: 12 }, (_, i) => `765611990000001${String(i).padStart(2, '0')}`);
@@ -370,5 +370,42 @@ describe('rename, disband, logo', () => {
     expect(setLogoKey(db, { teamId: id, by: P[2], logoKey: key })).toEqual({ ok: false, error: 'not_manager' });
     expect(setLogoKey(db, { teamId: id, by: P[0], logoKey: key })).toEqual({ ok: true, value: null });
     expect(getTeamBySlug(db, 'rats')!.logo_key).toBe(key);
+  });
+});
+
+describe('teamChipsOf', () => {
+  it('lists live teams oldest membership first, with the role on each', () => {
+    const rats = make(P[0], 'Rats', 'RR');
+    const owls = make(P[1], 'Owls', 'OWL', at(5));
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, 'member', ?)").run(owls.id, P[0], at(10).toISOString());
+    expect(teamChipsOf(db, P[0])).toEqual([
+      { slug: rats.slug, name: 'Rats', tag: 'RR', logoKey: null, role: 'captain' },
+      { slug: owls.slug, name: 'Owls', tag: 'OWL', logoKey: null, role: 'member' },
+    ]);
+  });
+
+  it('leaves out a team they left and a team that was disbanded', () => {
+    const rats = make(P[0], 'Rats', 'RR');
+    const owls = make(P[1], 'Owls', 'OWL');
+    db.prepare("INSERT INTO team_members (team_id, steamid, role, joined_at, left_at) VALUES (?, ?, 'member', ?, ?)")
+      .run(owls.id, P[0], at(1).toISOString(), at(2).toISOString());
+    expect(teamChipsOf(db, P[0]).map((t) => t.slug)).toEqual([rats.slug]);
+    db.prepare('UPDATE teams SET disbanded_at = ? WHERE id = ?').run(at(3).toISOString(), rats.id);
+    expect(teamChipsOf(db, P[0])).toEqual([]);
+  });
+
+  it('shows a team once, under the higher role, if two active rows ever exist', () => {
+    // The partial unique index stops this today; the chip must not double if
+    // a row ever slips past it.
+    const owls = make(P[1], 'Owls', 'OWL');
+    db.exec('DROP INDEX team_members_active');
+    const ins = db.prepare('INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, ?, ?)');
+    ins.run(owls.id, P[0], 'member', at(1).toISOString());
+    ins.run(owls.id, P[0], 'cocaptain', at(2).toISOString());
+    expect(teamChipsOf(db, P[0])).toEqual([{ slug: owls.slug, name: 'Owls', tag: 'OWL', logoKey: null, role: 'cocaptain' }]);
+  });
+
+  it('is empty for someone on no team', () => {
+    expect(teamChipsOf(db, P[5])).toEqual([]);
   });
 });
