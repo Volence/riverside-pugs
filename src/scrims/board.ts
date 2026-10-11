@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
-import { expire, getAccept } from './scrims.js';
+import { expire, getAccept, getPost, type AcceptRow } from './scrims.js';
+import { getTeam } from '../teams/teams.js';
 import { scrimMessage, scrimSideManagers } from './messages.js';
 
 /**
@@ -55,7 +56,8 @@ export class ScrimBoard {
       try {
         const result = expire(this.db, new Date(this.now()));
         this.notifyLost(result.accepts, 'it expired');
-        this.notifyLost(result.withdrawn.accepts, 'the team was disbanded');
+        // A team disbanded, or a side left with nobody in good standing to run it.
+        this.notifyLost(result.withdrawn.accepts, (a) => (this.teamGoneFor(a) ? 'the team was disbanded' : 'one of the sides can no longer play it'));
       } catch (err) {
         console.error('[scrims] expire() failed:', err instanceof Error ? err.message : err);
       }
@@ -69,16 +71,24 @@ export class ScrimBoard {
     }
   }
 
+  /** Whether the acceptance's own team or its post's team is disbanded. */
+  private teamGoneFor(a: AcceptRow): boolean {
+    const gone = (id: number | null) => id !== null && (getTeam(this.db, id)?.disbanded_at ?? 'x') !== null;
+    const p = getPost(this.db, a.post_id);
+    return gone(a.team_id) || (!!p && (gone(p.team_id) || gone(p.target_team_id)));
+  }
+
   /** Tells every current manager of each lost accepter's side (not just the
    *  acceptance's stored captain_steamid, which can be stale: a team accept
    *  may since have grown a co-captain). A failure to word or send one
    *  notice must not stop the rest. */
-  private notifyLost(acceptIds: number[], reason: string): void {
+  private notifyLost(acceptIds: number[], reason: string | ((a: AcceptRow) => string)): void {
     for (const acceptId of acceptIds) {
       const a = getAccept(this.db, acceptId);
       if (!a) continue;
       try {
-        const payload = scrimMessage(this.db, this.deps.publicUrl, a.post_id, 'scrim_declined', { reason });
+        const why = typeof reason === 'string' ? reason : reason(a);
+        const payload = scrimMessage(this.db, this.deps.publicUrl, a.post_id, 'scrim_declined', { reason: why });
         if (payload) this.deps.notifier.send(scrimSideManagers(this.db, a), 'scrim_declined', payload);
       } catch (err) {
         console.warn(`[scrims] expiry notice for accept ${acceptId} failed:`, err instanceof Error ? err.message : err);

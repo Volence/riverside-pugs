@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
+import { inGoodStanding } from '../standing.js';
 import { getSetting, settingNumber } from '../settings.js';
 import { findSlurs } from '../slurs.js';
 import { activeMembers, getTeam, myTeams, roleOf } from '../teams/teams.js';
@@ -168,6 +169,15 @@ function teamGone(db: DB, id: number): boolean {
  *  board, not acceptable, and withdrawn by the next expire. */
 function postGone(db: DB, p: PostRow): boolean {
   return (p.team_id !== null && teamGone(db, p.team_id)) || (p.target_team_id !== null && teamGone(db, p.target_team_id));
+}
+/** Whether anyone could still run this side: a pickup captain, or one of a
+ *  team's captain and co-captains, in good standing (not banned or merged
+ *  away). A side nobody can run never confirms, so its post or acceptance
+ *  only times out. The rollout switch is not asked: flipping it must not
+ *  wipe the board. */
+function sideCanPlay(db: DB, s: Pick<PostRow, 'team_id' | 'captain_steamid'>): boolean {
+  if (s.team_id === null) return inGoodStanding(db, s.captain_steamid);
+  return activeMembers(db, s.team_id).some((m) => isManagerRole(m.role) && inGoodStanding(db, m.steamid));
 }
 /** A direct challenge does not exist for anyone managing neither side, so
  *  every action on it answers them not_found rather than not_manager. */
@@ -511,6 +521,13 @@ function closeAccept(db: DB, o: { acceptId: number; by: string; now?: Date }, as
     if (a.status !== 'pending' || p.status !== 'pending') return fail('wrong_state');
     db.prepare('UPDATE scrim_accepts SET status = ?, responded_at = ? WHERE id = ?')
       .run(as === 'accepter' ? 'withdrawn' : 'declined', now.toISOString(), a.id);
+    // Inside the cutoff a reopened post could take no new acceptance (too_late):
+    // close it instead, as the tick does.
+    if (Date.parse(p.starts_at) - ACCEPT_CUTOFF_MS <= now.getTime()) {
+      db.prepare(`UPDATE scrim_posts SET status = 'expired' WHERE id = ? AND status = 'pending'
+        AND NOT EXISTS (SELECT 1 FROM scrim_accepts WHERE post_id = scrim_posts.id AND status = 'pending')`).run(p.id);
+      return ok({ postId: p.id, reopened: false });
+    }
     return ok({ postId: p.id, reopened: reopenIfIdle(db, p.id) });
   })();
 }
@@ -613,15 +630,35 @@ export function expire(db: DB, now: Date): { posts: number[]; accepts: number[];
     const withdrawn = { posts: [] as number[], accepts: [] as number[] };
     const live = db.prepare("SELECT * FROM scrim_posts WHERE status IN ('open','pending') AND (team_id IS NOT NULL OR target_team_id IS NOT NULL) ORDER BY id")
       .all() as PostRow[];
-    for (const p of live.filter((x) => postGone(db, x))) {
+    const everyLive = db.prepare("SELECT * FROM scrim_posts WHERE status IN ('open','pending') ORDER BY id").all() as PostRow[];
+    const gone = new Set([...live.filter((x) => postGone(db, x)), ...everyLive.filter((x) => !sideCanPlay(db, x))].map((x) => x.id));
+    for (const p of everyLive.filter((x) => gone.has(x.id))) {
       withdrawn.posts.push(p.id);
       withdrawn.accepts.push(...pendingAccepts(db, p.id).map((a) => a.id));
       db.prepare("UPDATE scrim_posts SET status = 'withdrawn' WHERE id = ?").run(p.id);
       db.prepare("UPDATE scrim_accepts SET status = 'withdrawn', responded_at = ? WHERE post_id = ? AND status = 'pending'").run(t, p.id);
     }
+    // An acceptance by a team since disbanded, or a side nobody can run any
+    // more: withdrawn, and its post reopened (or closed, inside the cutoff,
+    // by the timed-out pass below).
+    const pendingNow = db.prepare(
+      `SELECT a.* FROM scrim_accepts a JOIN scrim_posts p ON p.id = a.post_id WHERE a.status = 'pending' AND p.status = 'pending' ORDER BY a.id`,
+    ).all() as AcceptRow[];
+    const reopenAfter = new Set<number>();
+    for (const a of pendingNow) {
+      if ((a.team_id !== null && teamGone(db, a.team_id)) || !sideCanPlay(db, a)) {
+        withdrawn.accepts.push(a.id);
+        db.prepare("UPDATE scrim_accepts SET status = 'withdrawn', responded_at = ? WHERE id = ?").run(t, a.id);
+        reopenAfter.add(a.post_id);
+      }
+    }
     withdrawn.accepts.sort((x, y) => x - y);
-    const posts = (db.prepare("SELECT id FROM scrim_posts WHERE status IN ('open','pending') AND starts_at <= ? ORDER BY id")
-      .all(t) as { id: number }[]).map((r) => r.id);
+    // Open posts expire at the accept cutoff, not at the start: inside it an
+    // Accept is refused too_late, so a live-looking post would only mislead.
+    const cutoffIso = new Date(nowMs + ACCEPT_CUTOFF_MS).toISOString();
+    const posts = (db.prepare(
+      "SELECT id FROM scrim_posts WHERE (status IN ('open','pending') AND starts_at <= ?) OR (status = 'open' AND starts_at <= ?) ORDER BY id",
+    ).all(t, cutoffIso) as { id: number }[]).map((r) => r.id);
     const accepts: number[] = [];
     for (const id of posts) {
       accepts.push(...pendingAccepts(db, id).map((a) => a.id));
@@ -631,8 +668,12 @@ export function expire(db: DB, now: Date): { posts: number[]; accepts: number[];
       `SELECT a.id, a.post_id, a.created_at, p.starts_at FROM scrim_accepts a JOIN scrim_posts p ON p.id = a.post_id
         WHERE a.status = 'pending' AND p.status = 'pending'`,
     ).all() as { id: number; post_id: number; created_at: string; starts_at: string }[];
-    const touched = new Set<number>();
+    const touched = new Set<number>(reopenAfter);
     const closesPost = new Set<number>();
+    for (const id of reopenAfter) {
+      const p = getPost(db, id);
+      if (p && Date.parse(p.starts_at) - ACCEPT_CUTOFF_MS <= nowMs) closesPost.add(id);
+    }
     for (const a of stale) {
       if (acceptTimedOut(a.created_at, a.starts_at, nowMs)) {
         accepts.push(a.id);
@@ -661,11 +702,12 @@ export type BoardSide =
   | { kind: 'team'; teamId: number; name: string; tag: string; slug: string; logoKey: string | null }
   | { kind: 'pickup'; steamid: string; name: string };
 export interface BoardAccept {
-  id: number; side: BoardSide; sr: number; fits: boolean; campaigns: string[]; createdAt: string;
+  /** SR and the fit: left out while scrim_show_sr is off (not only hidden by the page). */
+  id: number; side: BoardSide; sr?: number; fits?: boolean; campaigns: string[]; createdAt: string;
   proposed: { playlist: string[]; minutes: number };
 }
 export interface BoardPost {
-  id: number; status: PostStatus; side: BoardSide; sr: number; srRange: number | null; startsAt: string;
+  id: number; status: PostStatus; side: BoardSide; sr?: number; srRange: number | null; startsAt: string;
   /** The block, estimated from the post's campaigns. */
   minutes: number;
   campaigns: string[]; campaignCount: number; note: string; createdAt: string; challenge: { teamId: number; name: string } | null;
@@ -715,21 +757,24 @@ export function board(
   const viewerSr = me && opts.fitsOnly && showSr(db) ? sideSr(db, captained ? { teamId: captained.id } : { captain: me }) : null;
 
   const showRecord = getSetting(db, 'scrim_reliability_public') === 'on';
+  const srOn = showSr(db);
+  // Inside the accept cutoff nothing on a post can happen any more (accept
+  // and confirm both refuse), so it is off the board even before the tick.
   const rows = db.prepare("SELECT * FROM scrim_posts WHERE status IN ('open','pending') AND starts_at > ? ORDER BY starts_at, id")
-    .all(now.toISOString()) as PostRow[];
+    .all(new Date(now.getTime() + ACCEPT_CUTOFF_MS).toISOString()) as PostRow[];
   const out: BoardPost[] = [];
   for (const p of rows) {
-    if (postGone(db, p)) continue;
+    if (postGone(db, p) || !sideCanPlay(db, p)) continue;
     const mine = me !== null && managesScrimSide(db, p, me);
     if (p.target_team_id !== null && !mine && !managed.has(p.target_team_id)) continue;
     if (!mine && viewerParties.some((v) => blocked(db, v, partyOf(p)))) continue;
-    const sr = sideSr(db, scrimSide(p));
+    const sr = srOn ? sideSr(db, scrimSide(p)) : 0;
     if (viewerSr !== null && !mine && !srFits(sr, p.sr_range, viewerSr)) continue;
     const pending = pendingAccepts(db, p.id);
     const campaigns = campaignsOf(p);
     const target = p.target_team_id !== null ? getTeam(db, p.target_team_id) : undefined;
     out.push({
-      id: p.id, status: p.status, side: boardSide(db, p), sr, srRange: p.sr_range, startsAt: p.starts_at, minutes: p.block_minutes,
+      id: p.id, status: p.status, side: boardSide(db, p), ...(srOn ? { sr } : {}), srRange: p.sr_range, startsAt: p.starts_at, minutes: p.block_minutes,
       campaigns, campaignCount: campaigns.length, note: p.note, createdAt: p.created_at,
       challenge: target ? { teamId: target.id, name: target.name } : null,
       acceptCount: pending.length,
@@ -738,9 +783,9 @@ export function board(
       myAcceptId: me !== null ? (pending.find((a) => managesScrimSide(db, a, me))?.id ?? null) : null,
       accepts: mine
         ? pending.map((a) => {
-          const asr = sideSr(db, scrimSide(a));
+          const asr = srOn ? sideSr(db, scrimSide(a)) : 0;
           return {
-            id: a.id, side: boardSide(db, a), sr: asr, fits: srFits(sr, p.sr_range, asr), campaigns: campaignsOf(a), createdAt: a.created_at,
+            id: a.id, side: boardSide(db, a), ...(srOn ? { sr: asr, fits: srFits(sr, p.sr_range, asr) } : {}), campaigns: campaignsOf(a), createdAt: a.created_at,
             proposed: proposedPlaylist(db, campaigns, campaignsOf(a)),
           };
         })

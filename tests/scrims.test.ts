@@ -495,13 +495,15 @@ describe('confirmAccept', () => {
 });
 
 describe('expire', () => {
-  it('posts at or past their start expire with their pending acceptances', () => {
+  it('posts at or past their start expire with their pending acceptances; open ones at the accept cutoff', () => {
     const open = post();
     const pending = post({ by: P[2], startsAt: '2026-10-02T21:00:00.000Z' });
     // Made an hour before START, so neither its 2 hours nor the 30 minute cutoff is up by START.
     const a = value(acceptPost(db, { postId: pending, by: P[3], now: at(START, -60) })).id;
-    expect(expire(db, at(START, -1))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
-    expect(expire(db, at(START))).toEqual({ posts: [open], accepts: [], withdrawn: { posts: [], accepts: [] } });
+    expect(expire(db, at(START, -31))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
+    // Inside the cutoff nobody may accept an open post, so it goes then.
+    expect(expire(db, at(START, -30))).toEqual({ posts: [open], accepts: [], withdrawn: { posts: [], accepts: [] } });
+    expect(expire(db, at(START))).toEqual({ posts: [], accepts: [], withdrawn: { posts: [], accepts: [] } });
     expect(expire(db, at('2026-10-02T21:00:00.000Z'))).toEqual({ posts: [pending], accepts: [a], withdrawn: { posts: [], accepts: [] } });
     expect(postRow(pending).status).toBe('expired');
     expect(acceptRow(a)).toMatchObject({ status: 'expired', responded_at: '2026-10-02T21:00:00.000Z' });
@@ -1113,5 +1115,55 @@ describe('a direct booking withdraws what overlaps it once both sides confirm (o
     value(confirmBooking(db, { bookingId: id, by: P[1], now: NOW }) as ScrimResult<null>);
     expect(withdrawForBooking(db, id, NOW)).toEqual({ posts: [], postAccepts: [], accepts: [mine] });
     expect(postRow(theirs).status).toBe('open');
+  });
+});
+
+describe('board and tick cleanups (2026-10-11 sweep)', () => {
+  const ban = (id: string) => db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(id);
+
+  it('the board leaves SR out entirely while scrim_show_sr is off', () => {
+    setSetting(db, 'scrim_show_sr', 'off');
+    const id = post();
+    accept(id, P[1]);
+    const [mine] = board(db, { steamid: P[0], staff: false }, { now: NOW });
+    expect(mine).not.toHaveProperty('sr');
+    expect(mine.accepts![0]).not.toHaveProperty('sr');
+    expect(mine.accepts![0]).not.toHaveProperty('fits');
+  });
+
+  it('a post inside the accept cutoff is off the board before the tick runs', () => {
+    post();
+    expect(board(db, { steamid: P[5], staff: false }, { now: at(START, -31) })).toHaveLength(1);
+    expect(board(db, { steamid: P[5], staff: false }, { now: at(START, -29) })).toHaveLength(0);
+  });
+
+  it('a decline inside the cutoff closes the post instead of reopening it', () => {
+    const id = post();
+    const a = accept(id, P[1], { now: at(START, -45) });
+    expect(value(declineAccept(db, { acceptId: a, by: P[0], now: at(START, -20) }))).toEqual({ postId: id, reopened: false });
+    expect(postRow(id).status).toBe('expired');
+  });
+
+  it('a banned pickup poster\'s post is withdrawn, with its acceptances', () => {
+    const id = post();
+    const a = accept(id, P[1]);
+    ban(P[0]);
+    expect(board(db, { steamid: P[5], staff: false }, { now: NOW })).toHaveLength(0);
+    expect(expire(db, NOW).withdrawn).toEqual({ posts: [id], accepts: [a] });
+    expect(postRow(id).status).toBe('withdrawn');
+  });
+
+  it('an acceptance from a team since disbanded, or a banned pickup captain, is withdrawn and the post reopens', () => {
+    const id = post();
+    const rats = team(P[1], 'Rats', 'RR');
+    const a1 = accept(id, P[1], { teamId: rats });
+    const a2 = accept(id, P[2]);
+    expect(disbandTeam(db, { teamId: rats, by: P[1], now: NOW }).ok).toBe(true);
+    expect(expire(db, NOW).withdrawn).toEqual({ posts: [], accepts: [a1] });
+    expect(postRow(id).status).toBe('pending');
+    ban(P[2]);
+    expect(expire(db, NOW).withdrawn).toEqual({ posts: [], accepts: [a2] });
+    expect(acceptRow(a2).status).toBe('withdrawn');
+    expect(postRow(id).status).toBe('open');
   });
 });
