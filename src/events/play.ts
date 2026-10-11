@@ -74,6 +74,20 @@ export function totalRounds(stage: E.StageRow): number | null {
   return null;
 }
 
+/** Whether round `round` of the event's stage `ordinal` is played: the
+ *  stage finished, a later stage started, or every main-bracket match of
+ *  that round has a result. Feeds an `after_round` roster lock. */
+export function roundPlayed(db: DB, eventId: number, ordinal: number, round: number): boolean {
+  const stages = db.prepare('SELECT id, ordinal, status FROM event_stages WHERE event_id = ? ORDER BY ordinal').all(eventId) as
+    { id: number; ordinal: number; status: string }[];
+  const stage = stages.find((s) => s.ordinal === ordinal);
+  if (!stage) return false;
+  if (stage.status === 'finished' || stages.some((s) => s.ordinal > ordinal && s.status !== 'pending')) return true;
+  if (stage.status !== 'live') return false;
+  const ms = matchesOf(db, stage.id).filter((m) => m.grp === 1 && m.round === round);
+  return ms.length > 0 && ms.every((m) => RESOLVED.has(m.status));
+}
+
 /** What a round's matches are stamped with (plan T4 Ruling 2): the stage's
  *  schedule row; else, for a league, its week as the window with no
  *  default time (Ruling 4); else nothing. A league row with a default time

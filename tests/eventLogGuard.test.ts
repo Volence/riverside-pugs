@@ -800,7 +800,7 @@ describe('event_log guard', () => {
    *  its mutations follow the same one-row rule. */
   describe('play guard (src/events/play.ts)', () => {
     const MATCH_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+event_matches\b/gi;
-    const PLAY_READS = new Set(['getMatch', 'matchesOf', 'stageEntrants', 'stageBracket', 'activeSeeded', 'totalRounds', 'roundTimes', 'scheduleRound']);
+    const PLAY_READS = new Set(['getMatch', 'matchesOf', 'stageEntrants', 'stageBracket', 'activeSeeded', 'totalRounds', 'roundTimes', 'scheduleRound', 'roundPlayed']);
     const aWins = { winner: 'a' as const, scoreA: 10, scoreB: 5, forfeit: false };
     const ok = <T>(r: V.Checked<T>): T => { if (!r.ok) throw new Error(r.error); return r.value; };
     const plan = (f: PlayFixture): P.StagePlan => ({

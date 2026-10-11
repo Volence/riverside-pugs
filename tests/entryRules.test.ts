@@ -77,10 +77,12 @@ describe('checkinTimes and rosterLocked', () => {
     expect(R.checkinTimes('2026-10-10T20:00:00.000Z', { enabled: true, opensMinutes: 60, closesMinutes: 15 }))
       .toEqual({ opensAt: '2026-10-10T19:00:00.000Z', closesAt: '2026-10-10T19:45:00.000Z' });
   });
-  it('locks at a time once it passes, never on after_round in T1b, never on none', () => {
+  it('locks at a time once it passes, on after_round once that round is played, never on none', () => {
     expect(R.rosterLocked({ kind: 'at', at: '2026-10-05T00:00:00.000Z' }, '2026-10-04T23:59:59.000Z')).toBe(false);
     expect(R.rosterLocked({ kind: 'at', at: '2026-10-05T00:00:00.000Z' }, '2026-10-05T00:00:00.000Z')).toBe(true);
     expect(R.rosterLocked({ kind: 'after_round', stage: 1, round: 2 }, '2030-01-01T00:00:00.000Z')).toBe(false);
+    expect(R.rosterLocked({ kind: 'after_round', stage: 1, round: 2 }, '2030-01-01T00:00:00.000Z', () => false)).toBe(false);
+    expect(R.rosterLocked({ kind: 'after_round', stage: 1, round: 2 }, '2030-01-01T00:00:00.000Z', (st, rd) => st === 1 && rd === 2)).toBe(true);
     expect(R.rosterLocked({ kind: 'none' }, '2030-01-01T00:00:00.000Z')).toBe(false);
   });
 });

@@ -15,6 +15,7 @@ import * as R from './entryRules.js';
 import * as Room from './room.js';
 import * as S from './standins.js';
 import * as V from './validate.js';
+import * as P from './play.js';
 
 /**
  * Every write to event_entries and event_entry_players (tournaments plan
@@ -91,6 +92,15 @@ export function entryOfPlayer(db: DB, eventId: number, steamid: string): EntryRo
      WHERE e.event_id = ? AND p.steamid = ? AND e.status NOT IN ('dropped','disqualified') LIMIT 1`,
   ).get(eventId, steamid) as EntryRow | undefined;
 }
+/** The name of another entry of this event whose locked lineup this player
+ *  was in, if any. */
+function playedFor(db: DB, eventId: number, steamid: string, entryId: number | null): string | null {
+  const r = db.prepare(
+    `SELECT e.name FROM event_lineups l JOIN event_entries e ON e.id = l.entry_id
+      WHERE e.event_id = ? AND l.entry_id IS NOT ? AND EXISTS (SELECT 1 FROM json_each(l.steamids) j WHERE j.value = ?) LIMIT 1`,
+  ).get(eventId, entryId, steamid) as { name: string } | undefined;
+  return r?.name ?? null;
+}
 export function placementOf(db: DB, ev: E.EventRow): R.Placement {
   return R.placeEntries(entriesOf(db, ev.id), capOf(ev));
 }
@@ -156,6 +166,13 @@ function checkRoster(
   for (const p of list) {
     const other = entryOfPlayer(db, ev.id, p.steamid);
     if (other && other.id !== o.entryId) elsewhere.push({ steamid: p.steamid, problems: [`Already on ${other.name}'s roster`] });
+    // Taken off one roster and put on another mid-event: a player who has
+    // already been in another entry's lineup plays for that entry only.
+    // Staff (a conduct replacement, a stand-in) are trusted to know.
+    else if (!o.staff && o.previous && !before.has(p.steamid)) {
+      const played = playedFor(db, ev.id, p.steamid, o.entryId);
+      if (played) elsewhere.push({ steamid: p.steamid, problems: [`Already played for ${played} in this event`] });
+    }
     const facts = playerFacts(db, p.steamid, o.now);
     const found = R.problemsOf(elig, facts, p.role);
     if (found.length > 0) problems.push({ steamid: p.steamid, problems: found.map((k) => R.problemText(k, elig, facts)) });
@@ -220,7 +237,7 @@ export function setEntryRoster(
     // Team managers only (managersOf gives a draft entry nobody): a draft
     // entry's roster is staff's to change (drafts plan D2a).
     if (!staff && !managersOf(db, entry.team_id).includes(o.by)) return V.fail('not_manager');
-    if (!staff && R.rosterLocked(f.roster.lock, at)) return V.fail('roster_locked');
+    if (!staff && R.rosterLocked(f.roster.lock, at, (st, rd) => P.roundPlayed(db, ev.id, st, rd))) return V.fail('roster_locked');
     const parsed = R.parseEntryRoster(o.roster, f.roster);
     if (!parsed.ok) return parsed;
     const previous = rosterOf(db, entry.id);

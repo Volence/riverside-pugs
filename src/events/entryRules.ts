@@ -102,8 +102,11 @@ export function checkinTimes(startsAt: string, c: Checkin): { opensAt: string; c
   };
 }
 
-/** Ruling 6: a lock `at` a time holds from that time; `after_round` needs
- *  played rounds, which arrive with rollout plan 3, so it never holds yet. */
-export function rosterLocked(lock: RosterLock, now: string): boolean {
-  return lock.kind === 'at' && now >= lock.at;
+/** Ruling 6: a lock `at` a time holds from that time; `after_round` holds
+ *  once that stage's round is played, which `played` answers (play.ts
+ *  roundPlayed). Without it (no db at hand) an after_round lock never holds. */
+export function rosterLocked(lock: RosterLock, now: string, played?: (stage: number, round: number) => boolean): boolean {
+  if (lock.kind === 'at') return now >= lock.at;
+  if (lock.kind === 'after_round') return played?.(lock.stage, lock.round) ?? false;
+  return false;
 }
