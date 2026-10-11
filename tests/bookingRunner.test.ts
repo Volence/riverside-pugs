@@ -433,6 +433,14 @@ describe('the plugin clock lines (scrims in game, items 4, 5 and 8)', () => {
     expect(bookingLines(db, getBooking(db, id)!)).toContain(`l4d_booking_close_at ${epochOf('2026-10-02T23:05:00.000Z')}`);
   });
 
+  it('a corrupt campaign_loaded detail or playlist falls back instead of throwing', () => {
+    const id = runningBooking(['no_mercy', 'death_toll']);
+    db.prepare("INSERT INTO booking_events (booking_id, at, actor, event, detail) VALUES (?, ?, NULL, 'campaign_loaded', '{oops')").run(id, new Date(now).toISOString());
+    expect(bookingLines(db, getBooking(db, id)!)).toContain('l4d_booking_campaign "No Mercy"');
+    db.prepare("UPDATE bookings SET playlist_json = 'not json' WHERE id = ?").run(id);
+    expect(bookingLines(db, getBooking(db, id)!)).toContain('l4d_booking_campaign ""');
+  });
+
   it('a tournament booking pushes none of them', () => {
     const r = createTournamentBooking(db, {
       region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: P[9],
@@ -737,6 +745,13 @@ describe('booked games (plan 4b)', () => {
       expect(bookRosterLines(db, getBooking(db, id)!)).toEqual([]);
       db.prepare("UPDATE bookings SET purpose = 'tournament', rules_json = ? WHERE id = ?").run(JSON.stringify(TEMPLATES['Casual Scrim']), id);
       expect(bookRosterLines(db, getBooking(db, id)!)).toEqual([]);
+    });
+
+    it('the staff replace push carries the roster too, so a replacement is placed at once', async () => {
+      const id = await running();
+      sent = [];
+      await runner.pushAllowList(id);
+      expect(rosterPart(cmds())).toEqual(['sm_pug_book_begin', `sm_pug_book_add a ${P[0]}`, `sm_pug_book_add b ${P[1]}`, 'sm_pug_book_commit b']);
     });
 
     it('an rcon error naming a roster line hides its ids', () => {
@@ -2903,5 +2918,28 @@ describe('start now (scrims in game Ruling 7)', () => {
     expect(sideRow(db, id, 'b')!.start_now_at).toBeNull();
     expect(sideRow(db, id, 'a')!.start_now_at).not.toBeNull();
     expect(getBooking(db, id)!.starts_at).toBe(new Date(START).toISOString());
+  });
+
+  it('rolls the slot back when a higher priority booking takes the only box inside allocate', () => {
+    const id = book();
+    db.prepare("UPDATE servers SET status = 'offline' WHERE name IN ('a', 'bb')").run();
+    db.prepare("UPDATE bookings SET reminded_60_at = '2026-09-30T10:00:00.000Z' WHERE id = ?").run(id);
+    const before = getBooking(db, id)!;
+    const t = createTournamentBooking(db, {
+      region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: P[9]!,
+      sides: [{ teamId: null, captain: P[2]!, players: P.slice(2, 6), spectators: [] }, { teamId: null, captain: P[6]!, players: P.slice(6, 10), spectators: [] }],
+      now: new Date(now),
+    });
+    if (!t.ok) throw new Error(t.error);
+    runner.startNow(id, P[0]);
+    expect(runner.startNow(id, P[1])).toEqual({ ok: false, error: 'no_box_now' });
+    expect(getBooking(db, t.value.id)!.server_id).toBe(3);
+    const after = getBooking(db, id)!;
+    expect(after.server_id).toBeNull();
+    expect({ starts_at: after.starts_at, ends_at: after.ends_at, warned_minutes: after.warned_minutes, reminded_60_at: after.reminded_60_at, reminded_15_at: after.reminded_15_at })
+      .toEqual({ starts_at: before.starts_at, ends_at: before.ends_at, warned_minutes: before.warned_minutes, reminded_60_at: '2026-09-30T10:00:00.000Z', reminded_15_at: null });
+    expect(sideRow(db, id, 'b')!.start_now_at).toBeNull();
+    expect(sideRow(db, id, 'a')!.start_now_at).not.toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE booking_id = ? AND event = 'start_now_undone'").get(id)).toEqual({ n: 1 });
   });
 });

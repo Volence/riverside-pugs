@@ -22,7 +22,7 @@ import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox, markBoxRestarted,
-  BOOKING_ERRORS, bookRoster, firstSurvivorSide, pressStartNow, startBookingNow, withdrawStartNow, type Result, type BookingRow, type Side, type SideRow,
+  BOOKING_ERRORS, bookRoster, firstSurvivorSide, pressStartNow, startBookingNow, startNowSnapshot, undoStartNow, withdrawStartNow, type Result, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { classifyBox } from './recovery.js';
 import { prepareRestore, restoreSnapshot, resumeLines, type RestoreSnapshot } from './restore.js';
@@ -254,8 +254,14 @@ const epochOf = (t: string | null): number => (t === null ? 0 : Math.floor(Date.
 function currentCampaign(db: DB, b: BookingRow): string | null {
   const row = db.prepare("SELECT detail FROM booking_events WHERE booking_id = ? AND event = 'campaign_loaded' ORDER BY id DESC LIMIT 1")
     .get(b.id) as { detail: string } | undefined;
-  const loaded = row ? (JSON.parse(row.detail) as { campaign?: string | null }).campaign ?? null : null;
-  return loaded ?? (JSON.parse(b.playlist_json) as string[])[b.playlist_pos] ?? null;
+  // A corrupt row falls back (the event, then the playlist, then none):
+  // these lines go out with every re-push and must never throw.
+  const parse = (text: string): unknown => { try { return JSON.parse(text); } catch { return null; } };
+  const detail = row ? parse(row.detail) as { campaign?: unknown } | null : null;
+  const loaded = typeof detail?.campaign === 'string' ? detail.campaign : null;
+  const playlist = parse(b.playlist_json);
+  const listed = Array.isArray(playlist) ? playlist[b.playlist_pos] : undefined;
+  return loaded ?? (typeof listed === 'string' ? listed : null);
 }
 
 /** The booking's clock for l4d_booking 1.5.0 (scrims in game): its `!time`,
@@ -1687,7 +1693,8 @@ export class BookingRunner {
     const b = this.running(bookingId);
     const server = b ? getServer(this.db, b.server_id!) : undefined;
     if (!b || !server) return;
-    await this.push(b.id, server, () => allowLines(this.db, b), 'the allowlist after a staff replace');
+    // The roster too: on a team-lock scrim the replacement is placed now.
+    await this.push(b.id, server, () => [...allowLines(this.db, b), ...bookRosterLines(this.db, b)], 'the allowlist after a staff replace');
   }
 
   /** Staff replay a chapter of a live tournament game (plan T3c Ruling 12),
@@ -2033,6 +2040,7 @@ export class BookingRunner {
       withdrawStartNow(this.db, { bookingId: id, by, now: nowDate });
       return { ok: false, error: 'no_box_now' };
     }
+    const prev = startNowSnapshot(this.db, id)!;
     const moved = startBookingNow(this.db, { bookingId: id, now: nowDate });
     if (!moved.ok) {
       withdrawStartNow(this.db, { bookingId: id, by, now: nowDate });
@@ -2043,6 +2051,13 @@ export class BookingRunner {
       this.allocate();
     } catch (err) {
       console.error(`[booking] ${id}: allocate() after Start now failed:`, err instanceof Error ? err.message : err);
+    }
+    // allocate walks bookings by priority: one ahead of this (or a booking
+    // relocating) may have taken the free box. Waiting with no box from the
+    // new start would end in a no_server close, so the slot goes back.
+    if (getBooking(this.db, id)?.server_id === null && undoStartNow(this.db, { bookingId: id, by, prev, now: nowDate })) {
+      console.log(`[booking] ${id}: Start now rolled back, the free box went to another booking`);
+      return { ok: false, error: 'no_box_now' };
     }
     return { ok: true, value: { started: true } };
   }
