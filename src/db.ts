@@ -2607,6 +2607,8 @@ export function openDb(path: string): DB {
   // its team) and when the entry has none.
   ensureColumn(db, 'booking_sides', 'tag', 'TEXT');
   ensureColumn(db, 'booking_sides', 'logo_key', 'TEXT');
+  // Scrims in game (2026-10-11): when this side's manager pressed Start now; null when not pressed.
+  ensureColumn(db, 'booking_sides', 'start_now_at', 'TEXT');
   db.prepare('UPDATE bookings SET games_allowed = json_array_length(playlist_json) WHERE games_allowed = 0').run();
   // Rulesets editor: the ruleset a copy was made from (null for the three
   // templates and for rows from before the editor), and the ruleset a booking
