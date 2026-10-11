@@ -69,4 +69,24 @@ describe('pairSwiss', () => {
     expect(pairSwiss(seeds(1), [], 3)).toEqual({ pairs: [], bye: 1 });
     expect(pairSwiss(seeds(2), [], 3)).toEqual({ pairs: [[1, 2]], bye: null });
   });
+
+  it('moves the bye up when the usual bye would leave no repeat-free pairing', () => {
+    // 1 has met 2, 4 and 5; 3 has met 5 and 2; only 1 and 3 have no bye yet.
+    const r = (a: number, b: number): TableResult => ({ a, b, winner: a, scoreA: 10, scoreB: 5 });
+    const bye = (a: number): TableResult => ({ a, b: null, winner: a, scoreA: null, scoreB: null });
+    const results = [r(1, 2), r(3, 5), r(1, 4), r(3, 2), r(1, 5), r(2, 4), bye(4), bye(5), bye(2)];
+    const p = pairSwiss(seeds(5), results, 4);
+    // Team 3 sitting out would leave 1 with only rematches; team 1 sits out instead.
+    expect(p.bye).toBe(1);
+    const met = new Set(results.filter((x) => x.b !== null).map((x) => key(x.a, x.b!)));
+    expect(p.pairs.some(([a, b]) => met.has(key(a, b)))).toBe(false);
+  });
+
+  it('when no bye avoids a rematch, pairs top down with as few as it can', () => {
+    const r = (a: number, b: number): TableResult => ({ a, b, winner: a, scoreA: 10, scoreB: 5 });
+    // Four teams, everyone has met everyone but 1 and 4.
+    const results = [r(1, 2), r(3, 4), r(1, 3), r(2, 4), r(2, 3)];
+    const p = pairSwiss(seeds(4), results, 4);
+    expect(p.pairs.map(([a, b]) => key(a, b)).sort()).toContain('1:4');
+  });
 });
