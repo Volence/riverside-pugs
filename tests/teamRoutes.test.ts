@@ -378,3 +378,29 @@ describe('leave and kick over HTTP', () => {
     expect((await call('POST', `/api/teams/${slug}/leave`, P[1])).json()).toEqual({ disbanded: true, captain: null });
   });
 });
+
+describe('team chips on a profile', () => {
+  const chips = async (of: string, as?: string) => (await call('GET', `/api/players/${of}`, as)).json().teams;
+
+  it('lists the player\'s teams with their role, to anyone the team pages are open to', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    const want = [{ slug, name: 'Rats', tag: 'RR', logoKey: null, role: 'captain' }];
+    expect(await chips(P[0], P[1])).toEqual(want);
+    // Under everyone the team page is public, so a signed-out visitor sees the chip it links to.
+    expect(await chips(P[0])).toEqual(want);
+  });
+
+  it('shows no chip, and sends no team, to anyone the switch keeps out', async () => {
+    await create(P[0], 'Rats', 'RR');
+    db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'competitive_enabled'").run();
+    expect(await chips(P[0], P[1])).toEqual([]);
+    expect(await chips(P[0])).toEqual([]);
+    expect(await chips(P[0], ADMIN)).toHaveLength(1);
+    db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
+    expect(await chips(P[0], ADMIN)).toEqual([]);
+  });
+
+  it('is empty for a player on no team', async () => {
+    expect(await chips(P[2], P[1])).toEqual([]);
+  });
+});

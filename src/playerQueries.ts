@@ -1,5 +1,7 @@
 import { forfeitRecord } from './ggVotes.js';
 import type { DB } from './db.js';
+import { competitiveAccess, competitivePublic } from './teams/access.js';
+import { teamChipsOf } from './teams/teams.js';
 import { alsoKnownAs } from './playerNames.js';
 import { playerMapBreakdown } from './playerStats.js';
 import { displaySr } from './rating.js';
@@ -162,6 +164,11 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     // Other names they have played matches under, most played first, so a
     // player who renamed is still recognisable (src/playerNames.ts).
     alsoKnownAs: alsoKnownAs(db, steamid, player.name),
+    // The teams they are on, as header chips. Gated exactly as the team pages
+    // the chips link to (src/routes/teams.ts allowedViewer): while the switch
+    // is at admins only nobody else gets a team here, and a chip never links
+    // to a page that would answer 404.
+    teams: (viewer ? competitiveAccess(db, viewer) : competitivePublic(db)) ? teamChipsOf(db, steamid) : [],
     social: socialLinks(db, steamid),
     rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
     // Public on purpose: the owner wants forfeiting allowed but visible.
