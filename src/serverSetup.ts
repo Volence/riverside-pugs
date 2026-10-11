@@ -52,10 +52,14 @@ export function quoted(v: string): string {
   return `"${v}"`;
 }
 
-/** Free text (a team name) made safe for quoted(): printable ASCII only, no
- *  quote or semicolon, at most `max` characters. */
+/** Free text (a team name, a player's name) made safe for a console line,
+ *  quoted or not: printable ASCII only, no quote or semicolon (either would
+ *  end the argument or start a second command), every `//` broken up (the
+ *  console reads the rest of an unquoted line after it as a comment: a
+ *  player named "(S)VI // Square4 Bass" cut a `say` short on 2026-10-11),
+ *  at most `max` characters. */
 export function consoleText(v: string, max: number): string {
-  return v.replace(/["\r\n;]/g, '').replace(/[^\x20-\x7e]/g, '?').slice(0, max);
+  return v.replace(/["\r\n;]/g, '').replace(/[^\x20-\x7e]/g, '?').replace(/\/(?=\/)/g, '/ ').slice(0, max);
 }
 
 /** Poll until the box's own startup config has run (see STARTUP_POLLS), or

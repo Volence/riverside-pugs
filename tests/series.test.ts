@@ -75,6 +75,14 @@ let f: SeriesFixture;
 afterEach(() => f?.close());
 
 describe('SeriesEngine: booking, the game burst and connect', () => {
+  it('a team name with ; or // reaches the start line as plain text, never a second command or a comment', async () => {
+    f = await seriesFixture();
+    f.db.prepare("UPDATE event_entries SET name = 'Bats; quit // x' WHERE name = 'Bats'").run();
+    await f.tick();
+    const line = f.sent.find((c) => c.startsWith('say [Match] Game 1:'))!;
+    expect(line).toBe('say [Match] Game 1: No Mercy. Bats quit / / x start as survivors. Ready up when both teams are in.');
+  });
+
   it('books a server the moment lineups lock, pushes game 1 with the veto\'s sides before the changelevel, and opens connect with a DM', async () => {
     f = await seriesFixture();
     await f.tick();
