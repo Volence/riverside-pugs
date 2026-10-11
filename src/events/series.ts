@@ -394,7 +394,7 @@ export class SeriesEngine {
     console.log(`[series] match ${m.id}: game ${due.ordinal} is match ${g.matchId} on ${campaign}`);
     this.push(m.id);
     // The entry names are team names (free text): consoleText, as every other line.
-    return [...this.linesFor(m, due, g.matchId), `say [Match] ${consoleText(this.startText(m, due, g.matchId), 200)}`];
+    return [...this.linesFor(m, due, g.matchId), `say [Match] ${consoleText(this.startText(m, due, g.matchId), 250)}`];
   }
 
   /** A game pushed but not heard from yet: its burst again (no chat line). */
