@@ -14,7 +14,7 @@ import { newLeasePassword } from '../practiceLeases.js';
 import { NOT_HELD_SQL } from '../serverHolds.js';
 import { getServer } from '../serverPool.js';
 import { bookingGames, gamesPlayed, liveBookingGame, type BookingGameView } from './games.js';
-import { nearestFreeSlot } from '../scrims/rules.js';
+import { ACCEPT_CUTOFF_MS, nearestFreeSlot, openPostAt } from '../scrims/rules.js';
 import { castersOf, type CasterView } from './casters.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
@@ -1197,9 +1197,9 @@ export interface BookingView {
   casters: CasterView[];
   /** Re-posting a cancelled scrim in one click (plan 2 Ruling 4): true only
    *  when the booking is cancelled, its purpose is scrim, it came from a
-   *  post, and the viewer manages a side. The time is never pre-checked
-   *  here; a start too close to post again comes back as the click's own
-   *  refusal. */
+   *  post, and the viewer manages a side; nor once the start is inside the
+   *  30 minute acceptance cutoff, nor once the viewer's side already has an
+   *  open post at that start. */
   repost: { allowed: boolean };
   /** Plan 2 Ruling 5: present only when the viewer manages exactly one
    *  confirmed side of a scrim that closed as ended or no_show (managing both
@@ -1278,8 +1278,13 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     games: seesGames ? bookingGames(db, id) : [],
     casters: castersOf(db, id),
     repost: {
+      // Also not once the start is inside the acceptance cutoff, nor once
+      // the viewer's side already has an open post at that start (owner,
+      // 2026-10-11): either click would only be refused.
       allowed: b.state === 'cancelled' && b.purpose === 'scrim' && manages.length > 0
-        && !!db.prepare('SELECT 1 FROM scrim_posts WHERE booking_id = ?').get(b.id),
+        && Date.parse(b.starts_at) - ACCEPT_CUTOFF_MS > nowMs
+        && !!db.prepare('SELECT 1 FROM scrim_posts WHERE booking_id = ?').get(b.id)
+        && !openPostAt(db, sideRow(db, b.id, manages[0])!, b.starts_at),
     },
     ...(acting.length === 1 && reviewable(b) ? { review: { open: reviewOpen(b, nowMs), mine: ownReview(db, b.id, acting[0]) } } : {}),
     ...(viewer.staff ? { reviews: staffReviews(db, b.id) } : {}),

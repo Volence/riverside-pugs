@@ -756,6 +756,20 @@ describe('review fix round 1', () => {
 });
 
 describe('repostFromBooking', () => {
+  it('a second re-post of the same booking by the same side is a duplicate', () => {
+    const bookingId = booked();
+    value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
+    value(repostFromBooking(db, { bookingId, by: P[0], now: NOW }));
+    expect(err(repostFromBooking(db, { bookingId, by: P[0], now: NOW }))).toBe('duplicate_post');
+    expect(err(repostFromBooking(db, { bookingId, by: P[1], now: NOW }))).toBe('ok'); // the other side is its own side
+  });
+
+  it('past the start it is too_late, not bad_time', () => {
+    const bookingId = booked();
+    value(cancelBooking(db, { bookingId, by: P[0], now: NOW }));
+    expect(err(repostFromBooking(db, { bookingId, by: P[0], now: at(START, 5) }))).toBe('too_late');
+  });
+
   // Alternated to 4 campaigns at the default 60-minute fallback (no_mercy,
   // dead_air, death_toll, blood_harvest), a 300 minute slot.
   const booked = (posterBy = P[0], accepterBy = P[1], teamId?: number): number => {
