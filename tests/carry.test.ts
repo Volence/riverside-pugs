@@ -60,6 +60,17 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
     expect(carryEntries(f.db, g1)).toBeNull();
   });
 
+  it('game 2 start line with two 40-character team names keeps its ready-up instruction', async () => {
+    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    carryOn(f);
+    f.db.prepare("UPDATE event_entries SET name = ? WHERE name = 'Rats'").run('R'.repeat(40));
+    f.db.prepare("UPDATE event_entries SET name = ? WHERE name = 'Bats'").run('B'.repeat(40));
+    await toGame2(f);
+    const line = f.sent.filter((c) => c.startsWith('say [Match] Game 2:')).pop()!;
+    expect(line).toContain('R'.repeat(40));
+    expect(line.endsWith('Ready up when both teams are in.')).toBe(true);
+  });
+
   it('orients by game 2\'s booking_side_a: Bats surviving first are pug team a', async () => {
     f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: (r) => driveHomeAway(r, 'survivors') });
     carryOn(f);
