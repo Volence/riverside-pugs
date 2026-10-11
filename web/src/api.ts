@@ -2498,14 +2498,15 @@ export type ScrimSide =
   | { kind: 'pickup'; steamid: string; name: string };
 
 export interface ScrimBoardAccept {
-  id: number; side: ScrimSide; sr: number; fits: boolean; campaigns: string[]; createdAt: string;
+  /** Absent while scrim_show_sr is off. */
+  id: number; side: ScrimSide; sr?: number; fits?: boolean; campaigns: string[]; createdAt: string;
   proposed: { playlist: string[]; minutes: number };
 }
 
 /** Mirrors src/scrims/scrims.ts's BoardPost, the one shape the board, "Your
  *  posts" and the `?post=` highlight all read. */
 export interface ScrimBoardPost {
-  id: number; status: 'open' | 'pending' | 'booked' | 'expired' | 'withdrawn'; side: ScrimSide; sr: number;
+  id: number; status: 'open' | 'pending' | 'booked' | 'expired' | 'withdrawn'; side: ScrimSide; sr?: number;
   srRange: number | null; startsAt: string; minutes: number; campaigns: string[]; campaignCount: number; note: string; createdAt: string;
   challenge: { teamId: number; name: string } | null;
   acceptCount: number;
