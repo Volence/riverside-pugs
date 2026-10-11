@@ -650,6 +650,11 @@ describe('balance and per-round lines', () => {
 // token: the listener admits it on the sender's address, address-gated like
 // PUGTV (see tests/logListener.test.ts and tests/playerNetworks.test.ts).
 describe('PUGBOOK parsing', () => {
+  it('parses a sub line, the steamid and name in arg (l4d_booking 1.5.0)', () => {
+    const ev = parseLogDatagram(framed('PUGBOOK event=cmd cmd=sub steamid=76561198000000001 arg=76561199000000002 Some Name'));
+    expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'sub', arg: '76561199000000002 Some Name' });
+  });
+
   it('parses a good line', () => {
     const ev = parseLogDatagram(framed('PUGBOOK event=cmd cmd=nextmap steamid=76561198000000001 arg=dead air'));
     expect(ev).toEqual({ kind: 'booking_cmd', steamid: '76561198000000001', cmd: 'nextmap', arg: 'dead air' });

@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { getPlayer } from '../players.js';
 import { getServer, type ServerRow } from '../serverPool.js';
 import { NOT_HELD_SQL, holdFor } from '../serverHolds.js';
 import { campaignRegistry, firstMapOf, type CampaignEntry } from '../campaignRegistry.js';
@@ -18,7 +19,7 @@ import { claimReviewAsk } from '../scrims/reviews.js';
 import { claimResultNotice, seriesTally } from './series.js';
 import { DEFAULT_GRACE_MINUTES, bookingLimits, byPriority, isLateCancel } from './rules.js';
 import {
-  acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
+  acceptedPeople, actingSides, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
   BOOKING_ERRORS, bookRoster, firstSurvivorSide, type BookingRow, type Side, type SideRow,
@@ -383,6 +384,12 @@ export function hideAllowIds(message: string): string {
     .replace(/sm_booking_allow_(add|refuse)((?:\s+\d+)*)/g, (_, what: string, ids: string) => `sm_booking_allow_${what} (${count(ids)} ids)`)
     .replace(/sm_pug_book_add ([abs])((?:\s+\d+)*)/g, (_, code: string, ids: string) => `sm_pug_book_add ${code} (${count(ids)} ids)`);
 }
+
+/** The in-game commands that let someone onto the box (plan 4b2, scrims in
+ *  game): the plugin adds the person before the site hears of it, so a
+ *  refusal must take them back (refuseAllow), and their log lines carry no
+ *  steamid. */
+const LETS_IN: ReadonlySet<BookingCmd> = new Set<BookingCmd>(['allow', 'sub']);
 
 /** The SteamID64 an `!allow` line names (its arg starts with it), or null. */
 function allowTarget(arg: string): string | null {
@@ -2014,26 +2021,29 @@ export class BookingRunner {
    *  does not manage one of its confirmed sides. A refusal is said on the box
    *  as `[Booking] <reason>`; a success is already said by the method it
    *  calls (the campaign-start lines, the goodbye, the +1 campaign notice, or
-   *  allowFromGame's who-is-in line). */
+   *  allowFromGame's or subFromGame's who-is-in line). */
   onCommand(serverId: number, steamid: string, cmd: BookingCmd, arg: string): void {
     // An allow line is about who may be on the box: its log lines carry no steamid.
-    const who = cmd === 'allow' ? 'the sender' : steamid;
+    const who = LETS_IN.has(cmd) ? 'the sender' : steamid;
     const b = bookingOnServer(this.db, serverId);
     if (!b) {
-      console.log(`[booking] onCommand: no open booking on server ${serverId} (${cmd === 'allow' ? 'no steamid logged' : `steamid ${steamid}`}, cmd ${cmd})`);
+      console.log(`[booking] onCommand: no open booking on server ${serverId} (${LETS_IN.has(cmd) ? 'no steamid logged' : `steamid ${steamid}`}, cmd ${cmd})`);
       // A booking winding down still holds the box and its plugin still
       // enforces: what that plugin let in on its own is taken back.
       const hold = holdFor(this.db, serverId);
-      if (cmd === 'allow' && hold?.kind === 'booking') this.refuseAllow(hold.rowId, serverId, arg, BOOKING_ERRORS.wrong_state.text);
+      if (LETS_IN.has(cmd) && hold?.kind === 'booking') this.refuseAllow(hold.rowId, serverId, arg, BOOKING_ERRORS.wrong_state.text);
       return;
     }
     if (actingSides(this.db, b.id, steamid).length === 0) {
       console.log(`[booking] ${b.id}: onCommand: ${who} does not manage a confirmed side (server ${serverId}, cmd ${cmd})`);
-      if (cmd === 'allow') this.refuseAllow(b.id, serverId, arg, BOOKING_ERRORS.not_manager.text);
+      if (LETS_IN.has(cmd)) this.refuseAllow(b.id, serverId, arg, BOOKING_ERRORS.not_manager.text);
       return;
     }
     if (b.purpose === 'tournament' && cmd !== 'allow') {
       // T3b Ruling 10: the series engine picks the campaigns and closes the box.
+      // A !sub there is pug-tourney's; l4d_booking 1.5.0 never sends one, but
+      // whatever an older plugin let in is taken back.
+      if (cmd === 'sub') this.refuseAllow(b.id, serverId, arg, 'The site runs this tournament match.');
       this.say(b.id, 'say [Match] The site runs this tournament match: it picks the campaigns and closes the server.', 'the tournament refusal');
       return;
     }
@@ -2061,6 +2071,10 @@ export class BookingRunner {
       }
       case 'allow': {
         error = this.allowFromGame(b.id, serverId, steamid, arg);
+        break;
+      }
+      case 'sub': {
+        error = this.subFromGame(b.id, serverId, steamid, arg);
         break;
       }
     }
@@ -2110,12 +2124,42 @@ export class BookingRunner {
     const side = sidesOf(this.db, id).find((s) => s.side === r.value.side);
     if (!b || !server || !side) return null;
     const who = consoleText(gameName(steamid, m?.[2]), 40);
-    const role = (this.db.prepare('SELECT role FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, steamid) as { role: string } | undefined)?.role ?? 'ringer';
-    const said = r.value.added
-      ? `say [Booking] ${who} is in, as a ${role} for ${consoleText(sideName(this.db, side), 60)}.`
-      : `say [Booking] ${who} is already in this booking.`;
+    const captain = consoleText(getPlayer(this.db, by)?.name ?? 'a captain', 40);
+    const said = !r.value.added
+      ? `say [Booking] ${who} is already in this booking.`
+      : r.value.role === 'spectator'
+        ? `say [Booking] ${who} can watch (allowed by ${captain}).`
+        : `say [Booking] ${who} is in, as a ${r.value.role} for ${consoleText(sideName(this.db, side), 60)} (allowed by ${captain}).`;
     console.log(`[booking] ${id}: !allow ${r.value.added ? 'added' : 'already in'}; the list has ${allowList(this.db, id).length} ids`);
-    void this.push(id, server, () => [...allowLines(this.db, b), said], 'the allowlist');
+    void this.push(id, server, () => [...allowLines(this.db, b), ...bookRosterLines(this.db, b), said], 'the allowlist');
+    return null;
+  }
+
+  /** `!sub` (scrims in game Ruling 10): `arg` is `<steamid64> <name...>`
+   *  from the plugin. On success the allowlist and the booking roster go to
+   *  the box at once, so pug-match places the sub on the captain's side; a
+   *  refusal is said and taken back on the box (refuseAllow). Always null. */
+  private subFromGame(id: number, serverId: number, by: string, arg: string): string | null {
+    const m = /^(\S+)\s*([\s\S]*)$/.exec(arg.trim());
+    const steamid = m?.[1] ?? '';
+    const r = subInGame(this.db, { bookingId: id, by, steamid, name: m?.[2] ?? '', now: new Date(this.now()) });
+    if (!r.ok) {
+      console.log(`[booking] ${id}: !sub refused (${r.error})`);
+      this.refuseAllow(id, serverId, arg, BOOKING_ERRORS[r.error].text);
+      return null;
+    }
+    const b = getBooking(this.db, id);
+    const server = getServer(this.db, serverId);
+    const side = sidesOf(this.db, id).find((s) => s.side === r.value.side);
+    if (!b || !server || !side) return null;
+    const who = consoleText(gameName(steamid, m?.[2]), 40);
+    const captain = consoleText(getPlayer(this.db, by)?.name ?? 'a captain', 40);
+    const sideText = consoleText(sideName(this.db, side), 60);
+    const said = r.value.change === 'already'
+      ? `say [Booking] ${who} already plays for ${sideText}.`
+      : `say [Booking] ${who} is in as a sub for ${sideText} (by ${captain}).`;
+    console.log(`[booking] ${id}: !sub ${r.value.change}`);
+    void this.push(id, server, () => [...allowLines(this.db, b), ...bookRosterLines(this.db, b), said], 'the allowlist');
     return null;
   }
 

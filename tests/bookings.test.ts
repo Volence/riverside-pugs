@@ -5,7 +5,7 @@ import { setSetting } from '../src/settings.js';
 import { createTeam, invitePlayer, respondInvite, setRole, transferCaptain } from '../src/teams/teams.js';
 import { currentSeasonId } from '../src/players.js';
 import {
-  BOOKING_ERRORS, bookRoster, firstSurvivorSide, type BookingRow, addPerson, allowInGame, allowList, bookingView, bumpBooking, bumpReason, cancelBooking, claimNoShow, closeBooking, confirmBooking,
+  BOOKING_ERRORS, bookRoster, firstSurvivorSide, type BookingRow, addPerson, allowInGame, subInGame, allowList, bookingView, bumpBooking, bumpReason, cancelBooking, claimNoShow, closeBooking, confirmBooking,
   createBooking, createTournamentBooking, declineBooking,
   addCampaign, endBooking, expireUnconfirmed, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
   myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
@@ -582,9 +582,9 @@ describe('who may be on the box (plan 4b2)', () => {
     const id = running();
     const unknown = '76561199123456789';
     const r = allowInGame(db, { bookingId: id, by: P[1], steamid: unknown, name: '  Some Name  ', now: NOW });
-    expect(r).toEqual({ ok: true, value: { side: 'b', added: true } });
+    expect(r).toEqual({ ok: true, value: { side: 'b', added: true, role: 'spectator' } });
     expect(db.prepare('SELECT name, status, is_admin FROM players WHERE steamid = ?').get(unknown)).toEqual({ name: 'Some Name', status: 'invited', is_admin: 0 });
-    expect(peopleOf(db, id).find((p) => p.steamid === unknown)).toMatchObject({ side: 'b', role: 'ringer', status: 'accepted', added_by: P[1] });
+    expect(peopleOf(db, id).find((p) => p.steamid === unknown)).toMatchObject({ side: 'b', role: 'spectator', status: 'accepted', added_by: P[1] });
     expect(db.prepare("SELECT actor, detail FROM booking_events WHERE booking_id = ? AND event = 'person_allowed_in_game'").get(id))
       .toEqual({ actor: P[1], detail: JSON.stringify({ steamid: unknown, side: 'b' }) });
     expect(allowList(db, id)).toContain(unknown);
@@ -592,7 +592,7 @@ describe('who may be on the box (plan 4b2)', () => {
 
   it('an existing player keeps their row; an unsafe or long name is cut or falls back to the steamid', () => {
     const id = running();
-    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: P[6], name: 'whatever', now: NOW })).toEqual({ ok: true, value: { side: 'a', added: true } });
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: P[6], name: 'whatever', now: NOW })).toEqual({ ok: true, value: { side: 'a', added: true, role: 'spectator' } });
     expect(db.prepare('SELECT name, status FROM players WHERE steamid = ?').get(P[6])).toEqual({ name: 'p6', status: 'active' });
     const long = '76561199123456780';
     allowInGame(db, { bookingId: id, by: P[0], steamid: long, name: 'x'.repeat(40), now: NOW });
@@ -632,8 +632,8 @@ describe('who may be on the box (plan 4b2)', () => {
     const id = running();
     allowInGame(db, { bookingId: id, by: P[0], steamid: P[6], name: 'n', now: NOW });
     const before = peopleOf(db, id);
-    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[6], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
-    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[0], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false } });
+    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[6], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false, role: 'spectator' } });
+    expect(allowInGame(db, { bookingId: id, by: P[1], steamid: P[0], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'b', added: false, role: 'player' } });
     expect(peopleOf(db, id)).toEqual(before);
     expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'person_allowed_in_game'").get()).toEqual({ n: 1 });
   });
@@ -642,7 +642,7 @@ describe('who may be on the box (plan 4b2)', () => {
     const id = running();
     addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[5], role: 'spectator', now: NOW }); // invited on a
     expect(allowList(db, id)).not.toContain(P[5]);
-    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: P[5], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'a', added: true } });
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: P[5], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'a', added: true, role: 'spectator' } });
     expect(peopleOf(db, id).find((p) => p.steamid === P[5])).toMatchObject({ side: 'a', role: 'spectator', status: 'accepted', added_by: P[0] });
     expect(db.prepare("SELECT actor, detail FROM booking_events WHERE booking_id = ? AND event = 'person_allowed_in_game'").get(id))
       .toEqual({ actor: P[0], detail: JSON.stringify({ steamid: P[5], side: 'a', accepted: true }) });
@@ -684,11 +684,49 @@ describe('who may be on the box (plan 4b2)', () => {
   it('a full side is side_full', () => {
     const id = running();
     for (let i = 0; i < 11; i++) {
-      expect(allowInGame(db, { bookingId: id, by: P[1], steamid: `765611991000000${String(i).padStart(2, '0')}`, name: `r${i}`, now: NOW }).ok).toBe(true);
+      expect(subInGame(db, { bookingId: id, by: P[1], steamid: `765611991000000${String(i).padStart(2, '0')}`, name: `r${i}`, now: NOW }).ok).toBe(true);
     }
-    const r = allowInGame(db, { bookingId: id, by: P[1], steamid: '76561199100000099', name: 'late', now: NOW });
+    const r = subInGame(db, { bookingId: id, by: P[1], steamid: '76561199100000099', name: 'late', now: NOW });
     expect(r).toEqual({ ok: false, error: 'side_full' });
     expect(db.prepare('SELECT 1 FROM players WHERE steamid = ?').get('76561199100000099')).toBeUndefined();
+  });
+
+  it("watchers do not count against the side's players, and are capped apart", () => {
+    const id = running();
+    const ins = db.prepare("INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, 'a', ?, ?, 'accepted', ?, '2026-09-01T00:00:00.000Z')");
+    const add = (sid: string, role: string) => { db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, 'x', 'active')").run(sid); ins.run(id, sid, role, P[0]); };
+    for (let i = 0; i < 12; i++) add(`765611994444444${String(i).padStart(2, '0')}`, 'player');
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: '76561199555555500', name: 'w', now: NOW }).ok).toBe(true);
+    for (let i = 1; i < 12; i++) add(`765611995555555${String(i).padStart(2, '0')}`, 'spectator');
+    expect(allowInGame(db, { bookingId: id, by: P[0], steamid: '76561199555555599', name: 'w', now: NOW })).toEqual({ ok: false, error: 'side_full' });
+  });
+
+  it("subInGame adds a ringer to the captain's side, turns a watcher of either side into one, accepts an invite, and refuses the other side's players", () => {
+    const id = running();
+    expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[6], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'a', change: 'added' } });
+    expect(peopleOf(db, id).find((p) => p.steamid === P[6])).toMatchObject({ side: 'a', role: 'ringer', status: 'accepted' });
+    allowInGame(db, { bookingId: id, by: P[1], steamid: P[7], name: 'n', now: NOW }); // a watcher of side b
+    expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[7], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'a', change: 'upgraded' } });
+    expect(peopleOf(db, id).find((p) => p.steamid === P[7])).toMatchObject({ side: 'a', role: 'ringer', status: 'accepted' });
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[8], role: 'player', now: NOW }); // invited on a
+    expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[8], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'a', change: 'accepted' } });
+    expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[6], name: 'n', now: NOW })).toEqual({ ok: true, value: { side: 'a', change: 'already' } });
+    expect(subInGame(db, { bookingId: id, by: P[1], steamid: P[6], name: 'n', now: NOW })).toEqual({ ok: false, error: 'plays_other_side' });
+    addPerson(db, { bookingId: id, by: P[0], side: 'a', steamid: P[9], role: 'player', now: NOW }); // invited on a
+    expect(subInGame(db, { bookingId: id, by: P[1], steamid: P[9], name: 'n', now: NOW })).toEqual({ ok: false, error: 'invited_elsewhere' });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE event = 'person_subbed_in_game'").get()).toEqual({ n: 3 });
+  });
+
+  it('subInGame refuses a non-captain, a banned id and a booking that is not running, like allowInGame', () => {
+    const id = create();
+    expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[7], name: 'n', now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    holdBox(db, id, servers[1], NOW);
+    markSetup(db, id, NOW);
+    markReady(db, id, NOW);
+    expect(subInGame(db, { bookingId: id, by: P[7], steamid: P[8], name: 'n', now: NOW })).toEqual({ ok: false, error: 'not_manager' });
+    ban(P[7]);
+    expect(subInGame(db, { bookingId: id, by: P[0], steamid: P[7], name: 'n', now: NOW })).toEqual({ ok: false, error: 'not_player' });
   });
 });
 

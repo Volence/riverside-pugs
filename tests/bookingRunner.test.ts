@@ -1844,16 +1844,36 @@ describe('booked games (plan 4b)', () => {
       expectList(minute[0].cmds, [P[0], P[1], ...STAFF]);
     });
 
-    it("a captain's !allow adds the ringer, re-pushes the list at once and says so", async () => {
+    it("a captain's !allow lets someone watch: a spectator of the captain's side, both lists re-pushed at once, the captain named", async () => {
       const id = await running();
-      const ringer = '76561199222222222';
-      runner.onCommand(3, P[1], 'allow', `${ringer} Some Name`);
+      const watcher = '76561199222222222';
+      runner.onCommand(3, P[1], 'allow', `${watcher} Some Name`);
       await flush();
-      expect(db.prepare('SELECT side, role, status, added_by FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, ringer))
-        .toEqual({ side: 'b', role: 'ringer', status: 'accepted', added_by: P[1] });
+      expect(db.prepare('SELECT side, role, status, added_by FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, watcher))
+        .toEqual({ side: 'b', role: 'spectator', status: 'accepted', added_by: P[1] });
       const c = cmds();
-      expectList(c, [P[0], P[1], ringer]);
-      expect(c.at(-1)).toBe("say [Booking] Some Name is in, as a ringer for p1's group.");
+      expectList(c, [P[0], P[1], watcher]);
+      expect(c).toContain(`sm_pug_book_add s ${watcher}`);
+      expect(c.at(-1)).toBe('say [Booking] Some Name can watch (allowed by p1).');
+    });
+
+    it("a captain's !sub makes a watcher a ringer of the captain's side; a name with // arrives whole; a second !sub says they already play", async () => {
+      const id = await running();
+      const sub = '76561199222222222';
+      runner.onCommand(3, P[1], 'allow', `${sub} (S)VI // Square4 Bass`);
+      await flush();
+      sent = [];
+      runner.onCommand(3, P[0], 'sub', `${sub} (S)VI // Square4 Bass`);
+      await flush();
+      expect(db.prepare('SELECT side, role, status FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, sub))
+        .toEqual({ side: 'a', role: 'ringer', status: 'accepted' });
+      const c = cmds();
+      expect(c).toContain(`sm_pug_book_add a ${[P[0], sub].sort().join(' ')}`);
+      expect(c.at(-1)).toBe("say [Booking] (S)VI / / Square4 Bass is in as a sub for p0's group (by p0).");
+      sent = [];
+      runner.onCommand(3, P[0], 'sub', `${sub} (S)VI // Square4 Bass`);
+      await flush();
+      expect(cmds().at(-1)).toBe("say [Booking] (S)VI / / Square4 Bass already plays for p0's group.");
     });
 
     it('!allow log lines name the booking and the outcome, never a steamid', async () => {
@@ -1921,9 +1941,14 @@ describe('booked games (plan 4b)', () => {
         db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, 'x', 'active')").run(sid);
         ins.run(id, sid, P[0]);
       }
-      runner.onCommand(3, P[0], 'allow', '76561199222222222 x');
+      runner.onCommand(3, P[0], 'sub', '76561199222222222 x');
       await flush();
       expect(cmds()).toEqual(['say [Booking] That side is full.', 'sm_booking_allow_refuse 76561199222222222']);
+      // A watcher does not count against the players: !allow still lets them in.
+      sent = [];
+      runner.onCommand(3, P[0], 'allow', '76561199222222222 x');
+      await flush();
+      expect(cmds().at(-1)).toBe('say [Booking] x can watch (allowed by p0).');
     });
 
     it('a non-captain cannot !allow anyone, and the box takes back what its plugin let in', async () => {
@@ -1934,6 +1959,15 @@ describe('booked games (plan 4b)', () => {
       log.mockRestore();
       expect(cmds()).toEqual(['say [Booking] Only a captain or co-captain of that side can do that.', 'sm_booking_allow_refuse 76561199222222222']);
       expect(db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(id, '76561199222222222')).toBeUndefined();
+    });
+
+    it('a non-captain cannot !sub anyone either, and the box takes back what its plugin let in', async () => {
+      await running();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      runner.onCommand(3, P[5], 'sub', '76561199222222222 x');
+      await flush();
+      log.mockRestore();
+      expect(cmds()).toEqual(['say [Booking] Only a captain or co-captain of that side can do that.', 'sm_booking_allow_refuse 76561199222222222']);
     });
 
     it('an !allow on a box a booking still holds while it winds down is taken back too', async () => {
