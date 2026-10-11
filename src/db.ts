@@ -2616,6 +2616,9 @@ export function openDb(path: string): DB {
   // booking made before this column has null and is not counted.
   ensureColumn(db, 'rulesets', 'based_on', 'INTEGER REFERENCES rulesets(id)');
   ensureColumn(db, 'bookings', 'ruleset_id', 'INTEGER REFERENCES rulesets(id)');
+  // A box relocate took for a booking (reholdBox) that has not had its forced
+  // restart yet; persisted so a web restart in between cannot skip it (2026-10-11).
+  ensureColumn(db, 'bookings', 'fresh_box', 'INTEGER NOT NULL DEFAULT 0');
   // !gg: the pug team that forfeited ('a' or 'b'), null for a match played
   // out. Rated like any other result; the column only drives the FF tag.
   ensureColumn(db, 'matches', 'forfeit_team', 'TEXT');
