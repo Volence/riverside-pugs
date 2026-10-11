@@ -290,6 +290,7 @@ describe('stats routes', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.match.id).toBe(matchId);
+    expect(body.match.kind).toBe('pug');
     expect(body.maps).toHaveLength(1);
     expect(body.players).toHaveLength(8);
     const p = body.players.find((x: any) => x.steamid === ME);

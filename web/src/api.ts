@@ -407,6 +407,8 @@ export interface MatchDetail {
     /** Plan 5: the ordinal of the map this game was replayed from after a
      *  restart, null when it was never restored. */
     restoredAtMap: number | null;
+    /** Optional for an older server, which is read as a PUG. */
+    kind?: 'pug' | 'scrim' | 'tournament';
   };
   maps: {
     ordinal: number; map: string; teamAScore: number; teamBScore: number;

@@ -11,6 +11,7 @@ import { StaffChatLog } from './StaffChatLog';
 import { StatTable, EventFeed, DemoPlaybackHint, type StatRow } from '../components/StatTable';
 import { ReportPlayer } from '../components/ReportPlayer';
 import { EndorsePanel } from '../components/EndorsePanel';
+import { endorsable } from '../endorse';
 import { AbortPartyList } from '../components/AbortPartyList';
 import { sideTotals } from '../matchTotals';
 import { Viewer } from '../replay/Viewer';
@@ -592,10 +593,10 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
         eyebrowB={eyebrowB}
       />
 
-      {/* Completed matches only, and only for a signed-in viewer: the panel
+      {/* Completed PUGs only, and only for a signed-in viewer: the panel
           asks the server whether THIS viewer may endorse here, and renders
           nothing when they may not. */}
-      {match.state === 'completed' && me && <EndorsePanel matchId={match.id} />}
+      {endorsable(match) && me && <EndorsePanel matchId={match.id} />}
 
       <div class="stack">
         {data.winLine && (

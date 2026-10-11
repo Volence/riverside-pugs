@@ -26,7 +26,7 @@ export const ENDORSE_LABEL: Record<EndorseKind, string> = {
 };
 
 export type EndorseError =
-  | 'bad_kind' | 'self' | 'no_match' | 'not_completed' | 'not_rostered'
+  | 'bad_kind' | 'self' | 'no_match' | 'not_pug' | 'not_completed' | 'not_rostered'
   | 'target_not_rostered' | 'closed' | 'duplicate' | 'budget';
 
 /** One sentence per refusal, shared by the site and the bot. */
@@ -34,6 +34,7 @@ export const ENDORSE_ERROR_TEXT: Record<EndorseError, string> = {
   bad_kind: 'That is not a kind of endorsement.',
   self: 'You cannot endorse yourself.',
   no_match: 'There is no such match.',
+  not_pug: 'Endorsements are for PUGs only. Scrims and tournament matches have none.',
   not_completed: 'Only a completed match can be endorsed.',
   not_rostered: 'You were not in this match.',
   target_not_rostered: 'That player was not in this match.',
@@ -90,12 +91,16 @@ function gate(db: DB, matchId: number, steamid: string):
   // The window is compared inside SQLite so ended_at and "now" are the same
   // kind of value. A NULL ended_at yields NULL, which is not open.
   const m = db.prepare(
-    `SELECT state,
+    `SELECT state, kind,
             datetime(ended_at, '+' || ? || ' hours') AS closesAt,
             datetime(ended_at, '+' || ? || ' hours') > datetime('now') AS open
      FROM matches WHERE id = ?`,
-  ).get(hours, hours, matchId) as { state: string; closesAt: string | null; open: number | null } | undefined;
+  ).get(hours, hours, matchId) as { state: string; kind: string; closesAt: string | null; open: number | null } | undefined;
   if (!m) return { ok: false, error: 'no_match', closesAt: null };
+  // Scrims and tournament matches never take endorsements (owner, 2026-10-11):
+  // every read already counts completedPug() only, so one given there would
+  // be invisible everywhere and still spend a budget.
+  if (m.kind !== 'pug') return { ok: false, error: 'not_pug', closesAt: null };
   if (m.state !== 'completed') return { ok: false, error: 'not_completed', closesAt: m.closesAt };
   if (!rostered(db, matchId, steamid)) return { ok: false, error: 'not_rostered', closesAt: m.closesAt };
   if (!m.open || !m.closesAt) return { ok: false, error: 'closed', closesAt: m.closesAt };
