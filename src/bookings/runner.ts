@@ -83,6 +83,9 @@ export function leftText(ms: number): string {
 export const CLOSE_GRACE_MS = 5 * 60_000;
 /** After a game, how long the box waits before loading the next campaign. */
 export const NEXT_DELAY_MS = 60_000;
+/** A timer fires this long after the time it waits for, so the runner's own
+ *  "is it due yet" check (next_at <= now) is already true when it runs. */
+export const WAKE_SLACK_MS = 250;
 /** Empty minute watches in a row before "everyone left" may end a booking. */
 export const EMPTY_WATCHES_TO_END = 2;
 /** The last game must have ended at least this long ago for "everyone left":
@@ -223,6 +226,10 @@ export interface BookingRunnerDeps {
    *  and no captain commands, but it starts no game and nothing hears it. */
   tournament?: TournamentHooks;
   sleep?: (ms: number) => Promise<void>;
+  /** Run `fn` once after `ms` (the next campaign's load and the close at
+   *  their exact times, scrims in game Ruling 4). Default setTimeout,
+   *  unref'd; the minute watch stays the fallback after a web restart. */
+  later?: (ms: number, fn: () => void) => void;
   now?: () => number;
 }
 
@@ -380,6 +387,7 @@ function sideManagers(db: DB, s: SideRow): string[] {
 export class BookingRunner {
   private readonly db: DB;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly later: (ms: number, fn: () => void) => void;
   private readonly now: () => number;
   /** Bookings with a setup or wind-down running; nothing else starts on them. */
   private readonly busy = new Map<number, Promise<void>>();
@@ -408,6 +416,7 @@ export class BookingRunner {
   constructor(private readonly deps: BookingRunnerDeps) {
     this.db = deps.db;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }));
+    this.later = deps.later ?? ((ms, fn) => { const t = setTimeout(fn, ms); t.unref?.(); });
     this.now = deps.now ?? Date.now;
   }
 
@@ -1804,8 +1813,8 @@ export class BookingRunner {
    *  box with the booking and calls this). Bookings by campaign: the finished
    *  games are counted (gamesPlayed: an aborted game does not count, a replay
    *  or an off-playlist campaign does). Below games_allowed, the next
-   *  campaign is announced and loaded on the first minute watch at least 60 s
-   *  later (so 60 to 120 s: "in about a minute"). At the count, the booking
+   *  campaign is announced and loaded 60 s later by a timer (the minute watch
+   *  is the fallback). At the count, the booking
    *  closes in 5 minutes unless a campaign is added (Ruling 3). A game that
    *  finished past the slot's end schedules nothing and says the server closes within a minute: the next watch ends the
    *  booking on time (Ruling 4). A booking already ending is left alone, so
@@ -1827,7 +1836,9 @@ export class BookingRunner {
       // Nothing loads during the grace: a campaign added in it is announced by onExtended.
       if (b.next_campaign !== null) setNext(this.db, b.id, null, null, new Date(nowMs));
       const graceMin = bookingLimits(this.db).closeGraceMinutes;
-      if (!setCloseAt(this.db, b.id, played, new Date(nowMs + graceMin * 60_000).toISOString(), new Date(nowMs))) return;
+      const closeMs = nowMs + graceMin * 60_000;
+      if (!setCloseAt(this.db, b.id, played, new Date(closeMs).toISOString(), new Date(nowMs))) return;
+      this.wakeAt(b.id, closeMs, 'close');
       const closes = `or the server closes in ${graceMin} minute${graceMin === 1 ? '' : 's'}.`;
       // A game started inside an earlier grace can take played past the count.
       line = played > b.games_allowed
@@ -1839,18 +1850,52 @@ export class BookingRunner {
     } else {
       line = this.scheduleNext(b, played, nowMs);
     }
-    this.say(b.id, line, 'next campaign line');
+    this.sayWithState(b.id, line, 'next campaign line');
   }
 
   /** The next campaign by the count (playlist[played], or the last one again
-   *  once the playlist is shorter than the count), due in about a minute.
-   *  Returns the line that says so. */
+   *  once the playlist is shorter than the count), due NEXT_DELAY_MS from
+   *  now, with a timer to load it then. Returns the line that says so. */
   private scheduleNext(b: BookingRow, played: number, nowMs: number): string {
     const playlist = JSON.parse(b.playlist_json) as string[];
     const next = playlist[played] ?? playlist[playlist.length - 1];
-    setNext(this.db, b.id, next, new Date(nowMs + NEXT_DELAY_MS).toISOString(), new Date(nowMs));
+    const at = nowMs + NEXT_DELAY_MS;
+    setNext(this.db, b.id, next, new Date(at).toISOString(), new Date(nowMs));
+    this.wakeAt(b.id, at, 'load');
     const name = consoleText(campaignRegistry(this.db).get(next)?.name ?? next, 60);
-    return `say [Booking] Next: ${name} in about a minute. !nextmap to pick another, !stay to replay this one, !end to finish.`;
+    return `say [Booking] Next: ${name} in ${NEXT_DELAY_MS / 1000} seconds. !nextmap to pick another, !stay to replay this one, !end to finish.`;
+  }
+
+  /** Load the due campaign, or end a due close, at `atMs`. A timer that
+   *  fires early, twice, or after a captain moved things on finds nothing due
+   *  (loadNext and dueEnd check) and does nothing. Never throws. */
+  private wakeAt(id: number, atMs: number, what: 'load' | 'close'): void {
+    this.later(Math.max(0, atMs - this.now()) + WAKE_SLACK_MS, () => {
+      try {
+        if (what === 'load') this.track(id, () => this.loadNext(id));
+        else this.closeIfDue(id);
+      } catch (err) {
+        console.error(`[booking] ${id}: the ${what} timer failed:`, err);
+      }
+    });
+  }
+
+  /** The close timer: end the booking now if its end is due. */
+  private closeIfDue(id: number): void {
+    const b = this.running(id);
+    if (!b) return;
+    const nowMs = this.now();
+    const due = this.dueEnd(b, nowMs);
+    if (due) this.endNow(id, due, new Date(nowMs));
+  }
+
+  /** A chat line together with the booking lines, so l4d_booking's clock
+   *  (next load, close) changes in the same burst that says it. Best effort. */
+  private sayWithState(id: number, line: string, what: string): void {
+    const b = getBooking(this.db, id);
+    const server = b && b.server_id !== null ? getServer(this.db, b.server_id) : undefined;
+    if (!b || !server) return;
+    void this.push(id, server, () => [...bookingLines(this.db, b), line], what);
   }
 
   /** One best-effort line on the booking's box, not awaited. */
@@ -2121,19 +2166,21 @@ export class BookingRunner {
     if (!b || b.server_id === null || b.ending_at !== null || (b.state !== 'ready' && b.state !== 'active')) return;
     const server = getServer(this.db, b.server_id);
     if (!server) return;
+    const played = gamesPlayed(this.db, id);
+    const left = b.games_allowed - played;
+    // Scheduling first, so the booking lines below carry the new next (and the cleared close).
+    const nextLine = played < b.games_allowed && b.next_campaign === null && !liveBookingGame(this.db, id) && this.sittingOnFinished(id)
+      ? this.scheduleNext(b, played, this.now())
+      : null;
     let lines: string[];
     try {
-      lines = bookingLines(this.db, b);
+      lines = bookingLines(this.db, getBooking(this.db, id) ?? b);
     } catch (err) {
       console.warn(`[booking] ${id}: +1 campaign notice not sent:`, err instanceof Error ? err.message : err);
       return;
     }
-    const played = gamesPlayed(this.db, id);
-    const left = b.games_allowed - played;
     lines.push(`say [Booking] +1 campaign: ${left} left to play, ${b.games_allowed} booked in all (until about ${b.ends_at.slice(11, 16)} UTC).`);
-    if (played < b.games_allowed && b.next_campaign === null && !liveBookingGame(this.db, id) && this.sittingOnFinished(id)) {
-      lines.push(this.scheduleNext(b, played, this.now()));
-    }
+    if (nextLine !== null) lines.push(nextLine);
     this.deps.rcon(server, lines).catch((err) => {
       console.warn(`[booking] ${id}: +1 campaign notice on ${server.name} failed:`, err instanceof Error ? err.message : err);
     });

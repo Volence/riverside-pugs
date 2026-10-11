@@ -9,7 +9,7 @@ import {
   addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
   createTournamentBooking, setNext, markActive, recordPresence, beginRecovery, dropBox, advancePlaylist, markReady,
 } from '../src/bookings/bookings.js';
-import { BookingRunner, CLEAR_LINES, allowLines, bookingLines, leftText, warnMark } from '../src/bookings/runner.js';
+import { BookingRunner, CLEAR_LINES, WAKE_SLACK_MS, allowLines, bookingLines, leftText, warnMark } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
@@ -27,6 +27,7 @@ let restarted: string[];
 let dms: { to: string; content: string }[];
 let preempts: number;
 let runner: BookingRunner;
+let timers: { ms: number; fn: () => void }[];
 
 const status = (b: { map: string; humans: string[] }) => [
   'hostname: test', `map     : ${b.map} at: 0 x, 0 y, 0 z`, `players : ${b.humans.length} humans, 0 bots (31 max)`,
@@ -68,6 +69,7 @@ function build(over: Partial<ConstructorParameters<typeof BookingRunner>[0]> = {
     notifier: new Notifier({ db, dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); } }),
     preempt: () => { preempts++; },
     sleep: async () => {},
+    later: (ms, fn) => { timers.push({ ms, fn }); },
     now: () => now,
     ...over,
   });
@@ -76,7 +78,7 @@ function build(over: Partial<ConstructorParameters<typeof BookingRunner>[0]> = {
 beforeEach(() => {
   db = openDb(':memory:');
   now = START - 2 * 24 * 60 * MIN;
-  sent = []; released = []; restarted = []; dms = []; preempts = 0; box = {};
+  timers = []; sent = []; released = []; restarted = []; dms = []; preempts = 0; box = {};
   const ins = db.prepare("INSERT INTO players (steamid, name, status, discord_id) VALUES (?, ?, 'active', ?)");
   P.forEach((id, i) => ins.run(id, `p${i}`, `d${i}`));
   setSetting(db, 'competitive_enabled', 'everyone');
@@ -681,7 +683,7 @@ describe('fix wave (final review)', () => {
 });
 
 describe('booked games (plan 4b)', () => {
-  const NEXT_DT = 'say [Booking] Next: Death Toll in about a minute. !nextmap to pick another, !stay to replay this one, !end to finish.';
+  const NEXT_DT = 'say [Booking] Next: Death Toll in 60 seconds. !nextmap to pick another, !stay to replay this one, !end to finish.';
   const CAPTAINS_DT = 'say [Booking] Death Toll: !nextmap, !stay, !end and !addcampaign are yours, captains.';
   /** Ruling 3: said when the finished-game count reaches games_allowed. */
   const CLOSE_1 = 'say [Booking] That was campaign 1 of 1. Type !addcampaign to play one more, or the server closes in 5 minutes.';
@@ -708,6 +710,64 @@ describe('booked games (plan 4b)', () => {
   }
   const events = (id: number, event: string) =>
     db.prepare('SELECT detail FROM booking_events WHERE booking_id = ? AND event = ? ORDER BY rowid').all(id, event) as { detail: string }[];
+
+  it('after a game the box is told the next load as an epoch, and a timer loads it on time, once, never early', async () => {
+    const id = await running();
+    box.ccc.humans = [P[0], P[1]];
+    now = START + 89 * MIN;
+    const game = insertGame(id, { state: 'completed', endedAt: now });
+    timers = [];
+    runner.onGameEnded(game);
+    await flush();
+    const at = now + MIN;
+    expect(cmds()).toEqual(expect.arrayContaining([`l4d_booking_next_at ${Math.floor(at / 1000)}`, 'l4d_booking_next_name "Death Toll"', NEXT_DT]));
+    expect(timers.map((t) => t.ms)).toEqual([MIN + WAKE_SLACK_MS]);
+    // Fired early: nothing loads.
+    timers[0]!.fn();
+    await runner.idle();
+    expect(cmds().some((c) => c.startsWith('changelevel'))).toBe(false);
+    sent = [];
+    now = at;
+    timers[0]!.fn();
+    await runner.idle();
+    // Fired twice: the second finds nothing due.
+    timers[0]!.fn();
+    await runner.idle();
+    expect(cmds().filter((c) => c.startsWith('changelevel'))).toEqual(['changelevel l4d_vs_smalltown01_caves']);
+    expect(cmds()).toContain('l4d_booking_next_at 0');
+    expect(getBooking(db, id)).toMatchObject({ playlist_pos: 1, next_campaign: null });
+  });
+
+  it('the closing grace ends on a timer at close_at, and the box was told the close as an epoch', async () => {
+    const id = await running(['no_mercy']);
+    now = START + 60 * MIN;
+    timers = [];
+    runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+    await flush();
+    const closeAt = now + 5 * MIN;
+    expect(cmds()).toContain(`l4d_booking_close_at ${Math.floor(closeAt / 1000)}`);
+    expect(cmds()).toContain(CLOSE_1);
+    expect(timers.map((t) => t.ms)).toEqual([5 * MIN + WAKE_SLACK_MS]);
+    timers[0]!.fn();
+    expect(getBooking(db, id)!.ending_at).toBeNull();
+    now = closeAt;
+    timers[0]!.fn();
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'done' });
+  });
+
+  it('+1 campaign during the close tells the box the close is off', async () => {
+    const id = await running(['no_mercy']);
+    now = START + 60 * MIN;
+    runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+    await flush();
+    sent = [];
+    expect(addCampaign(db, { bookingId: id, by: P[0], campaign: 'death_toll', now: new Date(now) }).ok).toBe(true);
+    runner.onExtended(id);
+    await flush();
+    expect(cmds()).toContain('l4d_booking_close_at 0');
+    expect(cmds()).toContain('l4d_booking_next_name "Death Toll"');
+  });
 
   it('setup turns on auto-track with the min players setting and the ruleset pause rules, and no log lines without an address', async () => {
     await running(['no_mercy']);
@@ -1446,7 +1506,7 @@ describe('booked games (plan 4b)', () => {
       now = START + 60 * MIN;
       finish(id);
       await flush();
-      expect(cmds()).toContain('say [Booking] Next: No Mercy in about a minute. !nextmap to pick another, !stay to replay this one, !end to finish.');
+      expect(cmds()).toContain('say [Booking] Next: No Mercy in 60 seconds. !nextmap to pick another, !stay to replay this one, !end to finish.');
       expect(getBooking(db, id)!.next_campaign).toBe('no_mercy');
     });
 
