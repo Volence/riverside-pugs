@@ -10,6 +10,8 @@ describe('series text', () => {
   it('says which games do not count', () => {
     expect(notCountedLabel({ state: 'completed' })).toBeNull();
     expect(notCountedLabel({ state: 'live' })).toBeNull();
+    expect(notCountedLabel({ state: 'pending' })).toBeNull();
+    expect(notCountedLabel({ state: 'configuring' })).toBeNull();
     expect(notCountedLabel({ state: 'aborted' })).toBe('Not finished, not counted');
     expect(notCountedLabel({ state: 'aborted', voided: true })).toBe('Voided, not counted');
   });

@@ -190,6 +190,13 @@ describe('Booking page', () => {
       expect(screen.queryByText(/ - .* p0's group|p0's group \d - \d/)).toBeNull();
     });
 
+    it('shows no series line when the server sends none (a tournament booking), though the rows stay', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ games: [{ ...GAME, state: 'completed' }], series: null }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText("p0's group 5 : 3 Mice");
+      expect(screen.queryByText(/p0's group \d - \d/)).toBeNull();
+    });
+
     const GAME = {
       matchId: 55, campaign: 'no_mercy', state: 'completed', scoreA: 3, scoreB: 5, sideA: 'b' as const,
       startedAt: '2026-10-02T20:00:00.000Z', endedAt: '2026-10-02T20:30:00.000Z',

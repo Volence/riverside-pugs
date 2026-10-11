@@ -440,6 +440,19 @@ describe('views', () => {
     expect(v.series).toEqual({ wins: { a: 1, b: 0 }, draws: 0, counted: 1 });
   });
 
+  it('bookingView gives no series for a tournament booking: the series engine decides that result', () => {
+    const id = create();
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, token, origin, kind, visibility, booking_id, booking_side_a, team_a_score, team_b_score, winner)
+       VALUES (?, 'completed', 'no_mercy', 'tt1', 'in_game', 'scrim', 'participants', ?, 'a', 300, 200, 'a')`,
+    ).run(currentSeasonId(db), id);
+    expect(bookingView(db, id, { steamid: P[0], staff: false })!.series).not.toBeNull();
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(id);
+    const v = bookingView(db, id, { steamid: P[0], staff: false })!;
+    expect(v.series).toBeNull();
+    expect(v.games).toHaveLength(1);
+  });
+
   it('bookingView counts campaigns: allowed, finished games played (an abort or a live game is not one), and the close deadline', () => {
     const id = create();
     const count = () => {

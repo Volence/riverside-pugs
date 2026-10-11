@@ -67,6 +67,14 @@ describe('admin feed', () => {
     expect(line).toContain(`https://pug.test/admin/people/${IDS[1]}`);
   });
 
+  it('a multi-line review note is quoted on one line, control characters turned to spaces', async () => {
+    publishAdminEvent({ kind: 'conduct_flag', steamid: IDS[1], where: 'review', text: 'kys\n\nyou\r\tlot\u0007', slurs: ['kys'], matchId: null, serverId: null, bookingId: 12 });
+    await settled();
+    const text = JSON.stringify(inFeed().at(-1)?.payload);
+    expect(text).toContain('wrote `kys  you  lot ` in a private scrim review');
+    expect(text).not.toContain('\\n\\n');
+  });
+
   it('team actions read as sentences with the team linked', async () => {
     const team = Number(db.prepare(
       `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by) VALUES ('Rats', 'rats', 'RR', 'RR', 'rats', ?, ?)`,

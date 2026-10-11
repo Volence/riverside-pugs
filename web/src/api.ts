@@ -2315,7 +2315,7 @@ export interface TeamScrim {
    *  and staff); every member may open the game links. */
   canView: boolean;
   games: { matchId: number; campaign: string; state: string; us: number; them: number; counted?: boolean; voided?: boolean }[];
-  series?: { us: number; them: number; draws: number; counted: number };
+  series?: { us: number; them: number; draws: number; counted: number } | null;
 }
 
 // ---------- bookings ----------
@@ -2352,7 +2352,6 @@ export interface ScrimRecord {
   pickup: ScrimReliability;
   teams: { teamId: number; slug: string; name: string; tag: string; record: ScrimReliability }[];
 }
-/** Mirrors src/scrims/reviews.ts's REVIEW_TAGS (plan 2 Ruling 5). */
 /** Mirrors src/scrims/reviews.ts's KNOWN_REVIEW_TAGS: the six offered since
  *  2026-10-11 and the retired good_comms, still on stored reviews. */
 export type ReviewTag = 'on_time' | 'easy_to_schedule' | 'flexible' | 'good_sport' | 'left_early' | 'toxic' | 'good_comms';
