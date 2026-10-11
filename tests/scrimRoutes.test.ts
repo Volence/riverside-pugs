@@ -179,6 +179,33 @@ describe('post, accept, confirm: the booking and its notices', () => {
     expect(otherAcceptId).toBeTypeOf('number');
   });
 
+  it('a confirm DMs why: the booked side\'s withdrawn post and accept (scrim_withdrawn), and a third party on that post (scrim_declined)', async () => {
+    const a = await post(P[0]);
+    const b = await post(P[0], { startsAt: new Date(START_MS + 30 * 60_000).toISOString() });
+    const c = await post(P[3], { startsAt: new Date(START_MS + 60 * 60_000).toISOString() });
+    await accept(b, P[2]);
+    await accept(c, P[0]);
+    const chosen = await accept(a, P[1]);
+    dms = [];
+    expect((await call('POST', `/api/scrims/accepts/${chosen}/confirm`, P[0])).statusCode).toBe(200);
+    const to = (s: string) => dms.filter((d) => d.to === discordOf(s)).map((d) => d.content);
+    expect(to(P[0]).filter((t) => t.startsWith('Your scrim post for') && t.endsWith('was withdrawn: your side booked another scrim at that time.'))).toHaveLength(1);
+    expect(to(P[0]).filter((t) => t.startsWith('Your accept of') && t.endsWith('was withdrawn: your side booked another scrim at that time.'))).toHaveLength(1);
+    expect(to(P[2]).filter((t) => t.endsWith('is closed: the posting side booked another scrim at that time.'))).toHaveLength(1);
+    expect(to(P[3])).toEqual([]); // the poster of the post P[0] had accepted is not DMed
+  });
+
+  it('a confirm that can never book declines the acceptance, says so, and DMs the accepter', async () => {
+    const a = await post(P[0]);
+    const acc = await accept(a, P[1]);
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[1]);
+    dms = [];
+    const r = await call('POST', `/api/scrims/accepts/${acc}/confirm`, P[0]);
+    expect(r.statusCode).toBe(400);
+    expect(r.json()).toEqual({ error: 'The accepting side can no longer play this scrim, so its acceptance was declined.', declined: true });
+    expect(dms.filter((d) => d.to === discordOf(P[1]) && d.content.endsWith('is closed: it could not be booked.'))).toHaveLength(1);
+  });
+
   it('a confirm calls only the runner\'s allocate(), never onCreated/onConfirmed, and each side gets exactly one scrim_booked DM', async () => {
     const calls: string[] = [];
     const stubRunner = {

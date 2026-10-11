@@ -7,10 +7,10 @@ import { whenUtc } from '../bookings/messages.js';
 import { getAccept, getPost, type AcceptRow, type PostRow } from './scrims.js';
 import { lengthLabel, showSr, sideSr, type ScrimSide } from './rules.js';
 
-/** The five scrim board notice types this module knows how to word (the
+/** The six scrim board notice types this module knows how to word (the
  *  scrim half of NotifyType; the booking half is worded in
  *  src/bookings/messages.ts). */
-export type ScrimNotifyType = 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined';
+export type ScrimNotifyType = 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined' | 'scrim_withdrawn';
 
 type SideRef = Pick<PostRow, 'team_id' | 'captain_steamid'>;
 
@@ -82,6 +82,14 @@ export function scrimMessage(
       }
       const why = extra.reason ?? 'the poster declined it';
       content = `Your scrim accept for ${posterLabel}'s post (${when}) is closed: ${escapeName(why)}.`;
+      break;
+    }
+    case 'scrim_withdrawn': {
+      // Owner ruling 2026-10-11: the side was booked over this time.
+      const why = escapeName(extra.reason ?? 'your side booked another scrim at that time');
+      content = extra.acceptId !== undefined
+        ? `Your accept of ${posterLabel}'s scrim post (${when}) was withdrawn: ${why}.`
+        : `Your scrim post for ${when} was withdrawn: ${why}.`;
       break;
     }
   }

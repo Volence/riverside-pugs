@@ -469,7 +469,7 @@ describe('confirmAccept', () => {
     if (!other.ok) throw new Error(other.error);
     const before = bookingCount();
     const r = confirmAccept(db, { acceptId: a, by: P[0], now: NOW });
-    expect(r).toEqual({ ok: false, error: 'allowance', text: BOOKING_ERRORS.allowance.text });
+    expect(r).toEqual({ ok: false, error: 'allowance', text: 'The accepting side already has as many upcoming bookings as allowed.' });
     expect(bookingCount()).toBe(before);
     expect(db.prepare('SELECT COUNT(*) AS n FROM booking_sides').get()).toEqual({ n: 2 });
     expect(postRow(id).status).toBe('pending');
@@ -478,14 +478,19 @@ describe('confirmAccept', () => {
     expect(confirmBooking(db, { bookingId: other.value.id, by: P[5], now: NOW }).ok).toBe(true);
   });
 
-  it('an accepter who lost access is refused and nothing is kept', () => {
+  it('an accepter who lost access is refused, nothing is kept, and the acceptance is declined', () => {
     const id = post();
     const a = accept(id, P[1]);
     db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[1]);
     // createBooking refuses a pickup opponent who is no longer an active player.
-    expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))).toBe('not_player');
+    const r = confirmAccept(db, { acceptId: a, by: P[0], now: NOW });
+    expect(r).toEqual({
+      ok: false, error: 'not_player', declined: true,
+      text: 'The accepting side can no longer play this scrim, so its acceptance was declined.',
+    });
     expect(bookingCount()).toBe(0);
-    expect(postRow(id).status).toBe('pending');
+    expect(acceptRow(a)).toMatchObject({ status: 'declined', responded_at: NOW.toISOString() });
+    expect(postRow(id).status).toBe('open');
   });
 });
 
@@ -732,12 +737,14 @@ describe('review fix round 1', () => {
     expect(postRow(id).status).toBe('withdrawn');
   });
 
-  it('a booking refusal from a confirm keeps the booking\'s own text', () => {
+  it('a confirm refusal says whose side it is about', () => {
     const id = post();
     const a = accept(id, P[1]);
     db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(P[1]);
-    expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))
-      .toEqual({ ok: false, error: 'not_player', text: BOOKING_ERRORS.not_player.text });
+    expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW })).toEqual({
+      ok: false, error: 'not_player', declined: true,
+      text: 'The accepting side can no longer play this scrim, so its acceptance was declined.',
+    });
     const id2 = post({ by: P[2], startsAt: '2026-10-03T20:00:00.000Z' });
     const a2 = accept(id2, P[3]);
     fillSlotAt('2026-10-03T20:00:00.000Z');
@@ -909,13 +916,15 @@ describe('blocks: a blocked pair never meets, whichever side blocked', () => {
     setRole(db, { teamId: cats, by: P[1], target: P[5], role: 'cocaptain' });
     expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))).toBe('not_available');
     expect(bookingCount()).toBe(0);
-    expect(acceptRow(a).status).toBe('pending');
+    expect(acceptRow(a).status).toBe('declined'); // a block never clears by waiting (NEVER_CLEARS)
 
     // The other direction: Cats blocked P[6], a plain member of Rats, who is
     // then made co-captain.
     setRole(db, { teamId: cats, by: P[1], target: P[5], role: 'member' });
     block(P[1], { teamId: cats }, { steamid: P[6] });
-    expect(err(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))).toBe('ok');
+    const post1 = post({ teamId: rats, startsAt: '2026-10-05T20:00:00.000Z' });
+    const a1 = accept(post1, P[1], { teamId: cats });
+    expect(err(confirmAccept(db, { acceptId: a1, by: P[0], now: NOW }))).toBe('ok');
     const post2 = post({ teamId: rats, startsAt: '2026-10-03T20:00:00.000Z' });
     const a2 = accept(post2, P[1], { teamId: cats });
     setRole(db, { teamId: rats, by: P[0], target: P[6], role: 'cocaptain' });
@@ -927,7 +936,7 @@ describe('blocks: a blocked pair never meets, whichever side blocked', () => {
     const a = accept(id, P[1]);
     db.prepare(`INSERT INTO scrim_blocks (blocker_steamid, target_steamid, created_by, created_at) VALUES (?, ?, ?, ?)`)
       .run(P[1], P[0], P[1], NOW.toISOString());
-    expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW })).toEqual({ ok: false, error: 'not_available' });
+    expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW })).toMatchObject({ ok: false, error: 'not_available', declined: true });
     expect(bookingCount()).toBe(0);
   });
 });
@@ -997,5 +1006,54 @@ describe('one side, one slot on the board (owner, 2026-10-11)', () => {
     for (const id of posts.slice(0, 3)) accept(id, P[3]);
     expect(err(acceptPost(db, { postId: posts[3], by: P[3], now: NOW }))).toBe('too_many_accepts');
     expect(SCRIM_ERRORS.too_many_accepts.text).toBe('That side already has 3 pending acceptances. Withdraw one first.');
+  });
+});
+
+describe('a confirm withdraws what overlaps the booked slot (owner, 2026-10-11)', () => {
+  it("withdraws both sides' other overlapping posts and pending acceptances, and leaves the rest", () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const mice = team(P[1], 'Mice', 'MM');
+    const a = post({ teamId: rats }); // 20:00, booked below as 20:00 to 23:00
+    const b = post({ teamId: rats, startsAt: '2026-10-02T21:00:00.000Z' });
+    const d = post({ teamId: rats, startsAt: '2026-10-04T20:00:00.000Z' });
+    const e = post({ by: P[1], teamId: mice, startsAt: '2026-10-02T19:00:00.000Z' });
+    const c = post({ by: P[5], startsAt: '2026-10-02T22:00:00.000Z' });
+    const onB = accept(b, P[6]);
+    const ratsOnC = accept(c, P[0], { teamId: rats });
+    const chosen = accept(a, P[1], { teamId: mice });
+    const r = value(confirmAccept(db, { acceptId: chosen, by: P[0], now: NOW }));
+    expect(r.withdrawn).toEqual({ posts: [b, e], postAccepts: [onB], accepts: [ratsOnC] });
+    expect(postRow(b).status).toBe('withdrawn');
+    expect(postRow(e).status).toBe('withdrawn');
+    expect(acceptRow(onB)).toMatchObject({ status: 'withdrawn', responded_at: NOW.toISOString() });
+    expect(acceptRow(ratsOnC)).toMatchObject({ status: 'withdrawn', responded_at: NOW.toISOString() });
+    expect(postRow(c).status).toBe('open'); // nothing else pending on it
+    expect(postRow(d).status).toBe('open'); // another day
+    expect(postRow(a).status).toBe('booked');
+  });
+
+  it('a second poster cannot then book the same side over that time', () => {
+    const one = post({ by: P[0] });
+    const two = post({ by: P[2], startsAt: '2026-10-02T21:00:00.000Z' });
+    const toOne = accept(one, P[1]);
+    const toTwo = accept(two, P[1]);
+    value(confirmAccept(db, { acceptId: toOne, by: P[0], now: NOW }));
+    expect(acceptRow(toTwo).status).toBe('withdrawn');
+    const before = bookingCount();
+    expect(err(confirmAccept(db, { acceptId: toTwo, by: P[2], now: NOW }))).toBe('wrong_state');
+    expect(bookingCount()).toBe(before);
+  });
+
+  it('a direct booking made after the accept makes the confirm refuse, worded for the accepting side, and keeps the acceptance', () => {
+    const id = post();
+    const a = accept(id, P[1]);
+    const direct = createBooking(db, { by: P[4], opponent: { steamid: P[1] }, startsAt: '2026-10-02T21:00:00.000Z', playlist: ['no_mercy'], now: NOW });
+    if (!direct.ok) throw new Error(direct.error);
+    value(confirmBooking(db, { bookingId: direct.value.id, by: P[1], now: NOW }) as ScrimResult<null>);
+    const before = bookingCount();
+    expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW }))
+      .toEqual({ ok: false, error: 'busy_them', text: 'The accepting side already has a booking at that time.' });
+    expect(bookingCount()).toBe(before);
+    expect(acceptRow(a).status).toBe('pending');
   });
 });
