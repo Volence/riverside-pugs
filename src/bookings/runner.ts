@@ -21,7 +21,7 @@ import { DEFAULT_GRACE_MINUTES, bookingLimits, byPriority, isLateCancel } from '
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
-  beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
+  beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox, markBoxRestarted,
   BOOKING_ERRORS, bookRoster, firstSurvivorSide, pressStartNow, startBookingNow, withdrawStartNow, type Result, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { classifyBox } from './recovery.js';
@@ -437,9 +437,6 @@ export class BookingRunner {
   private readonly announced = new Set<number>();
   /** Recovery attempts so far, per booking (plan 5); SETUP_TRIES at most. */
   private readonly recoverTries = new Map<number, number>();
-  /** Bookings just moved to another box by relocate: recoverOnce restarts
-   *  that box first, as setup does a fresh one (plan 5). */
-  private readonly freshBox = new Set<number>();
   /** Unanswered A2S queries in a row per booking while rcon fails (plan 5).
    *  In memory: a web restart starts the count again, which only delays a move. */
   private readonly a2sMisses = new Map<number, number>();
@@ -1246,7 +1243,6 @@ export class BookingRunner {
         continue;
       }
       console.log(`[booking] ${b.id} moves to ${s.name}`);
-      this.freshBox.add(b.id);
       this.track(b.id, () => this.recover(b.id));
     }
     if (preempt) this.deps.preempt();
@@ -1354,8 +1350,14 @@ export class BookingRunner {
   }
 
   private async recoverOnce(b: BookingRow, server: ServerRow): Promise<void> {
-    // A box just taken by a move gets the forced restart setup gives a fresh box.
-    if (this.freshBox.delete(b.id) && !(await this.deps.restart(server))) throw new Error('the new box did not come back from its restart');
+    // A box just taken by a move gets the forced restart setup gives a fresh
+    // box. The flag is a column (reholdBox sets it), so a web restart in
+    // between cannot lose it, and it clears only once the restart came back,
+    // so a retry after a failed restart restarts again.
+    if (b.fresh_box === 1) {
+      if (!(await this.deps.restart(server))) throw new Error('the new box did not come back from its restart');
+      markBoxRestarted(this.db, b.id);
+    }
     await waitForStartup(this.deps.rcon, server, this.sleep);
     await this.execVerified(server, b);
     const [version, mk] = await this.deps.rcon(server, ['l4d_booking_version', 'l4d_booking_id']);

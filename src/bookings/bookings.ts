@@ -66,6 +66,8 @@ export interface BookingRow {
   /** Crash recovery (plan 5): see src/db.ts. */
   recovering_at: string | null; recover_reason: 'restart' | 'gone' | null; lost_since: string | null;
   a2s_seen_at: string | null; up_alerted_at: string | null; recoveries: number; waiting_since: string | null;
+  /** 1 from reholdBox until the new box's forced restart came back (markBoxRestarted). */
+  fresh_box: number;
 }
 export interface SideRow {
   booking_id: number; side: Side; team_id: number | null; captain_steamid: string; confirmed_at: string | null;
@@ -1246,7 +1248,7 @@ export function dropBox(db: DB, id: number, now: Date): number | null {
 export function reholdBox(db: DB, id: number, serverId: number, now: Date): boolean {
   return db.transaction(() => {
     const changed = db.prepare(
-      `UPDATE bookings SET server_id = ?, waiting_since = NULL
+      `UPDATE bookings SET server_id = ?, waiting_since = NULL, fresh_box = 1
         WHERE id = ? AND server_id IS NULL AND waiting_since IS NOT NULL AND recovering_at IS NOT NULL AND ending_at IS NULL
           AND ? IN (SELECT id FROM servers WHERE status = 'idle' AND enabled = 1 AND ${NOT_HELD_SQL})`,
     ).run(serverId, id, serverId).changes > 0;
@@ -1255,6 +1257,11 @@ export function reholdBox(db: DB, id: number, serverId: number, now: Date): bool
     logEvent(db, id, null, 'box_moved', { serverId }, now);
     return true;
   })();
+}
+
+/** The box reholdBox took has had its forced restart: recovery goes on without another. */
+export function markBoxRestarted(db: DB, id: number): void {
+  db.prepare('UPDATE bookings SET fresh_box = 0 WHERE id = ?').run(id);
 }
 
 /** Staff move the booking to another box (plan T3c Ruling 13): the same

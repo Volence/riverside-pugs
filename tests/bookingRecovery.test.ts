@@ -514,6 +514,35 @@ describe('box gone', () => {
     for (let i = 0; i < 3; i++) { now += MIN; await runner.tick(); await runner.idle(); }
   };
 
+  it('a web restart between taking the new box and restarting it still restarts it first', async () => {
+    const id = await running();
+    // The old process got this far (relocate's reholdBox) and died.
+    beginRecovery(db, id, 'gone', new Date(now));
+    dropBox(db, id, new Date(now));
+    expect(reholdBox(db, id, 2, new Date(now))).toBe(true);
+    expect(getBooking(db, id)!.fresh_box).toBe(1);
+    restarted = [];
+    const fresh = build();
+    fresh.resume();
+    await fresh.idle();
+    expect(restarted).toEqual(['bb']);
+    expect(getBooking(db, id)).toMatchObject({ server_id: 2, recovering_at: null, fresh_box: 0 });
+  });
+
+  it('a restart that does not come back keeps the flag, so the retry restarts again', async () => {
+    const id = await running();
+    beginRecovery(db, id, 'gone', new Date(now));
+    dropBox(db, id, new Date(now));
+    reholdBox(db, id, 2, new Date(now));
+    let first = true;
+    const r = build({ restart: async (server) => { restarted.push(server.name); if (first) { first = false; return false; } box[server.name].type = PUB; box[server.name].map = 'l4d_vs_hospital01_apartment'; box[server.name].marker = ''; return true; } });
+    restarted = [];
+    r.resume();
+    await r.idle();
+    expect(restarted).toEqual(['bb', 'bb']);
+    expect(getBooking(db, id)!.fresh_box).toBe(0);
+  });
+
   it('is quiet before the limit, then moves to another box after rcon, heartbeat and A2S are silent for 3 minutes', async () => {
     runner = build({ a2s: async () => null });
     const id = await running();
