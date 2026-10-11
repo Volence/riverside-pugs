@@ -205,19 +205,28 @@ export interface BookingRunnerDeps {
   now?: () => number;
 }
 
+/** srcds writes every rcon command into its log (`rcon from "...": command
+ *  "..."`), the file and the logaddress stream alike, so a password or the
+ *  allowlist pushed in the clear sits in plain text there. Logging is off
+ *  around such lines, the way gameLines sends the log secret: BoxRcon awaits
+ *  each reply before sending the next line and srcds runs a command before it
+ *  answers, so the lines in between are never logged (proved on the local
+ *  box, plan 2026-10-11 Task 2). */
+export const quietLines = (lines: string[]): string[] => ['sv_rcon_log 0', ...lines, 'sv_rcon_log 1'];
+
 /** The lines that make a box the booking's: the plugin's cvars (which put
  *  the values back after every map load) and the engine cvars themselves. */
 export function bookingLines(db: DB, b: BookingRow): string[] {
   if (!/^[a-z0-9]+$/.test(b.password) || !/^[a-z0-9]+$/.test(b.tv_password)) throw new Error('booking password has unexpected characters');
   const [a, bs] = sidesOf(db, b.id);
   const notice = consoleText(`Booked: ${sideName(db, a)} vs ${sideName(db, bs)} until ${b.ends_at.slice(11, 16)} UTC`, 120);
-  return [
+  return quietLines([
     `l4d_booking_tv_password ${quoted(b.tv_password)}`,
     `l4d_booking_notice ${quoted(notice)}`,
     `l4d_booking_password ${quoted(b.password)}`,
     `sm_cvar sv_password ${quoted(b.password)}`,
     `sm_cvar tv_password ${quoted(b.tv_password)}`,
-  ];
+  ]);
 }
 
 /** The lines that make the box record the booking's games (plan 4b), and
@@ -273,7 +282,7 @@ export function allowLines(db: DB, b: BookingRow): string[] {
     `l4d_booking_grace ${settingNumber(db, 'booking_allow_grace_seconds', 60, { min: 15, max: 300, integer: true })}`,
     `l4d_booking_block ${settingNumber(db, 'booking_allow_block_minutes', 30, { min: 0, max: 240, integer: true })}`,
   );
-  return lines;
+  return quietLines(lines);
 }
 
 /** An rcon error names the command it was on: an allowlist line (add or

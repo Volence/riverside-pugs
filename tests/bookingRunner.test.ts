@@ -370,6 +370,29 @@ describe('bookingLines', () => {
   });
 });
 
+describe('rcon log hygiene (scrims in game, item 16)', () => {
+  it('wraps the passwords, the notice and the allowlist in sv_rcon_log 0 and 1', () => {
+    const id = book();
+    const b = getBooking(db, id)!;
+    const lines = bookingLines(db, b);
+    const off = lines.indexOf('sv_rcon_log 0');
+    const on = lines.indexOf('sv_rcon_log 1');
+    expect(off).toBe(0);
+    for (const secret of [
+      `l4d_booking_tv_password "${b.tv_password}"`, `l4d_booking_password "${b.password}"`,
+      `sm_cvar sv_password "${b.password}"`, `sm_cvar tv_password "${b.tv_password}"`,
+    ]) {
+      const i = lines.indexOf(secret);
+      expect(i).toBeGreaterThan(off);
+      expect(i).toBeLessThan(on);
+    }
+    const allow = allowLines(db, b);
+    expect(allow[0]).toBe('sv_rcon_log 0');
+    expect(allow.at(-1)).toBe('sv_rcon_log 1');
+    expect(allow.slice(1, -1)).not.toContain('sv_rcon_log 1');
+  });
+});
+
 describe('the minute watch', () => {
   const ready = async () => {
     const id = book();
@@ -1611,9 +1634,10 @@ describe('booked games (plan 4b)', () => {
       setSetting(db, 'booking_allow_grace_seconds', '90');
       setSetting(db, 'booking_allow_block_minutes', '0');
       const lines = allowLines(db, getBooking(db, id)!);
-      expect(lines).toHaveLength(6);
-      expect(lines[1].split(' ')).toHaveLength(11);
-      expect(lines[2].split(' ')).toHaveLength(5);
+      // The list inside sv_rcon_log 0 and 1 (item 16).
+      expect(lines).toHaveLength(8);
+      expect(lines[2].split(' ')).toHaveLength(11);
+      expect(lines[3].split(' ')).toHaveLength(5);
       expectList(lines, [P[0], P[1], ...STAFF], 90, 0);
     });
 
