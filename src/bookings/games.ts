@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { holdFor } from '../serverHolds.js';
+import { countsInSeries, seriesTally } from './series.js';
 import { getBooking, peopleOf, sideName, sidesOf, type BookingRow, type Side } from './bookings.js';
 
 /**
@@ -49,6 +50,11 @@ export interface BookingGameView {
   scoreA: number;
   scoreB: number;
   sideA: Side | null;
+  /** matches.winner, by MATCH team ('a' is whichever booking side sideA
+   *  names); null until the game has a result. */
+  winner: 'a' | 'b' | 'draw' | null;
+  /** A completed game staff voided afterwards (stored as aborted with voided_at). */
+  voided: boolean;
   /** matches.created_at: a game is adopted when it goes live, and an adopted
    *  match never stamps went_live_at (see SelfStartedMatches.commit). */
   startedAt: string;
@@ -62,15 +68,15 @@ export interface BookingGameView {
 /** Every game of a booking, oldest first. */
 export function bookingGames(db: DB, bookingId: number): BookingGameView[] {
   const rows = db.prepare(
-    `SELECT id, campaign, state, team_a_score, team_b_score, booking_side_a, created_at, ended_at, restored_at_map
+    `SELECT id, campaign, state, team_a_score, team_b_score, booking_side_a, winner, voided_at, created_at, ended_at, restored_at_map
        FROM matches WHERE booking_id = ? ORDER BY id`,
   ).all(bookingId) as {
     id: number; campaign: string; state: string; team_a_score: number; team_b_score: number;
-    booking_side_a: Side | null; created_at: string; ended_at: string | null; restored_at_map: number | null;
+    booking_side_a: Side | null; winner: 'a' | 'b' | 'draw' | null; voided_at: string | null; created_at: string; ended_at: string | null; restored_at_map: number | null;
   }[];
   return rows.map((r) => ({
     matchId: r.id, campaign: r.campaign, state: r.state, scoreA: r.team_a_score, scoreB: r.team_b_score,
-    sideA: r.booking_side_a, startedAt: r.created_at, endedAt: r.ended_at, restoredAtMap: r.restored_at_map,
+    sideA: r.booking_side_a, winner: r.winner, voided: r.voided_at !== null, startedAt: r.created_at, endedAt: r.ended_at, restoredAtMap: r.restored_at_map,
   }));
 }
 
@@ -88,7 +94,8 @@ export function liveBookingGame(db: DB, bookingId: number): { id: number; token:
 
 export interface TeamScrim {
   bookingId: number; purpose: 'scrim' | 'tournament'; opponent: string; startsAt: string; state: string;
-  games: { matchId: number; campaign: string; state: string; us: number; them: number }[];
+  games: { matchId: number; campaign: string; state: string; us: number; them: number; counted: boolean; voided: boolean }[];
+  series: { us: number; them: number; draws: number; counted: number };
 }
 
 /** A team's Scrims tab (plan 4c, ruling 5): every booking the team was a
@@ -104,13 +111,19 @@ export function teamScrims(db: DB, teamId: number): TeamScrim[] {
   ).all(teamId) as { id: number; purpose: 'scrim' | 'tournament'; state: string; starts_at: string; side: Side }[];
   return rows.map((r) => {
     const other = sidesOf(db, r.id).find((s) => s.side !== r.side)!;
+    const games = bookingGames(db, r.id);
     return {
       bookingId: r.id, purpose: r.purpose, opponent: sideName(db, other), startsAt: r.starts_at, state: r.state,
-      games: bookingGames(db, r.id).map((g) => ({
+      games: games.map((g) => ({
         matchId: g.matchId, campaign: g.campaign, state: g.state,
         us: g.sideA === r.side ? g.scoreA : g.scoreB,
         them: g.sideA === r.side ? g.scoreB : g.scoreA,
+        counted: countsInSeries(g), voided: g.voided,
       })),
+      series: (() => {
+        const t = seriesTally(games);
+        return { us: t.wins[r.side], them: t.wins[r.side === 'a' ? 'b' : 'a'], draws: t.draws, counted: t.counted };
+      })(),
     };
   });
 }
