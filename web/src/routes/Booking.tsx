@@ -6,6 +6,7 @@ import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { campaignsLabel, localLabel } from '../bookingTime';
 import { campaignName } from '../format';
+import { notCountedLabel, seriesLine } from '../series';
 import { confirm } from '../components/Confirm';
 import { RecordLine } from '../components/ScrimRecord';
 import { REVIEW_TAGS, REVIEW_TAG_LABELS, REVIEW_TAG_HINTS, REVIEW_NOTE_MAX } from '../components/ReviewSummary';
@@ -381,30 +382,39 @@ export function Booking({ id, session }: { id: string; session: Session }) {
           {open && s.confirmed && v.viewer.manages.includes(s.side) && <AddPerson id={v.id} side={s.side} onDone={setV} />}
         </Panel>
       ))}
-      {v.games.length > 0 && (
-        <Panel>
-          <h3>Games</h3>
-          <ul class="bookinggames">
-            {v.games.map((g) => {
-              const sideA = v.sides.find((s) => s.side === 'a')!;
-              const sideB = v.sides.find((s) => s.side === 'b')!;
-              const scoreA = g.sideA === 'b' ? g.scoreB : g.scoreA;
-              const scoreB = g.sideA === 'b' ? g.scoreA : g.scoreB;
-              return (
-                <li key={g.matchId}>
-                  <span>{campaignName(g.campaign)}</span>
-                  <span>{sideA.name} {scoreA} : {scoreB} {sideB.name}</span>
-                  <span class="muted">{g.state}</span>
-                  {g.restoredAtMap !== null && (
-                    <span class="muted">Stats from map {g.restoredAtMap + 1} on: the server restarted</span>
-                  )}
-                  <a href={`/match/${g.matchId}`}>View</a>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
-      )}
+      {v.games.length > 0 && (() => {
+        // The viewer's own side first (side a for staff and outsiders), in
+        // the series line and every row (owner, 2026-10-11).
+        const first: BookingSide = v.viewer.side ?? 'a';
+        const second: BookingSide = first === 'a' ? 'b' : 'a';
+        const nameOf = (s: BookingSide) => v.sides.find((x) => x.side === s)!.name;
+        return (
+          <Panel>
+            <h3>Games</h3>
+            {v.series && v.series.counted > 0 && (
+              <p><strong>{seriesLine(nameOf(first), v.series.wins[first], v.series.wins[second], nameOf(second), v.series.draws)}</strong></p>
+            )}
+            <ul class="bookinggames">
+              {v.games.map((g) => {
+                const scores = g.sideA === 'b' ? { a: g.scoreB, b: g.scoreA } : { a: g.scoreA, b: g.scoreB };
+                const notCounted = notCountedLabel(g);
+                return (
+                  <li key={g.matchId}>
+                    <span>{campaignName(g.campaign)}</span>
+                    <span>{nameOf(first)} {scores[first]} : {scores[second]} {nameOf(second)}</span>
+                    <span class="muted">{g.state}</span>
+                    {notCounted && <span class="muted">{notCounted}</span>}
+                    {g.restoredAtMap !== null && (
+                      <span class="muted">Stats from map {g.restoredAtMap + 1} on: the server restarted</span>
+                    )}
+                    <a href={`/match/${g.matchId}`}>View</a>
+                  </li>
+                );
+              })}
+            </ul>
+          </Panel>
+        );
+      })()}
       {actingSide && <Casters v={v} mySide={actingSide} open={open} busy={busy} act={act} />}
       {actingSide && v.review?.open && <ReviewCard v={v} mySide={actingSide} busy={busy} act={act} />}
       {v.reviews && <StaffReviews v={v} />}

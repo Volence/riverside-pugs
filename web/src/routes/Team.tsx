@@ -7,6 +7,7 @@ import type { Session } from '../hooks/useLiveState';
 import { toLogoPng } from '../teamLogo';
 import { campaignName } from '../format';
 import { placementText } from '../eventFormat';
+import { notCountedLabel, seriesLine } from '../series';
 import { RecordLine, reliableBadge } from '../components/ScrimRecord';
 import { opponentsReviewLine } from '../components/ReviewSummary';
 
@@ -216,6 +217,9 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                     {s.purpose === 'tournament' && <span class="teamchip">Tournament</span>}
                     <span class={`teamchip teamchip--${s.state}`}>{SCRIM_STATE_LABEL[s.state] ?? s.state}</span>
                   </div>
+                  {s.series && s.series.counted > 0 && (
+                    <p class="scrimrecord">{seriesLine(team.name, s.series.us, s.series.them, s.opponent, s.series.draws)}</p>
+                  )}
                   {s.games.length > 0 && (
                     <ul class="bookinggames">
                       {s.games.map((g) => (
@@ -223,6 +227,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                           <span>{campaignName(g.campaign)}</span>
                           <span>{g.us} : {g.them}</span>
                           <span class="muted">{g.state}</span>
+                          {notCountedLabel(g) && <span class="muted">{notCountedLabel(g)}</span>}
                           <a href={`/match/${g.matchId}`}>View</a>
                         </li>
                       ))}
