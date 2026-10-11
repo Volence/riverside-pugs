@@ -7,7 +7,7 @@ import {
   BOOKING_ERRORS, canUse, confirmBooking, createBooking, getBooking, managedSides, parsePlaylist, parseStart,
   sideRow, type BookingError,
 } from '../bookings/bookings.js';
-import { allowance, bookingLimits, capacityProblem, estimateMinutes, iso, upcomingCount, type Party } from '../bookings/rules.js';
+import { allowance, bookedDuring, bookingLimits, capacityProblem, estimateMinutes, iso, upcomingCount, type Party } from '../bookings/rules.js';
 import { inNight } from './night.js';
 import { nearestFreeSlot, proposedPlaylist, showSr, sideSr, srFits, type ScrimSide } from './rules.js';
 import { reliability, type Reliability } from './reliability.js';
@@ -58,6 +58,11 @@ export const SCRIM_ERRORS = {
   challenge_side: { status: 400, text: 'This challenge is for your team; accept it as that team.' },
   too_late: { status: 409, text: 'Too close to the start: an acceptance needs at least 30 minutes to be answered.' },
   too_many_posts: { status: 409, text: 'That side already has 3 open scrim posts. Withdraw one first.' },
+  // One side, one slot (owner, 2026-10-11), and the acceptance limits that came with it.
+  booked_then: { status: 409, text: 'That side already has a booked scrim at that time.' },
+  duplicate_post: { status: 409, text: 'That side already has an open post starting at that time.' },
+  accept_cooldown: { status: 409, text: 'The poster declined that side less than an hour ago. Try again later, or accept another post.' },
+  too_many_accepts: { status: 409, text: 'That side already has 3 pending acceptances. Withdraw one first.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type ScrimError = keyof typeof SCRIM_ERRORS;
 /** As bookings' Result. A refusal that came from the booking domain (in
@@ -87,6 +92,14 @@ export const ACCEPT_TTL_MS = 2 * 3_600_000;
 export const ACCEPT_CUTOFF_MS = 30 * 60_000;
 /** Open or pending posts one side (a team, or a pickup captain) may hold at once. */
 export const SCRIM_MAX_OPEN_POSTS = 3;
+/** Pending acceptances one side may hold at once, across all posts (owner
+ *  ruling 2026-10-11, mirroring the open-posts limit). Each acceptance DMs
+ *  every manager of the post, so this also caps what one side can send. */
+export const SCRIM_MAX_PENDING_ACCEPTS = 3;
+/** After a side's acceptance of a post is declined (by the poster, or by a
+ *  confirm that could never book it), that side waits this long before
+ *  accepting the same post again. Withdrawing your own has no wait. */
+export const ACCEPT_COOLDOWN_MS = 60 * 60_000;
 
 // ---------- reads and helpers ----------
 
@@ -141,6 +154,28 @@ function openPostCount(db: DB, s: SideRef): number {
     ? db.prepare("SELECT COUNT(*) AS n FROM scrim_posts WHERE status IN ('open','pending') AND team_id = ?").get(s.team_id)
     : db.prepare("SELECT COUNT(*) AS n FROM scrim_posts WHERE status IN ('open','pending') AND team_id IS NULL AND captain_steamid = ?").get(s.captain_steamid);
   return (row as { n: number }).n;
+}
+/** Whether the side already has an open or pending post starting exactly at
+ *  `startsAt`: a second one is an exact duplicate (owner, 2026-10-11), as
+ *  posts 3 and 4 of the first live scrim were, 6 seconds apart. */
+export function openPostAt(db: DB, s: SideRef, startsAt: string): boolean {
+  const row = s.team_id !== null
+    ? db.prepare("SELECT 1 FROM scrim_posts WHERE status IN ('open','pending') AND starts_at = ? AND team_id = ?").get(startsAt, s.team_id)
+    : db.prepare("SELECT 1 FROM scrim_posts WHERE status IN ('open','pending') AND starts_at = ? AND team_id IS NULL AND captain_steamid = ?").get(startsAt, s.captain_steamid);
+  return row !== undefined;
+}
+function pendingAcceptCount(db: DB, s: SideRef): number {
+  const row = s.team_id !== null
+    ? db.prepare("SELECT COUNT(*) AS n FROM scrim_accepts WHERE status = 'pending' AND team_id = ?").get(s.team_id)
+    : db.prepare("SELECT COUNT(*) AS n FROM scrim_accepts WHERE status = 'pending' AND team_id IS NULL AND captain_steamid = ?").get(s.captain_steamid);
+  return (row as { n: number }).n;
+}
+/** This side's acceptance of this post was declined inside ACCEPT_COOLDOWN_MS. */
+function declinedLately(db: DB, postId: number, s: SideRef, nowMs: number): boolean {
+  const row = (s.team_id !== null
+    ? db.prepare("SELECT MAX(responded_at) AS at FROM scrim_accepts WHERE post_id = ? AND status = 'declined' AND team_id = ?").get(postId, s.team_id)
+    : db.prepare("SELECT MAX(responded_at) AS at FROM scrim_accepts WHERE post_id = ? AND status = 'declined' AND team_id IS NULL AND captain_steamid = ?").get(postId, s.captain_steamid)) as { at: string | null };
+  return row.at !== null && Date.parse(row.at) + ACCEPT_COOLDOWN_MS > nowMs;
 }
 
 /** Once nothing is left pending on a pending post, it is open again. */
@@ -229,6 +264,9 @@ export function createPost(db: DB, o: {
     const side: SideRef = { team_id: teamId, captain_steamid: captain };
     // A blocked pair cannot challenge each other, whichever side blocked.
     if (targetId !== null && blocked(db, partyOf(side), { teamId: targetId })) return fail('not_available');
+    if (openPostAt(db, side, iso(startMs))) return fail('duplicate_post');
+    // A side holding a booked slot posts nothing that overlaps it (owner, 2026-10-11).
+    if (bookedDuring(db, partyOf(side), startMs, startMs + minutes * 60_000)) return fail('booked_then');
     if (openPostCount(db, side) >= SCRIM_MAX_OPEN_POSTS) return fail('too_many_posts');
     if (capacityProblem(db, { region, startMs, endMs: startMs + minutes * 60_000 }) !== null) return fail('no_capacity');
     if (outOfAllowance(db, partyOf(side), nowMs)) return fail('allowance');
@@ -333,6 +371,12 @@ export function acceptPost(db: DB, o: {
       ? db.prepare("SELECT 1 FROM scrim_accepts WHERE post_id = ? AND status = 'pending' AND team_id = ?").get(p.id, side.team_id)
       : db.prepare("SELECT 1 FROM scrim_accepts WHERE post_id = ? AND status = 'pending' AND team_id IS NULL AND captain_steamid = ?").get(p.id, o.by);
     if (already) return fail('already_accepted');
+    if (declinedLately(db, p.id, side, nowMs)) return fail('accept_cooldown');
+    if (pendingAcceptCount(db, side) >= SCRIM_MAX_PENDING_ACCEPTS) return fail('too_many_accepts');
+    // Checked against the post's block; the confirm checks the merged
+    // playlist's real slot through the booking domain (bookedDuring there).
+    const postStart = Date.parse(p.starts_at);
+    if (bookedDuring(db, partyOf(side), postStart, postStart + p.block_minutes * 60_000)) return fail('booked_then');
     if (outOfAllowance(db, partyOf(side), nowMs)) return fail('allowance');
 
     const id = Number(db.prepare(

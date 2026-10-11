@@ -61,7 +61,7 @@ describe('ScrimPoster', () => {
     if (!team.ok) throw new Error(team.error);
     const targetTeamId = team.value.id;
     const challengeId = value(createPost(db, {
-      by: P[0], startsAt: START, minutes: 90, campaigns: ['no_mercy'], srRange: null, note: '', targetTeamId, now: NOW,
+      by: P[0], startsAt: '2026-10-03T20:00:00.000Z', minutes: 90, campaigns: ['no_mercy'], srRange: null, note: '', targetTeamId, now: NOW,
     })).id;
 
     await poster.tickNow();

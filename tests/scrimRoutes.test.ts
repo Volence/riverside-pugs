@@ -324,7 +324,7 @@ describe('direct challenges', () => {
     db.prepare("UPDATE players SET is_admin = 1 WHERE steamid = ?").run(P[1]);
     dms.length = 0;
     // Now P[1] can use the board: only P[1] is DMed, not the co-captain P[2].
-    await post(P[0], { teamId: rats, targetTeamId: mice });
+    await post(P[0], { teamId: rats, targetTeamId: mice, startsAt: new Date(START_MS + 86_400_000).toISOString() });
     expect(dms.map((d) => d.to)).toEqual([discordOf(P[1])]);
   });
 });
