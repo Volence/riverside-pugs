@@ -5,7 +5,7 @@ import { setSetting } from '../src/settings.js';
 import { createTeam, disbandTeam, invitePlayer, respondInvite, setRole } from '../src/teams/teams.js';
 import { BOOKING_ERRORS, cancelBooking, confirmBooking, createBooking, getBooking, sideRow, peopleOf } from '../src/bookings/bookings.js';
 import {
-  acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, withdrawAccept, withdrawPost,
+  acceptPost, board, confirmAccept, createPost, declineAccept, expire, repostFromBooking, SCRIM_ERRORS, withdrawAccept, withdrawPost,
   type ScrimResult,
 } from '../src/scrims/scrims.js';
 import { blockTarget } from '../src/scrims/blocks.js';
@@ -153,8 +153,8 @@ describe('createPost', () => {
     expect(r(100.5)).toBe('bad_sr_range');
     expect(r('100')).toBe('bad_sr_range');
     expect(r(50)).toBe('ok');
-    expect(r(1000)).toBe('ok');
-    expect(r(null)).toBe('ok');
+    expect(err(createPost(db, postInput({ srRange: 1000, startsAt: '2026-10-03T20:00:00.000Z' })))).toBe('ok');
+    expect(err(createPost(db, postInput({ srRange: null, startsAt: '2026-10-04T20:00:00.000Z' })))).toBe('ok');
   });
 
   it('a note is at most 200 characters after trimming and has no slurs', () => {
@@ -163,7 +163,7 @@ describe('createPost', () => {
     expect(r(`  ${'x'.repeat(200)}  `)).toBe('ok');
     expect(r(42)).toBe('bad_note');
     expect(r('come play you f a g g o t s')).toBe('note_slur');
-    expect(r(undefined)).toBe('ok');
+    expect(err(createPost(db, postInput({ note: undefined, startsAt: '2026-10-03T20:00:00.000Z' })))).toBe('ok');
   });
 
   it('a challenge target must be a live team that is not the poster\'s own', () => {
@@ -929,5 +929,73 @@ describe('blocks: a blocked pair never meets, whichever side blocked', () => {
       .run(P[1], P[0], P[1], NOW.toISOString());
     expect(confirmAccept(db, { acceptId: a, by: P[0], now: NOW })).toEqual({ ok: false, error: 'not_available' });
     expect(bookingCount()).toBe(0);
+  });
+});
+
+describe('one side, one slot on the board (owner, 2026-10-11)', () => {
+  /** P[0] against P[1] at START with one campaign: a 90 minute slot, 20:00 to 21:30. */
+  const bookPair = (a = P[0], b = P[1], startsAt = START): number => {
+    const r = createBooking(db, { by: a, opponent: { steamid: b }, startsAt, playlist: ['no_mercy'], now: NOW });
+    if (!r.ok) throw new Error(r.error);
+    value(confirmBooking(db, { bookingId: r.value.id, by: b, now: NOW }) as ScrimResult<null>);
+    return r.value.id;
+  };
+  // A default post (no_mercy, death_toll) is a 180 minute block.
+
+  it('a side holding a booking cannot post a block that overlaps it; back to back is fine', () => {
+    bookPair();
+    expect(err(createPost(db, postInput({ startsAt: '2026-10-02T18:00:00.000Z' })))).toBe('booked_then');
+    expect(err(createPost(db, postInput({ by: P[1], startsAt: '2026-10-02T21:00:00.000Z' })))).toBe('booked_then');
+    expect(err(createPost(db, postInput({ startsAt: '2026-10-02T17:00:00.000Z' })))).toBe('ok'); // ends at 20:00
+    expect(err(createPost(db, postInput({ startsAt: '2026-10-02T21:30:00.000Z' })))).toBe('ok'); // starts at 21:30
+  });
+
+  it('a cancelled booking frees the slot', () => {
+    const id = bookPair();
+    cancelBooking(db, { bookingId: id, by: P[0], now: NOW });
+    expect(err(createPost(db, postInput({ startsAt: '2026-10-02T21:00:00.000Z' })))).toBe('ok');
+  });
+
+  it("a team's booking does not stop its captain posting as a pickup, and the reverse", () => {
+    const rats = team(P[0], 'Rats', 'RR');
+    const r = createBooking(db, { by: P[0], teamId: rats, opponent: { steamid: P[1] }, startsAt: START, playlist: ['no_mercy'], now: NOW });
+    if (!r.ok) throw new Error(r.error);
+    confirmBooking(db, { bookingId: r.value.id, by: P[1], now: NOW });
+    expect(err(createPost(db, postInput({ teamId: rats, startsAt: '2026-10-02T21:00:00.000Z' })))).toBe('booked_then');
+    expect(err(createPost(db, postInput({ startsAt: '2026-10-02T21:00:00.000Z' })))).toBe('ok'); // P[0] as a pickup
+  });
+
+  it("refuses an acceptance whose post block overlaps the accepter's booking", () => {
+    bookPair();
+    const id = post({ by: P[2], startsAt: '2026-10-02T20:30:00.000Z' });
+    expect(err(acceptPost(db, { postId: id, by: P[1], now: NOW }))).toBe('booked_then');
+    expect(err(acceptPost(db, { postId: id, by: P[3], now: NOW }))).toBe('ok');
+  });
+
+  it('refuses an exact duplicate by the same side, but not another side at that time, nor a fresh post once the first is gone', () => {
+    const first = post();
+    expect(err(createPost(db, postInput()))).toBe('duplicate_post');
+    expect(err(createPost(db, postInput({ by: P[1] })))).toBe('ok');
+    value(withdrawPost(db, { postId: first, by: P[0], now: NOW }));
+    expect(err(createPost(db, postInput()))).toBe('ok');
+    expect(SCRIM_ERRORS.duplicate_post.text).toBe('That side already has an open post starting at that time.');
+    expect(SCRIM_ERRORS.booked_then.text).toBe('That side already has a booked scrim at that time.');
+  });
+
+  it('a side the poster declined waits an hour before accepting the same post again; withdrawing your own has no wait', () => {
+    const id = post();
+    const a = accept(id, P[3]);
+    value(declineAccept(db, { acceptId: a, by: P[0], now: NOW }));
+    expect(err(acceptPost(db, { postId: id, by: P[3], now: at(NOW.toISOString(), 59) }))).toBe('accept_cooldown');
+    expect(err(acceptPost(db, { postId: id, by: P[3], now: at(NOW.toISOString(), 60) }))).toBe('ok');
+    const other = post({ by: P[2] });
+    expect(err(acceptPost(db, { postId: other, by: P[3], now: at(NOW.toISOString(), 1) }))).toBe('ok'); // another post: no wait
+  });
+
+  it('a side holds at most 3 pending acceptances', () => {
+    const posts = [P[0], P[1], P[2], P[4]].map((by, i) => post({ by, startsAt: `2026-10-0${2 + i}T20:00:00.000Z` }));
+    for (const id of posts.slice(0, 3)) accept(id, P[3]);
+    expect(err(acceptPost(db, { postId: posts[3], by: P[3], now: NOW }))).toBe('too_many_accepts');
+    expect(SCRIM_ERRORS.too_many_accepts.text).toBe('That side already has 3 pending acceptances. Withdraw one first.');
   });
 });
