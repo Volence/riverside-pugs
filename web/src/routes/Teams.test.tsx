@@ -73,6 +73,21 @@ describe('Teams', () => {
     expect(await screen.findByText('Another team already has that name.')).toBeTruthy();
   });
 
+  it('heads the page with the Compete tabs, Teams current, and none while closed', async () => {
+    mockTeams.list.mockResolvedValue({ teams: [] });
+    mockTeams.mine.mockResolvedValue({ teams: [], invites: [], canCreate: true });
+    const { unmount } = render(<Teams session={signedIn} />);
+    const strip = await screen.findByRole('navigation', { name: 'Compete' });
+    const current = [...strip.querySelectorAll('a')].filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(current.map((a) => a.textContent)).toEqual(['Teams']);
+    unmount();
+    mockTeams.list.mockRejectedValue(new ApiError(404, 'not found'));
+    mockTeams.mine.mockRejectedValue(new ApiError(404, 'not found'));
+    render(<Teams session={signedIn} />);
+    await screen.findByText('Teams are not open yet.');
+    expect(screen.queryByRole('navigation', { name: 'Compete' })).toBeNull();
+  });
+
   it('shows nothing but a not-found line when the switch is closed', async () => {
     mockTeams.list.mockRejectedValue(new ApiError(404, 'not found'));
     mockTeams.mine.mockRejectedValue(new ApiError(404, 'not found'));

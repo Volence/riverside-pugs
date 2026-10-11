@@ -3,6 +3,7 @@ import { useLocation } from 'preact-iso';
 import { ApiError, teamsApi, type MyTeamItem, type TeamInviteItem, type TeamListItem } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { TeamBadge } from '../components/TeamBadge';
 // Scrims.tsx imports TeamBadge from here; kept so that file need not change.
@@ -87,6 +88,7 @@ export function Teams({ session }: { session: Session }) {
 
   return (
     <main class="page page--profile teampage">
+      <CompeteTabs active="teams" />
       <PageHeader eyebrow="Competitive" title="Teams" aside={mine?.canCreate && !showForm
         ? <button class="btn btn--ghost" onClick={() => setCreating(true)}>Start a team</button>
         : undefined} />

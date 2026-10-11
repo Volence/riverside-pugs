@@ -94,6 +94,13 @@ describe('Scrims page', () => {
     expect(screen.getAllByText('Mice').length).toBeGreaterThan(0);
   });
 
+  it('heads the board with the Compete tabs, Scrims current', async () => {
+    renderScrims();
+    const strip = await screen.findByRole('navigation', { name: 'Compete' });
+    const current = [...strip.querySelectorAll('a')].filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(current.map((a) => a.textContent)).toEqual(['Scrims']);
+  });
+
   it('a side\'s name links to its team page, or a pickup group to its captain\'s profile', async () => {
     renderScrims();
     await screen.findByText('Rats');

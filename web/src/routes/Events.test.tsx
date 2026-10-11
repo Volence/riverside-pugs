@@ -62,6 +62,19 @@ describe('Events', () => {
     expect(screen.queryByText('Past')).toBeNull();
   });
 
+  it('heads the page with the Compete tabs, Events current, and none while closed', async () => {
+    mockEvents.list.mockResolvedValue({ events: [] });
+    const { unmount } = render(<Events session={session} />);
+    const strip = await screen.findByRole('navigation', { name: 'Compete' });
+    const current = [...strip.querySelectorAll('a')].filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(current.map((a) => a.textContent)).toEqual(['Events']);
+    unmount();
+    mockEvents.list.mockRejectedValue(new ApiError(404, 'not found'));
+    render(<Events session={session} />);
+    await screen.findByText('Events are not open yet.');
+    expect(screen.queryByRole('navigation', { name: 'Compete' })).toBeNull();
+  });
+
   it('says events are not open when the switch keeps the viewer out', async () => {
     mockEvents.list.mockRejectedValue(new ApiError(404, 'not found'));
     render(<Events session={session} />);

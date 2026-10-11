@@ -142,6 +142,13 @@ describe('Bookings page', () => {
     expect(screen.queryByText('Your pickup record')).toBeNull();
   });
 
+  it('heads the page with the Compete tabs, Bookings current', async () => {
+    render(<Bookings session={session} />);
+    const strip = await screen.findByRole('navigation', { name: 'Compete' });
+    const current = [...strip.querySelectorAll('a')].filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(current.map((a) => a.textContent)).toEqual(['Bookings']);
+  });
+
   it('a closed switch says so', async () => {
     const { ApiError } = await import('../api');
     mockBookings.mine.mockRejectedValue(new ApiError(404, 'not found'));
