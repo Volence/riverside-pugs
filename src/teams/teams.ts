@@ -3,7 +3,7 @@ import type { DB } from '../db.js';
 import { findSlurs, foldLookalikes } from '../slurs.js';
 import { DEFAULT_IGNORABLE, hasUnsafeChars } from '../profileFields.js';
 import { settingNumber } from '../settings.js';
-import { inGoodStanding } from '../standing.js';
+import { inGoodStanding, standingOf } from '../standing.js';
 import { getPlayer } from '../players.js';
 import { competitiveAccess } from './access.js';
 
@@ -70,6 +70,22 @@ export type TeamError = keyof typeof TEAM_ERRORS;
 export type Result<T> = { ok: true; value: T } | { ok: false; error: TeamError };
 export const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 export const fail = (error: TeamError): { ok: false; error: TeamError } => ({ ok: false, error });
+
+/** Out of the picture for good, not just for now: merged away, unknown, or
+ *  banned with no end (a permanent ban, or a legacy banned status with no
+ *  ban row behind it). A timed ban (the automatic abandon ban, a 3-day
+ *  conduct ban) is not this: a captain serving one keeps the team, and
+ *  their posts stay up. Used where losing the role or the post would
+ *  outlast the ban. */
+export function outForGood(db: DB, steamid: string, now = new Date()): boolean {
+  const s = standingOf(db, getPlayer(db, steamid), now);
+  if (s === 'merged' || s === 'unknown') return true;
+  if (s !== 'banned') return false;
+  const bans = db.prepare(
+    'SELECT expires_at FROM bans WHERE player_id = ? AND lifted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)',
+  ).all(steamid, now.toISOString()) as { expires_at: string | null }[];
+  return bans.length === 0 || bans.some((b) => b.expires_at === null);
+}
 
 export function membershipCap(db: DB): number {
   return settingNumber(db, 'team_membership_cap', 3, { integer: true, min: 1, max: 10 });
@@ -508,9 +524,10 @@ function settleCaptaincy(db: DB, teamId: number, now: string): { disbanded: bool
   }
   const current = members.find((m) => m.role === 'captain');
   if (current) return { disbanded: false, captain: current.steamid };
-  // A banned or held member cannot log in to run the team; pass over them
-  // unless nobody else is left.
-  const next = members.find((m) => inGoodStanding(db, m.steamid)) ?? members[0];
+  // A member banned for good cannot run the team; pass over them unless
+  // nobody else is left (someone on a timed ban is back soon, so they keep
+  // their place in line, though one in good standing goes first).
+  const next = members.find((m) => inGoodStanding(db, m.steamid)) ?? members.find((m) => !outForGood(db, m.steamid)) ?? members[0];
   db.prepare("UPDATE team_members SET role = 'captain' WHERE id = ?").run(next.id);
   db.prepare('UPDATE teams SET captain_steamid = ? WHERE id = ?').run(next.steamid, teamId);
   return { disbanded: false, captain: next.steamid };
@@ -570,11 +587,12 @@ export function transferCaptain(db: DB, o: { teamId: number; by: string; target:
   return db.transaction((): Result<null> => {
     const team = liveTeam(db, o.teamId);
     if (!team) return fail('not_found');
-    // A co-captain may take the team over from a captain who is banned or on
-    // hold: that captain cannot log in, and every captain-only action (and
-    // booking the team as an opponent) would otherwise wait on staff.
+    // A co-captain may take the team over from a captain banned for good:
+    // that captain will never log in again, and every captain-only action
+    // (and booking the team as an opponent) would otherwise wait on staff.
+    // Not for a timed ban: nothing would hand the team back when it ends.
     const mine = roleOf(db, team.id, o.by);
-    const captainOut = mine === 'cocaptain' && !inGoodStanding(db, team.captain_steamid);
+    const captainOut = mine === 'cocaptain' && outForGood(db, team.captain_steamid);
     if (!o.staff && mine !== 'captain' && !captainOut) return fail('not_allowed');
     const theirs = roleOf(db, team.id, o.target);
     if (!theirs) return fail('not_member');

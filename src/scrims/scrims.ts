@@ -1,9 +1,8 @@
 import type { DB } from '../db.js';
 import { getPlayer } from '../players.js';
-import { inGoodStanding } from '../standing.js';
 import { getSetting, settingNumber } from '../settings.js';
 import { findSlurs } from '../slurs.js';
-import { activeMembers, getTeam, myTeams, roleOf } from '../teams/teams.js';
+import { activeMembers, getTeam, myTeams, outForGood, roleOf } from '../teams/teams.js';
 import {
   BOOKING_ERRORS, canUse, confirmBooking, createBooking, getBooking, managedSides, parsePlaylist, parseStart,
   sideRow, type BookingError,
@@ -171,13 +170,14 @@ function postGone(db: DB, p: PostRow): boolean {
   return (p.team_id !== null && teamGone(db, p.team_id)) || (p.target_team_id !== null && teamGone(db, p.target_team_id));
 }
 /** Whether anyone could still run this side: a pickup captain, or one of a
- *  team's captain and co-captains, in good standing (not banned or merged
- *  away). A side nobody can run never confirms, so its post or acceptance
- *  only times out. The rollout switch is not asked: flipping it must not
- *  wipe the board. */
+ *  team's captain and co-captains, not banned for good (outForGood: a
+ *  timed ban, like the automatic abandon ban, ends, and the post would be
+ *  gone for nothing). A side nobody can run never confirms, so its post or
+ *  acceptance only times out. The rollout switch is not asked: flipping it
+ *  must not wipe the board. */
 function sideCanPlay(db: DB, s: Pick<PostRow, 'team_id' | 'captain_steamid'>): boolean {
-  if (s.team_id === null) return inGoodStanding(db, s.captain_steamid);
-  return activeMembers(db, s.team_id).some((m) => isManagerRole(m.role) && inGoodStanding(db, m.steamid));
+  if (s.team_id === null) return !outForGood(db, s.captain_steamid);
+  return activeMembers(db, s.team_id).some((m) => isManagerRole(m.role) && !outForGood(db, m.steamid));
 }
 /** A direct challenge does not exist for anyone managing neither side, so
  *  every action on it answers them not_found rather than not_manager. */

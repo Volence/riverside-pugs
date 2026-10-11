@@ -55,6 +55,11 @@ describe('lookalike letters', () => {
   it('ordinary Russian chat is not read as a slur', () => {
     expect(findSlurs('привет как дела')).toEqual([]);
     expect(findSlurs('сок рак мех кот')).toEqual([]);
+    // Ukrainian "і" is a lookalike, but the words around it are not: never
+    // glued into a run of single letters (review finding, 2026-10-11).
+    expect(findSlurs('як і як це працює')).toEqual([]);
+    expect(findSlurs('як він і як це')).toEqual([]);
+    expect(findSlurs('αυτό είναι καλό')).toEqual([]);
   });
 
   it('a lookalike name keys the same as the Latin one', () => {
@@ -86,6 +91,23 @@ describe('a banned captain', () => {
     expect(transferCaptain(db, { teamId: id, by: P[2], target: P[2] })).toEqual({ ok: false, error: 'not_allowed' });
     expect(transferCaptain(db, { teamId: id, by: P[1], target: P[1] })).toEqual({ ok: true, value: null });
     expect(roleOf(db, id, P[1])).toBe('captain');
+  });
+});
+
+describe('a timed ban is not the end', () => {
+  const timedBan = (steamid: string, minutes: number) => {
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, 'abandon', 'system', ?, ?)")
+      .run(steamid, new Date().toISOString(), new Date(Date.now() + minutes * 60_000).toISOString());
+    db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(steamid);
+  };
+
+  it('a co-captain cannot take the team from a captain serving a timed ban, but can from a permanent one', () => {
+    const id = team(P[0], [P[1]]);
+    setRole(db, { teamId: id, by: P[0], target: P[1], role: 'cocaptain' });
+    timedBan(P[0], 60);
+    expect(transferCaptain(db, { teamId: id, by: P[1], target: P[1] })).toEqual({ ok: false, error: 'not_allowed' });
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at, expires_at) VALUES (?, 'cheating', 'staff', ?, NULL)").run(P[0], new Date().toISOString());
+    expect(transferCaptain(db, { teamId: id, by: P[1], target: P[1] }).ok).toBe(true);
   });
 });
 
