@@ -59,6 +59,14 @@ describe('admin feed', () => {
     expect(JSON.stringify(banned)).toContain('same connection as banned');
   });
 
+  it('a slur in a scrim review note is quoted, with the booking and the file linked', async () => {
+    publishAdminEvent({ kind: 'conduct_flag', steamid: IDS[1], where: 'review', text: 'kys', slurs: ['kys'], matchId: null, serverId: null, bookingId: 12 });
+    await settled();
+    const line = JSON.stringify(inFeed().at(-1)?.payload);
+    expect(line).toContain('wrote `kys` in a private scrim review on [booking #12](https://pug.test/booking/12) (kys).');
+    expect(line).toContain(`https://pug.test/admin/people/${IDS[1]}`);
+  });
+
   it('team actions read as sentences with the team linked', async () => {
     const team = Number(db.prepare(
       `INSERT INTO teams (name, name_key, tag, tag_key, slug, captain_steamid, created_by) VALUES ('Rats', 'rats', 'RR', 'RR', 'rats', ?, ?)`,

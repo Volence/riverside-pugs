@@ -3,7 +3,8 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { parseLogDatagram } from '../src/logParse.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
-import { handleConduct } from '../src/conductFlags.js';
+import { handleConduct, flagWrittenConduct } from '../src/conductFlags.js';
+import { conductAdapter } from '../src/admin/timeline/conduct.js';
 import { addAlias, canonicalise } from '../src/aliases.js';
 
 const P = '76561199048276493';
@@ -83,6 +84,18 @@ describe('handleConduct', () => {
     unsubscribe = subscribeAdminEvents((e) => posted.push(e));
   });
   afterEach(() => unsubscribe());
+
+  it('a slur in a scrim review note is stored on the file and posted once per exact text', () => {
+    expect(flagWrittenConduct(db, { steamid: P, where: 'review', text: 'they were fine', bookingId: 4, now: t0 })).toBe(false);
+    expect(flagWrittenConduct(db, { steamid: P, where: 'review', text: 'kys lol', bookingId: 4, now: t0 })).toBe(true);
+    expect(flagWrittenConduct(db, { steamid: P, where: 'review', text: 'kys lol', bookingId: 4, now: at(60) })).toBe(false);
+    expect(posted).toEqual([{
+      kind: 'conduct_flag', steamid: P, where: 'review', text: 'kys lol', slurs: ['kys'], matchId: null, serverId: null, bookingId: 4,
+    }]);
+    expect(flags()).toEqual([{ kind: 'review', detail: 'kys lol' }]);
+    const items = conductAdapter.items({ db, ids: [P] } as Parameters<typeof conductAdapter.items>[0]);
+    expect(items[0].summary).toBe('Wrote "kys lol" in a scrim review note (kys).');
+  });
 
   it('ignores clean chat and clean names', () => {
     handleConduct(db, { kind: 'say', steamid: P, team: 3, scope: null, message: 'he was on my angle' }, null, t0);

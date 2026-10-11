@@ -34,4 +34,13 @@ describe('arrivedSince', () => {
     ], '2026-09-21T00:00:00.000Z');
     expect(text).toBe('1 input flag (pounce_spam)');
   });
+
+  it('counts review notes apart from chat and names', () => {
+    const text = arrivedSince([
+      item({ source: 'conduct', kind: 'chat' }),
+      item({ source: 'conduct', kind: 'review' }),
+      item({ source: 'conduct', kind: 'name' }),
+    ], null);
+    expect(text).toBe('slurs: 1 chat line, 1 name, 1 review note');
+  });
 });

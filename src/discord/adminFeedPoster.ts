@@ -228,6 +228,13 @@ export class AdminFeedPoster {
           server ? `on ${server}` : '',
         ].filter(Boolean).join(' ');
         const what = e.slurs.join(', ');
+        if (e.where === 'review') {
+          const booking = e.bookingId !== undefined ? ` on [booking #${e.bookingId}](${this.deps.publicUrl}/booking/${e.bookingId})` : '';
+          return {
+            text: `📝 ${this.name(e.steamid)} wrote ${quoted} in a private scrim review${booking} (${what}). [File](${this.file(e.steamid)})`,
+            color: COLOR.problem,
+          };
+        }
         return {
           text: e.where === 'chat'
             ? `🗯️ ${this.name(e.steamid)} typed ${quoted} in chat${where ? ' ' + where : ''} (${what}). [File](${this.file(e.steamid)})`

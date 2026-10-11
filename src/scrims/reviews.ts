@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { flagWrittenConduct } from '../conductFlags.js';
 import { getPlayer } from '../players.js';
 import { myTeams } from '../teams/teams.js';
 import { iso, partyWhere, type Party } from '../bookings/rules.js';
@@ -84,7 +85,8 @@ function parseReviewNote(raw: unknown): string | null {
 
 export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs: unknown; tags: unknown; note?: unknown; now?: Date }): Result<{ side: Side }> {
   const now = o.now ?? new Date();
-  return db.transaction((): Result<{ side: Side }> => {
+  const note = parseReviewNote(o.note);
+  const r = db.transaction((): Result<{ side: Side }> => {
     const b = getBooking(db, o.bookingId);
     if (!b) return { ok: false, error: 'not_found' };
     if (!reviewable(b)) return { ok: false, error: 'wrong_state' };
@@ -95,7 +97,6 @@ export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs:
     if (!reviewOpen(b, now.getTime())) return { ok: false, error: 'review_closed' };
     const tags = parseTags(o.tags);
     if ((o.thumbs !== 1 && o.thumbs !== -1) || tags === null) return { ok: false, error: 'bad_review' };
-    const note = parseReviewNote(o.note);
     if (note === null) return { ok: false, error: 'bad_review_note' };
     const t = now.toISOString();
     const edit = db.prepare('SELECT 1 FROM scrim_reviews WHERE booking_id = ? AND by_side = ?').get(b.id, side) !== undefined;
@@ -108,6 +109,17 @@ export function submitReview(db: DB, o: { bookingId: number; by: string; thumbs:
     logBookingEvent(db, b.id, o.by, 'reviewed', { side, edit }, now);
     return { ok: true, value: { side } };
   })();
+  // After the commit: the note is saved either way, and a failure to flag
+  // it must not undo the review (owner, 2026-10-11: through the same conduct
+  // path chat uses).
+  if (r.ok && note) {
+    try {
+      flagWrittenConduct(db, { steamid: o.by, where: 'review', text: note, bookingId: o.bookingId, now });
+    } catch (err) {
+      console.warn(`[scrims] review note check for booking ${o.bookingId} failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+  return r;
 }
 
 /** The review this side wrote on this booking, for its own managers. */
