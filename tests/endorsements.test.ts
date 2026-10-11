@@ -45,6 +45,18 @@ describe('schema', () => {
 });
 
 describe('giveEndorsement', () => {
+  it('refuses a scrim or tournament match with its own reason, and the panel state says so', () => {
+    seedMatch(1);
+    db.prepare("UPDATE matches SET kind = 'scrim' WHERE id = 1").run();
+    seedMatch(2);
+    db.prepare("UPDATE matches SET kind = 'tournament' WHERE id = 2").run();
+    expect(giveEndorsement(db, { matchId: 1, from: IDS[0], to: IDS[5], kind: 'caller' })).toEqual({ ok: false, error: 'not_pug' });
+    expect(giveEndorsement(db, { matchId: 2, from: IDS[0], to: IDS[5], kind: 'caller' })).toEqual({ ok: false, error: 'not_pug' });
+    expect(endorseState(db, 1, IDS[0])).toMatchObject({ eligible: false, reason: 'not_pug', closesAt: null, candidates: [] });
+    expect(ENDORSE_ERROR_TEXT.not_pug).toBe('Endorsements are for PUGs only. Scrims and tournament matches have none.');
+    expect(rowCount()).toBe(0);
+  });
+
   it('records one and reports what is left of the budget', () => {
     seedMatch(1);
     expect(giveEndorsement(db, { matchId: 1, from: IDS[0], to: IDS[5], kind: 'caller' })).toEqual({ ok: true, remaining: 1 });
