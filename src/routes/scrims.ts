@@ -50,10 +50,11 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     if (!staffViewer && !competitiveAccess(db, viewer)) { reply.code(404).send(NOT_FOUND); return null; }
     return requireActive(req, reply);
   };
-  const refuse = (reply: FastifyReply, r: { error: S.ScrimError; text?: string; nearestSlot?: string | null }) => {
+  const refuse = (reply: FastifyReply, r: { error: S.ScrimError; text?: string; nearestSlot?: string | null; declined?: boolean }) => {
     const def = S.SCRIM_ERRORS[r.error];
     const out: Record<string, unknown> = { error: r.text ?? def.text };
     if (r.error === 'no_capacity') out.nearestSlot = r.nearestSlot ?? null;
+    if (r.declined) out.declined = true;
     return reply.code(def.status).send(out);
   };
   const body = (req: FastifyRequest) => (req.body ?? {}) as Record<string, unknown>;
@@ -255,14 +256,15 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     const post = accept ? S.getPost(db, accept.post_id) : undefined;
     const r = S.confirmAccept(db, { acceptId: id, by: me });
     if (!r.ok) {
-      // The slot was taken from under this acceptance: the poster sees the
-      // refusal and its nearestSlot right here in this response. The
-      // acceptance itself stays pending (the poster can try again, or pick
-      // another), so the accepter is not DMed about it: that DM would read
-      // as final and would repeat on every further Confirm click.
+      // The slot was taken from under this acceptance, or a side is booked
+      // elsewhere: the poster sees the refusal (and any nearestSlot) right
+      // here, and the acceptance stays pending, so the accepter is not DMed
+      // (that DM would read as final and repeat on every Confirm click).
+      // One that can never clear was declined (NEVER_CLEARS): that one is final.
+      if (r.declined && accept) tell(scrimSideManagers(db, accept), 'scrim_declined', accept.post_id, { reason: 'it could not be booked' });
       return refuse(reply, r);
     }
-    const { bookingId, takenAcceptIds } = r.value;
+    const { bookingId, takenAcceptIds, withdrawn } = r.value;
     // The booking is already created AND confirmed inside confirmAccept's own
     // transaction; onCreated/onConfirmed would send booking_invite and
     // booking_confirmed DMs that are stale or duplicate here (scrim_booked,
@@ -280,6 +282,21 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
     for (const takenId of takenAcceptIds) {
       const taken = S.getAccept(db, takenId);
       if (taken) tell(scrimSideManagers(db, taken), 'scrim_taken', taken.post_id);
+    }
+    // Owner ruling 2026-10-11: both sides are booked now, so their other
+    // overlapping posts and acceptances were withdrawn; each side is told why.
+    const BOOKED_ELSEWHERE = 'your side booked another scrim at that time';
+    for (const postId of withdrawn.posts) {
+      const wp = S.getPost(db, postId);
+      if (wp) tell(scrimSideManagers(db, wp), 'scrim_withdrawn', postId, { reason: BOOKED_ELSEWHERE });
+    }
+    for (const acceptId of withdrawn.postAccepts) {
+      const wa = S.getAccept(db, acceptId);
+      if (wa) tell(scrimSideManagers(db, wa), 'scrim_declined', wa.post_id, { reason: 'the posting side booked another scrim at that time' });
+    }
+    for (const acceptId of withdrawn.accepts) {
+      const wa = S.getAccept(db, acceptId);
+      if (wa) tell(scrimSideManagers(db, wa), 'scrim_withdrawn', wa.post_id, { acceptId, reason: BOOKED_ELSEWHERE });
     }
     return reply.code(200).send({ bookingId });
   });

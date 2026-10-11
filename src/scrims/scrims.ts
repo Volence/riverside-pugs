@@ -68,20 +68,48 @@ export type ScrimError = keyof typeof SCRIM_ERRORS;
 /** As bookings' Result. A refusal that came from the booking domain (in
  *  confirmAccept) carries that domain's own `text`, so SCRIM_ERRORS' scrim
  *  wording for the same code never replaces it; a `no_capacity` one also
- *  carries the nearest free slot (null when nothing within 3 hours has room). */
+ *  carries the nearest free slot (null when nothing within 3 hours has room).
+ *  `declined` is set when a confirm declined the acceptance because the booking
+ *  domain refused it in a way that can never clear (NEVER_CLEARS). */
 export type ScrimResult<T> =
   | { ok: true; value: T }
-  | { ok: false; error: ScrimError; text?: string; nearestSlot?: string | null };
+  | { ok: false; error: ScrimError; text?: string; nearestSlot?: string | null; declined?: boolean };
 const ok = <T>(value: T): ScrimResult<T> => ({ ok: true, value });
 const fail = (error: ScrimError): { ok: false; error: ScrimError } => ({ ok: false, error });
 
 /** A booking refusal inside confirmAccept's transaction. Thrown, not
- *  returned, so better-sqlite3 rolls back what createBooking already wrote. */
+ *  returned, so better-sqlite3 rolls back what createBooking already wrote.
+ *  `step` is whose call refused: createBooking speaks for the poster's side,
+ *  confirmBooking for the accepting side. */
 class Refused extends Error {
-  constructor(readonly code: BookingError) {
+  constructor(readonly code: BookingError, readonly step: 'poster' | 'accepter') {
     super(code);
   }
 }
+
+/** Booking refusals about the accepting side that waiting never clears
+ *  (owner, 2026-10-11): the acceptance is declined at once. */
+const NEVER_CLEARS: ReadonlySet<BookingError> = new Set<BookingError>(['not_open', 'not_player', 'bad_opponent', 'not_available']);
+const ACCEPTER_GONE = 'The accepting side can no longer play this scrim, so its acceptance was declined.';
+const ACCEPTER_BUSY = 'The accepting side already has a booking at that time.';
+const OWN_BUSY = 'Your side already has a booking at that time.';
+/** The poster reads every confirm refusal, but the booking domain words each
+ *  one for the side that made the call. These say whose side it is about.
+ *  A code not listed keeps the booking domain's text (not_available's never
+ *  says why, on purpose). The poster's own not_open is checked before
+ *  createBooking runs, so a not_open from it is the accepting side's. */
+const REFUSAL_TEXT: Record<Refused['step'], Partial<Record<BookingError, string>>> = {
+  poster: {
+    allowance: 'Your side already has as many upcoming bookings as allowed.',
+    busy_us: OWN_BUSY, busy_them: ACCEPTER_BUSY,
+    not_open: ACCEPTER_GONE, not_player: ACCEPTER_GONE, bad_opponent: ACCEPTER_GONE,
+  },
+  accepter: {
+    allowance: 'The accepting side already has as many upcoming bookings as allowed.',
+    busy_us: ACCEPTER_BUSY, busy_them: OWN_BUSY,
+    not_open: ACCEPTER_GONE,
+  },
+};
 
 export const NOTE_MAX = 200;
 const SR_RANGE_MIN = 50;
@@ -184,6 +212,70 @@ function reopenIfIdle(db: DB, postId: number): boolean {
     `UPDATE scrim_posts SET status = 'open' WHERE id = ? AND status = 'pending'
        AND NOT EXISTS (SELECT 1 FROM scrim_accepts WHERE post_id = scrim_posts.id AND status = 'pending')`,
   ).run(postId).changes > 0;
+}
+
+/** Withdraw a post and its pending acceptances, as a withdraw by hand does. */
+function closePost(db: DB, postId: number, t: string): void {
+  db.prepare("UPDATE scrim_posts SET status = 'withdrawn' WHERE id = ?").run(postId);
+  db.prepare("UPDATE scrim_accepts SET status = 'withdrawn', responded_at = ? WHERE post_id = ? AND status = 'pending'").run(t, postId);
+}
+
+/** What a confirm withdrew because the sides are now booked over it. */
+export interface Withdrawn {
+  /** Either side's own open or pending posts. */
+  posts: number[];
+  /** Other sides' pending acceptances of those posts, withdrawn with them. */
+  postAccepts: number[];
+  /** Either side's own pending acceptances of other posts. */
+  accepts: number[];
+}
+
+/**
+ * Owner ruling 2026-10-11: once both sides are booked, each side's other open
+ * or pending posts and its pending acceptances whose block overlaps the
+ * booked slot are withdrawn, exactly as by hand: a post takes its pending
+ * acceptances with it, and a post left with nothing pending is open again.
+ * Runs inside confirmAccept's transaction after the chosen post is booked and
+ * its acceptances answered, so neither is touched here.
+ */
+function withdrawOverlaps(db: DB, sides: SideRef[], startMs: number, endMs: number, t: string): Withdrawn {
+  const out: Withdrawn = { posts: [], postAccepts: [], accepts: [] };
+  const overlaps = (startsAt: string, minutes: number): boolean => {
+    const s = Date.parse(startsAt);
+    return s < endMs && s + minutes * 60_000 > startMs;
+  };
+  for (const s of sides) {
+    const where = (x: string) => (s.team_id !== null ? `${x}team_id = ?` : `${x}team_id IS NULL AND ${x}captain_steamid = ?`);
+    const arg = s.team_id ?? s.captain_steamid;
+    const posts = db.prepare(`SELECT * FROM scrim_posts WHERE status IN ('open','pending') AND ${where('')} ORDER BY id`).all(arg) as PostRow[];
+    for (const p of posts.filter((x) => overlaps(x.starts_at, x.block_minutes))) {
+      out.posts.push(p.id);
+      out.postAccepts.push(...pendingAccepts(db, p.id).map((a) => a.id));
+      closePost(db, p.id, t);
+    }
+    const accepts = db.prepare(
+      `SELECT a.id, a.post_id, p.starts_at, p.block_minutes FROM scrim_accepts a JOIN scrim_posts p ON p.id = a.post_id
+        WHERE a.status = 'pending' AND ${where('a.')} ORDER BY a.id`,
+    ).all(arg) as { id: number; post_id: number; starts_at: string; block_minutes: number }[];
+    for (const a of accepts.filter((x) => overlaps(x.starts_at, x.block_minutes))) {
+      out.accepts.push(a.id);
+      db.prepare("UPDATE scrim_accepts SET status = 'withdrawn', responded_at = ? WHERE id = ?").run(t, a.id);
+      reopenIfIdle(db, a.post_id);
+    }
+  }
+  for (const k of ['posts', 'postAccepts', 'accepts'] as const) out[k].sort((x, y) => x - y);
+  return out;
+}
+
+/** Decline an acceptance a confirm can never book (NEVER_CLEARS), after the
+ *  confirm's own transaction rolled back. True when it was still pending. */
+function declineRefused(db: DB, acceptId: number, now: Date): boolean {
+  return db.transaction(() => {
+    const changed = db.prepare("UPDATE scrim_accepts SET status = 'declined', responded_at = ? WHERE id = ? AND status = 'pending'")
+      .run(now.toISOString(), acceptId).changes > 0;
+    if (changed) reopenIfIdle(db, getAccept(db, acceptId)!.post_id);
+    return changed;
+  })();
 }
 
 function parseSrRange(raw: unknown): number | null | undefined {
@@ -317,9 +409,7 @@ export function withdrawPost(db: DB, o: { postId: number; by: string; now?: Date
     if (!managesScrimSide(db, p, o.by)) return fail('not_manager');
     if (p.status !== 'open' && p.status !== 'pending') return fail('wrong_state');
     const acceptIds = pendingAccepts(db, p.id).map((a) => a.id);
-    db.prepare("UPDATE scrim_posts SET status = 'withdrawn' WHERE id = ?").run(p.id);
-    db.prepare("UPDATE scrim_accepts SET status = 'withdrawn', responded_at = ? WHERE post_id = ? AND status = 'pending'")
-      .run(now.toISOString(), p.id);
+    closePost(db, p.id, now.toISOString());
     return ok({ acceptIds });
   })();
 }
@@ -421,11 +511,14 @@ export function declineAccept(db: DB, o: { acceptId: number; by: string; now?: D
  * declined (their ids come back as takenAcceptIds, for notices). If the
  * booking domain refuses either step, nothing is kept and its error comes
  * back; for no_capacity, with the nearest slot that has room for the
- * proposed playlist's slot.
+ * proposed playlist's slot. Refusals say whose side they are about
+ * (REFUSAL_TEXT); one that can never clear also declines the acceptance
+ * (NEVER_CLEARS). Both sides' other overlapping posts and acceptances are
+ * withdrawn (withdrawOverlaps).
  */
-export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: Date }): ScrimResult<{ bookingId: number; takenAcceptIds: number[] }> {
+export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: Date }): ScrimResult<{ bookingId: number; takenAcceptIds: number[]; withdrawn: Withdrawn }> {
   const now = o.now ?? new Date();
-  type Out = ScrimResult<{ bookingId: number; takenAcceptIds: number[] }>;
+  type Out = ScrimResult<{ bookingId: number; takenAcceptIds: number[]; withdrawn: Withdrawn }>;
   try {
     return db.transaction((): Out => {
       const a = getAccept(db, o.acceptId);
@@ -434,36 +527,44 @@ export function confirmAccept(db: DB, o: { acceptId: number; by: string; now?: D
       if (hiddenFrom(db, p, o.by)) return fail('not_found');
       if (p.status !== 'pending' || a.status !== 'pending') return fail('wrong_state');
       if (!managesScrimSide(db, p, o.by)) return fail('not_manager');
+      // The poster's own access, here, so a not_open from createBooking below
+      // can only be the accepting side's.
+      if (!canUse(db, o.by)) return fail('not_open');
       // The tick may not have written it yet; a timed-out acceptance is never booked.
       if (acceptTimedOut(a.created_at, p.starts_at, now.getTime())) return fail('wrong_state');
       // Blocking declines what is pending between the pair, but a player
       // block can start to match after the accept (they are made a
-      // co-captain), so a confirm asks again.
-      if (blocked(db, partyOf(p), partyOf(a))) return fail('not_available');
+      // co-captain), so a confirm asks again; it never clears by waiting.
+      if (blocked(db, partyOf(p), partyOf(a))) throw new Refused('not_available', 'poster');
 
       const { playlist } = proposedPlaylist(db, campaignsOf(p), campaignsOf(a));
       const created = createBooking(db, {
         by: o.by, teamId: p.team_id, opponent: a.team_id !== null ? { teamId: a.team_id } : { steamid: a.captain_steamid },
         startsAt: p.starts_at, playlist, now,
       });
-      if (!created.ok) throw new Refused(created.error);
+      if (!created.ok) throw new Refused(created.error, 'poster');
       const bookingId = created.value.id;
       // A team side confirms through its captain now (transferCaptain may
       // have moved it since the acceptance was made).
       const accepter = a.team_id !== null ? (getTeam(db, a.team_id)?.captain_steamid ?? a.captain_steamid) : a.captain_steamid;
       const confirmed = confirmBooking(db, { bookingId, by: accepter, now });
-      if (!confirmed.ok) throw new Refused(confirmed.error);
+      if (!confirmed.ok) throw new Refused(confirmed.error, 'accepter');
 
       const t = now.toISOString();
       const takenAcceptIds = pendingAccepts(db, p.id).filter((x) => x.id !== a.id).map((x) => x.id);
       db.prepare("UPDATE scrim_posts SET status = 'booked', booking_id = ? WHERE id = ?").run(bookingId, p.id);
       db.prepare("UPDATE scrim_accepts SET status = 'chosen', responded_at = ? WHERE id = ?").run(t, a.id);
       db.prepare("UPDATE scrim_accepts SET status = 'declined', responded_at = ? WHERE post_id = ? AND status = 'pending'").run(t, p.id);
-      return ok({ bookingId, takenAcceptIds });
+      const booked = getBooking(db, bookingId)!;
+      const withdrawn = withdrawOverlaps(db, [p, a], Date.parse(booked.starts_at), Date.parse(booked.ends_at), t);
+      return ok({ bookingId, takenAcceptIds, withdrawn });
     })();
   } catch (e) {
     if (!(e instanceof Refused)) throw e;
-    const text = BOOKING_ERRORS[e.code].text;
+    const text = REFUSAL_TEXT[e.step][e.code] ?? BOOKING_ERRORS[e.code].text;
+    if (NEVER_CLEARS.has(e.code)) {
+      return { ok: false, error: e.code, text, ...(declineRefused(db, o.acceptId, now) ? { declined: true } : {}) };
+    }
     if (e.code !== 'no_capacity') return { ok: false, error: e.code, text };
     const a = getAccept(db, o.acceptId)!;
     const p = getPost(db, a.post_id)!;
