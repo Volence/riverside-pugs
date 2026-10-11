@@ -20,7 +20,7 @@
  */
 import { openDb } from '../src/db.js';
 import { inputThresholds, rerunSignatures } from '../src/inputBursts.js';
-import { MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, type Thresholds } from '../src/inputStats.js';
+import { MATCH_SIGNATURES, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, type Thresholds } from '../src/inputStats.js';
 
 const args = process.argv.slice(2);
 const flag = (name: string): string | undefined => {
@@ -50,7 +50,7 @@ for (const [name, key] of overrides) {
 const before = (db.prepare('SELECT COUNT(*) AS c FROM input_detections').get() as { c: number }).c;
 const r = rerunSignatures(db, thresholds, { dryRun });
 
-console.log(`signatures: ${SIGNATURES.map((s) => `${s.name} (x${s.repeats})`).join(', ')}`);
+console.log(`signatures: ${[...SIGNATURES.map((s) => `${s.name} (x${s.repeats})`), ...MATCH_SIGNATURES.map((s) => s.name)].join(', ')}`);
 console.log(`thresholds: ${JSON.stringify(thresholds)}`);
 console.log(`${r.bursts} bursts across ${r.groups} player-matches`);
 console.log(`${before} detection rows before, ${r.detections} after, ${r.removed} no longer supported${dryRun ? ' (dry run, nothing written)' : ''}`);
