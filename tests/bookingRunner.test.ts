@@ -7,7 +7,7 @@ import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { Notifier } from '../src/notify/notify.js';
 import {
   addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
-  createTournamentBooking, setNext, markActive, recordPresence, beginRecovery, dropBox,
+  createTournamentBooking, setNext, markActive, recordPresence, beginRecovery, dropBox, advancePlaylist, markReady,
 } from '../src/bookings/bookings.js';
 import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
@@ -393,6 +393,53 @@ describe('rcon log hygiene (scrims in game, item 16)', () => {
   });
 });
 
+describe('the plugin clock lines (scrims in game, items 4, 5 and 8)', () => {
+  const epochOf = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+  const runningBooking = (playlist: string[]) => {
+    const id = book({ playlist });
+    holdBox(db, id, 3, new Date(now));
+    markSetup(db, id, new Date(now));
+    markReady(db, id, new Date(now));
+    return id;
+  };
+
+  it('a scrim pushes the title, the campaign on the box, the slot end, and nothing due', () => {
+    const id = book({ playlist: ['no_mercy', 'death_toll'] });
+    expect(bookingLines(db, getBooking(db, id)!)).toEqual(expect.arrayContaining([
+      `l4d_booking_title "p0's group vs p1's group"`,
+      'l4d_booking_campaign "No Mercy"',
+      `l4d_booking_ends ${epochOf('2026-10-02T23:00:00.000Z')}`,
+      'l4d_booking_next_at 0', 'l4d_booking_next_name ""', 'l4d_booking_close_at 0',
+    ]));
+  });
+
+  it('a due next campaign and a pending close go as epochs, and the campaign follows the last load', () => {
+    const id = runningBooking(['no_mercy', 'death_toll']);
+    const at = '2026-10-02T21:01:00.000Z';
+    setNext(db, id, 'death_toll', at, new Date(now));
+    let lines = bookingLines(db, getBooking(db, id)!);
+    expect(lines).toContain(`l4d_booking_next_at ${epochOf(at)}`);
+    expect(lines).toContain('l4d_booking_next_name "Death Toll"');
+    advancePlaylist(db, id, 1, new Date(now));
+    lines = bookingLines(db, getBooking(db, id)!);
+    expect(lines).toContain('l4d_booking_campaign "Death Toll"');
+    expect(lines).toContain('l4d_booking_next_at 0');
+    db.prepare('UPDATE bookings SET close_at = ? WHERE id = ?').run('2026-10-02T23:05:00.000Z', id);
+    expect(bookingLines(db, getBooking(db, id)!)).toContain(`l4d_booking_close_at ${epochOf('2026-10-02T23:05:00.000Z')}`);
+  });
+
+  it('a tournament booking pushes none of them', () => {
+    const r = createTournamentBooking(db, {
+      region: 'na', campaign: 'no_mercy', rulesJson: '{}', rulesetId: null, gameConfig: 'standard', createdBy: P[9],
+      sides: [{ teamId: null, captain: P[2], players: P.slice(2, 6), spectators: [] }, { teamId: null, captain: P[6], players: P.slice(6, 10), spectators: [] }],
+      now: new Date(now),
+    });
+    if (!r.ok) throw new Error(r.error);
+    const lines = bookingLines(db, getBooking(db, r.value.id)!);
+    expect(lines.some((l) => /^l4d_booking_(title|campaign|ends|next_at|next_name|close_at) /.test(l))).toBe(false);
+  });
+});
+
 describe('the minute watch', () => {
   const ready = async () => {
     const id = book();
@@ -567,6 +614,8 @@ describe('fix wave (final review)', () => {
       'sm_pug_tournament 0',
       // Plan T5: the tournament box's match-rule cvars back to the plugin's defaults.
       'sm_pug_tech_limit 0', 'sm_pug_tech_seconds 300', 'sm_pug_dc_team_seconds 0', 'sm_pug_sub_emergency 0', 'sm_pug_sub_charge 0', 'sm_pug_admin_cooldown 180',
+      // Scrims in game: the plugin's clock, so a skipped restart cannot leave a countdown running.
+      'l4d_booking_title ""', 'l4d_booking_campaign ""', 'l4d_booking_ends 0', 'l4d_booking_next_at 0', 'l4d_booking_next_name ""', 'l4d_booking_close_at 0',
     ]);
     expect(cmds.indexOf('l4d_booking_password ""')).toBeGreaterThan(cmds.indexOf('sm_kick @humans "The booking is over. Thanks for playing."'));
 
