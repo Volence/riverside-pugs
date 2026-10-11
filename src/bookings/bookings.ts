@@ -79,6 +79,8 @@ export interface SideRow {
   /** A draft entry's tag and logo key, snapshotted with the name; NULL on a
    *  team side and when the entry has none. */
   tag: string | null; logo_key: string | null;
+  /** Start now (scrims in game Ruling 7): when this side pressed it; null when not. */
+  start_now_at: string | null;
 }
 export interface PersonRow {
   booking_id: number; side: Side; steamid: string; role: PersonRole; status: 'invited' | 'accepted'; added_by: string; added_at: string;
@@ -100,6 +102,7 @@ export const BOOKING_ERRORS = {
   no_capacity: { status: 409, text: 'Not enough servers are free for that time. Try another slot.' },
   bad_campaign: { status: 400, text: 'Pick a campaign from the map pool.' },
   no_campaign_room: { status: 409, text: 'No server is free for another campaign after this slot.' },
+  no_box_now: { status: 409, text: 'No server is free right now. Try again in a minute.' },
   allowance: { status: 409, text: 'That side already has as many upcoming bookings as allowed.' },
   // One side, one slot (owner, 2026-10-11): worded for the side asking.
   busy_us: { status: 409, text: 'Your side already has a booking at that time.' },
@@ -959,6 +962,74 @@ export function endBooking(db: DB, o: { bookingId: number; by: string; staff?: b
   })();
 }
 
+// ---------- start now (scrims in game Ruling 7) ----------
+
+/** Whether a booking may still start early: a scrim, not ending, not yet
+ *  started (starts_at ahead), in a state before any game. */
+function startNowOpen(b: BookingRow, nowMs: number): boolean {
+  return b.purpose === 'scrim' && b.ending_at === null && ['scheduled', 'held', 'setup', 'ready'].includes(b.state) && Date.parse(b.starts_at) > nowMs;
+}
+
+/** A manager of a confirmed side presses Start now. `both` once the other
+ *  side has pressed too; the runner then moves the slot (startBookingNow). */
+export function pressStartNow(db: DB, o: { bookingId: number; by: string; now?: Date }): Result<{ both: boolean; side: Side }> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<{ both: boolean; side: Side }> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    if (!startNowOpen(b, now.getTime()) || sidesOf(db, b.id).some((s) => s.confirmed_at === null)) return fail('wrong_state');
+    const side = actingSides(db, b.id, o.by)[0];
+    if (!side) return fail('not_manager');
+    db.prepare('UPDATE booking_sides SET start_now_at = COALESCE(start_now_at, ?) WHERE booking_id = ? AND side = ?').run(now.toISOString(), b.id, side);
+    logEvent(db, b.id, o.by, 'start_now_pressed', { side }, now);
+    const other = sideRow(db, b.id, side === 'a' ? 'b' : 'a')!;
+    return ok({ both: other.start_now_at !== null, side });
+  })();
+}
+
+/** The manager takes their side's press back (or the runner does, when the
+ *  start it would complete is refused). */
+export function withdrawStartNow(db: DB, o: { bookingId: number; by: string; now?: Date }): Result<null> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<null> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    const side = actingSides(db, b.id, o.by)[0];
+    if (!side) return fail('not_manager');
+    if (db.prepare('UPDATE booking_sides SET start_now_at = NULL WHERE booking_id = ? AND side = ? AND start_now_at IS NOT NULL').run(b.id, side).changes > 0) {
+      logEvent(db, b.id, o.by, 'start_now_withdrawn', { side }, now);
+    }
+    return ok(null);
+  })();
+}
+
+/** Both sides pressed: the slot moves up to now with its length kept, the
+ *  same capacity check as a new booking for the earlier window, both
+ *  presses cleared, the reminders marked sent (the start is now) and the
+ *  slot warnings re-armed. The runner checks a box can be held first. */
+export function startBookingNow(db: DB, o: { bookingId: number; now?: Date }): Result<{ startsAt: string; endsAt: string; minutes: number }> {
+  const now = o.now ?? new Date();
+  return db.transaction((): Result<{ startsAt: string; endsAt: string; minutes: number }> => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    const nowMs = now.getTime();
+    if (!startNowOpen(b, nowMs) || sidesOf(db, b.id).some((s) => s.start_now_at === null)) return fail('wrong_state');
+    const shift = Date.parse(b.starts_at) - nowMs;
+    const endMs = Date.parse(b.ends_at) - shift;
+    if (capacityProblem(db, { region: b.region, startMs: nowMs, endMs, exceptId: b.id, purpose: b.purpose }) !== null) return fail('no_capacity');
+    const startsAt = iso(nowMs);
+    const endsAt = iso(endMs);
+    db.prepare(
+      `UPDATE bookings SET starts_at = ?, ends_at = ?, warned_minutes = NULL,
+         reminded_60_at = COALESCE(reminded_60_at, ?), reminded_15_at = COALESCE(reminded_15_at, ?) WHERE id = ?`,
+    ).run(startsAt, endsAt, now.toISOString(), now.toISOString(), b.id);
+    db.prepare('UPDATE booking_sides SET start_now_at = NULL WHERE booking_id = ?').run(b.id);
+    const minutes = Math.round(shift / 60_000);
+    logEvent(db, b.id, null, 'started_early', { from: b.starts_at, to: startsAt, minutes }, now);
+    return ok({ startsAt, endsAt, minutes });
+  })();
+}
+
 // ---------- runner writes ----------
 
 /** Take this box for the booking: only an idle, enabled box nothing holds,
@@ -1243,6 +1314,8 @@ export interface BookingSideView {
   /** shortSide: closed as ended or no_show with this side under SHOWN_MIN,
    *  claimed or not, so staff may excuse it. */
   short: boolean;
+  /** Start now: this side pressed it (scrims in game Ruling 7). */
+  startNow: boolean;
   /** The side's record, only for those canSeeReliability lets see it. */
   record?: Reliability;
 }
@@ -1260,6 +1333,8 @@ export interface BookingView {
   connect: { host: string; port: number; password: string } | null;
   cancel: { side: Side | null; reason: string | null } | null; endReason: string | null;
   noShowFrom: string;
+  /** Start now may be pressed: a scrim, both sides confirmed, before its start, no end started. */
+  canStartNow: boolean;
   /** Crash recovery (plan 5): present while the booking's box is being set up
    *  again after a restart, or while it waits for another box after the old
    *  one was lost. `moved` is true for the latter (recover_reason 'gone');
@@ -1344,6 +1419,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
         lateCancel, excused: s.excused_at !== null,
         canExcuse: lateCancel && s.excused_at === null && acting.includes(s.side === 'a' ? 'b' : 'a') && !acting.includes(s.side),
         short: shortSide(b, s),
+        startNow: s.start_now_at !== null,
         ...(viewer.staff || canSeeReliability(db, partyOf(s), viewer.steamid) ? { record: reliability(db, partyOf(s)) } : {}),
       };
     }),
@@ -1352,6 +1428,7 @@ export function bookingView(db: DB, id: number, viewer: { steamid: string; staff
     cancel: b.state === 'cancelled' ? { side: b.cancel_side, reason: b.cancel_reason } : null,
     endReason: b.end_reason,
     noShowFrom: iso(Date.parse(b.starts_at) + (rules?.noShowGraceMinutes ?? 15) * 60_000),
+    canStartNow: startNowOpen(b, nowMs) && sidesOf(db, id).every((s) => s.confirmed_at !== null),
     recovery: b.recovering_at !== null && b.ending_at === null
       ? { since: b.recovering_at, moved: b.recover_reason === 'gone', waiting: b.server_id === null } : null,
     viewer: { side: me?.side ?? manages[0] ?? null, manages, staff: viewer.staff, invited: me?.status === 'invited' },

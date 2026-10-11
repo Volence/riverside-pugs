@@ -8,7 +8,7 @@ import {
   BOOKING_ERRORS, bookRoster, firstSurvivorSide, type BookingRow, addPerson, allowInGame, subInGame, allowList, bookingView, bumpBooking, bumpReason, cancelBooking, claimNoShow, closeBooking, confirmBooking,
   createBooking, createTournamentBooking, declineBooking,
   addCampaign, endBooking, expireUnconfirmed, getBooking, holdBox, markActive, markReady, markReleased, markSetup,
-  myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow,
+  myBookings, peopleOf, recordPresence, removePerson, respondPerson, sideRow, sidesOf, pressStartNow, startBookingNow, withdrawStartNow,
 } from '../src/bookings/bookings.js';
 import { isLateCancel } from '../src/bookings/rules.js';
 import { bookingMessage } from '../src/bookings/messages.js';
@@ -890,5 +890,65 @@ describe('firstSurvivorSide (scrims in game Ruling 2)', () => {
 
   it('unreadable rules start with side a', () => {
     expect(firstSurvivorSide({ id: 1, purpose: 'scrim', rules_json: '{' } as unknown as BookingRow, 0)).toBe('a');
+  });
+});
+
+describe('start now (scrims in game Ruling 7)', () => {
+  const confirmed = () => { const id = create(); confirmBooking(db, { bookingId: id, by: P[1], now: NOW }); return id; };
+
+  it('one press waits for the other side; the second lets the slot move up to now, its length kept, both presses cleared', () => {
+    const id = confirmed();
+    const before = getBooking(db, id)!;
+    const len = Date.parse(before.ends_at) - Date.parse(before.starts_at);
+    expect(pressStartNow(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: true, value: { both: false, side: 'a' } });
+    const view = bookingView(db, id, { steamid: P[0], staff: false }, NOW.getTime())!;
+    expect(view.sides.map((s) => s.startNow)).toEqual([true, false]);
+    expect(view.canStartNow).toBe(true);
+    expect(startBookingNow(db, { bookingId: id, now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    expect(pressStartNow(db, { bookingId: id, by: P[1], now: NOW })).toEqual({ ok: true, value: { both: true, side: 'b' } });
+    const r = startBookingNow(db, { bookingId: id, now: NOW });
+    expect(r.ok).toBe(true);
+    const after = getBooking(db, id)!;
+    expect(after.starts_at).toBe(NOW.toISOString());
+    expect(Date.parse(after.ends_at) - Date.parse(after.starts_at)).toBe(len);
+    expect(after.warned_minutes).toBeNull();
+    expect(after.reminded_15_at).not.toBeNull();
+    expect(after.reminded_60_at).not.toBeNull();
+    expect(sidesOf(db, id).map((s) => s.start_now_at)).toEqual([null, null]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE booking_id = ? AND event = 'started_early'").get(id)).toEqual({ n: 1 });
+    expect(bookingView(db, id, { steamid: P[0], staff: false }, NOW.getTime())!.canStartNow).toBe(false);
+  });
+
+  it('a press can be taken back', () => {
+    const id = confirmed();
+    pressStartNow(db, { bookingId: id, by: P[0], now: NOW });
+    expect(withdrawStartNow(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: true, value: null });
+    expect(sidesOf(db, id).map((s) => s.start_now_at)).toEqual([null, null]);
+    expect(pressStartNow(db, { bookingId: id, by: P[1], now: NOW })).toEqual({ ok: true, value: { both: false, side: 'b' } });
+  });
+
+  it('refuses a non-manager, an unconfirmed side, a started, ending or tournament booking', () => {
+    const plain = create();
+    expect(pressStartNow(db, { bookingId: plain, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    cancelBooking(db, { bookingId: plain, by: P[0], now: NOW });
+    const id = confirmed();
+    expect(pressStartNow(db, { bookingId: id, by: P[5], now: NOW })).toEqual({ ok: false, error: 'not_manager' });
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(id);
+    expect(pressStartNow(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    db.prepare("UPDATE bookings SET purpose = 'scrim', starts_at = ? WHERE id = ?").run(new Date(NOW.getTime() - MIN).toISOString(), id);
+    expect(pressStartNow(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    const other = confirmed();
+    cancelBooking(db, { bookingId: other, by: P[0], now: NOW });
+    expect(pressStartNow(db, { bookingId: other, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+  });
+
+  it('refuses when the earlier slot has no room, keeping the slot', () => {
+    const id = confirmed();
+    pressStartNow(db, { bookingId: id, by: P[0], now: NOW });
+    pressStartNow(db, { bookingId: id, by: P[1], now: NOW });
+    setSetting(db, 'pug_reserve_servers', '10');
+    const before = getBooking(db, id)!.starts_at;
+    expect(startBookingNow(db, { bookingId: id, now: NOW })).toEqual({ ok: false, error: 'no_capacity' });
+    expect(getBooking(db, id)!.starts_at).toBe(before);
   });
 });
