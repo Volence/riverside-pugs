@@ -170,6 +170,20 @@ describe('Team', () => {
     ...over,
   });
 
+  it('shows each scrim\'s series from the team\'s own side, and marks a game that does not count', async () => {
+    mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false } }));
+    mockTeams.scrims.mockResolvedValue({ scrims: [scrim({
+      games: [
+        { matchId: 7, campaign: 'no_mercy', state: 'completed', us: 2, them: 1, counted: true, voided: false },
+        { matchId: 8, campaign: 'no_mercy', state: 'aborted', us: 0, them: 0, counted: false, voided: true },
+      ],
+      series: { us: 1, them: 0, draws: 0, counted: 1 },
+    })] });
+    render(<Team slug="rats" session={session('2')} />);
+    expect(await screen.findByText('Riverside Rats 1 - 0 Other Crew')).toBeTruthy();
+    expect(screen.getByText('Voided, not counted')).toBeTruthy();
+  });
+
   it('fetches and shows the Scrims panel for a member', async () => {
     mockTeams.get.mockResolvedValue(view({ viewer: { role: 'member', staff: false } }));
     mockTeams.scrims.mockResolvedValue({ scrims: [scrim()] });

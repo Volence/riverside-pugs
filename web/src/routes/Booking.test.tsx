@@ -166,6 +166,30 @@ describe('Booking page', () => {
   });
 
   describe('games (plan 4b, Task 7)', () => {
+    it('shows the series from the viewer\'s own side first, rows in the same order, and marks games that do not count', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({
+        viewer: { side: 'b', manages: ['b'], staff: false, invited: false },
+        state: 'ended', connect: null,
+        games: [
+          { ...GAME, matchId: 644, campaign: 'no_mercy', sideA: 'b', scoreA: 347, scoreB: 250, winner: 'a', voided: false },
+          { ...GAME, matchId: 645, campaign: 'death_toll', sideA: 'b', scoreA: 328, scoreB: 893, winner: 'b', voided: false },
+          { ...GAME, matchId: 646, campaign: 'no_mercy', state: 'aborted', sideA: 'a', scoreA: 10, scoreB: 0, winner: null, voided: false },
+        ],
+        series: { wins: { a: 1, b: 1 }, draws: 0, counted: 2 },
+      }));
+      render(<Booking id="7" session={session} />);
+      expect(await screen.findByText("Mice 1 - 1 p0's group")).toBeTruthy();
+      expect(screen.getByText("Mice 347 : 250 p0's group")).toBeTruthy();
+      expect(screen.getByText('Not finished, not counted')).toBeTruthy();
+    });
+
+    it('shows no series line while no game counts', async () => {
+      mockBookings.get.mockResolvedValue(VIEW({ games: [{ ...GAME, state: 'live' }], series: { wins: { a: 0, b: 0 }, draws: 0, counted: 0 } }));
+      render(<Booking id="7" session={session} />);
+      await screen.findByText("p0's group 5 : 3 Mice");
+      expect(screen.queryByText(/ - .* p0's group|p0's group \d - \d/)).toBeNull();
+    });
+
     const GAME = {
       matchId: 55, campaign: 'no_mercy', state: 'completed', scoreA: 3, scoreB: 5, sideA: 'b' as const,
       startedAt: '2026-10-02T20:00:00.000Z', endedAt: '2026-10-02T20:30:00.000Z',

@@ -2314,7 +2314,8 @@ export interface TeamScrim {
   /** Whether the viewer may open the booking page (its people, managers
    *  and staff); every member may open the game links. */
   canView: boolean;
-  games: { matchId: number; campaign: string; state: string; us: number; them: number }[];
+  games: { matchId: number; campaign: string; state: string; us: number; them: number; counted?: boolean; voided?: boolean }[];
+  series?: { us: number; them: number; draws: number; counted: number };
 }
 
 // ---------- bookings ----------
@@ -2391,6 +2392,8 @@ export interface BookingGameView {
   /** Plan 5: the ordinal of the map this game was replayed from after a
    *  restart, null when it was never restored. */
   restoredAtMap: number | null;
+  /** Optional for an older server. */
+  winner?: 'a' | 'b' | 'draw' | null; voided?: boolean;
 }
 export interface BookingView {
   id: number; purpose: 'scrim' | 'tournament'; state: BookingState; ending: boolean;
@@ -2412,6 +2415,8 @@ export interface BookingView {
   recovery: { since: string; moved: boolean; waiting: boolean } | null;
   viewer: { side: BookingSide | null; manages: BookingSide[]; staff: boolean; invited: boolean };
   games: BookingGameView[];
+  /** Optional for an older server; null when the viewer does not see the games. */
+  series?: { wins: { a: number; b: number }; draws: number; counted: number } | null;
   /** Casters either side invited, and which sides' halves are set. */
   casters: BookingCaster[];
   /** Re-posting a cancelled scrim in one click (plan 2): true only when the
