@@ -50,10 +50,30 @@ const LEET: Record<string, string> = {
   '$': 's', '5': 's', '7': 't', '6': 'g', '9': 'g', q: 'g',
 };
 
+/** Cyrillic and Greek letters drawn the same as a Latin one (lowercase,
+ *  after toLowerCase), so "nіgga" with a Cyrillic і is not two fragments.
+ *  Only true lookalikes: a Russian word folds to Latin gibberish, never to
+ *  a slur by accident. */
+const LOOKALIKE: Record<string, string> = {
+  'а': 'a', 'е': 'e', 'ё': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x',
+  'і': 'i', 'ї': 'i', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd', 'һ': 'h', 'к': 'k', 'ԛ': 'q', 'ԝ': 'w',
+  'α': 'a', 'ο': 'o', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'ε': 'e',
+  'ɡ': 'g', 'ı': 'i',
+};
+
+/** Map lookalike letters to the Latin letter they imitate; everything else
+ *  is left alone. Team names key on this too, so "Rіverside" (Cyrillic і)
+ *  cannot sit next to "Riverside". */
+export function foldLookalikes(text: string): string {
+  let out = '';
+  for (const ch of text) out += LOOKALIKE[ch] ?? ch;
+  return out;
+}
+
 /** Lowercase, strip accents, map the stand-ins. Characters that are not
  *  letters after that become separators. */
 function letters(text: string): string {
-  const base = text.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const base = foldLookalikes(text.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase());
   let out = '';
   for (const ch of base) out += LEET[ch] ?? (/[a-z]/.test(ch) ? ch : ' ');
   return out;

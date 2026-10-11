@@ -732,3 +732,10 @@ export function timeoutCause(kind: 'ready_fail' | 'no_show' | undefined): string
     : kind === 'ready_fail' ? 'missed ready checks'
     : 'missed ready checks or no-shows';
 }
+
+/** A booked or event game's match state, in words ("completed" reads as
+ *  Final). Unknown states fall back to themselves. */
+const GAME_STATE_LABEL: Record<string, string> = {
+  pending: 'Waiting', configuring: 'Setting up', live: 'Live', completed: 'Final', aborted: 'Aborted',
+};
+export const gameStateLabel = (state: string): string => GAME_STATE_LABEL[state] ?? state;

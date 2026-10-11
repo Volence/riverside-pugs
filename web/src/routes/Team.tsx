@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { ApiError, logoUrl, teamsApi, type TeamScrim, type TeamView } from '../api';
-import { Empty, Panel } from '../components/bits';
+import { Empty, PageSkeleton, Panel } from '../components/bits';
+import { CopyRow } from '../components/CopyRow';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { toLogoPng } from '../teamLogo';
-import { campaignName } from '../format';
+import { campaignName, gameStateLabel } from '../format';
+import { localLabel } from '../bookingTime';
 import { placementText } from '../eventFormat';
 import { notCountedLabel, seriesLine } from '../series';
 import { RecordLine, reliableBadge } from '../components/ScrimRecord';
@@ -41,12 +43,18 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
   /** The member a Kick press is waiting to be confirmed for. */
   const [confirmKick, setConfirmKick] = useState<string | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  /** Bumped after every action, so the Scrims panel refetches (a kick or a
+   *  leave changes which bookings the viewer may open). */
+  const [scrimsTick, setScrimsTick] = useState(0);
   const [scrims, setScrims] = useState<TeamScrim[] | null>(null);
   const me = session.kind === 'active' ? session.me.steamid : null;
 
   const load = (signal?: AbortSignal) =>
-    teamsApi.get(slug, signal).then(setTeam, (e) => { if (e instanceof ApiError && e.status === 404) setMissing(true); });
+    teamsApi.get(slug, signal).then((t) => { setTeam(t); setFailed(false); }, (e) => {
+      if (e instanceof ApiError && e.status === 404) setMissing(true);
+      else if (!(e instanceof DOMException && e.name === 'AbortError')) setFailed(true);
+    });
 
   // The initial load is cancelled on unmount or when the slug changes, so a
   // slow response for a team the viewer already navigated away from can
@@ -65,7 +73,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
     const ctl = new AbortController();
     teamsApi.scrims(slug, ctl.signal).then((r) => setScrims(r.scrims), () => {});
     return () => ctl.abort();
-  }, [slug, team?.viewer.role, team?.viewer.staff]);
+  }, [slug, team?.viewer.role, team?.viewer.staff, scrimsTick]);
 
   useEffect(() => {
     if (q.trim().length < 2) { setFound([]); return; }
@@ -77,11 +85,19 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
   const act = async (fn: () => Promise<unknown>, after?: () => void) => {
     setError(null);
     setBusy(true);
-    try { await fn(); after?.(); await load(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try { await fn(); after?.(); await load(); setScrimsTick((n) => n + 1); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
 
   if (missing) return <main class="page page--profile"><PageHeader title="Team" /><Empty>No such team, or teams are not open yet.</Empty></main>;
-  if (!team) return <main class="page page--profile"><PageHeader title="Team" /></main>;
+  if (!team && failed) {
+    return (
+      <main class="page page--profile">
+        <PageHeader title="Team" />
+        <p class="error" role="alert">Could not load this team. <button class="btn btn--ghost btn--sm" onClick={() => { setFailed(false); void load(); }}>Try again</button></p>
+      </main>
+    );
+  }
+  if (!team) return <PageSkeleton variant="profile" panels={2} />;
 
   const live = team.disbandedAt === null;
   const role = team.viewer.role;
@@ -94,6 +110,9 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
   // transferCaptain, renameTeam, disbandTeam and setLogoKey DO have a staff
   // bypass, so staff who are not on the team still get these.
   const staffControls = live && (role === 'captain' || team.viewer.staff);
+  // A banned or held captain cannot log in; a co-captain may then hand the
+  // captaincy to anyone in good standing, themselves included.
+  const takeOver = live && role === 'cocaptain' && !!team.captainAway;
   const joinUrl = team.manage?.joinLinkToken ? `${location.origin}/team/join/${team.manage.joinLinkToken}` : null;
 
   const starters = Math.min(team.members.length, ENTRY_MIN);
@@ -148,13 +167,16 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                       <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => { setConfirmKick(null); setConfirmCaptain(m.steamid); }}>Make captain</button>
                     </>
                   )}
+                  {takeOver && !staffControls && m.role !== 'captain' && (
+                    <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => { setConfirmKick(null); setConfirmCaptain(m.steamid); }}>Make captain</button>
+                  )}
                   {canManage && m.steamid !== me && m.role !== 'captain' && (role === 'captain' || m.role === 'member') && (
                     <button class="btn btn--ghost btn--sm btn--quietdanger" disabled={busy} onClick={() => { setConfirmCaptain(null); setConfirmKick(m.steamid); }}>Kick</button>
                   )}
                 </span>
                 {confirmKick === m.steamid && (
                   <span class="teamconfirmrow">
-                    <span class="teamroster__meta">{m.name} leaves the team and cannot rejoin through the join link. You can invite them back later.</span>
+                    <span class="teamroster__meta">{m.name} leaves the team and cannot rejoin through the join link, and comes off the team's scrims that have not started yet. You can invite them back later.</span>
                     <span class="teamconfirm">
                       <button class="btn btn--sm btn--danger" disabled={busy} onClick={() => act(() => teamsApi.kick(slug, m.steamid), () => setConfirmKick(null))}>Yes, kick {m.name}</button>
                       <button class="btn btn--ghost btn--sm" onClick={() => setConfirmKick(null)}>Keep them</button>
@@ -206,15 +228,15 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                     {s.canView ? (
                       <a class="teamrow__who" href={`/booking/${s.bookingId}`}>
                         <span class="teamrow__name">vs {s.opponent}</span>
-                        <span class="teamroster__meta">{day(s.startsAt)}</span>
+                        <span class="teamroster__meta">{localLabel(s.startsAt)}</span>
                       </a>
                     ) : (
                       <div class="teamrow__who">
                         <span class="teamrow__name">vs {s.opponent}</span>
-                        <span class="teamroster__meta">{day(s.startsAt)}</span>
+                        <span class="teamroster__meta">{localLabel(s.startsAt)}</span>
                       </div>
                     )}
-                    {s.purpose === 'tournament' && <span class="teamchip">Tournament</span>}
+                    {s.purpose === 'tournament' && <span class="teamchip teamchip--tournament">Tournament</span>}
                     <span class={`teamchip teamchip--${s.state}`}>{SCRIM_STATE_LABEL[s.state] ?? s.state}</span>
                   </div>
                   {s.series && s.series.counted > 0 && (
@@ -226,7 +248,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                         <li key={g.matchId}>
                           <span>{campaignName(g.campaign)}</span>
                           <span>{g.us} : {g.them}</span>
-                          <span class="muted">{g.state}</span>
+                          <span class="muted">{gameStateLabel(g.state)}</span>
                           {notCountedLabel(g) && <span class="muted">{notCountedLabel(g)}</span>}
                           <a href={`/match/${g.matchId}`}>View</a>
                         </li>
@@ -279,11 +301,8 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
               {joinUrl ? (
                 <>
                   <p class="teamnote">Anyone with this link can join until you turn it off.</p>
-                  <div class="teamlink">
-                    <input readOnly value={joinUrl} aria-label="Join link" onFocus={(e) => (e.target as HTMLInputElement).select()} />
-                    <button class="btn btn--sm" onClick={() => { void navigator.clipboard?.writeText(joinUrl); setCopied(true); }}>{copied ? 'Copied' : 'Copy'}</button>
-                  </div>
-                  <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => teamsApi.joinLink(slug, false), () => setCopied(false))}>Turn off join link</button>
+                  <CopyRow label="Join link" value={joinUrl} />
+                  <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => teamsApi.joinLink(slug, false))}>Turn off join link</button>
                 </>
               ) : (
                 <>
@@ -304,7 +323,11 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
             <label class="btn btn--ghost btn--sm teamupload">
               {team.logoKey ? 'Replace logo' : 'Upload logo'}
               <input class="sr-only" type="file" accept="image/*" aria-label="Logo" disabled={busy} onChange={(e) => {
-                const f = (e.target as HTMLInputElement).files?.[0];
+                const input = e.target as HTMLInputElement;
+                const f = input.files?.[0];
+                // Cleared at once, so picking the same file again after a
+                // refused upload still fires onChange.
+                input.value = '';
                 if (f) void act(async () => teamsApi.logo(slug, await toLogoPng(f)));
               }} />
             </label>
