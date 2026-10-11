@@ -38,7 +38,7 @@ beforeEach(async () => {
     dm: () => async (to, p) => { dms.push({ to, content: p.content ?? '' }); },
   });
   await app.register(scrimRoutes, { db, runner: null, notifier, publicUrl: PUBLIC_URL });
-  await app.register(bookingRoutes, { db, runner: null });
+  await app.register(bookingRoutes, { db, runner: null, notifier, publicUrl: PUBLIC_URL });
   await app.ready();
 
   cookies = {};
@@ -256,6 +256,25 @@ describe('post, accept, confirm: the booking and its notices', () => {
     expect(booked.map((d) => d.to).sort()).toEqual([discordOf(P[0]), discordOf(P[1])].sort());
 
     await stubApp.close();
+  });
+
+  it('a direct booking confirmed over a side\'s open post withdraws it and tells the poster and the accepter; a post elsewhere stays', async () => {
+    const overlapping = await post(P[0]);
+    const elsewhere = await post(P[0], { startsAt: new Date(START_MS + 2 * 86_400_000).toISOString() });
+    await accept(overlapping, P[2]);
+    const made = await call('POST', '/api/bookings', P[0], {
+      opponent: { steamid: P[1] }, startsAt: new Date(START_MS + 3_600_000).toISOString(), playlist: ['no_mercy'],
+    });
+    expect(made.statusCode).toBe(201);
+    dms.length = 0;
+    const confirmed = await call('POST', `/api/bookings/${made.json().id}/confirm`, P[1]);
+    expect(confirmed.statusCode).toBe(200);
+    const status = (id: number) => (db.prepare('SELECT status FROM scrim_posts WHERE id = ?').get(id) as { status: string }).status;
+    expect(status(overlapping)).toBe('withdrawn');
+    expect(status(elsewhere)).toBe('open');
+    const to = (steamid: string) => dms.filter((d) => d.to === discordOf(steamid)).map((d) => d.content);
+    expect(to(P[0]).filter((t) => t.endsWith('was withdrawn: your side booked another scrim at that time.'))).toHaveLength(1);
+    expect(to(P[2]).filter((t) => t.endsWith('the posting side booked another scrim at that time.'))).toHaveLength(1);
   });
 
   it('a decline tells every current manager of that accepter\'s side (scrim_declined), not only its stored captain', async () => {

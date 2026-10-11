@@ -4,7 +4,8 @@ import { escapeName } from '../identity.js';
 import { getPlayer } from '../players.js';
 import { activeMembers, getTeam } from '../teams/teams.js';
 import { whenUtc } from '../bookings/messages.js';
-import { getAccept, getPost, type AcceptRow, type PostRow } from './scrims.js';
+import type { Notifier } from '../notify/notify.js';
+import { getAccept, getPost, type AcceptRow, type PostRow, type Withdrawn } from './scrims.js';
 import { lengthLabel, showSr, sideSr, type ScrimSide } from './rules.js';
 
 /** The six scrim board notice types this module knows how to word (the
@@ -99,4 +100,33 @@ export function scrimMessage(
     components: [[{ kind: 'link', url: link, label: 'Open it' }]],
     mentionUserIds: [],
   };
+}
+
+/**
+ * Tell each side why its posts and acceptances were withdrawn by a booking
+ * (confirmAccept's, or a direct booking's confirm; owner ruling 2026-10-11).
+ * Never throws: it runs after a committed write.
+ */
+export function sendWithdrawnNotices(db: DB, notifier: Notifier, publicUrl: string, withdrawn: Withdrawn): void {
+  const BOOKED_ELSEWHERE = 'your side booked another scrim at that time';
+  const tell = (steamids: Iterable<string>, type: ScrimNotifyType, postId: number, extra: Parameters<typeof scrimMessage>[4] = {}) => {
+    try {
+      const payload = scrimMessage(db, publicUrl, postId, type, extra);
+      if (payload) notifier.send(steamids, type, payload);
+    } catch (err) {
+      console.warn(`[scrims] ${type} notice failed:`, err instanceof Error ? err.message : err);
+    }
+  };
+  for (const postId of withdrawn.posts) {
+    const wp = getPost(db, postId);
+    if (wp) tell(scrimSideManagers(db, wp), 'scrim_withdrawn', postId, { reason: BOOKED_ELSEWHERE });
+  }
+  for (const acceptId of withdrawn.postAccepts) {
+    const wa = getAccept(db, acceptId);
+    if (wa) tell(scrimSideManagers(db, wa), 'scrim_declined', wa.post_id, { reason: 'the posting side booked another scrim at that time' });
+  }
+  for (const acceptId of withdrawn.accepts) {
+    const wa = getAccept(db, acceptId);
+    if (wa) tell(scrimSideManagers(db, wa), 'scrim_withdrawn', wa.post_id, { acceptId, reason: BOOKED_ELSEWHERE });
+  }
 }
