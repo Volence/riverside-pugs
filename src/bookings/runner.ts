@@ -22,7 +22,7 @@ import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
-  BOOKING_ERRORS, bookRoster, firstSurvivorSide, type BookingRow, type Side, type SideRow,
+  BOOKING_ERRORS, bookRoster, firstSurvivorSide, pressStartNow, startBookingNow, withdrawStartNow, type Result, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { classifyBox } from './recovery.js';
 import { prepareRestore, restoreSnapshot, resumeLines, type RestoreSnapshot } from './restore.js';
@@ -2011,6 +2011,36 @@ export class BookingRunner {
     if (!r.ok) return { ok: false, error: BOOKING_ERRORS[r.error].text };
     this.settle(id);
     return { ok: true };
+  }
+
+  /** Start now (scrims in game Ruling 7): a manager presses it; once both
+   *  sides have, the slot moves up to now and allocate takes a box at once.
+   *  The completing press is refused, and taken back, when no box could be
+   *  held right now (the booking would otherwise wait for one and be closed
+   *  as no_server after the grace from its new start) or when the earlier
+   *  slot has no room. */
+  startNow(id: number, by: string): Result<{ started: boolean }> {
+    const nowDate = new Date(this.now());
+    const r = pressStartNow(this.db, { bookingId: id, by, now: nowDate });
+    if (!r.ok) return r;
+    if (!r.value.both) return { ok: true, value: { started: false } };
+    const b = getBooking(this.db, id)!;
+    if (b.server_id === null && !this.pickBox(b)) {
+      withdrawStartNow(this.db, { bookingId: id, by, now: nowDate });
+      return { ok: false, error: 'no_box_now' };
+    }
+    const moved = startBookingNow(this.db, { bookingId: id, now: nowDate });
+    if (!moved.ok) {
+      withdrawStartNow(this.db, { bookingId: id, by, now: nowDate });
+      return moved;
+    }
+    console.log(`[booking] ${id} starts now, ${moved.value.minutes} minutes early`);
+    try {
+      this.allocate();
+    } catch (err) {
+      console.error(`[booking] ${id}: allocate() after Start now failed:`, err instanceof Error ? err.message : err);
+    }
+    return { ok: true, value: { started: true } };
   }
 
   /** A captain's in-game command (plugin l4d_booking 1.1.0's signed PUGBOOK

@@ -191,6 +191,17 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
   action('no-show', (me, id) => B.claimNoShow(db, { bookingId: id, by: me }),
     (_me, id, value) => runner?.onNoShow(id, (value as { absent: B.Side }).absent));
   action('end', (me, id) => B.endBooking(db, { bookingId: id, by: me }), (_me, id) => runner?.settle(id));
+  // Start now (scrims in game Ruling 7): each confirmed side's manager presses
+  // it; the runner moves the slot and takes a box once both have.
+  app.post('/api/bookings/:id/start-now', async (req, reply) => {
+    const v = visible(req, reply);
+    if (!v) return;
+    if (!runner) return reply.code(503).send(NO_RUNNER);
+    const r = runner.startNow(v.id, v.me);
+    if (!r.ok) return refuse(reply, r.error);
+    return view(v.me, v.id);
+  });
+  action('start-now/withdraw', (me, id) => B.withdrawStartNow(db, { bookingId: id, by: me }));
   action('people', (me, id, req) => {
     const b = body(req);
     return B.addPerson(db, { bookingId: id, by: me, side: b.side, steamid: b.steamid, role: b.role });

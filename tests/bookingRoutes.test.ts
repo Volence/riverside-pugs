@@ -386,3 +386,32 @@ describe('private reviews (plan 2, Task 4)', () => {
     expect(own.body).not.toContain('toxic');
   });
 });
+
+describe('start now (scrims in game Ruling 7)', () => {
+  it('a captain presses it and takes it back; the view says who pressed', async () => {
+    const id = await create();
+    confirmBooking(db, { bookingId: id, by: P[1] });
+    const first = await call('POST', `/api/bookings/${id}/start-now`, P[0]);
+    expect(first.statusCode).toBe(200);
+    expect(first.json().canStartNow).toBe(true);
+    expect(first.json().sides.map((s: { startNow: boolean }) => s.startNow)).toEqual([true, false]);
+    const back = await call('POST', `/api/bookings/${id}/start-now/withdraw`, P[0]);
+    expect(back.statusCode).toBe(200);
+    expect(back.json().sides.map((s: { startNow: boolean }) => s.startNow)).toEqual([false, false]);
+  });
+
+  it('with no free box the second press answers 409 with the reason', async () => {
+    const id = await create();
+    confirmBooking(db, { bookingId: id, by: P[1] });
+    db.prepare("UPDATE servers SET status = 'offline'").run();
+    await call('POST', `/api/bookings/${id}/start-now`, P[0]);
+    const r = await call('POST', `/api/bookings/${id}/start-now`, P[1]);
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe('No server is free right now. Try again in a minute.');
+  });
+
+  it('someone the booking is not shown to gets a 404', async () => {
+    const id = await create();
+    expect((await call('POST', `/api/bookings/${id}/start-now`, P[2])).statusCode).toBe(404);
+  });
+});
