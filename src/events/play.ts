@@ -94,12 +94,28 @@ interface Stamp { not_before: string | null; scheduled_at: string | null; source
 
 const NO_STAMP: Stamp = { not_before: null, scheduled_at: null, source: null, from: null, to: null };
 
+/** The schedule row (a winners-bracket round) a bracket match is played
+ *  under. The schedule has one row per round of the main bracket (group 1);
+ *  the other groups have their own round numbers, so reading their row by
+ *  round alone gave a grand final round 1's window (held as "window
+ *  expired" the moment it was ready) and lower rounds past the upper count
+ *  no time at all. A lower-bracket round k follows upper round k/2 + 1
+ *  (rounded down), capped at the upper final; the third-place match and the
+ *  grand final go with the upper final. */
+export function scheduleRound(type: V.StageType, group: number, round: number, upperRounds: number): number {
+  if (group <= 1 || upperRounds < 1) return round;
+  if (type === 'double_elim' && group === 2) return Math.min(upperRounds, Math.floor(round / 2) + 1);
+  return upperRounds;
+}
+
 /** A window stage's match carries the default time and the window; a
  *  rolling stage's match carries the date as not_before (Ruling 3). A bye
- *  or a row written already resolved is never played, so it gets NO_STAMP. */
-function stampOf(db: DB, stageId: number, round: number, at: string): Stamp {
+ *  or a row written already resolved is never played, so it gets NO_STAMP.
+ *  `place` is a bracket match's group and its stage's upper round count. */
+function stampOf(db: DB, stageId: number, round: number, at: string, place?: { group: number; upperRounds: number }): Stamp {
   const stage = E.getStage(db, stageId)!;
-  const t = roundTimes(stage, round, at);
+  const row = place ? scheduleRound(E.stageSettingsOf(stage).type, place.group, round, place.upperRounds) : round;
+  const t = roundTimes(stage, row, at);
   return stage.scheduling === 'window'
     ? { not_before: null, scheduled_at: t.at, source: t.at !== null ? 'default' : null, from: t.from, to: t.to }
     : { not_before: t.at, scheduled_at: null, source: null, from: null, to: null };
@@ -133,13 +149,15 @@ function syncBracket(db: DB, eventId: number, stageId: number, data: BracketData
        result_source = ?, finished_at = ? WHERE id = ?`,
   );
   const seen = new Set<number>();
-  for (const b of bracketMatches(data)) {
+  const all = bracketMatches(data);
+  const upperRounds = Math.max(0, ...all.filter((b) => b.group === 1).map((b) => b.round));
+  for (const b of all) {
     seen.add(b.bmId);
     const status: MatchStatus = b.state === 'done' ? (b.forfeit ? 'forfeit' : 'done') : b.state === 'ready' ? 'waiting' : 'pending';
     const resolved = b.state === 'done';
     const row = rows.get(b.bmId);
     if (!row) {
-      const s = resolved ? NO_STAMP : stampOf(db, stageId, b.round, at);
+      const s = resolved ? NO_STAMP : stampOf(db, stageId, b.round, at, { group: b.group, upperRounds });
       ins.run(eventId, stageId, b.group, b.round, b.number, b.bmId, b.a, b.b, status, b.winner, b.scoreA, b.scoreB, at, resolved ? at : null,
         s.not_before, s.scheduled_at, s.source, s.from, s.to);
       continue;
@@ -336,9 +354,11 @@ export function applySchedule(db: DB, o: { stageId: number; by: string | null; n
        WHERE id = ?`,
     );
     let stamped = 0;
-    for (const m of matchesOf(db, stage.id)) {
+    const rows = matchesOf(db, stage.id);
+    const upperRounds = Math.max(0, ...rows.filter((m) => m.grp === 1).map((m) => m.round));
+    for (const m of rows) {
       if (m.status !== 'pending' && m.status !== 'waiting') continue;
-      const s = stampOf(db, stage.id, m.round, at);
+      const s = stampOf(db, stage.id, m.round, at, m.bm_match_id !== null ? { group: m.grp, upperRounds } : undefined);
       upd.run(s.not_before, s.from, s.to, s.scheduled_at, s.source, m.id);
       stamped++;
     }

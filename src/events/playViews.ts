@@ -99,8 +99,8 @@ function stageLabels(ev: E.EventRow, s: E.StageRow, ms: P.MatchRow[]) {
     labelType,
     label: (grp: number, round: number) => roundLabel(labelType, st.config, grp, round, last.get(grp)!),
     dates: (round: number) => (league && seasonStart ? weekDates(seasonStart, weekOfRound(round, league.matchesPerWeek)) : null),
-    times: (round: number) => {
-      const t = P.roundTimes(s, round, s.started_at ?? ev.starts_at);
+    times: (round: number, grp = 1) => {
+      const t = P.roundTimes(s, P.scheduleRound(st.type, grp, round, last.get(1) ?? 0), s.started_at ?? ev.starts_at);
       return { defaultAt: t.at, window: t.from !== null && t.to !== null ? { from: t.from, to: t.to } : null };
     },
   };
@@ -149,7 +149,7 @@ export function stagePlayViews(db: DB, ev: E.EventRow, opts: { staff?: boolean }
     for (const m of ms) {
       let r = rounds.find((x) => x.group === m.grp && x.round === m.round);
       if (!r) {
-        r = { group: m.grp, round: m.round, label: label(m.grp, m.round), dates: dates(m.round), ...times(m.round), matches: [] };
+        r = { group: m.grp, round: m.round, label: label(m.grp, m.round), dates: dates(m.round), ...times(m.round, m.grp), matches: [] };
         rounds.push(r);
       }
       const resolved = P.RESOLVED.has(m.status);

@@ -243,6 +243,27 @@ describe('play writer', () => {
     expect(P.applySchedule(f.db, { stageId: 999, by: ADMIN, now: NOW })).toEqual({ ok: false, error: 'stage_not_found' });
   });
 
+  it('scheduleRound: lower-bracket rounds follow the upper round they come after; the third place and grand final go with the upper final', () => {
+    expect([1, 2, 3].map((r) => P.scheduleRound('single_elim', 1, r, 3))).toEqual([1, 2, 3]);
+    expect(P.scheduleRound('single_elim', 2, 1, 3)).toBe(3);
+    expect([1, 2, 3, 4].map((r) => P.scheduleRound('double_elim', 2, r, 3))).toEqual([1, 2, 2, 3]);
+    expect(P.scheduleRound('double_elim', 3, 1, 3)).toBe(3);
+    expect(P.scheduleRound('double_elim', 3, 2, 3)).toBe(3);
+  });
+
+  it('a window single elimination stamps its third-place match with the final\'s window, not round 1\'s', async () => {
+    const f = playFixture({ stages: [{ ...SE(true), scheduling: 'window' }], entries: 4 });
+    const rows = [
+      { round: 1, at: '2026-10-14T21:00:00Z', from: '2026-10-12T00:00:00Z', to: '2026-10-15T23:59:59Z' },
+      { round: 2, at: '2026-10-17T21:00:00Z', from: '2026-10-16T00:00:00Z', to: '2026-10-18T23:59:59Z' },
+    ];
+    ok(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.stages[0]!, by: ADMIN, rounds: rows, now: NOW }));
+    await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW });
+    const ms = P.matchesOf(f.db, f.stages[0]!);
+    const third = ms.find((m) => m.grp === 2)!;
+    expect(third).toMatchObject({ round: 1, window_start: '2026-10-16T00:00:00.000Z', scheduled_at: '2026-10-17T21:00:00.000Z' });
+  });
+
   it('applySchedule refuses on a cancelled or a finished event, as setRoundSchedule does (plan T4 Task 2 review)', async () => {
     const f = playFixture({ stages: [LEAGUE(4, 2, 'round_robin', null, '2026-10-12')], entries: 4 });
     await startEventFlow(f.db, { eventId: f.eventId, by: ADMIN, now: NOW });
