@@ -822,13 +822,13 @@ export function reapOrphanedMatches(
   const cutoff = new Date(Date.now() - olderThanMs).toISOString().replace('T', ' ').slice(0, 19);
   const rows = db
     .prepare(
-      `SELECT m.id, m.server_id FROM matches m
+      `SELECT m.id, m.server_id, m.booking_id FROM matches m
        JOIN match_live l ON l.match_id = m.id
        WHERE m.state = 'live' AND l.last_seen < ?
          -- A booking in crash recovery (plan 5) owns its game's fate: restored, or aborted as server_lost by its give-up.
          AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.id = m.booking_id AND b.recovering_at IS NOT NULL AND b.ending_at IS NULL)`,
     )
-    .all(cutoff) as { id: number; server_id: number | null }[];
+    .all(cutoff) as { id: number; server_id: number | null; booking_id: number | null }[];
 
   for (const r of rows) {
     db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'server_lost', ended_at = datetime('now') WHERE id = ?")
@@ -846,7 +846,10 @@ export function reapOrphanedMatches(
     archiveAborted(db, r.id);
     publishAdminEvent({ kind: 'problem', matchId: r.id, text: `Match #${r.id} aborted: the game server stopped reporting it.` });
     // Nobody on it did anything wrong: the whole roster goes back in front.
-    noteMatchAborted(db, { matchId: r.id, cause: 'server_lost', requeue: true });
+    // Not for a game inside a booking (scrim or tournament): its players are
+    // still on the booking, which (or the series) decides what comes next,
+    // and a PUG lobby popping on them mid-series would pull them off it.
+    noteMatchAborted(db, { matchId: r.id, cause: 'server_lost', requeue: r.booking_id === null });
     console.warn(`[liveView] reaped orphaned match ${r.id}: no heartbeat for ${olderThanMs}ms`);
   }
   return rows.map((r) => r.id);

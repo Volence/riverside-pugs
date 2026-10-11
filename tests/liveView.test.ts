@@ -8,6 +8,7 @@ import {
   recordRoundStart, recordRoundEnd, roundsFor, recordChat, recordPhase, pausesFor, readyupsFor, slowToReady,
 } from '../src/liveView.js';
 import { clearLive } from '../src/matchArchive.js';
+import { subscribeMatchAborts } from '../src/matchAborts.js';
 import { watchCauselessAborts } from './helpers.js';
 
 const TOKEN = '0123456789abcdef0123456789abcdef';
@@ -504,6 +505,25 @@ describe('reapOrphanedMatches', () => {
     db.prepare("INSERT INTO match_live (match_id, last_seen) VALUES (?, datetime('now', '-60 minutes'))").run(m);
     const releaser = new ServerReleaser(db, async () => {});
     expect(reapOrphanedMatches(db, releaser)).not.toContain(m);
+  });
+
+  it('never puts a booked game\'s players back in the PUG queue', () => {
+    // A tournament game (origin 'queue', the series engine's) gone silent
+    // with no recovery running: aborted, but its players stay on the booking.
+    upsertPlayer(db, { steamid: A[0], name: 'p1', avatar: null }, []);
+    const b = Number(db.prepare(
+      `INSERT INTO bookings (purpose, starts_at, ends_at, state, password, tv_password, game_config, rules_json, playlist_json, created_by, created_at)
+       VALUES ('tournament', '2026-10-02T20:00:00Z', '2026-10-02T22:00:00Z', 'active', 'pw', 'tv', 'pug', '{}', '["no_mercy"]', ?, '2026-10-01T00:00:00Z')`,
+    ).run(A[0]).lastInsertRowid);
+    const m = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, token, origin, booking_id) VALUES (?, 'live', 'no_mercy', 't2', 'queue', ?)").run(currentSeasonId(db), b).lastInsertRowid);
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(m, A[0]);
+    db.prepare("INSERT INTO match_live (match_id, last_seen) VALUES (?, datetime('now', '-60 minutes'))").run(m);
+    const seen: boolean[] = [];
+    const off = subscribeMatchAborts((e) => { if (e.matchId === m) seen.push(e.requeue); });
+    try {
+      expect(reapOrphanedMatches(db, new ServerReleaser(db, async () => {}))).toContain(m);
+    } finally { off(); }
+    expect(seen).toEqual([false]);
   });
 });
 
