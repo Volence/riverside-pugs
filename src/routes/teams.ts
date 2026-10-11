@@ -136,10 +136,15 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
   });
 
   app.get('/api/teams/join/:token', async (req, reply) => {
-    if (!allowedActive(req, reply)) return;
+    const me = allowedActive(req, reply);
+    if (!me) return;
     const t = T.teamByJoinToken(db, (req.params as { token: string }).token);
     if (!t) return refuse(reply, 'link_off');
-    return { slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, members: T.rosterSize(db, t.id), captainName: nameOf(t.captain_steamid) };
+    return {
+      slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, members: T.rosterSize(db, t.id), captainName: nameOf(t.captain_steamid),
+      // Already on it: the page sends them to the team instead of offering Join.
+      member: T.roleOf(db, t.id, me) !== null,
+    };
   });
 
   app.post('/api/teams/join/:token', async (req, reply) => {

@@ -7,6 +7,7 @@ import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { estimateLine, estimateSlot, localLabel, playMinutes, toUtcIso } from '../bookingTime';
 import { RecordLine } from '../components/ScrimRecord';
+import { confirm } from '../components/Confirm';
 
 const STATE_LABEL: Record<BookingSummary['state'], string> = {
   scheduled: 'Booked', held: 'Server taken', setup: 'Setting up', ready: 'Ready', active: 'Playing',
@@ -28,7 +29,11 @@ function Row({ b, busy, act }: { b: BookingSummary; busy: boolean; act: (fn: () 
       {b.needs === 'confirm' && (
         <span class="teamconfirm">
           <button class="btn btn--sm" disabled={busy} onClick={() => act(() => bookingsApi.act(b.id, 'confirm'))}>Confirm</button>
-          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => act(() => bookingsApi.act(b.id, 'decline'))}>Decline</button>
+          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={async () => {
+            if (await confirm({ title: `Decline ${b.aName} vs ${b.bName}?`, body: 'The booking is cancelled and the other side is told.', confirmLabel: 'Decline', cancelLabel: 'Go back', danger: true })) {
+              act(() => bookingsApi.act(b.id, 'decline'));
+            }
+          }}>Decline</button>
         </span>
       )}
       {b.needs === 'accept' && (
@@ -96,8 +101,8 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
       </label>
       <fieldset class="bookform__fieldset">
         <legend class="teamsub">Against</legend>
-        <label><input type="radio" checked={against === 'team'} onChange={() => setAgainst('team')} /> A team</label>
-        <label><input type="radio" checked={against === 'player'} onChange={() => setAgainst('player')} /> A player and their group</label>
+        <label><input type="radio" name="against" checked={against === 'team'} onChange={() => setAgainst('team')} /> A team</label>
+        <label><input type="radio" name="against" checked={against === 'player'} onChange={() => setAgainst('player')} /> A player and their group</label>
         {against === 'team'
           ? <select aria-label="Opponent team" value={oppTeam === null ? '' : String(oppTeam)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setOppTeam(v ? Number(v) : null); }}>
               <option value="">Pick a team</option>
@@ -157,11 +162,14 @@ export function Bookings({ session }: { session: Session }) {
   const [closed, setClosed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = () => {
     if (!signedIn) return;
-    bookingsApi.mine().then(setMine, (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
-    bookingsApi.options().then(setOptions, () => {});
+    setLoadFailed(false);
+    const failed = (e: unknown) => { if (e instanceof ApiError && e.status === 404) setClosed(true); else setLoadFailed(true); };
+    bookingsApi.mine().then(setMine, failed);
+    bookingsApi.options().then(setOptions, failed);
   };
   useEffect(load, [signedIn]);
 
@@ -179,9 +187,10 @@ export function Bookings({ session }: { session: Session }) {
       <CompeteTabs active="bookings" />
       <PageHeader eyebrow="Competitive" title="Bookings" />
       {error && <p class="error" role="alert">{error}</p>}
+      {loadFailed && <p class="error" role="alert">Could not load your bookings. <button class="btn btn--ghost btn--sm" onClick={load}>Try again</button></p>}
       <Panel>
         <h3>Your bookings</h3>
-        {mine === null ? null : mine.open.length === 0
+        {mine === null ? (loadFailed ? null : <Empty>Loading…</Empty>) : mine.open.length === 0
           ? <Empty>Nothing booked.</Empty>
           : <ul class="bookinglist">{mine.open.map((b) => <Row key={b.id} b={b} busy={busy} act={act} />)}</ul>}
       </Panel>

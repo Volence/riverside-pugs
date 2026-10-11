@@ -2014,7 +2014,7 @@ export const teamsApi = {
   cancelInvite: (id: number) => post(`/api/teams/invites/${id}/cancel`),
   joinLink: (slug: string, on: boolean) => post<{ token: string | null }>(`/api/teams/${enc(slug)}/join-link`, { on }),
   joinInfo: (token: string, signal?: AbortSignal) =>
-    get<{ slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string }>(`/api/teams/join/${enc(token)}`, signal),
+    get<{ slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string; member: boolean }>(`/api/teams/join/${enc(token)}`, signal),
   join: (token: string) => post<{ slug: string }>(`/api/teams/join/${enc(token)}`),
   leave: (slug: string) => post<{ disbanded: boolean; captain: string | null }>(`/api/teams/${enc(slug)}/leave`),
   kick: (slug: string, steamid: string) => post(`/api/teams/${enc(slug)}/members/${enc(steamid)}/kick`),

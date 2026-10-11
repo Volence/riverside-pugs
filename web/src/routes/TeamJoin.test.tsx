@@ -30,6 +30,26 @@ describe('TeamJoin', () => {
     expect(screen.getByText('Captain cap · 3 / 8 players')).toBeTruthy();
   });
 
+  it('someone already on the team is sent to it, not offered Join', async () => {
+    mockTeams.joinInfo.mockResolvedValue({ slug: 'rats', name: 'Rats', tag: 'RR', logoKey: null, members: 3, captainName: 'cap', member: true });
+    render(<TeamJoin token="abc123" session={signedIn} />);
+    expect(await screen.findByText('You are already on this team.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Join Rats' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Go to the team' }).getAttribute('href')).toBe('/team/rats');
+  });
+
+  it('a server error is not read as the link being turned off', async () => {
+    const { ApiError } = await import('../api');
+    mockTeams.joinInfo.mockRejectedValue(new ApiError(500, 'boom'));
+    render(<TeamJoin token="abc123" session={signedIn} />);
+    expect(await screen.findByText(/Could not load this join link/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'See all teams' })).toBeTruthy();
+    cleanup();
+    mockTeams.joinInfo.mockRejectedValue(new ApiError(404, 'That join link is turned off or was replaced.'));
+    render(<TeamJoin token="abc123" session={signedIn} />);
+    expect(await screen.findByText(/turned off or was replaced\. Ask the captain/)).toBeTruthy();
+  });
+
   it('a full roster cannot be joined from the link page', async () => {
     mockTeams.joinInfo.mockResolvedValue({ slug: 'rats', name: 'Rats', tag: 'RR', logoKey: null, members: 8, captainName: 'cap' });
     render(<TeamJoin token="abc123" session={signedIn} />);
