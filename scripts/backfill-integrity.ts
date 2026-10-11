@@ -15,6 +15,7 @@
 import { loadConfig } from '../src/config.js';
 import { openDb } from '../src/db.js';
 import { analyzePending, backfillAll } from '../src/integrity/run.js';
+import { flagNewcomers } from '../src/integrity/newcomer.js';
 import { TUNING } from '../src/integrity/constants.js';
 import { ANALYZER_VERSION } from '../src/integrity/store.js';
 
@@ -29,6 +30,10 @@ if (!dir) {
 if (process.argv.includes('--pending')) {
   const got = analyzePending(db, dir);
   console.log(`Analysed ${got.rounds} pending round${got.rounds === 1 ? '' : 's'}, skipped ${got.skipped}.`);
+  // The server posts these from the flags table on its next sweep: this is a
+  // child process and has no line to the bot.
+  const fresh = flagNewcomers(db);
+  if (fresh.length) console.log(`Newcomer outliers flagged: ${fresh.map((o) => `${o.steamid} in match ${o.matchId}`).join(', ')}.`);
   process.exit(0);
 }
 

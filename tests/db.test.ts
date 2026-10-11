@@ -25,7 +25,7 @@ describe('openDb', () => {
       'event_log', 'event_matches', 'event_reschedules', 'event_stages', 'event_vetoes', 'events', 'fleet_files', 'fleet_readings',
       'game_configs',
       'input_bursts', 'input_caps', 'input_detections',
-      'integrity_clips', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
+      'integrity_clips', 'integrity_flag_posts', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
       'integrity_unanalysable', 'ip_alerts', 'ip_watch',
       'map_looks',
       'match_abandons', 'match_abort_notices', 'match_chat', 'match_connect_funnel', 'match_demos', 'match_gg_votes', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',

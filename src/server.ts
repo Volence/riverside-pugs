@@ -4,6 +4,7 @@ import { sweepDemos } from './demoOffload.js';
 import { sweepReplays } from './replayOffload.js';
 import { r2FromEnv } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
+import { claimNewcomerPosts } from './integrity/newcomer.js';
 import { IntegrityJobs, matchInFlight, pendingRoundCount } from './integrity/job.js';
 import { reaperRoundLimit, runMetricsPass } from './metrics/job.js';
 import { handleAbandon } from './abandon.js';
@@ -1654,6 +1655,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       if (integrityJobs && pendingRoundCount(deps.db) > 0) integrityJobs.start('pending');
     } catch (err) {
       console.error('[integrity] automatic pass failed:', err);
+    }
+    try {
+      // The analysis child stores newcomer flags; telling the mods is ours.
+      for (const f of claimNewcomerPosts(deps.db)) {
+        publishAdminEvent({ kind: 'newcomer_flag', steamid: f.steamid, matchId: f.matchId, detail: f.detail });
+      }
+    } catch (err) {
+      console.error('[integrity] newcomer post failed:', err);
     }
     try {
       reapOrphanedMatches(deps.db, releaser);

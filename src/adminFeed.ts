@@ -48,6 +48,9 @@ export type AdminEvent =
   // per player per spray file per hour.
   | { kind: 'spray_exploit'; steamid: string; crc: string; matchId: number | null; serverId: number | null }
   | { kind: 'input_flag'; steamid: string; matchId: number | null; signature: string; detail: string }
+  /** A player too new for the analyzer board whose one match scored in its
+   *  top 1% (src/integrity/newcomer.ts). */
+  | { kind: 'newcomer_flag'; steamid: string; matchId: number; detail: string }
   // A client setting out of bounds (cpu_level 0). Posted once per player per
   // match, and only for a player in a live match.
   // A slur in chat or in a name, from any human on a game server, in a match
@@ -119,6 +122,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   clock: 'admin_feed_problems',
   signon_drop: 'admin_feed_problems',
   input_flag: 'admin_feed_problems',
+  newcomer_flag: 'admin_feed_problems',
   cvar_flag: 'admin_feed_problems',
   conduct_flag: 'admin_feed_conduct',
   lilac_flag: 'admin_feed_problems',

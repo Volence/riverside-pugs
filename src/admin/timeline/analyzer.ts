@@ -56,7 +56,7 @@ export const analyzerAdapter: TimelineAdapter = {
        WHERE c.steamid IN (${marks(ids)}) AND c.analyzer_version = ?
        ORDER BY at DESC, c.score DESC LIMIT ?`,
     ).all(...ids, ANALYZER_VERSION, ROW_LIMIT) as Row[];
-    return rows.map((r) => ({
+    const clips = rows.map((r) => ({
       at: toIso(r.at),
       source: 'analyzer' as const,
       kind: r.kind,
@@ -66,6 +66,23 @@ export const analyzerAdapter: TimelineAdapter = {
       replay: r.has_replay > 0 ? { ordinal: r.ordinal, half: r.half, tMs: r.start_ms } : null,
       ref: { type: 'integrity_clip', id: r.id },
     }));
+    // Newcomer outliers (src/integrity/newcomer.ts): flags, not clips, because
+    // they score a whole match rather than a window of it.
+    const flags = (db.prepare(
+      `SELECT id, match_id, detail, at FROM integrity_flags
+       WHERE source = 'analyzer' AND steamid IN (${marks(ids)})
+       ORDER BY at DESC, id DESC LIMIT ?`,
+    ).all(...ids, ROW_LIMIT) as { id: number; match_id: number | null; detail: string; at: string }[]).map((f) => ({
+      at: toIso(f.at),
+      source: 'analyzer' as const,
+      kind: 'newcomer_esp',
+      summary: `Too new for the analyzer board, but this match scored in the top 1% on record (${f.detail}). `
+        + 'Watch the replay before deciding anything.',
+      matchId: f.match_id,
+      replay: null,
+      ref: { type: 'integrity_flag', id: f.id },
+    }));
+    return [...clips, ...flags].sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0));
   },
   evidence(db: DB) {
     return (db.prepare(
@@ -77,6 +94,9 @@ export const analyzerAdapter: TimelineAdapter = {
        FROM integrity_clips c JOIN matches m ON m.id = c.match_id
        WHERE c.analyzer_version = ? AND c.kind <> 'hidden_track' GROUP BY c.steamid`,
     ).all(ANALYZER_VERSION) as { steamid: string; at: string }[])
-      .map((r) => ({ steamid: r.steamid, at: toIso(r.at) }));
+      .map((r) => ({ steamid: r.steamid, at: toIso(r.at) }))
+      .concat((db.prepare(
+        "SELECT steamid, MAX(at) AS at FROM integrity_flags WHERE source = 'analyzer' GROUP BY steamid",
+      ).all() as { steamid: string; at: string }[]).map((r) => ({ steamid: r.steamid, at: toIso(r.at) })));
   },
 };
