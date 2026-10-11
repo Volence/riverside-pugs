@@ -49,7 +49,7 @@ function SignupRow({ s, canAct, busy, others, onCaptain, onSwap, onRemove }: {
       <td>{fmtTime(s.signedUpAt)}</td>
       <td class={quiet ? 'muted' : ''}>{s.abandons30d} abandons, {s.noShows30d} no-shows (30 d)</td>
       <td>
-        {s.role && <span class="chip">{ROLE[s.role]}</span>}
+        {s.role && <span class="teamchip">{ROLE[s.role]}</span>}
         {s.manual && <span class="muted"> (moved by hand)</span>}
         {s.role === 'captain' && s.captainPref !== 'want' && <span class="muted"> (did not volunteer)</span>}
       </td>

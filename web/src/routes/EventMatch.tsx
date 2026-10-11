@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ApiError, entryLogoUrl, eventsApi, type MatchRoomView } from '../api';
-import { Empty, Panel } from '../components/bits';
+import { Empty, PageSkeleton, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { useHubEvent } from '../hooks/useHubEvent';
 import type { Session } from '../hooks/useLiveState';
 import { whenText } from '../eventFormat';
-import { PHASE_TEXT, clockText, logText, resultLine } from './event/room/roomText';
+import { PHASE_TEXT, clockText, holdText, logText, resultLine } from './event/room/roomText';
 import { VetoBoard } from './event/room/VetoBoard';
 import { LineupPanel } from './event/room/LineupPanel';
 import { ServerPanel } from './event/room/ServerPanel';
@@ -34,6 +34,8 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
   const matchId = Number(id);
   const [v, setV] = useState<MatchRoomView | null>(null);
   const [missing, setMissing] = useState(false);
+  // Only shown while there is no view yet: a failed refetch keeps the room on screen.
+  const [failed, setFailed] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -41,8 +43,12 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
 
   const load = () => eventsApi.room(slug, matchId).then((x) => {
     setV(x);
+    setFailed(false);
     setOffset(Date.parse(x.serverNow) - Date.now());
-  }, (e) => { if (e instanceof ApiError && e.status === 404) setMissing(true); });
+  }, (e) => {
+    if (e instanceof ApiError && e.status === 404) setMissing(true);
+    else setFailed(true);
+  });
 
   useEffect(() => { void load(); }, [slug, id]);
   useHubEvent(['event_room'], () => { void load(); });
@@ -79,7 +85,15 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
   };
 
   if (missing || !Number.isInteger(matchId)) return <main class="page page--profile"><PageHeader title="Match" /><Empty>No such match.</Empty></main>;
-  if (!v) return <main class="page page--profile"><PageHeader title="Match" /></main>;
+  if (!v && failed) {
+    return (
+      <main class="page page--profile">
+        <PageHeader title="Match" />
+        <p class="error" role="alert">Could not load this match. <button class="btn btn--ghost btn--sm" type="button" onClick={() => { setFailed(false); void load(); }}>Try again</button></p>
+      </main>
+    );
+  }
+  if (!v) return <PageSkeleton variant="profile" panels={3} />;
 
   const left = v.deadline ? Date.parse(v.deadline) - (now + offset) : null;
   const me = v.me;
@@ -128,7 +142,10 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
           <h3>Ready check</h3>
           <ul class="room__ready">
             {(['a', 'b'] as const).map((s) => (
-              <li key={s}><Team name={`${v[s]?.name ?? 'TBD'}: ${v.ready[s] ? 'ready' : 'waiting'}`} logoKey={v[s]?.logoKey} /></li>
+              <li key={s}>
+                <Team name={v[s]?.name ?? 'TBD'} logoKey={v[s]?.logoKey} />
+                <span class={`teamchip${v.ready[s] ? ' teamchip--ready' : ''}`}>{v.ready[s] ? 'Ready' : 'Waiting'}</span>
+              </li>
             ))}
           </ul>
           {me?.manager && !myReady && <button class="btn" type="button" disabled={busy} onClick={() => run(() => eventsApi.ready(slug, matchId))}>Ready</button>}
@@ -174,12 +191,15 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
       )}
       {v.phase === 'hold' && (
         <Panel>
-          <p class="warning">{`On hold: staff are looking at this match.${v.holdReason && v.holdReason !== 'dispute' ? ` (${v.holdReason})` : ''}`}</p>
+          <h3>On hold</h3>
+          <p class="warning">Staff are looking at this match.</p>
+          {v.holdReason && v.holdReason !== 'dispute' && <p>{`Reason: ${holdText(v.holdReason)}`}</p>}
           {v.dispute && <p>{`Disputed by ${v.dispute.byName} for ${v.dispute.side === 'a' ? v.a?.name ?? 'TBD' : v.b?.name ?? 'TBD'}: ${v.dispute.reason}`}</p>}
         </Panel>
       )}
       {v.phase === 'done' && (
         <Panel>
+          <h3>Result</h3>
           <p>{v.result
             ? (v.result.forfeit
               ? `Forfeit win for ${v.result.winner === 'a' ? v.a?.name : v.b?.name}.`

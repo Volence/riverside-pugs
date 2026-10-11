@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { EventView } from '../api';
 
 const { mockEvents } = vi.hoisted(() => ({ mockEvents: { list: vi.fn(), get: vi.fn(), mine: vi.fn(), prefs: vi.fn(), standins: vi.fn(async () => ({ offer: null, captain: null })), keep: vi.fn(async () => ({ keep: null })) } }));
@@ -229,7 +229,11 @@ describe('EventPage', () => {
   it('says it could not load on any other failure, instead of staying blank', async () => {
     mockEvents.get.mockRejectedValue(new ApiError(500, 'boom'));
     render(<EventPage slug="riverside-cup" session={session} />);
-    expect((await screen.findByRole('alert')).textContent).toBe('Could not load this event. Try again in a moment.');
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load this event. Try again');
+    mockEvents.get.mockResolvedValue(view());
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(mockEvents.get).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('marks a waitlisted entry', async () => {

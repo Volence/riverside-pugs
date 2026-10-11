@@ -139,7 +139,7 @@ function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, 
       <ul class="entrypanel__roster">
         {e.roster.map((p) => (
           <li key={p.steamid}>
-            <span class="chip">{ROLE[p.role]}</span> {p.name}{p.steamid === e.captainSteamid && <span class="muted"> (captain)</span>}
+            <span class="teamchip">{ROLE[p.role]}</span> {p.name}{p.steamid === e.captainSteamid && <span class="muted"> (captain)</span>}
             {p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}
             {canReplace(p) && replacing?.steamid !== p.steamid && (
               <button class="btn btn--ghost btn--sm" aria-label={`Replace player ${p.name}`} disabled={busy} onClick={() => setReplacing({ steamid: p.steamid, name: p.name })}>Replace player</button>
@@ -169,7 +169,7 @@ function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, 
           )}
           {active && (
             <>
-              <input type="text" placeholder="Reason" value={reason} onInput={(ev) => setReason((ev.target as HTMLInputElement).value)} />
+              <input type="text" placeholder="Reason" aria-label={`Disqualify reason for ${e.name}`} value={reason} onInput={(ev) => setReason((ev.target as HTMLInputElement).value)} />
               <button class="btn btn--ghost" disabled={busy} onClick={() => onDisqualify(e.id, e.name, reason)}>Disqualify</button>
             </>
           )}

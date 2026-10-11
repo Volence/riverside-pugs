@@ -21,7 +21,7 @@ export function LineupPanel({ v, busy, onLock }: { v: MatchRoomView; busy: boole
   // sends the same steamids regardless of which boxes were toggled last.
   const ordered = () => (me?.playable ?? []).filter((p) => chosen.includes(p.steamid)).map((p) => p.steamid);
   const lock = async () => {
-    if (!await confirm({ title: `Lock ${myName}' lineup?`, body: 'You cannot change it for this match.', confirmLabel: 'Lock lineup' })) return;
+    if (!await confirm({ title: `Lock ${myName}'s lineup?`, body: 'You cannot change it for this match.', confirmLabel: 'Lock lineup' })) return;
     await onLock(ordered());
   };
   return (

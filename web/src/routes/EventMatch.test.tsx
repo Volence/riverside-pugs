@@ -34,7 +34,8 @@ describe('EventMatchPage', () => {
     mockEvents.ready.mockResolvedValue({});
     render(<EventMatchPage slug="cup" id="1" session={{ kind: 'active' } as never} />);
     expect(await screen.findByRole('heading', { name: 'Rats vs Bats' })).toBeTruthy();
-    expect(screen.getByText('Bats: ready')).toBeTruthy();
+    const bats = screen.getAllByText('Bats').map((n) => n.closest<HTMLElement>('.room__ready li')).find(Boolean)!;
+    expect(within(bats).getByText('Ready').className).toBe('teamchip teamchip--ready');
     fireEvent.click(screen.getByRole('button', { name: 'Ready' }));
     await waitFor(() => expect(mockEvents.ready).toHaveBeenCalledWith('cup', 1));
     expect(mockEvents.room).toHaveBeenCalledTimes(2);
@@ -103,9 +104,34 @@ describe('EventMatchPage', () => {
   it('shows a team logo in the ready check the same way as in the header', async () => {
     mockEvents.room.mockResolvedValue(view({ phase: 'ready', ready: { a: false, b: true }, a: { id: 1, name: 'Rats', tag: 'RAT', logoKey: 'abc', seed: 1, out: false } }));
     render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
-    const ready = (await screen.findByText('Rats: waiting')).closest('li')!;
+    const ready = (await screen.findByText('Waiting')).closest('li')!;
     expect(ready.querySelector('.roomteam img')).toBeTruthy();
-    expect(screen.getByText('Bats: ready').closest('.roomteam')).toBeTruthy();
+    expect(within(ready).getByText('Waiting').className).toBe('teamchip');
+    expect(screen.getAllByText('Bats').some((n) => n.closest('.room__ready .roomteam'))).toBe(true);
+  });
+
+  it('says it could not load on a non-404 failure, and Try again loads it', async () => {
+    mockEvents.room.mockRejectedValueOnce(new ApiError(500, 'boom'));
+    mockEvents.room.mockResolvedValue(view());
+    render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load this match. Try again');
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('heading', { name: 'Rats vs Bats' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a skeleton while the first load is pending', () => {
+    mockEvents.room.mockReturnValue(new Promise(() => {}));
+    const { container } = render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+    expect(container.querySelector('[aria-busy="true"]')).toBeTruthy();
+  });
+
+  it('explains a hold code in plain words, under an On hold heading', async () => {
+    mockEvents.room.mockResolvedValue(view({ phase: 'hold', holdReason: 'window_expired' }));
+    render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+    expect(await screen.findByRole('heading', { name: 'On hold' })).toBeTruthy();
+    expect(screen.getByText('Reason: The scheduling window ended with no time agreed.')).toBeTruthy();
+    expect(screen.queryByText(/window_expired/)).toBeNull();
   });
 
   it('shows the server panel with the connect line in the connect phase, and the series with a live score (plan T3b)', async () => {

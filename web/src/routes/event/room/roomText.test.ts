@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clockText, gameTitle, gameLine, logText, resultLine, seriesLine, stepText } from './roomText';
+import { HOLD_TEXT, clockText, gameTitle, gameLine, holdText, logText, resultLine, seriesLine, stepText } from './roomText';
 import type { MatchRoomView, RoomGame } from '../../../api';
 
 const v = (over: Partial<MatchRoomView>): MatchRoomView => ({
@@ -51,5 +51,19 @@ describe('roomText', () => {
     expect(seriesLine(v({ series: { bestOf: 2, totalScore: true, winsA: 0, winsB: 0, totalA: 1000, totalB: 1050, over: true, winner: 'b' } }))).toBe('Two games, total score · Rats 1000 - 1050 Bats');
     expect(resultLine(v({ series: { bestOf: 3, totalScore: false, winsA: 2, winsB: 1, totalA: 0, totalB: 0, over: true, winner: 'a' } }))).toBe('Rats beat Bats 2 games to 1.');
     expect(resultLine(v({ series: { bestOf: 2, totalScore: true, winsA: 0, winsB: 0, totalA: 1000, totalB: 1050, over: true, winner: 'b' } }))).toBe('Bats beat Rats 1050 to 1000 on total score.');
+  });
+});
+
+describe('holdText', () => {
+  it('turns every code src/events holds with into a sentence', () => {
+    for (const code of ['window_expired', 'nobody_ready', 'lineup_short', 'no_presence', 'no_show_both', 'game_aborted', 'game_lost',
+      'tiebreak_unknown', 'tiebreak_refused', 'no_result', 'booking_time', 'booking_staff', 'booking_ended']) {
+      expect(HOLD_TEXT[code], code).toMatch(/^[A-Z].*\.$/);
+      expect(holdText(code)).toBe(HOLD_TEXT[code]);
+    }
+  });
+
+  it('shows a reason staff typed as is', () => {
+    expect(holdText('Waiting on a demo from Rats')).toBe('Waiting on a demo from Rats');
   });
 });

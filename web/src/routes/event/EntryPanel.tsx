@@ -71,7 +71,7 @@ function MyEntry({ slug, entry, maxSubs, onChange }: { slug: string; entry: MyEn
         <ul class="entrypanel__roster">
           {entry.roster.map((p) => (
             <li key={p.steamid}>
-              <span class="chip">{ROLE[p.role]}</span> {p.name}
+              <span class="teamchip">{ROLE[p.role]}</span> {p.name}
               {p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}
             </li>
           ))}

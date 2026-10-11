@@ -249,7 +249,7 @@ describe('PlayPanel', () => {
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'live', phase: 'live', desk: desk({ frozen: true, subs: { a: 1, b: 0 } }) }),
     ] }] }] }));
     render(<PlayPanel eventId={9} canEdit={false} />);
-    expect(await screen.findByText(/On hold \(dispute, from Confirming\)/)).toBeTruthy();
+    expect(await screen.findByText(/On hold \(from Confirming\): A captain disputed the result\./)).toBeTruthy();
     expect(screen.getByText(/Disputed by Bob for Bats: They had five/)).toBeTruthy();
     expect(screen.getByText(/Frozen by staff/)).toBeTruthy();
     expect(screen.getByText(/Subs: Cats 1, Dogs 0/)).toBeTruthy();

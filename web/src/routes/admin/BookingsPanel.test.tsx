@@ -11,7 +11,7 @@ vi.mock('../../api', async (importOriginal) => {
   return { ...actual, adminApi: { ...actual.adminApi, ...mockAdmin } };
 });
 vi.mock('../../components/Confirm', () => ({ confirm: mockConfirm }));
-const { BookingsPanel } = await import('./BookingsPanel');
+const { BookingsPanel, endReasonText } = await import('./BookingsPanel');
 
 const ROW: AdminBookingRow = {
   id: 4, purpose: 'scrim', state: 'active', ending: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z',
@@ -79,7 +79,8 @@ describe('BookingsPanel', () => {
     expect(screen.getByText('Match')).toBeTruthy();
     expect(screen.getAllByText('Scrim')).toHaveLength(2);
     expect(screen.getByTestId('booking-priority').textContent).toBe('Priority: Match, then Scrim, then PUG, then practice and side games. Scrims hold 1 of 2 servers they may hold at once; 2 always left for PUGs. A match with no free server bumps a scrim that has not started.');
-    expect(screen.getByText('cancelled (bumped by a match)')).toBeTruthy();
+    const bumped = screen.getByText('bumped by a match');
+    expect(bumped.closest('td')!.textContent).toBe('Cancelled bumped by a match');
     // Both the scrim (ROW, active) and the scheduled tournament match are
     // still open, so each still gets its own +1 campaign button; queryByRole
     // throws on more than one match, so this checks for at least one instead.
@@ -101,5 +102,26 @@ describe('BookingsPanel', () => {
     render(<BookingsPanel nudge={0} />);
     await screen.findByText("Rats vs p1's group");
     expect(screen.queryByTestId('booking-priority')).toBeNull();
+  });
+
+  it('names every end reason in words, as a state chip then the reason', async () => {
+    mockAdmin.bookings.mockResolvedValue({
+      bookings: [
+        { ...ROW, id: 7, aName: 'Idle', state: 'ended', endReason: 'idle' },
+        { ...ROW, id: 8, aName: 'Timed', state: 'ended', endReason: 'time' },
+        { ...ROW, id: 9, aName: 'Gone', state: 'no_show', endReason: 'no_show' },
+        { ...ROW, id: 10, aName: 'Odd', state: 'cancelled', endReason: 'some_new_code' },
+      ],
+    });
+    render(<BookingsPanel nudge={0} />);
+    await screen.findByText("Idle vs p1's group");
+    const cell = (name: string) => screen.getByText(`${name} vs p1's group`).closest('tr')!.querySelectorAll('td')[2];
+    expect(cell('Idle').textContent).toBe('Over nobody was on it');
+    expect(cell('Idle').querySelector('.teamchip.teamchip--ended')).toBeTruthy();
+    expect(cell('Timed').textContent).toBe('Over time ran out');
+    // A no-show's reason would only repeat the chip.
+    expect(cell('Gone').textContent).toBe('No-show');
+    expect(cell('Odd').textContent).toBe('Cancelled some new code');
+    expect(endReasonText('setup_failed')).toBe('setup failed');
   });
 });
