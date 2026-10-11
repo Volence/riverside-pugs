@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { addServer, type ServerRow } from '../src/serverPool.js';
+import { addServer, getServer, type ServerRow } from '../src/serverPool.js';
+import { TEMPLATES } from '../src/rulesets.js';
 import { setSetting } from '../src/settings.js';
 import { currentSeasonId } from '../src/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
@@ -9,7 +10,7 @@ import {
   addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
   createTournamentBooking, setNext, markActive, recordPresence, beginRecovery, dropBox, advancePlaylist, markReady,
 } from '../src/bookings/bookings.js';
-import { BookingRunner, CLEAR_LINES, WAKE_SLACK_MS, allowLines, bookingLines, leftText, warnMark } from '../src/bookings/runner.js';
+import { BookingRunner, CLEAR_LINES, WAKE_SLACK_MS, allowLines, bookRosterLines, bookingLines, gameLines, hideAllowIds, leftText, warnMark } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
@@ -621,6 +622,8 @@ describe('fix wave (final review)', () => {
       'sm_pug_tech_limit 0', 'sm_pug_tech_seconds 300', 'sm_pug_dc_team_seconds 0', 'sm_pug_sub_emergency 0', 'sm_pug_sub_charge 0', 'sm_pug_admin_cooldown 180',
       // Scrims in game: the plugin's clock, so a skipped restart cannot leave a countdown running.
       'l4d_booking_title ""', 'l4d_booking_campaign ""', 'l4d_booking_ends 0', 'l4d_booking_next_at 0', 'l4d_booking_next_name ""', 'l4d_booking_close_at 0',
+      // Scrims in game: pug-match forgets the booking's people.
+      'sm_pug_book_clear',
     ]);
     expect(cmds.indexOf('l4d_booking_password ""')).toBeGreaterThan(cmds.indexOf('sm_kick @humans "The booking is over. Thanks for playing."'));
 
@@ -692,6 +695,70 @@ describe('booked games (plan 4b)', () => {
   const flush = () => new Promise((r) => setImmediate(r));
   /** `YYYY-MM-DD HH:MM:SS`, as datetime('now') writes matches.ended_at. */
   const sqlTime = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+
+  describe('the booking roster for pug-match (scrims in game Ruling 1)', () => {
+    const rosterPart = (c: string[]) => c.filter((x) => x.startsWith('sm_pug_book_'));
+
+    it('every game burst carries the sides and who survives first, inside sv_rcon_log 0 and 1', async () => {
+      const id = await running();
+      const b = getBooking(db, id)!;
+      const lines = gameLines(db, b, getServer(db, 3)!);
+      expect(rosterPart(lines)).toEqual(['sm_pug_book_begin', `sm_pug_book_add a ${P[0]}`, `sm_pug_book_add b ${P[1]}`, 'sm_pug_book_commit b']);
+      const begin = lines.indexOf('sm_pug_book_begin');
+      expect(lines[begin - 1]).toBe('sv_rcon_log 0');
+      expect(lines[lines.indexOf('sm_pug_book_commit b') + 1]).toBe('sv_rcon_log 1');
+      // The minute watch re-sends it.
+      box.ccc.humans = [P[0]];
+      now = START + 5 * MIN;
+      await runner.tick();
+      expect(rosterPart(cmds())).toContain('sm_pug_book_commit b');
+    });
+
+    it('after a finished game the other side survives first, sent before the next changelevel', async () => {
+      const id = await running();
+      box.ccc.humans = [P[0], P[1]];
+      now = START + 89 * MIN;
+      runner.onGameEnded(insertGame(id, { state: 'completed', endedAt: now }));
+      await flush();
+      sent = [];
+      now += MIN;
+      timers.at(-1)!.fn();
+      await runner.idle();
+      const c = cmds();
+      expect(c.indexOf('sm_pug_book_commit a')).toBeGreaterThan(-1);
+      expect(c.indexOf('sm_pug_book_commit a')).toBeLessThan(c.indexOf('changelevel l4d_vs_smalltown01_caves'));
+    });
+
+    it('nothing for a ruleset without the team lock, nor for a tournament booking', async () => {
+      const id = await running();
+      db.prepare('UPDATE bookings SET rules_json = ? WHERE id = ?').run(JSON.stringify({ ...TEMPLATES['Casual Scrim'], teamLock: false }), id);
+      expect(bookRosterLines(db, getBooking(db, id)!)).toEqual([]);
+      db.prepare("UPDATE bookings SET purpose = 'tournament', rules_json = ? WHERE id = ?").run(JSON.stringify(TEMPLATES['Casual Scrim']), id);
+      expect(bookRosterLines(db, getBooking(db, id)!)).toEqual([]);
+    });
+
+    it('an rcon error naming a roster line hides its ids', () => {
+      expect(hideAllowIds(`rcon exec timeout: sm_pug_book_add a ${P[0]} ${P[1]}`)).toBe('rcon exec timeout: sm_pug_book_add a (2 ids)');
+    });
+
+    it('a box on the old plugins answers Unknown command to the new lines, and setup and the watch carry on', async () => {
+      const old = build({
+        rcon: async (server, c) => {
+          const replies = await fakeRcon(server, c);
+          return c.map((x, i) => (/^(sm_pug_book_|l4d_booking_(title|campaign|ends|next_at|next_name|close_at) )/.test(x) ? `Unknown command "${x.split(' ')[0]}"` : replies[i]!));
+        },
+      });
+      const id = book();
+      now = START - 15 * MIN;
+      old.allocate();
+      await old.idle();
+      expect(getBooking(db, id)!.state).toBe('ready');
+      box.ccc.humans = [P[0]];
+      now = START + 5 * MIN;
+      await old.tick();
+      expect(getBooking(db, id)!.state).toBe('active');
+    });
+  });
 
   const running = async (playlist: string[] = ['no_mercy', 'death_toll'], r: BookingRunner = runner, pair?: [string, string]) => {
     const id = book({ playlist, pair });

@@ -21,7 +21,7 @@ import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox,
-  BOOKING_ERRORS, type BookingRow, type Side, type SideRow,
+  BOOKING_ERRORS, bookRoster, firstSurvivorSide, type BookingRow, type Side, type SideRow,
 } from './bookings.js';
 import { classifyBox } from './recovery.js';
 import { prepareRestore, restoreSnapshot, resumeLines, type RestoreSnapshot } from './restore.js';
@@ -157,6 +157,8 @@ export const CLEAR_LINES: readonly string[] = [
   ...TOURNAMENT_RULE_CLEAR,
   // Scrims in game: l4d_booking's clock, so a skipped restart cannot leave a countdown running.
   'l4d_booking_title ""', 'l4d_booking_campaign ""', 'l4d_booking_ends 0', 'l4d_booking_next_at 0', 'l4d_booking_next_name ""', 'l4d_booking_close_at 0',
+  // Scrims in game: pug-match forgets the booking's people (an older plugin: Unknown command).
+  'sm_pug_book_clear',
 ];
 
 /** The series engine's hand on a tournament booking (tournaments plan T3b). */
@@ -304,7 +306,8 @@ export function bookingLines(db: DB, b: BookingRow): string[] {
  *  `withSecret`, the default) the log secret exactly as pushLogSecret
  *  (src/logAuth.ts) sends it. The secret goes only at setup and after a
  *  campaign load, not in the minute re-push. It is a console line: callers
- *  must redact it from anything they log (redactSecrets). */
+ *  must redact it from anything they log (redactSecrets). Last, on a scrim,
+ *  the booking's people for pug-match's placement (bookRosterLines). */
 export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?: string, withSecret = true): string[] {
   const pause = bookingRules(b)?.pause;
   const captains = [...new Set(sidesOf(db, b.id).filter((s) => s.confirmed_at !== null).flatMap((s) => sideManagers(db, s)))];
@@ -323,7 +326,7 @@ export function gameLines(db: DB, b: BookingRow, server: ServerRow, logAddress?:
       lines.push('sv_rcon_log 0', `sm_pug_log_secret "${server.log_secret}"`, 'sv_rcon_log 1');
     }
   }
-  lines.push(...allowLines(db, b));
+  lines.push(...allowLines(db, b), ...bookRosterLines(db, b));
   return lines;
 }
 
@@ -350,10 +353,35 @@ export function allowLines(db: DB, b: BookingRow): string[] {
   return quietLines(lines);
 }
 
+/** Steamids per `sm_pug_book_add` line, as ALLOW_CHUNK. */
+export const BOOK_CHUNK = 10;
+
+/** The booking's people for pug-match 0.3.33 (scrims in game Ruling 1):
+ *  side a, side b and watchers, staged and committed whole, the commit naming
+ *  the side that survives first on this campaign's first map. With it the
+ *  plugin places each side before go-live, keeps the team lock on for the
+ *  auto-tracked game and keeps watchers and strangers off both teams. Only
+ *  for a scrim whose ruleset has the team lock; a tournament box has its own
+ *  roster (T3b). The ids never reach a log line: quietLines here, and
+ *  hideAllowIds for an rcon error. */
+export function bookRosterLines(db: DB, b: BookingRow): string[] {
+  if (b.purpose === 'tournament' || bookingRules(b)?.teamLock !== true) return [];
+  const r = bookRoster(db, b.id);
+  const lines = ['sm_pug_book_begin'];
+  for (const [code, ids] of [['a', r.a], ['b', r.b], ['s', r.watch]] as const) {
+    for (let i = 0; i < ids.length; i += BOOK_CHUNK) lines.push(`sm_pug_book_add ${code} ${ids.slice(i, i + BOOK_CHUNK).join(' ')}`);
+  }
+  lines.push(`sm_pug_book_commit ${firstSurvivorSide(b, gamesPlayed(db, b.id))}`);
+  return quietLines(lines);
+}
+
 /** An rcon error names the command it was on: an allowlist line (add or
- *  refuse) becomes a count. */
+ *  refuse) or a booking roster line becomes a count. */
 export function hideAllowIds(message: string): string {
-  return message.replace(/sm_booking_allow_(add|refuse)((?:\s+\d+)*)/g, (_, what: string, ids: string) => `sm_booking_allow_${what} (${ids.trim() === '' ? 0 : ids.trim().split(/\s+/).length} ids)`);
+  const count = (ids: string) => (ids.trim() === '' ? 0 : ids.trim().split(/\s+/).length);
+  return message
+    .replace(/sm_booking_allow_(add|refuse)((?:\s+\d+)*)/g, (_, what: string, ids: string) => `sm_booking_allow_${what} (${count(ids)} ids)`)
+    .replace(/sm_pug_book_add ([abs])((?:\s+\d+)*)/g, (_, code: string, ids: string) => `sm_pug_book_add ${code} (${count(ids)} ids)`);
 }
 
 /** The SteamID64 an `!allow` line names (its arg starts with it), or null. */
@@ -1497,7 +1525,10 @@ export class BookingRunner {
       setNext(this.db, id, null, null, new Date(this.now()));
       return;
     }
-    if (game.length > 0) await this.push(id, server, () => game, 'the game burst');
+    // A scrim's roster goes before the changelevel too, so the plugin places
+    // the sides of THIS campaign from the first second of its first map.
+    const before = [...game, ...bookRosterLines(this.db, b)];
+    if (before.length > 0) await this.push(id, server, () => before, 'the game burst');
     // Moved on first: a box that does not take the changelevel is not sent it
     // again every minute; a captain can pick the campaign again.
     advancePlaylist(this.db, id, at >= 0 ? at : b.playlist_pos, new Date(this.now()));
