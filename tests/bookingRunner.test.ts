@@ -9,7 +9,7 @@ import {
   addPerson, cancelBooking, confirmBooking, createBooking, addCampaign, getBooking, holdBox, markSetup, respondPerson, sideRow,
   createTournamentBooking, setNext, markActive, recordPresence, beginRecovery, dropBox, advancePlaylist, markReady,
 } from '../src/bookings/bookings.js';
-import { BookingRunner, CLEAR_LINES, allowLines, bookingLines } from '../src/bookings/runner.js';
+import { BookingRunner, CLEAR_LINES, allowLines, bookingLines, leftText, warnMark } from '../src/bookings/runner.js';
 import { BookingVoice } from '../src/bookings/voice.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
@@ -529,19 +529,22 @@ describe('the minute watch', () => {
     expect(getBooking(db, id)!.end_reason).toBe('idle');
   });
 
-  // Ruling 4: one warning, about 10 minutes before the slot's end, in place
-  // of the old 30, 10 and 5 minute ones.
-  it('warns once, about 10 minutes before the slot ends, then an idle booking ends on time', async () => {
+  // Scrims in game Ruling 6: a warning at 30 and at 10 minutes left.
+  it('warns at 30 and at 10 minutes before the slot ends, once each, then an idle booking ends on time', async () => {
     const id = await ready();
     box.ccc.humans = [P[0]];
-    const says = () => sent.flatMap((s) => s.cmds).filter((c) => c.includes('of the booked slot left'));
-    now = START + 79 * MIN; await runner.tick();
+    const says = () => sent.flatMap((s) => s.cmds).filter((c) => c.includes('left in the booked slot'));
+    const W29 = 'say [Booking] 29 min left in the booked slot (ends 21:30 UTC). No new campaign starts after the end.';
+    const W10 = 'say [Booking] 10 min left in the booked slot (ends 21:30 UTC). No new campaign starts after the end.';
+    now = START + 59 * MIN; await runner.tick();
     expect(says()).toEqual([]);
+    now = START + 61 * MIN; await runner.tick();
+    now = START + 62 * MIN; await runner.tick();
+    expect(says()).toEqual([W29]);
     now = START + 80 * MIN; await runner.tick();
     now = START + 81 * MIN; await runner.tick();
     now = START + 85 * MIN; await runner.tick();
-    expect(says()).toEqual(['say [Booking] About 10 minutes of the booked slot left (until 21:30 UTC).']);
-    expect(sent.flatMap((s) => s.cmds).some((c) => /About \d+ minutes left on this booking/.test(c))).toBe(false);
+    expect(says()).toEqual([W29, W10]);
     now = START + 90 * MIN; await runner.tick();
     await runner.idle();
     expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'time' });
@@ -1544,6 +1547,10 @@ describe('booked games (plan 4b)', () => {
       now = START + 200 * MIN;
       await runner.tick();
       await runner.idle();
+      // Ruling 6: said once, however many watches pass.
+      expect(cmds().filter((c) => c.includes('The booked slot is over'))).toEqual([
+        'say [Booking] The booked slot is over (23:00 UTC). This game will be finished, then the server closes.',
+      ]);
       expect(getBooking(db, id)!.ending_at).toBeNull();
       expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(live)).toEqual({ state: 'live' });
       // The first of two games finishes past the slot: no next campaign is announced, and the booking ends.
@@ -1552,6 +1559,7 @@ describe('booked games (plan 4b)', () => {
       runner.onGameEnded(live);
       await flush();
       expect(cmds().some((c) => c.startsWith('say [Booking] Next:'))).toBe(false);
+      expect(cmds()).toContain('say [Booking] The booked slot is over, so that was the last game. The server closes within a minute.');
       now += MIN;
       await runner.tick();
       await runner.idle();
@@ -1629,23 +1637,22 @@ describe('booked games (plan 4b)', () => {
       expect(getBooking(db, id)).toMatchObject({ state: 'ended', end_reason: 'time' });
     });
 
-    it('the 10 minute warning is said only between games, never during the grace', async () => {
+    it('a warning during a game says the game will be finished, and is not said again after it', async () => {
       const id = await running(); // until 23:00
       box.ccc.humans = [P[0], P[1]];
-      const says = () => cmds().filter((c) => c.includes('of the booked slot left'));
+      const says = () => cmds().filter((c) => c.includes('left in the booked slot'));
       const live = insertGame(id, { state: 'live' });
       now = START + 170 * MIN;
       await runner.tick();
       now = START + 171 * MIN;
       await runner.tick();
-      expect(says()).toEqual([]);
+      expect(says()).toEqual(['say [Booking] 10 min left in the booked slot (ends 23:00 UTC). This game will be finished even if it runs past the end.']);
       db.prepare("UPDATE matches SET state = 'completed', ended_at = ? WHERE id = ?").run(sqlTime(now), live);
       runner.onGameEnded(live);
       now = START + 172 * MIN;
       await runner.tick();
       await runner.idle();
-      expect(says()).toEqual(['say [Booking] About 8 minutes of the booked slot left (until 23:00 UTC).']);
-
+      expect(says()).toHaveLength(1);
     });
 
     it('no 10 minute warning during the closing grace: the close line says it all', async () => {
@@ -1657,7 +1664,7 @@ describe('booked games (plan 4b)', () => {
       await runner.tick();
       await runner.idle();
       expect(cmds()).toContain(CLOSE_1);
-      expect(cmds().filter((c) => c.includes('of the booked slot left'))).toEqual([]);
+      expect(cmds().filter((c) => c.includes('left in the booked slot'))).toEqual([]);
       expect(getBooking(db, id)!.ending_at).toBeNull();
     });
   });
@@ -2682,5 +2689,24 @@ describe('server priority (owner, 2026-10-07)', () => {
       expect(getBooking(db, m1)).toMatchObject({ state: 'ready', server_id: 3 });
       expect(getBooking(db, m2)!.server_id).toBeNull();
     });
+  });
+});
+
+describe('slot warnings (scrims in game, items 4 and 7)', () => {
+  it('leftText rounds up to whole minutes, hours past 60', () => {
+    expect(leftText(29 * MIN)).toBe('29 min');
+    expect(leftText(29 * MIN - 1)).toBe('29 min');
+    expect(leftText(10_000)).toBe('1 min');
+    expect(leftText(112 * MIN)).toBe('1 h 52 min');
+    expect(leftText(120 * MIN)).toBe('2 h');
+  });
+
+  it('warnMark says the smallest mark crossed, once', () => {
+    expect(warnMark(31 * MIN, null)).toBeNull();
+    expect(warnMark(29 * MIN, null)).toBe(30);
+    expect(warnMark(25 * MIN, 30)).toBeNull();
+    expect(warnMark(9 * MIN, 30)).toBe(10);
+    expect(warnMark(8 * MIN, null)).toBe(10);
+    expect(warnMark(5 * MIN, 10)).toBeNull();
   });
 });

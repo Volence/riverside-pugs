@@ -57,9 +57,28 @@ export const MAP_SETTLE_MS = 20_000;
 export const REPLAY_TRIES = 3;
 export type ReplayResult = 'ok' | 'refused' | 'busy' | 'error' | 'dropped';
 export const GOODBYE_MS = 3_000;
-/** Minutes left on the slot at which the box says so in chat, once, and
- *  only between games (bookings by campaign, Ruling 4). */
-export const WARN_MINUTES = 10;
+/** Minutes left on the slot at which the box says so in chat (scrims in game
+ *  Ruling 6; was one warning at 10, between games only). */
+export const WARN_AT_MINUTES: readonly number[] = [10, 30];
+
+/** The mark to say now: the smallest one the time left has crossed that is
+ *  below the last one said (warned_minutes), or null. A booking first seen
+ *  8 minutes from its end hears the 10 only. */
+export function warnMark(leftMs: number, warned: number | null): number | null {
+  for (const m of [...WARN_AT_MINUTES].sort((x, y) => x - y)) {
+    if (leftMs <= m * 60_000 && (warned === null || warned > m)) return m;
+  }
+  return null;
+}
+
+/** Time left in whole minutes, rounded up: "29 min", "1 h 52 min", "2 h".
+ *  l4d_booking's !time words it the same way. */
+export function leftText(ms: number): string {
+  const min = Math.max(1, Math.ceil(ms / 60_000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  return min % 60 === 0 ? `${h} h` : `${h} h ${min % 60} min`;
+}
 /** The seeded default of booking_close_grace_minutes (plan T5 Ruling 2). */
 export const CLOSE_GRACE_MS = 5 * 60_000;
 /** After a game, how long the box waits before loading the next campaign. */
@@ -1062,17 +1081,31 @@ export class BookingRunner {
       this.track(b.id, () => this.loadNext(b.id));
     }
 
-    // Ruling 4: one warning, only between games, and not during a closing
-    // grace (the close line has said what happens next). +1 campaign clears
-    // warned_minutes, so a moved slot end is warned about again.
-    const leftMin = (endsMs - nowMs) / 60_000;
-    if (leftMin <= WARN_MINUTES && (fresh.warned_minutes === null || fresh.warned_minutes > WARN_MINUTES)
-      && fresh.close_at === null && fresh.purpose !== 'tournament' && !liveBookingGame(this.db, b.id)) {
-      setWarned(this.db, b.id, WARN_MINUTES);
-      try {
-        await this.deps.rcon(server, [`say [Booking] About ${Math.max(1, Math.round(leftMin))} minutes of the booked slot left (until ${fresh.ends_at.slice(11, 16)} UTC).`]);
-      } catch {
-        // Best effort.
+    // Scrims in game Ruling 6: a warning at 30 and at 10 minutes left (the
+    // smallest mark crossed), during a game too since the slot's end never
+    // cuts one, and not during a closing grace (the close line has said what
+    // happens next). Past the end with a game live, the box says once that
+    // the slot is over (warned_minutes 0). +1 campaign clears warned_minutes,
+    // so a moved end is warned about again.
+    if (fresh.purpose !== 'tournament' && fresh.close_at === null) {
+      const live = liveBookingGame(this.db, b.id) !== null;
+      const leftMs = endsMs - nowMs;
+      const ends = fresh.ends_at.slice(11, 16);
+      const mark = leftMs > 0 ? warnMark(leftMs, fresh.warned_minutes) : null;
+      let line: string | null = null;
+      if (mark !== null) {
+        setWarned(this.db, b.id, mark);
+        line = `say [Booking] ${leftText(leftMs)} left in the booked slot (ends ${ends} UTC). ${live ? 'This game will be finished even if it runs past the end.' : 'No new campaign starts after the end.'}`;
+      } else if (leftMs <= 0 && live && fresh.warned_minutes !== 0) {
+        setWarned(this.db, b.id, 0);
+        line = `say [Booking] The booked slot is over (${ends} UTC). This game will be finished, then the server closes.`;
+      }
+      if (line !== null) {
+        try {
+          await this.deps.rcon(server, [line]);
+        } catch {
+          // Best effort.
+        }
       }
     }
   }
@@ -1774,7 +1807,7 @@ export class BookingRunner {
    *  campaign is announced and loaded on the first minute watch at least 60 s
    *  later (so 60 to 120 s: "in about a minute"). At the count, the booking
    *  closes in 5 minutes unless a campaign is added (Ruling 3). A game that
-   *  finished past the slot's end announces nothing: the next watch ends the
+   *  finished past the slot's end schedules nothing and says the server closes within a minute: the next watch ends the
    *  booking on time (Ruling 4). A booking already ending is left alone, so
    *  a game finishing after the close cannot reopen anything. */
   onGameEnded(matchId: number): void {
@@ -1801,7 +1834,8 @@ export class BookingRunner {
         ? `say [Booking] That was past the last booked campaign. Type !addcampaign to play one more, ${closes}`
         : `say [Booking] That was campaign ${b.games_allowed} of ${b.games_allowed}. Type !addcampaign to play one more, ${closes}`;
     } else if (nowMs >= Date.parse(b.ends_at)) {
-      return;
+      // Ruling 4 still: nothing more loads; the next watch ends the booking on time.
+      line = 'say [Booking] The booked slot is over, so that was the last game. The server closes within a minute.';
     } else {
       line = this.scheduleNext(b, played, nowMs);
     }
