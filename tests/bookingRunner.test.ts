@@ -870,6 +870,49 @@ describe('booked games (plan 4b)', () => {
   // Plan 2 Ruling 5: the private review ask goes once per side when a scrim
   // closes as ended or no_show, guarded by a review_asked event.
   const ASK = 'Leave a quick private review on the booking page. Only staff see single reviews.';
+  // Owner, 2026-10-11: the series result goes privately to both sides, each
+  // oriented to its own side, once the box is back; once per booking.
+  const scored = (bookingId: number, o: { campaign: string; state: string; sideA: 'a' | 'b'; a: number; b: number; winner: 'a' | 'b' | 'draw' | null }) =>
+    db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id, booking_side_a, team_a_score, team_b_score, winner, ended_at)
+       VALUES (?, ?, ?, 3, ?, 'in_game', 'scrim', 'participants', ?, ?, ?, ?, ?, ?)`,
+    ).run(currentSeasonId(db), o.state, o.campaign, `t${Math.random()}`, bookingId, o.sideA, o.a, o.b, o.winner, sqlTime(now));
+
+  it('sends each side the series result once its box is back, oriented to that side, and never twice', async () => {
+    const id = await running(['no_mercy', 'death_toll']);
+    scored(id, { campaign: 'no_mercy', state: 'completed', sideA: 'a', a: 400, b: 300, winner: 'a' });
+    scored(id, { campaign: 'death_toll', state: 'completed', sideA: 'b', a: 500, b: 450, winner: 'a' });
+    scored(id, { campaign: 'no_mercy', state: 'aborted', sideA: 'a', a: 10, b: 0, winner: null });
+    expect(runner.endFromGame(id, P[0])).toEqual({ ok: true });
+    await runner.idle();
+    const results = dms.filter((d) => d.content.startsWith('Scrim result:'));
+    expect(results.map((d) => [d.to, d.content]).sort()).toEqual([
+      ['d0', "Scrim result: **p0's group** 1 - 1 **p1's group**\nNo Mercy: 400 - 300\nDeath Toll: 450 - 500\nNo Mercy: not finished, not counted"],
+      ['d1', "Scrim result: **p1's group** 1 - 1 **p0's group**\nNo Mercy: 300 - 400\nDeath Toll: 500 - 450\nNo Mercy: not finished, not counted"],
+    ]);
+    expect(events(id, 'result_sent')).toHaveLength(1);
+    runner.settle(id);
+    await runner.tick();
+    await runner.idle();
+    expect(dms.filter((d) => d.content.startsWith('Scrim result:'))).toHaveLength(2);
+  });
+
+  it('sends no result when no game counted, nor for a tournament booking', async () => {
+    const id = await running(['no_mercy']);
+    scored(id, { campaign: 'no_mercy', state: 'aborted', sideA: 'a', a: 10, b: 0, winner: null });
+    runner.endFromGame(id, P[0]);
+    await runner.idle();
+    expect(dms.some((d) => d.content.startsWith('Scrim result:'))).toBe(false);
+    expect(events(id, 'result_sent')).toHaveLength(0);
+    const cup = book({ pair: [P[2], P[3]] });
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(cup);
+    scored(cup, { campaign: 'no_mercy', state: 'completed', sideA: 'a', a: 400, b: 300, winner: 'a' });
+    db.prepare("UPDATE bookings SET state = 'ended', end_reason = 'staff', ending_at = ? WHERE id = ?").run(new Date(now).toISOString(), cup);
+    runner.settle(cup);
+    await runner.idle();
+    expect(dms.some((d) => d.content.startsWith('Scrim result:'))).toBe(false);
+  });
+
   it('an ended scrim asks each side\'s managers once for a review, never again on a second settle', async () => {
     const id = await running(['no_mercy']);
     expect(runner.endFromGame(id, P[0])).toEqual({ ok: true });

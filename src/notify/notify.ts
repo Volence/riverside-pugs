@@ -16,6 +16,7 @@ export type NotifyType =
   | 'booking_invite' | 'booking_confirmed' | 'booking_starting' | 'booking_ready' | 'booking_recovered' | 'booking_cancelled' | 'booking_no_show' | 'booking_bumped'
   | 'scrim_challenge' | 'scrim_accepted' | 'scrim_booked' | 'scrim_taken' | 'scrim_declined' | 'scrim_withdrawn'
   | 'scrim_review'
+  | 'scrim_result'
   | 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
   | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
@@ -41,6 +42,7 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'scrim_declined', label: 'My scrim accept is declined or expires' },
   { type: 'scrim_withdrawn', label: 'My scrim post or accept is withdrawn because my side booked another scrim at that time' },
   { type: 'scrim_review', label: 'Review my scrim opponent after a booked scrim' },
+  { type: 'scrim_result', label: 'A scrim I played in finished, with the series result' },
   { type: 'event_checkin_open', label: 'Check-in opens for an event my team entered' },
   { type: 'event_dropped', label: 'My team\'s event entry is dropped' },
   { type: 'event_roster_added', label: 'Someone puts me on an event roster' },

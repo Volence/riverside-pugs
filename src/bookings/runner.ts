@@ -13,8 +13,9 @@ import { TEMPLATES } from '../rulesets.js';
 import { consoleText, cvarValue, quoted, SETUP_PENDING_TYPE, waitForStartup, type BoxRcon } from '../serverSetup.js';
 import { activeMembers } from '../teams/teams.js';
 import type { Notifier } from '../notify/notify.js';
-import { bookingMessage, reviewAskMessage, type BookingNotifyType } from './messages.js';
+import { bookingMessage, resultMessage, reviewAskMessage, type BookingNotifyType } from './messages.js';
 import { claimReviewAsk } from '../scrims/reviews.js';
+import { claimResultNotice, seriesTally } from './series.js';
 import { DEFAULT_GRACE_MINUTES, bookingLimits, byPriority, isLateCancel } from './rules.js';
 import {
   acceptedPeople, actingSides, advancePlaylist, allowInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
@@ -708,7 +709,7 @@ export class BookingRunner {
       this.forgetToken(id, token);
       tokens.push(token);
     }
-    if (b.server_id === null) { markReleased(this.db, id, new Date(this.now())); return; }
+    if (b.server_id === null) { markReleased(this.db, id, new Date(this.now())); this.announceResult(id); return; }
     const server = getServer(this.db, b.server_id);
     if (server) for (const token of tokens) await this.sendAbort(id, server, token);
     if (server && sayGoodbye) {
@@ -740,6 +741,7 @@ export class BookingRunner {
       console.error(`[booking] ${id}: releasing server ${b.server_id} failed:`, err);
     }
     markReleased(this.db, id, new Date(this.now()));
+    this.announceResult(id);
     this.emptyWatches.delete(id);
     this.a2sMisses.delete(id);
     this.announced.delete(id);
@@ -818,6 +820,30 @@ export class BookingRunner {
       }
     } catch (err) {
       console.warn(`[booking] ${b.id}: scrim_review notice failed:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  /** Owner, 2026-10-11: once a scrim's box is back, each side's managers and
+   *  accepted people get the series result, oriented to their own side, when
+   *  at least one game counted. Private to the two sides (scrims are
+   *  participants-only), never a channel post; a tournament booking has its
+   *  own result notices. Once per booking: claimResultNotice writes the
+   *  result_sent event. Never throws, like tell(). */
+  private announceResult(id: number): void {
+    const b = getBooking(this.db, id);
+    if (!b || b.purpose !== 'scrim') return;
+    try {
+      if (seriesTally(bookingGames(this.db, id)).counted === 0) return;
+      if (!claimResultNotice(this.db, id, new Date(this.now()))) return;
+      const people = acceptedPeople(this.db, id);
+      for (const s of sidesOf(this.db, id)) {
+        const payload = resultMessage(this.db, this.deps.publicUrl, id, s.side);
+        if (!payload) continue;
+        const to = [...sideManagers(this.db, s), ...people.filter((p) => p.side === s.side).map((p) => p.steamid)];
+        this.deps.notifier.send(to, 'scrim_result', payload);
+      }
+    } catch (err) {
+      console.warn(`[booking] ${id}: scrim_result notice failed:`, err instanceof Error ? err.message : err);
     }
   }
 

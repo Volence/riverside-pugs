@@ -3,6 +3,9 @@ import type { MessagePayload } from '../discord/transport.js';
 import { escapeName } from '../identity.js';
 import { getPlayer } from '../players.js';
 import { getServer } from '../serverPool.js';
+import { campaignDisplayName } from '../campaignRegistry.js';
+import { bookingGames } from './games.js';
+import { gameLine, seriesLine, seriesTally } from './series.js';
 import { getBooking, sideName, sidesOf, type Side } from './bookings.js';
 
 /** "2026-10-02 20:00 UTC". DMs have no viewer time zone; the site shows local time. */
@@ -97,6 +100,29 @@ export function reviewAskMessage(db: DB, publicUrl: string, bookingId: number, s
   if (!other) return null;
   return {
     content: `How was ${escapeName(sideName(db, other))}? Leave a quick private review on the booking page. Only staff see single reviews.`,
+    embeds: [],
+    components: [[{ kind: 'link', url: `${publicUrl}/booking/${b.id}`, label: 'Open the booking' }]],
+    mentionUserIds: [],
+  };
+}
+
+/** The private series result (owner, 2026-10-11) for one side's people and
+ *  managers, that side first; null for a booking that is gone or has no
+ *  counted game. Sent once per booking by the runner's announceResult. Never
+ *  to a channel: scrims are participants-only. */
+export function resultMessage(db: DB, publicUrl: string, bookingId: number, side: Side): MessagePayload | null {
+  const b = getBooking(db, bookingId);
+  if (!b) return null;
+  const sides = sidesOf(db, b.id);
+  const mine = sides.find((s) => s.side === side);
+  const theirs = sides.find((s) => s.side !== side);
+  if (!mine || !theirs) return null;
+  const games = bookingGames(db, b.id).filter((g) => g.state !== 'live');
+  const t = seriesTally(games);
+  if (t.counted === 0) return null;
+  const head = `Scrim result: ${seriesLine(`**${escapeName(sideName(db, mine))}**`, t.wins[side], t.wins[theirs.side], `**${escapeName(sideName(db, theirs))}**`, t.draws)}`;
+  return {
+    content: [head, ...games.map((g) => gameLine(g, campaignDisplayName(db, g.campaign), side))].join('\n'),
     embeds: [],
     components: [[{ kind: 'link', url: `${publicUrl}/booking/${b.id}`, label: 'Open the booking' }]],
     mentionUserIds: [],
