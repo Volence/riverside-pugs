@@ -91,7 +91,7 @@ function ScrimCard({
  *  them), SR range (only while scrim_show_sr is on; otherwise none is sent
  *  and the post is open), note and an optional direct challenge. Mirrors
  *  Bookings.tsx's BookForm. */
-function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: boolean; onSubmit: (b: NewScrimPost) => Promise<boolean> }) {
+function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: boolean; onSubmit: (b: NewScrimPost) => Promise<number | null> }) {
   const [teamId, setTeamId] = useState<number | null>(options.myTeams[0]?.id ?? null);
   const [when, setWhen] = useState('');
   const [campaigns, setCampaigns] = useState<string[]>([]);
@@ -102,15 +102,24 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
   const estimate = estimateSlot(options.estimate, campaigns);
   const toggle = (slug: string) => setCampaigns((p) => p.includes(slug) ? p.filter((s) => s !== slug) : p.length < options.limits.playlistMax ? [...p, slug] : p);
 
+  // Owner, 2026-10-11: the form used to sit unchanged after a post, so a
+  // captain clicked again and made a duplicate. It now clears and says so.
+  const [postedId, setPostedId] = useState<number | null>(null);
+
   const submit = async (ev: Event) => {
     ev.preventDefault();
     const startsAt = toUtcIso(when);
     if (!startsAt) return;
-    await onSubmit({
+    setPostedId(null);
+    const id = await onSubmit({
       teamId, startsAt, campaigns, note,
       ...(options.showSr ? { srRange: srRange === '' ? null : Number(srRange) } : {}),
       targetTeamId: targetTeamId === '' ? undefined : Number(targetTeamId),
     });
+    if (id === null) return;
+    // The side stays as picked: a captain posting twice posts for the same side.
+    setWhen(''); setCampaigns([]); setSrRange(''); setNote(''); setTargetTeamId('');
+    setPostedId(id);
   };
 
   return (
@@ -150,6 +159,9 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
         </label>
       )}
       <button class="btn" type="submit" disabled={busy || campaigns.length === 0 || !when}>Post the scrim</button>
+      {postedId !== null && (
+        <p class="muted">Posted. <a href={`/scrims?post=${postedId}`}>See it on the board</a></p>
+      )}
     </form>
   );
 }
@@ -453,7 +465,13 @@ export function Scrims({ session }: { session: Session }) {
     try { await fn(); load(); return true; } catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; } finally { setBusy(false); }
   };
 
-  const post = (b: NewScrimPost) => act(() => scrimsApi.create(b));
+  // The new post's id, for the form's "See it on the board" link (?post=
+  // highlights it), or null when the post was refused.
+  const post = async (b: NewScrimPost): Promise<number | null> => {
+    const made: { id: number | null } = { id: null };
+    const done = await act(async () => { made.id = (await scrimsApi.create(b)).id; });
+    return done ? made.id : null;
+  };
   const accept = (postId: number, teamId: number | null, campaigns: string[]) => act(() => scrimsApi.accept(postId, teamId, campaigns));
   const withdrawAccept = (acceptId: number) => act(() => scrimsApi.withdrawAccept(acceptId));
   const decline = (acceptId: number) => act(() => scrimsApi.decline(acceptId));
@@ -466,6 +484,7 @@ export function Scrims({ session }: { session: Session }) {
       const { bookingId } = await scrimsApi.confirm(acceptId);
       route(`/booking/${bookingId}`);
     } catch (e) {
+      load();
       if (e instanceof ApiError && e.nearestSlot !== undefined) {
         const message = e.nearestSlot ? `${e.message} Nearest free slot: ${localLabel(e.nearestSlot)}.` : e.message;
         setConfirmError({ acceptId, message });
