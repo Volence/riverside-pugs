@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
  * Counts are per file so a second raw filter in an allowed file still fails.
  */
 const ALLOWED: Record<string, number> = {
+  'src/bookings/rules.ts': 1,       // campaign length estimate: every kind holds a server as long
   'src/db.ts': 1,                   // matches.state CHECK constraint, valid for every kind
   'src/matchResult.ts': 1,          // the result writer
   'src/demoOffload.ts': 1,          // offload demos of every kind

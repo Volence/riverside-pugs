@@ -1,6 +1,7 @@
 import type { DB } from '../db.js';
 import { settingNumber } from '../settings.js';
 import { completedPug } from '../matchKinds.js';
+import { campaignRegistry } from '../campaignRegistry.js';
 import type { BookingRow } from './bookings.js';
 
 /**
@@ -198,21 +199,67 @@ export function allowance(db: DB, party: Party, nowMs: number): number {
   return Math.max(1, bookingLimits(db).maxUpcoming - recentNoShows(db, party, nowMs));
 }
 
+/** Whole-campaign games needed before measured lengths replace the PUG-only
+ *  figure, and how many of the latest are used (owner, 2026-10-11: the
+ *  board said "about 2 h 30" for Dark Wood plus Blood Harvest, and Dark Wood
+ *  alone took 90 minutes). */
+export const MEASURED_MIN_GAMES = 5;
+export const MEASURED_LAST_GAMES = 20;
+
+function median(sorted: number[]): number {
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /**
- * How long this campaign usually takes, in minutes: the median of its last 30
- * completed PUGs, from going live to the end, ignoring anything under 10
- * minutes or over 4 hours (aborts, a box left running). With fewer than 3
+ * How long this campaign really takes, in minutes: the median of the last
+ * MEASURED_LAST_GAMES games of any kind (PUG, scrim or tournament) that played
+ * the whole campaign, or null with fewer than MEASURED_MIN_GAMES of them.
+ *
+ * Whole campaign: completed (never aborted, so never voided either, since a
+ * voided game is stored as aborted), not a !gg forfeit, not replayed from a
+ * later map after a restart (restored_at_map), and a match_maps row for every
+ * map the campaign has (at least one when the registry does not list its
+ * maps). Going live is went_live_at for a match the site set up, and
+ * created_at for one adopted live from the box (an in-game PUG, every booking
+ * game), which never stamps went_live_at and is created at go-live. The same
+ * 10 minute to 4 hour window as below keeps out a box left running.
+ *
+ * Every kind on purpose: this is how long the campaign holds a server, and
+ * the raw filter is allowlisted in tests/matchKindGuard.test.ts.
+ */
+export function measuredCampaignMinutes(db: DB, campaign: string): number | null {
+  const want = Math.max(1, campaignRegistry(db).get(campaign)?.maps.length ?? 0);
+  const rows = db.prepare(
+    `SELECT (julianday(m.ended_at) - julianday(COALESCE(m.went_live_at, m.created_at))) * 1440 AS mins,
+            (SELECT COUNT(*) FROM match_maps mm WHERE mm.match_id = m.id) AS maps
+       FROM matches m
+      WHERE m.state = 'completed' AND m.campaign = ? AND m.ended_at IS NOT NULL
+        AND m.forfeit_team IS NULL AND m.restored_at_map IS NULL
+      ORDER BY m.id DESC LIMIT 200`,
+  ).all(campaign) as { mins: number; maps: number }[];
+  const mins = rows.filter((r) => r.maps >= want && r.mins >= 10 && r.mins <= 240)
+    .slice(0, MEASURED_LAST_GAMES).map((r) => r.mins).sort((a, b) => a - b);
+  return mins.length < MEASURED_MIN_GAMES ? null : Math.round(median(mins));
+}
+
+/**
+ * How long this campaign usually takes, in minutes: measuredCampaignMinutes
+ * once there are enough whole-campaign games. Before that, the median of its
+ * last 30 completed PUGs from going live to the end, ignoring anything under
+ * 10 minutes or over 4 hours (aborts, a box left running); with fewer than 3
  * such games, DEFAULT_CAMPAIGN_MINUTES.
  */
 export function typicalCampaignMinutes(db: DB, campaign: string): number {
+  const measured = measuredCampaignMinutes(db, campaign);
+  if (measured !== null) return measured;
   const mins = (db.prepare(
     `SELECT (julianday(ended_at) - julianday(went_live_at)) * 1440 AS m FROM matches
       WHERE ${completedPug()} AND campaign = ? AND went_live_at IS NOT NULL AND ended_at IS NOT NULL
       ORDER BY id DESC LIMIT 30`,
   ).all(campaign) as { m: number }[]).map((r) => r.m).filter((m) => m >= 10 && m <= 240).sort((a, b) => a - b);
   if (mins.length < 3) return DEFAULT_CAMPAIGN_MINUTES;
-  const mid = Math.floor(mins.length / 2);
-  return Math.round(mins.length % 2 ? mins[mid] : (mins[mid - 1] + mins[mid]) / 2);
+  return Math.round(median(mins));
 }
 
 export function playlistMinutes(db: DB, playlist: string[]): number {

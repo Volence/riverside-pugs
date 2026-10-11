@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import {
   addCampaignMinutes, allowance, bookingLimits, bookingsDue, byPriority, capacityProblem, estimateMinutes, playlistMinutes, recentNoShows,
-  scrimsHolding, typicalCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES, scheduledMatchSlots, EVENT_SLOT_MINUTES,
+  scrimsHolding, typicalCampaignMinutes, measuredCampaignMinutes, upcomingCount, DEFAULT_CAMPAIGN_MINUTES, scheduledMatchSlots, EVENT_SLOT_MINUTES,
 } from '../src/bookings/rules.js';
 
 const A = '76561199000000501';
@@ -244,6 +244,52 @@ describe('campaign timing', () => {
     match('no_mercy', 5); // a crash or abort shape, ignored
     expect(typicalCampaignMinutes(db, 'no_mercy')).toBe(70);
     expect(playlistMinutes(db, ['no_mercy', 'death_toll'])).toBe(70 + DEFAULT_CAMPAIGN_MINUTES);
+  });
+
+  /** A game of any kind, `minutes` long, with `maps` match_maps rows. */
+  const game = (campaign: string, minutes: number, o: {
+    kind?: string; state?: string; maps?: number; wentLive?: boolean; forfeit?: string | null; restored?: number | null;
+  } = {}) => {
+    const id = Number(db.prepare(
+      `INSERT INTO matches (season_id, state, campaign, kind, went_live_at, created_at, ended_at, forfeit_team, restored_at_map)
+       VALUES ((SELECT id FROM seasons LIMIT 1), ?, ?, ?, ?, '2026-09-01 20:00:00', datetime('2026-09-01 20:00:00', ?), ?, ?)`,
+    ).run(o.state ?? 'completed', campaign, o.kind ?? 'scrim', o.wentLive ? '2026-09-01 20:00:00' : null, `+${minutes} minutes`,
+      o.forfeit ?? null, o.restored ?? null).lastInsertRowid);
+    for (let i = 0; i < (o.maps ?? 4); i++) {
+      db.prepare('INSERT INTO match_maps (match_id, ordinal, map) VALUES (?, ?, ?)').run(id, i, `m${i}`);
+    }
+  };
+
+  it('uses the median of whole-campaign games of any kind once there are 5, else the PUG figure', () => {
+    match('dark_wood', 50); match('dark_wood', 60); match('dark_wood', 70); // PUG history, no maps rows
+    for (const m of [90, 95, 100, 85]) game('dark_wood', m);
+    expect(measuredCampaignMinutes(db, 'dark_wood')).toBeNull();
+    expect(typicalCampaignMinutes(db, 'dark_wood')).toBe(60);
+    game('dark_wood', 92, { kind: 'pug', wentLive: true });
+    expect(measuredCampaignMinutes(db, 'dark_wood')).toBe(92);
+    expect(typicalCampaignMinutes(db, 'dark_wood')).toBe(92);
+  });
+
+  it('leaves out aborted, forfeited, restored, map-less and out-of-window games', () => {
+    for (const m of [80, 82, 84, 86, 88]) game('blood_harvest', m);
+    game('blood_harvest', 30, { state: 'aborted' });
+    game('blood_harvest', 30, { forfeit: 'a' });
+    game('blood_harvest', 30, { restored: 2 });
+    game('blood_harvest', 30, { maps: 0 });
+    game('blood_harvest', 5);
+    game('blood_harvest', 300);
+    expect(measuredCampaignMinutes(db, 'blood_harvest')).toBe(84);
+  });
+
+  it('takes only the last 20', () => {
+    for (let i = 0; i < 20; i++) game('no_mercy', 200);
+    for (let i = 0; i < 20; i++) game('no_mercy', 60);
+    expect(measuredCampaignMinutes(db, 'no_mercy')).toBe(60);
+  });
+
+  it('a self-started game (no went_live_at) is timed from its row, created at go-live', () => {
+    for (let i = 0; i < 5; i++) game('death_toll', 75, { kind: 'pug', wentLive: false });
+    expect(measuredCampaignMinutes(db, 'death_toll')).toBe(75);
   });
 
   it('estimates a booking as 15 plus each campaign and 10, rounded up to the 30 minute step', () => {
