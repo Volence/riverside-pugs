@@ -278,6 +278,44 @@ describe('Scrims page', () => {
     expect(other?.className).not.toContain('scrimrow--night');
     expect(screen.getAllByText('Scrim night').length).toBeGreaterThan(0);
   });
+
+  it('after a post goes through, the form clears and says Posted with a link to the new card', async () => {
+    mockScrims.create.mockResolvedValue({ id: 77 });
+    renderScrims();
+    await screen.findByRole('heading', { name: 'Post a scrim' });
+    fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
+    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.input(screen.getByLabelText('Note'), { target: { value: 'gl hf' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post the scrim' }));
+    const done = await screen.findByText(/^Posted\./);
+    expect(done.textContent).toBe('Posted. See it on the board');
+    expect(screen.getByRole('link', { name: 'See it on the board' }).getAttribute('href')).toBe('/scrims?post=77');
+    expect((screen.getByLabelText('Start') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('No Mercy') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText('Note') as HTMLInputElement).value).toBe('');
+    expect((screen.getByRole('button', { name: 'Post the scrim' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a refused post keeps the form as it was and shows no Posted line', async () => {
+    mockScrims.create.mockRejectedValue(new Error('That side already has an open post starting at that time.'));
+    renderScrims();
+    await screen.findByRole('heading', { name: 'Post a scrim' });
+    fireEvent.input(screen.getByLabelText('Start'), { target: { value: '2026-10-02T20:00' } });
+    fireEvent.click(screen.getByLabelText('No Mercy'));
+    fireEvent.click(screen.getByRole('button', { name: 'Post the scrim' }));
+    expect(await screen.findByText('That side already has an open post starting at that time.')).toBeTruthy();
+    expect(screen.queryByText(/^Posted\./)).toBeNull();
+    expect((screen.getByLabelText('Start') as HTMLInputElement).value).toBe('2026-10-02T20:00');
+    expect((screen.getByLabelText('No Mercy') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('a confirm refused for good reloads the board, since the acceptance is gone', async () => {
+    mockScrims.confirm.mockRejectedValue(new ApiError(400, 'The accepting side can no longer play this scrim, so its acceptance was declined.'));
+    renderScrims();
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+    expect(await screen.findByText('The accepting side can no longer play this scrim, so its acceptance was declined.')).toBeTruthy();
+    await waitFor(() => expect(mockScrims.board).toHaveBeenCalledTimes(2));
+  });
 });
 
 describe('the Blocked panel', () => {
