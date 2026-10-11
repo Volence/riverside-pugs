@@ -2871,3 +2871,25 @@ describe('slot warnings (scrims in game, items 4 and 7)', () => {
     expect(warnMark(5 * MIN, 10)).toBeNull();
   });
 });
+
+describe('start now (scrims in game Ruling 7)', () => {
+  it('both presses move the slot up and take a box at once; it is set up like any booking', async () => {
+    const id = book();
+    expect(runner.startNow(id, P[0])).toEqual({ ok: true, value: { started: false } });
+    expect(getBooking(db, id)!.server_id).toBeNull();
+    expect(runner.startNow(id, P[1])).toEqual({ ok: true, value: { started: true } });
+    expect(getBooking(db, id)!.starts_at).toBe(new Date(now).toISOString());
+    await runner.idle();
+    expect(getBooking(db, id)).toMatchObject({ state: 'ready', server_id: 3 });
+  });
+
+  it('the second press is refused and not kept when no box can be held right now', () => {
+    const id = book();
+    db.prepare("UPDATE servers SET status = 'offline'").run();
+    runner.startNow(id, P[0]);
+    expect(runner.startNow(id, P[1])).toEqual({ ok: false, error: 'no_box_now' });
+    expect(sideRow(db, id, 'b')!.start_now_at).toBeNull();
+    expect(sideRow(db, id, 'a')!.start_now_at).not.toBeNull();
+    expect(getBooking(db, id)!.starts_at).toBe(new Date(START).toISOString());
+  });
+});
