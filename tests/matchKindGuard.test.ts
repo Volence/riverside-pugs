@@ -31,6 +31,7 @@ const ALLOWED: Record<string, number> = {
   'src/discord/commands.ts': 1,     // public matches only
   'src/matchArchive.ts': 1,         // comment
   'src/cast/access.ts': 2,          // caster picker and canCastMatch's recent window
+  'src/inputBursts.ts': 1,          // end-of-match input checks, every kind (a scrim cheater is still one)
 };
 
 const RAW = /state\s*=\s*'completed'|state\s+IN\s*\([^)]*'completed'/g;
