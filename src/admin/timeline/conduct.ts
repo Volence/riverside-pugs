@@ -23,7 +23,9 @@ export const conductAdapter: TimelineAdapter = {
         kind: r.kind,
         summary: r.kind === 'name'
           ? `Used the name "${r.detail}" (${what}).`
-          : `Typed "${r.detail}" in chat (${what}).`,
+          : r.kind === 'review'
+            ? `Wrote "${r.detail}" in a scrim review note (${what}).`
+            : `Typed "${r.detail}" in chat (${what}).`,
         matchId: r.match_id,
         replay: null,
         ref: { type: 'integrity_flag', id: r.id },

@@ -6,6 +6,7 @@ import { createTeam, invitePlayer, respondInvite } from '../src/teams/teams.js';
 import { bookingView, cancelBooking, confirmBooking, createBooking, getBooking, sideRow } from '../src/bookings/bookings.js';
 import { reviewAskMessage } from '../src/bookings/messages.js';
 import { NOTIFY_TYPES } from '../src/notify/notify.js';
+import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import {
   REVIEW_TAGS, REVIEW_TAG_LABELS, RETIRED_REVIEW_TAGS, reviewSummary, scrimReviewsOf, staffReviews, submitReview, toxicFlag,
 } from '../src/scrims/reviews.js';
@@ -317,5 +318,20 @@ describe('the staff-only note (owner, 2026-10-11)', () => {
     // An edit without a note clears it.
     submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags: [], now: new Date(now) });
     expect(staffReviews(db, id)[0].note).toBe('');
+  });
+
+  it('a slur in the note saves the review and raises the conduct alert; a clean note raises nothing', () => {
+    const posted: AdminEvent[] = [];
+    const off = subscribeAdminEvents((e) => posted.push(e));
+    try {
+      const id = booked(START);
+      const now = new Date(closed(id) + HOUR);
+      expect(submitReview(db, { bookingId: id, by: P[0], thumbs: 1, tags: [], note: 'great games', now }).ok).toBe(true);
+      expect(submitReview(db, { bookingId: id, by: P[0], thumbs: -1, tags: ['toxic'], note: 'kys', now }).ok).toBe(true);
+      expect(staffReviews(db, id)[0].note).toBe('kys');
+      expect(posted.filter((e) => e.kind === 'conduct_flag')).toEqual([expect.objectContaining({ where: 'review', steamid: P[0], bookingId: id })]);
+    } finally {
+      off();
+    }
   });
 });

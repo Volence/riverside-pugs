@@ -62,3 +62,26 @@ export function handleConduct(db: DB, ev: ConductEvent, serverId: number | null,
 
   if (post) publishAdminEvent({ kind: 'conduct_flag', steamid: ev.steamid, where, text, slurs, matchId, serverId });
 }
+
+/**
+ * A slur in text a player wrote on the site for staff only: a scrim review's
+ * note (owner, 2026-10-11). The note is kept as written, since only staff
+ * read it, and goes the way a chat line does: stored as a conduct flag on the
+ * writer's file (kind 'review', the exact text as the detail) and posted to
+ * the staff channel. Posted once per player per exact text, as names are, so
+ * saving the same review again posts nothing new. True when it posted.
+ */
+export function flagWrittenConduct(db: DB, o: { steamid: string; where: 'review'; text: string; bookingId: number; now?: Date }): boolean {
+  const slurs = findSlurs(o.text);
+  if (slurs.length === 0) return false;
+  const seen = db.prepare(
+    "SELECT 1 FROM integrity_flags WHERE source = 'conduct' AND kind = ? AND steamid = ? AND detail = ? LIMIT 1",
+  ).get(o.where, o.steamid, o.text);
+  if (seen) return false;
+  db.prepare(
+    `INSERT INTO integrity_flags (match_id, server_id, steamid, source, kind, severity, detail, at)
+     VALUES (NULL, NULL, ?, 'conduct', ?, 'suspected', ?, ?)`,
+  ).run(o.steamid, o.where, o.text, (o.now ?? new Date()).toISOString());
+  publishAdminEvent({ kind: 'conduct_flag', steamid: o.steamid, where: o.where, text: o.text, slurs, matchId: null, serverId: null, bookingId: o.bookingId });
+  return true;
+}

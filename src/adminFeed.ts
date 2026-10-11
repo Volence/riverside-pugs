@@ -57,9 +57,13 @@ export type AdminEvent =
   // or not (src/conductFlags.ts). `slurs` names the kinds found, never the
   // word list. Chat posts at most once a minute per player and a name once
   // per player per name; every line is still stored on the player's file.
+  // 'review' is a scrim review's staff-only note (src/scrims/reviews.ts),
+  // posted once per player per exact text.
   | {
-    kind: 'conduct_flag'; steamid: string; where: 'chat' | 'name'; text: string;
+    kind: 'conduct_flag'; steamid: string; where: 'chat' | 'name' | 'review'; text: string;
     slurs: string[]; matchId: number | null; serverId: number | null;
+    /** 'review' only: the booking whose scrim review note held it. */
+    bookingId?: number;
   }
   | { kind: 'cvar_flag'; steamid: string; matchId: number; cvar: string; value: number; act: 'held' | 'fixed' | 'live' }
   // Something Steam says about a player rostered in a live match: a VAC or
