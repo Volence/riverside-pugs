@@ -28,10 +28,16 @@
 // load), after a role change, or after this module moved them: a player who
 // sits out stays out. A full team is never over-filled. sm_pug_book_clear
 // (the site's CLEAR_LINES) forgets it all, and so does the end restart.
+// The list only counts while l4d_booking_password is set: CLEAR_LINES and a
+// restart clear it and a booked box always has one, so a list left over from
+// a box the site took away (no CLEAR_LINES on that path) never acts on a
+// later PUG or pub. A backend-rostered match is never touched (its roster is
+// the authority), and sm_pug_team_lock 0 moves nobody, here as in the lock.
 
 #define BOOK_SIDE_A 1
 #define BOOK_SIDE_B 2
 #define BOOK_WATCH 3
+#define BOOK_UNKNOWN -1            // Book_RoleOf: no SteamID for the client yet, so its role is not known
 #define BOOK_CHUNK_MAX 32          // ids one sm_pug_book_add line may carry (the site sends 10)
 #define BOOK_PLACE_TRIES 8         // placement attempts after an arrival or a role change, one per lock tick (2 s)
 #define BOOK_TELL_GAP 20.0         // seconds between two placement notices to one client
@@ -55,10 +61,16 @@ void Book_Init()
 	RegServerCmd("sm_pug_book_status", Cmd_BookStatus, "sm_pug_book_status [steamid64] - counts, the first side, and one id's role");
 }
 
-/** A booked scrim's people are loaded: the placement runs and the lock holds for an auto-tracked match. */
+/** A booked scrim's people are loaded and the box is booked right now (l4d_booking's
+ *  password is set): the placement runs and the lock holds for an auto-tracked match. */
 bool Book_Active()
 {
-	return g_bBookLoaded && g_hBook.Size > 0;
+	if (!g_bBookLoaded || g_hBook.Size == 0) return false;
+	ConVar cv = FindConVar("l4d_booking_password");
+	if (cv == null) return false;
+	char pass[8];
+	cv.GetString(pass, sizeof(pass));
+	return pass[0] != '\0';
 }
 
 static bool Book_IsId64(const char[] id)
@@ -128,7 +140,7 @@ public Action Cmd_BookCommit(int args)
 	{
 		if (!IsClientInGame(c) || IsFakeClient(c)) continue;
 		int role = Book_RoleOf(c);
-		if (role != g_iBookRole[c])
+		if (role != BOOK_UNKNOWN && role != g_iBookRole[c])
 		{
 			g_iBookRole[c] = role;
 			g_bBookPlace[c] = true;
@@ -173,11 +185,12 @@ public Action Cmd_BookStatus(int args)
 	return Plugin_Handled;
 }
 
-/** The client's booking role, or 0 (not on the booking, or no SteamID yet). */
+/** The client's booking role, 0 when not on the booking, or BOOK_UNKNOWN
+ *  while the client has no SteamID yet (never read as a stranger). */
 int Book_RoleOf(int client)
 {
 	char id[32];
-	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return 0;
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return BOOK_UNKNOWN;
 	int role;
 	return g_hBook.GetValue(id, role) ? role : 0;
 }
@@ -207,11 +220,18 @@ int Book_PugOfSide(int side)
 }
 
 /** The game team a booking side belongs on right now, or 0 when this module
- *  does not know (between games away from a first map, or after the finale). */
+ *  does not know (between games away from a first map, after the finale, or
+ *  while a tracked match's mapping is not settled: Timer_TeamLock's seed hold
+ *  and its blind vote, the changelevel window where g_iPugSide is still the
+ *  previous half's). */
 int Book_TeamOfSide(int side)
 {
 	if (g_State == MS_Pending || g_State == MS_Live)
 	{
+		if (g_bSeedHold) return 0;
+		int straight, inverted;
+		OrientationVote(straight, inverted);
+		if (straight == 0 && inverted == 0) return 0;
 		int pug = Book_PugOfSide(side);
 		return pug == 0 ? 0 : g_iPugSide[pug];
 	}
@@ -245,6 +265,11 @@ void Book_Tell(int client, const char[] text)
 void Book_Pass()
 {
 	if (!Book_Active()) return;
+	// sm_pug_team_lock 0 is the testing switch: nobody is moved.
+	if (!g_cvTeamLock.BoolValue) return;
+	// A backend-rostered match (a site PUG or tournament game, not
+	// self-started): its roster is the authority, not a booking list.
+	if (g_State != MS_None && !g_bSelfStarted) return;
 	bool tracked = g_State == MS_Pending || g_State == MS_Live;
 	for (int c = 1; c <= MaxClients; c++)
 	{
@@ -255,6 +280,7 @@ void Book_Pass()
 		// the roster is the authority until that game ends.
 		if (tracked && g_iClientRoster[c] != -1) { g_bBookPlace[c] = false; continue; }
 		int role = Book_RoleOf(c);
+		if (role == BOOK_UNKNOWN) continue; // no SteamID yet: not a stranger, just not known
 		if (role != g_iBookRole[c])
 		{
 			g_iBookRole[c] = role;
