@@ -24,7 +24,7 @@ describe('openDb', () => {
       'draft_captain_offers', 'draft_keep_answers', 'draft_keeps', 'draft_pick_lists', 'draft_picks', 'draft_rooms', 'draft_signups', 'draft_standin_offers', 'draft_standins', 'endorsements', 'evader_flags', 'event_campaign_prefs', 'event_entries', 'event_entry_players', 'event_entry_prefs', 'event_games', 'event_lineups',
       'event_log', 'event_matches', 'event_reschedules', 'event_stages', 'event_vetoes', 'events', 'fleet_files', 'fleet_readings',
       'game_configs',
-      'input_bursts', 'input_caps', 'input_detections', 'input_stalls',
+      'input_bursts', 'input_caps', 'input_detections', 'input_match_scans', 'input_stalls',
       'integrity_clips', 'integrity_flag_posts', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
       'integrity_unanalysable', 'ip_alerts', 'ip_watch',
       'map_looks',

@@ -89,7 +89,12 @@ export function evaluateStalls(db: DB, matchId: number, steamid: string): string
     'SELECT id, gap, missed, team, cls, lunging, at FROM input_stalls WHERE match_id = ? AND steamid = ? ORDER BY id',
   ).all(matchId, steamid) as StallRow[];
   const r = fakelag(rows);
-  if (!r) return null;
+  if (!r) {
+    // Qualified earlier in the match and no longer does: the row goes, as a
+    // re-run would take it. What was posted stays posted.
+    db.prepare('DELETE FROM input_detections WHERE match_id = ? AND steamid = ? AND signature = ?').run(matchId, steamid, SIGNATURE);
+    return null;
+  }
   const note = fakelagNote(r);
   const existing = db.prepare(
     'SELECT id FROM input_detections WHERE match_id = ? AND steamid = ? AND signature = ?',
