@@ -11,6 +11,7 @@ import type * as V from './validate.js';
 import { STAGE_LABEL, chaptersLabel, rulesLines, stageSummary } from './format.js';
 import { vetoSummary } from './vetoConfig.js';
 import { stagePlayViews, type StagePlayView } from './playViews.js';
+import * as P from './play.js';
 
 /** What the public event list and event page show (spec section 7). */
 
@@ -204,7 +205,7 @@ export function myEventView(db: DB, ev: E.EventRow, viewer: string, now = new Da
     return [...current, ...places.filter((p) => !on.has(p.steamid)).map((p) => option(p.steamid, p.role, false, entryId))];
   };
   const rosterOpen = ev.status === 'registration' || ev.status === 'checkin' || ev.status === 'live';
-  const locked = R.rosterLocked(f.roster.lock, at);
+  const locked = R.rosterLocked(f.roster.lock, at, (st, rd) => P.roundPlayed(db, ev.id, st, rd));
   const preFinal = ev.locked_at === null && (ev.status === 'registration' || ev.status === 'checkin');
 
   const mine = N.entriesOf(db, ev.id).filter(N.isActive).filter((e) =>

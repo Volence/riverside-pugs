@@ -87,6 +87,20 @@ describe('play writer', () => {
       .toEqual({ ok: false, error: 'changed' });
   });
 
+  it('roundPlayed: a round counts as played once every main-bracket match of it has a result, or a later stage starts', () => {
+    const f = playFixture({ stages: [SWISS(2, 2), SE()], entries: 4 });
+    ok(P.startEvent(f.db, { eventId: f.eventId, by: ADMIN, plan: swissPlan(f.stages[0]!, f.entries), now: NOW }));
+    const [m1, m2] = P.matchesOf(f.db, f.stages[0]!);
+    expect(P.roundPlayed(f.db, f.eventId, 1, 1)).toBe(false);
+    ok(P.recordResult(f.db, { matchId: m1!.id, by: ADMIN, result: aWins, bracket: null, now: NOW }));
+    expect(P.roundPlayed(f.db, f.eventId, 1, 1)).toBe(false);
+    ok(P.recordResult(f.db, { matchId: m2!.id, by: ADMIN, result: aWins, bracket: null, now: NOW }));
+    expect(P.roundPlayed(f.db, f.eventId, 1, 1)).toBe(true);
+    expect(P.roundPlayed(f.db, f.eventId, 1, 2)).toBe(false);
+    expect(P.roundPlayed(f.db, f.eventId, 2, 1)).toBe(false);
+    expect(P.roundPlayed(f.db, f.eventId, 9, 1)).toBe(false);
+  });
+
   it('recordResult allows a round 1 correction in a round robin league even once later rounds exist (every round is written at the start)', () => {
     const f = playFixture({ stages: [LEAGUE(4, 1, 'round_robin', null)], entries: 4 });
     const pairings = repeatedRoundRobin(f.entries, 4);
