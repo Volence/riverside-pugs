@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DB } from '../db.js';
-import { findSlurs } from '../slurs.js';
+import { findSlurs, foldLookalikes } from '../slurs.js';
 import { DEFAULT_IGNORABLE, hasUnsafeChars } from '../profileFields.js';
 import { settingNumber } from '../settings.js';
 import { inGoodStanding } from '../standing.js';
@@ -46,7 +46,7 @@ export const TEAM_ERRORS = {
   tag_taken: { status: 409, text: 'Another team already has that tag.' },
   your_cap: { status: 409, text: 'You are already on as many teams as allowed. Leave one first.' },
   their_cap: { status: 409, text: 'That player is already on as many teams as allowed.' },
-  created_cap: { status: 409, text: 'You have created as many teams as allowed. Disband one first.' },
+  created_cap: { status: 409, text: 'You have created as many teams as allowed. A team you made counts until it is disbanded, even after you leave it.' },
   roster_full: { status: 409, text: `The roster is full (${ROSTER_MAX} players).` },
   not_found: { status: 404, text: 'No such team.' },
   not_allowed: { status: 403, text: 'Only the captain can do that.' },
@@ -61,6 +61,8 @@ export const TEAM_ERRORS = {
   kicked: { status: 403, text: 'You were removed from this team. Ask the captain for an invite.' },
   is_captain: { status: 400, text: 'Hand the captaincy over first.' },
   bad_role: { status: 400, text: 'A role is cocaptain or member.' },
+  team_busy: { status: 409, text: 'This team has a booked scrim or an event entry. Cancel the booking or withdraw the entry first.' },
+  not_eligible: { status: 409, text: 'That player is banned or on hold, so they cannot captain the team.' },
   keep_short: { status: 409, text: 'Fewer than three of the drafted players can join a team right now.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type TeamError = keyof typeof TEAM_ERRORS;
@@ -84,8 +86,9 @@ export function normalizeName(raw: unknown): { ok: true; name: string; key: stri
   if (findSlurs(name).length > 0) return fail('name_not_allowed');
   // NFKC before lower-casing, so compatibility variants (full-width letters,
   // ligatures) key the same as their plain ascii form: "ＲＡＴＳ" and "rats"
-  // must not be able to look like two different teams.
-  return { ok: true, name, key: name.normalize('NFKC').toLowerCase() };
+  // must not be able to look like two different teams. Cyrillic and Greek
+  // lookalikes fold to Latin for the same reason ("Rіverside").
+  return { ok: true, name, key: foldLookalikes(name.normalize('NFKC').toLowerCase()) };
 }
 
 export function normalizeTag(raw: unknown): { ok: true; tag: string; key: string } | { ok: false; error: TeamError } {
@@ -163,8 +166,49 @@ function createdCount(db: DB, steamid: string): number {
 }
 
 export function canCreate(db: DB, steamid: string): boolean {
+  return createBlocker(db, steamid) === null;
+}
+
+/** Why this player may not create a team right now, or null if they may. */
+export function createBlocker(db: DB, steamid: string): 'your_cap' | 'created_cap' | null {
   const cap = membershipCap(db);
-  return activeMembershipCount(db, steamid) < cap && createdCount(db, steamid) < cap;
+  if (activeMembershipCount(db, steamid) >= cap) return 'your_cap';
+  if (createdCount(db, steamid) >= cap) return 'created_cap';
+  return null;
+}
+
+/** A team with a scrim booking still open, or an entry still in an event
+ *  that has not finished: closing it would leave the booking or entry with
+ *  nobody able to manage it (cancel, check in, pick a lineup). */
+export function teamBusy(db: DB, teamId: number): boolean {
+  const booking = db.prepare(
+    `SELECT 1 FROM bookings b JOIN booking_sides s ON s.booking_id = b.id
+      WHERE s.team_id = ? AND b.ended_at IS NULL AND b.purpose = 'scrim' LIMIT 1`,
+  ).get(teamId);
+  if (booking) return true;
+  return db.prepare(
+    `SELECT 1 FROM event_entries e JOIN events v ON v.id = e.event_id
+      WHERE e.team_id = ? AND e.status IN ('registered','checked_in') AND v.status NOT IN ('finished','cancelled') LIMIT 1`,
+  ).get(teamId) !== undefined;
+}
+
+/** Take a player who left the team off its scrims that have not started
+ *  (state scheduled): the booking copied every member on at creation, and a
+ *  kicked player must not keep the server password. Bookings already under
+ *  way keep their list (the box has it); tournaments follow event sub rules.
+ *  Call inside a transaction. */
+function dropFromTeamBookings(db: DB, teamId: number, steamid: string, reason: 'kicked' | 'left', now: string): void {
+  const rows = db.prepare(
+    `SELECT p.booking_id FROM booking_people p
+       JOIN booking_sides s ON s.booking_id = p.booking_id AND s.side = p.side
+       JOIN bookings b ON b.id = p.booking_id
+      WHERE p.steamid = ? AND s.team_id = ? AND s.captain_steamid != ? AND b.purpose = 'scrim' AND b.state = 'scheduled' AND b.ended_at IS NULL`,
+  ).all(steamid, teamId, steamid) as { booking_id: number }[];
+  for (const r of rows) {
+    db.prepare('DELETE FROM booking_people WHERE booking_id = ? AND steamid = ?').run(r.booking_id, steamid);
+    db.prepare('INSERT INTO booking_events (booking_id, at, actor, event, detail) VALUES (?, ?, NULL, ?, ?)')
+      .run(r.booking_id, now, 'person_removed', JSON.stringify({ steamid, why: reason === 'kicked' ? 'kicked from team' : 'left team' }));
+  }
 }
 
 export function myTeams(db: DB, steamid: string): (TeamRow & { role: TeamRole })[] {
@@ -461,7 +505,9 @@ function settleCaptaincy(db: DB, teamId: number, now: string): { disbanded: bool
   }
   const current = members.find((m) => m.role === 'captain');
   if (current) return { disbanded: false, captain: current.steamid };
-  const next = members[0];
+  // A banned or held member cannot log in to run the team; pass over them
+  // unless nobody else is left.
+  const next = members.find((m) => inGoodStanding(db, m.steamid)) ?? members[0];
   db.prepare("UPDATE team_members SET role = 'captain' WHERE id = ?").run(next.id);
   db.prepare('UPDATE teams SET captain_steamid = ? WHERE id = ?').run(next.steamid, teamId);
   return { disbanded: false, captain: next.steamid };
@@ -475,7 +521,10 @@ export function leaveTeam(
     const team = liveTeam(db, o.teamId);
     if (!team) return fail('not_found');
     if (!roleOf(db, team.id, o.steamid)) return fail('not_member');
+    // The last one out closes the team, which a pending scrim or event entry forbids.
+    if (rosterSize(db, team.id) === 1 && teamBusy(db, team.id)) return fail('team_busy');
     db.prepare('UPDATE team_members SET left_at = ? WHERE team_id = ? AND steamid = ? AND left_at IS NULL').run(now, team.id, o.steamid);
+    dropFromTeamBookings(db, team.id, o.steamid, 'left', now);
     return ok(settleCaptaincy(db, team.id, now));
   })();
 }
@@ -494,6 +543,7 @@ export function kickMember(
     if (theirs === 'captain') return fail(o.target === o.by ? 'is_captain' : 'not_allowed');
     if (mine === 'cocaptain' && theirs !== 'member') return fail('not_allowed');
     db.prepare("UPDATE team_members SET left_at = ?, left_reason = 'kicked' WHERE team_id = ? AND steamid = ? AND left_at IS NULL").run(now, team.id, o.target);
+    dropFromTeamBookings(db, team.id, o.target, 'kicked', now);
     return ok(settleCaptaincy(db, team.id, now));
   })();
 }
@@ -517,10 +567,16 @@ export function transferCaptain(db: DB, o: { teamId: number; by: string; target:
   return db.transaction((): Result<null> => {
     const team = liveTeam(db, o.teamId);
     if (!team) return fail('not_found');
-    if (!o.staff && roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
+    // A co-captain may take the team over from a captain who is banned or on
+    // hold: that captain cannot log in, and every captain-only action (and
+    // booking the team as an opponent) would otherwise wait on staff.
+    const mine = roleOf(db, team.id, o.by);
+    const captainOut = mine === 'cocaptain' && !inGoodStanding(db, team.captain_steamid);
+    if (!o.staff && mine !== 'captain' && !captainOut) return fail('not_allowed');
     const theirs = roleOf(db, team.id, o.target);
     if (!theirs) return fail('not_member');
     if (theirs === 'captain') return ok(null);
+    if (!inGoodStanding(db, o.target)) return fail('not_eligible');
     db.prepare("UPDATE team_members SET role = 'cocaptain' WHERE team_id = ? AND role = 'captain' AND left_at IS NULL").run(team.id);
     db.prepare("UPDATE team_members SET role = 'captain' WHERE team_id = ? AND steamid = ? AND left_at IS NULL").run(team.id, o.target);
     db.prepare('UPDATE teams SET captain_steamid = ? WHERE id = ?').run(o.target, team.id);
@@ -559,6 +615,7 @@ export function disbandTeam(db: DB, o: { teamId: number; by: string; staff?: boo
     const team = liveTeam(db, o.teamId);
     if (!team) return fail('not_found');
     if (!o.staff && roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
+    if (teamBusy(db, team.id)) return fail('team_busy');
     closeTeam(db, team.id, now);
     return ok(null);
   })();

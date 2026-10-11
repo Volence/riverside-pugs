@@ -1982,6 +1982,8 @@ export interface TeamView {
   origin?: { eventSlug: string; eventName: string; placement: number | null } | null;
   captain: string; members: TeamMemberView[]; former: { steamid: string; name: string; leftAt: string }[];
   viewer: { role: TeamRole | null; staff: boolean };
+  /** The captain is banned or on hold: a co-captain may take the team over. */
+  captainAway?: boolean;
   manage: { invites: { id: number; steamid: string; name: string; createdAt: string }[]; joinLinkToken: string | null } | null;
   /** The team's scrim record: members and staff only, unless the record is
    *  public. Absent for everyone else. */
@@ -1993,12 +1995,15 @@ export interface TeamView {
   reviews?: ReviewSummary;
 }
 
+/** /api/teams/mine. createBlocked says why canCreate is false. */
+export interface MyTeams { teams: MyTeamItem[]; invites: TeamInviteItem[]; canCreate: boolean; createBlocked?: string }
+
 export const logoUrl = (key: string): string => `/api/teams/logos/${key}.png`;
 
 const enc = encodeURIComponent;
 export const teamsApi = {
   list: (signal?: AbortSignal) => get<{ teams: TeamListItem[] }>('/api/teams', signal),
-  mine: (signal?: AbortSignal) => get<{ teams: MyTeamItem[]; invites: TeamInviteItem[]; canCreate: boolean }>('/api/teams/mine', signal),
+  mine: (signal?: AbortSignal) => get<MyTeams>('/api/teams/mine', signal),
   get: (slug: string, signal?: AbortSignal) => get<TeamView>(`/api/teams/${enc(slug)}`, signal),
   search: (q: string, signal?: AbortSignal) =>
     get<{ players: { steamid: string; name: string; avatar: string | null }[] }>(`/api/teams/player-search?q=${enc(q)}`, signal),

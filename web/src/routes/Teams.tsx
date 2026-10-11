@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { ApiError, teamsApi, type MyTeamItem, type TeamInviteItem, type TeamListItem } from '../api';
+import { ApiError, teamsApi, type MyTeams, type TeamListItem } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { CompeteTabs } from '../components/CompeteTabs';
@@ -46,7 +46,8 @@ export function Teams({ session }: { session: Session }) {
   const { route } = useLocation();
   const signedIn = session.kind === 'active';
   const [all, setAll] = useState<TeamListItem[] | null>(null);
-  const [mine, setMine] = useState<{ teams: MyTeamItem[]; invites: TeamInviteItem[]; canCreate: boolean } | null>(null);
+  const [mine, setMine] = useState<MyTeams | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [closed, setClosed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
@@ -55,8 +56,9 @@ export function Teams({ session }: { session: Session }) {
   const [busy, setBusy] = useState(false);
 
   const load = () => {
-    teamsApi.list().then((r) => setAll(r.teams), (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); });
-    if (signedIn) teamsApi.mine().then(setMine, () => {});
+    setLoadError(false);
+    teamsApi.list().then((r) => setAll(r.teams), (e) => { if (e instanceof ApiError && e.status === 404) setClosed(true); else setLoadError(true); });
+    if (signedIn) teamsApi.mine().then(setMine, (e) => { if (!(e instanceof ApiError && e.status === 404)) setLoadError(true); });
   };
   useEffect(load, [signedIn]);
 
@@ -93,6 +95,10 @@ export function Teams({ session }: { session: Session }) {
         ? <button class="btn btn--ghost" onClick={() => setCreating(true)}>Start a team</button>
         : undefined} />
       {error && <p class="error" role="alert">{error}</p>}
+      {loadError && (
+        <p class="error" role="alert">Could not load teams. <button class="btn btn--ghost btn--sm" onClick={load}>Try again</button></p>
+      )}
+      {mine && !mine.canCreate && mine.createBlocked && mine.teams.length === 0 && <p class="teamnote">{mine.createBlocked}</p>}
 
       {mine && mine.invites.length > 0 && (
         <Panel>
@@ -147,7 +153,7 @@ export function Teams({ session }: { session: Session }) {
 
       <Panel>
         <h3>All teams{all && all.length > 0 ? <span class="teamcount">{all.length}</span> : null}</h3>
-        {all === null ? null : all.length === 0
+        {all === null ? (loadError ? null : <Empty>Loading teams…</Empty>) : all.length === 0
           ? <Empty>No teams yet. Be the first.</Empty>
           : (
             <ul class="teamrows">

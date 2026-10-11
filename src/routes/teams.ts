@@ -26,6 +26,9 @@ export interface TeamView {
   origin: { eventSlug: string; eventName: string; placement: number | null } | null;
   captain: string; members: TeamMemberView[]; former: { steamid: string; name: string; leftAt: string }[];
   viewer: { role: T.TeamRole | null; staff: boolean };
+  /** The captain is banned or on hold, so a co-captain may take the team
+   *  over (transferCaptain). Sent to the team's managers and staff only. */
+  captainAway?: boolean;
   manage: { invites: { id: number; steamid: string; name: string; createdAt: string }[]; joinLinkToken: string | null } | null;
   /** The team's scrim record (plan 2): only for its members and staff, or
    *  anyone once scrim_reliability_public is on. Omitted otherwise. */
@@ -107,7 +110,8 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     const invites: InviteItem[] = T.pendingInvitesFor(db, me).map((i) => ({
       id: i.id, slug: i.slug, name: i.name, tag: i.tag, invitedByName: getPlayer(db, i.invited_by)?.name ?? null, createdAt: i.created_at,
     }));
-    return { teams, invites, canCreate: T.canCreate(db, me) };
+    const blocker = T.createBlocker(db, me);
+    return { teams, invites, canCreate: blocker === null, ...(blocker ? { createBlocked: T.TEAM_ERRORS[blocker].text } : {}) };
   });
 
   app.get('/api/teams/player-search', async (req, reply) => {
@@ -194,6 +198,7 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
       }),
       former: T.formerMembers(db, t.id).map((f) => ({ steamid: f.steamid, name: nameOf(f.steamid), leftAt: f.left_at })),
       viewer: { role, staff },
+      ...(manager && !t.disbanded_at ? { captainAway: !inGoodStanding(db, t.captain_steamid) } : {}),
       manage: manager && !t.disbanded_at
         ? {
             invites: T.openInvitesOf(db, t.id).map((i) => ({ id: i.id, steamid: i.steamid, name: nameOf(i.steamid), createdAt: i.created_at })),
