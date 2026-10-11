@@ -109,6 +109,7 @@ export const BOOKING_ERRORS = {
   already_in: { status: 409, text: 'That player is already in this booking.' },
   side_full: { status: 409, text: 'That side is full.' },
   invited_elsewhere: { status: 409, text: 'They have an invite from the other side; they accept it on the site.' },
+  plays_other_side: { status: 409, text: 'They already play for the other side.' },
   not_person: { status: 404, text: 'That player is not in this booking.' },
   no_invite: { status: 410, text: 'That invite is no longer open.' },
   is_captain: { status: 400, text: "A side's captain cannot be removed." },
@@ -651,20 +652,22 @@ export function gameName(steamid: string, raw: unknown): string {
   return trimmed === '' || hasUnsafeChars(trimmed) ? steamid : trimmed;
 }
 
-/** A captain's in-game `!allow` (plan 4b2): the person connecting joins the
- *  captain's side as an accepted ringer, or, holding an open invite to a side
- *  this captain runs, has it accepted. Already accepted is `added: false`. Only a manager of a confirmed side of
- *  an open booking that is ready or active, and only through the runner's
- *  signed PUGBOOK line. It touches nothing but `players` (a row inserted if
- *  absent, status invited, never an admin) and `booking_people`. The name
- *  comes from the game and is untrusted: trimmed, cut to 32 characters, and
- *  replaced by the steamid when it is empty or has unsafe characters. */
-export function allowInGame(db: DB, o: { bookingId: number; by: string; steamid: unknown; name: unknown; now?: Date }): Result<{ side: Side; added: boolean }> {
+/** A captain's in-game `!allow` (plan 4b2; scrims in game Ruling 9): the
+ *  person connecting may WATCH: they join the captain's side as an accepted
+ *  spectator, not counted against its players (watchers are capped apart, at
+ *  PEOPLE_PER_SIDE). Holding an open invite to a side this captain runs, the
+ *  invite is accepted with its role kept. Already accepted is `added: false`.
+ *  Only a manager of a confirmed side of an open booking that is ready or
+ *  active, and only through the runner's signed PUGBOOK line. It touches
+ *  nothing but `players` (a row inserted if absent, status invited, never an
+ *  admin) and `booking_people`. The name comes from the game and is
+ *  untrusted (gameName). */
+export function allowInGame(db: DB, o: { bookingId: number; by: string; steamid: unknown; name: unknown; now?: Date }): Result<{ side: Side; added: boolean; role: PersonRole }> {
   const now = o.now ?? new Date();
   if (typeof o.steamid !== 'string' || !/^\d{17}$/.test(o.steamid)) return fail('not_player');
   const steamid = o.steamid;
   const name = gameName(steamid, o.name);
-  return db.transaction((): Result<{ side: Side; added: boolean }> => {
+  return db.transaction((): Result<{ side: Side; added: boolean; role: PersonRole }> => {
     const b = getBooking(db, o.bookingId);
     if (!b) return fail('not_found');
     if (!isOpen(b) || (b.state !== 'ready' && b.state !== 'active')) return fail('wrong_state');
@@ -672,21 +675,62 @@ export function allowInGame(db: DB, o: { bookingId: number; by: string; steamid:
     if (!side) return fail('not_manager');
     if (barredFromBox(db, steamid, now)) return fail('not_player');
     const row = db.prepare('SELECT * FROM booking_people WHERE booking_id = ? AND steamid = ?').get(b.id, steamid) as PersonRow | undefined;
-    if (row?.status === 'accepted') return ok({ side, added: false });
+    if (row?.status === 'accepted') return ok({ side, added: false, role: row.role });
     if (row) {
       // An open invite: a captain of that side letting them in accepts it
       // for them (role kept); the other side's invite is theirs to answer.
       if (!actingSides(db, b.id, o.by).includes(row.side)) return fail('invited_elsewhere');
       db.prepare("UPDATE booking_people SET status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(b.id, steamid);
       logEvent(db, b.id, o.by, 'person_allowed_in_game', { steamid, side: row.side, accepted: true }, now);
-      return ok({ side: row.side, added: true });
+      return ok({ side: row.side, added: true, role: row.role });
     }
-    const count = (db.prepare('SELECT COUNT(*) AS n FROM booking_people WHERE booking_id = ? AND side = ?').get(b.id, side) as { n: number }).n;
-    if (count >= PEOPLE_PER_SIDE) return fail('side_full');
+    const watchers = (db.prepare("SELECT COUNT(*) AS n FROM booking_people WHERE booking_id = ? AND side = ? AND role = 'spectator'").get(b.id, side) as { n: number }).n;
+    if (watchers >= PEOPLE_PER_SIDE) return fail('side_full');
+    db.prepare("INSERT OR IGNORE INTO players (steamid, name, status) VALUES (?, ?, 'invited')").run(steamid, name);
+    insertPerson(db, b.id, side, steamid, 'spectator', 'accepted', o.by, now);
+    logEvent(db, b.id, o.by, 'person_allowed_in_game', { steamid, side }, now);
+    return ok({ side, added: true, role: 'spectator' });
+  })();
+}
+
+/** A captain's in-game `!sub` (scrims in game Ruling 10): the person plays
+ *  for the captain's side, as a ringer. A watcher of either side becomes a
+ *  ringer of this side; an invite to this side is accepted (role kept);
+ *  someone who plays for, or is invited to play for, the other side is
+ *  refused. Players and ringers per side stay within PEOPLE_PER_SIDE. Same
+ *  gates and untrusted name as allowInGame. */
+export function subInGame(db: DB, o: { bookingId: number; by: string; steamid: unknown; name: unknown; now?: Date }): Result<{ side: Side; change: 'added' | 'upgraded' | 'accepted' | 'already' }> {
+  type Out = Result<{ side: Side; change: 'added' | 'upgraded' | 'accepted' | 'already' }>;
+  const now = o.now ?? new Date();
+  if (typeof o.steamid !== 'string' || !/^\d{17}$/.test(o.steamid)) return fail('not_player');
+  const steamid = o.steamid;
+  const name = gameName(steamid, o.name);
+  return db.transaction((): Out => {
+    const b = getBooking(db, o.bookingId);
+    if (!b) return fail('not_found');
+    if (!isOpen(b) || (b.state !== 'ready' && b.state !== 'active')) return fail('wrong_state');
+    const side = actingSides(db, b.id, o.by)[0];
+    if (!side) return fail('not_manager');
+    if (barredFromBox(db, steamid, now)) return fail('not_player');
+    const row = db.prepare('SELECT * FROM booking_people WHERE booking_id = ? AND steamid = ?').get(b.id, steamid) as PersonRow | undefined;
+    if (row && row.role !== 'spectator') {
+      if (row.side !== side) return fail(row.status === 'invited' ? 'invited_elsewhere' : 'plays_other_side');
+      if (row.status === 'accepted') return ok({ side, change: 'already' });
+      db.prepare("UPDATE booking_people SET status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(b.id, steamid);
+      logEvent(db, b.id, o.by, 'person_subbed_in_game', { steamid, side, change: 'accepted' }, now);
+      return ok({ side, change: 'accepted' });
+    }
+    const playing = (db.prepare("SELECT COUNT(*) AS n FROM booking_people WHERE booking_id = ? AND side = ? AND role <> 'spectator'").get(b.id, side) as { n: number }).n;
+    if (playing >= PEOPLE_PER_SIDE) return fail('side_full');
+    if (row) {
+      db.prepare("UPDATE booking_people SET side = ?, role = 'ringer', status = 'accepted' WHERE booking_id = ? AND steamid = ?").run(side, b.id, steamid);
+      logEvent(db, b.id, o.by, 'person_subbed_in_game', { steamid, side, change: 'upgraded', from: row.side }, now);
+      return ok({ side, change: 'upgraded' });
+    }
     db.prepare("INSERT OR IGNORE INTO players (steamid, name, status) VALUES (?, ?, 'invited')").run(steamid, name);
     insertPerson(db, b.id, side, steamid, 'ringer', 'accepted', o.by, now);
-    logEvent(db, b.id, o.by, 'person_allowed_in_game', { steamid, side }, now);
-    return ok({ side, added: true });
+    logEvent(db, b.id, o.by, 'person_subbed_in_game', { steamid, side, change: 'added' }, now);
+    return ok({ side, change: 'added' });
   })();
 }
 

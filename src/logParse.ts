@@ -30,7 +30,7 @@ export type SideLogEvent = typeof SIDE_EVENTS[number];
  *  (plan 4b2) carries `<steamid64> <name...>` in its arg, `addcampaign`
  *  (l4d_booking 1.3.0) a campaign name or nothing, and `extend` is its
  *  older alias with no campaign. */
-export const BOOKING_CMDS = ['nextmap', 'stay', 'end', 'extend', 'addcampaign', 'allow'] as const;
+export const BOOKING_CMDS = ['nextmap', 'stay', 'end', 'extend', 'addcampaign', 'allow', 'sub'] as const;
 export type BookingCmd = typeof BOOKING_CMDS[number];
 const SIDE_PLAYER_EVENTS: readonly SideLogEvent[] = ['join', 'part', 'ready', 'vote'];
 
