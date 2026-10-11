@@ -1011,7 +1011,7 @@ export function withdrawStartNow(db: DB, o: { bookingId: number; by: string; now
  *  same capacity check as a new booking for the earlier window, both
  *  presses cleared, the reminders marked sent (the start is now) and the
  *  slot warnings re-armed. The runner checks a box can be held first. */
-export function startBookingNow(db: DB, o: { bookingId: number; now?: Date }): Result<{ startsAt: string; endsAt: string; minutes: number }> {
+export function startBookingNow(db: DB, o: { bookingId: number; side?: Side; now?: Date }): Result<{ startsAt: string; endsAt: string; minutes: number }> {
   const now = o.now ?? new Date();
   return db.transaction((): Result<{ startsAt: string; endsAt: string; minutes: number }> => {
     const b = getBooking(db, o.bookingId);
@@ -1021,6 +1021,10 @@ export function startBookingNow(db: DB, o: { bookingId: number; now?: Date }): R
     const shift = Date.parse(b.starts_at) - nowMs;
     const endMs = Date.parse(b.ends_at) - shift;
     if (capacityProblem(db, { region: b.region, startMs: nowMs, endMs, exceptId: b.id, purpose: b.purpose }) !== null) return fail('no_capacity');
+    // One side, one slot: the earlier slot must not run into a side's other booking.
+    for (const s of sidesOf(db, b.id)) {
+      if (bookedDuring(db, partyOf(s), nowMs, endMs, b.id)) return fail(o.side === undefined || s.side === o.side ? 'busy_us' : 'busy_them');
+    }
     const startsAt = iso(nowMs);
     const endsAt = iso(endMs);
     db.prepare(

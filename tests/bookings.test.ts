@@ -944,9 +944,26 @@ describe('start now (scrims in game Ruling 7)', () => {
     expect(pressStartNow(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
     db.prepare("UPDATE bookings SET purpose = 'scrim', starts_at = ? WHERE id = ?").run(new Date(NOW.getTime() - MIN).toISOString(), id);
     expect(pressStartNow(db, { bookingId: id, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+    // One side, one slot: free it before booking the same sides again.
+    cancelBooking(db, { bookingId: id, by: P[0], now: NOW });
     const other = confirmed();
     cancelBooking(db, { bookingId: other, by: P[0], now: NOW });
     expect(pressStartNow(db, { bookingId: other, by: P[0], now: NOW })).toEqual({ ok: false, error: 'wrong_state' });
+  });
+
+  it('refuses when the earlier slot would run into a side\'s other booking', () => {
+    // P[1] plays P[2] from 18:30 to 21:30 and this one is 22:00 to 01:00, so starting it at 21:00 would overlap.
+    const earlier = create({ by: P[2], startsAt: at(START, -90).toISOString(), opponent: { steamid: P[1] } });
+    confirmBooking(db, { bookingId: earlier, by: P[1], now: NOW });
+    const id = create({ startsAt: at(START, 120).toISOString() });
+    confirmBooking(db, { bookingId: id, by: P[1], now: NOW });
+    pressStartNow(db, { bookingId: id, by: P[0], now: NOW });
+    pressStartNow(db, { bookingId: id, by: P[1], now: NOW });
+    const at2 = new Date(Date.parse(getBooking(db, earlier)!.ends_at) - 30 * MIN);
+    const before = getBooking(db, id)!.starts_at;
+    expect(startBookingNow(db, { bookingId: id, side: 'a', now: at2 })).toEqual({ ok: false, error: 'busy_them' });
+    expect(startBookingNow(db, { bookingId: id, side: 'b', now: at2 })).toEqual({ ok: false, error: 'busy_us' });
+    expect(getBooking(db, id)!.starts_at).toBe(before);
   });
 
   it('refuses when the earlier slot has no room, keeping the slot', () => {

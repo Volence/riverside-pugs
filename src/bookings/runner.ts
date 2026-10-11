@@ -2041,7 +2041,7 @@ export class BookingRunner {
       return { ok: false, error: 'no_box_now' };
     }
     const prev = startNowSnapshot(this.db, id)!;
-    const moved = startBookingNow(this.db, { bookingId: id, now: nowDate });
+    const moved = startBookingNow(this.db, { bookingId: id, side: r.value.side, now: nowDate });
     if (!moved.ok) {
       withdrawStartNow(this.db, { bookingId: id, by, now: nowDate });
       return moved;
