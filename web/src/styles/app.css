@@ -1559,6 +1559,10 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .hudtabs__feedback { margin-left: auto; align-self: center; padding: 0 var(--sp-2); font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
 .hudtabs__feedback:hover { color: var(--text); }
 .hudtabs + .page-head, .hudtabs + .sr-only + .page-head { margin-top: var(--sp-5); }
+/* The Compete strip (Scrims, Bookings, Teams, Events) heads the four list
+ * pages, with the same air under it as the HUD strip. Four short labels fit at
+ * 390 px; .tabs scrolls the strip, never the page, if a font runs wide. */
+.competetabs + .page-head { margin-top: var(--sp-5); }
 .tabs__count {
   margin-left: 0.4em;
   padding: 0 0.4em;
