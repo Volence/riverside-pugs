@@ -9,7 +9,7 @@ import {
 } from '../bookings/bookings.js';
 import { allowance, bookedDuring, bookingLimits, capacityProblem, estimateMinutes, iso, upcomingCount, type Party } from '../bookings/rules.js';
 import { inNight } from './night.js';
-import { nearestFreeSlot, proposedPlaylist, showSr, sideSr, srFits, type ScrimSide } from './rules.js';
+import { ACCEPT_CUTOFF_MS, openPostAt, nearestFreeSlot, proposedPlaylist, showSr, sideSr, srFits, type ScrimSide } from './rules.js';
 import { reliability, type Reliability } from './reliability.js';
 import { blocked } from './blocks.js';
 
@@ -116,8 +116,9 @@ const SR_RANGE_MIN = 50;
 const SR_RANGE_MAX = 1000;
 /** A pending acceptance nobody answers expires this long after it was made... */
 export const ACCEPT_TTL_MS = 2 * 3_600_000;
-/** ...or this long before the post's start, whichever comes first. */
-export const ACCEPT_CUTOFF_MS = 30 * 60_000;
+/** ...or this long before the post's start, whichever comes first. Defined in
+ *  rules.ts (no import cycle with bookings.ts) and re-exported here. */
+export { ACCEPT_CUTOFF_MS };
 /** Open or pending posts one side (a team, or a pickup captain) may hold at once. */
 export const SCRIM_MAX_OPEN_POSTS = 3;
 /** Pending acceptances one side may hold at once, across all posts (owner
@@ -141,6 +142,7 @@ export function pendingAccepts(db: DB, postId: number): AcceptRow[] {
   return db.prepare("SELECT * FROM scrim_accepts WHERE post_id = ? AND status = 'pending' ORDER BY created_at, id").all(postId) as AcceptRow[];
 }
 
+export { openPostAt };
 type SideRef = Pick<PostRow, 'team_id' | 'captain_steamid'>;
 const isManagerRole = (r: string | null): boolean => r === 'captain' || r === 'cocaptain';
 /** Whether `steamid` manages a post's or acceptance's side right now. */
@@ -182,15 +184,6 @@ function openPostCount(db: DB, s: SideRef): number {
     ? db.prepare("SELECT COUNT(*) AS n FROM scrim_posts WHERE status IN ('open','pending') AND team_id = ?").get(s.team_id)
     : db.prepare("SELECT COUNT(*) AS n FROM scrim_posts WHERE status IN ('open','pending') AND team_id IS NULL AND captain_steamid = ?").get(s.captain_steamid);
   return (row as { n: number }).n;
-}
-/** Whether the side already has an open or pending post starting exactly at
- *  `startsAt`: a second one is an exact duplicate (owner, 2026-10-11), as
- *  posts 3 and 4 of the first live scrim were, 6 seconds apart. */
-export function openPostAt(db: DB, s: SideRef, startsAt: string): boolean {
-  const row = s.team_id !== null
-    ? db.prepare("SELECT 1 FROM scrim_posts WHERE status IN ('open','pending') AND starts_at = ? AND team_id = ?").get(startsAt, s.team_id)
-    : db.prepare("SELECT 1 FROM scrim_posts WHERE status IN ('open','pending') AND starts_at = ? AND team_id IS NULL AND captain_steamid = ?").get(startsAt, s.captain_steamid);
-  return row !== undefined;
 }
 function pendingAcceptCount(db: DB, s: SideRef): number {
   const row = s.team_id !== null
@@ -393,6 +386,10 @@ export function repostFromBooking(db: DB, o: { bookingId: number; by: string; no
   const side = managedSides(db, b.id, o.by)[0];
   if (!side) return fail('not_manager');
   const s = sideRow(db, b.id, side)!;
+  // Only while a post could still be accepted (plan 2 Ruling 4, with the
+  // owner's 2026-10-11 fix): later, the click is refused in plain words
+  // rather than as createPost's bad_time.
+  if (Date.parse(b.starts_at) - ACCEPT_CUTOFF_MS <= now.getTime()) return fail('too_late');
   const campaigns = (JSON.parse(b.playlist_json) as string[]).slice(0, bookingLimits(db).playlistMax);
   return createPost(db, {
     by: o.by, teamId: s.team_id, startsAt: b.starts_at, campaigns, srRange: post.sr_range, note: '', now,

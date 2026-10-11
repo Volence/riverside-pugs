@@ -129,3 +129,16 @@ export function lengthLabel(campaigns: number, minutes: number): string {
   const slot = h === 0 ? `${m} min` : m === 0 ? `${h} h` : `${h} h ${m}`;
   return `${campaigns} campaign${campaigns === 1 ? '' : 's'}, about ${slot}`;
 }
+
+/** A pending acceptance's post stops taking acceptances this long before its start. */
+export const ACCEPT_CUTOFF_MS = 30 * 60_000;
+
+/** Whether the side already has an open or pending post starting exactly at
+ *  `startsAt`: a second one is an exact duplicate (owner, 2026-10-11), as
+ *  posts 3 and 4 of the first live scrim were, 6 seconds apart. */
+export function openPostAt(db: DB, s: { team_id: number | null; captain_steamid: string }, startsAt: string): boolean {
+  const row = s.team_id !== null
+    ? db.prepare("SELECT 1 FROM scrim_posts WHERE status IN ('open','pending') AND starts_at = ? AND team_id = ?").get(startsAt, s.team_id)
+    : db.prepare("SELECT 1 FROM scrim_posts WHERE status IN ('open','pending') AND starts_at = ? AND team_id IS NULL AND captain_steamid = ?").get(startsAt, s.captain_steamid);
+  return row !== undefined;
+}

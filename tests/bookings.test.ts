@@ -12,7 +12,7 @@ import {
 } from '../src/bookings/bookings.js';
 import { isLateCancel } from '../src/bookings/rules.js';
 import { bookingMessage } from '../src/bookings/messages.js';
-import { acceptPost, confirmAccept, createPost } from '../src/scrims/scrims.js';
+import { acceptPost, confirmAccept, createPost, repostFromBooking } from '../src/scrims/scrims.js';
 import { blockTarget } from '../src/scrims/blocks.js';
 
 const P = Array.from({ length: 14 }, (_, i) => `765611990000007${String(i).padStart(2, '0')}`);
@@ -495,21 +495,32 @@ describe('repost (plan 2)', () => {
 
   it('is allowed once cancelled, for a manager of either side; not before, and not to an outsider', () => {
     const id = bookFromPost();
-    expect(bookingView(db, id, { steamid: P[0], staff: false })!.repost).toEqual({ allowed: false }); // not cancelled yet
+    expect(bookingView(db, id, { steamid: P[0], staff: false }, NOW.getTime())!.repost).toEqual({ allowed: false }); // not cancelled yet
     cancelBooking(db, { bookingId: id, by: P[0], now: NOW });
-    expect(bookingView(db, id, { steamid: P[0], staff: false })!.repost).toEqual({ allowed: true });
-    expect(bookingView(db, id, { steamid: P[1], staff: false })!.repost).toEqual({ allowed: true });
-    expect(bookingView(db, id, { steamid: P[5], staff: false })).toBeNull();
+    expect(bookingView(db, id, { steamid: P[0], staff: false }, NOW.getTime())!.repost).toEqual({ allowed: true });
+    expect(bookingView(db, id, { steamid: P[1], staff: false }, NOW.getTime())!.repost).toEqual({ allowed: true });
+    expect(bookingView(db, id, { steamid: P[5], staff: false }, NOW.getTime())).toBeNull();
   });
 
   it('is never allowed for a staff viewer who manages no side, nor for a cancelled booking not from a post', () => {
     const id = bookFromPost();
     cancelBooking(db, { bookingId: id, by: P[0], now: NOW });
-    expect(bookingView(db, id, { steamid: P[9], staff: true })!.repost).toEqual({ allowed: false });
+    expect(bookingView(db, id, { steamid: P[9], staff: true }, NOW.getTime())!.repost).toEqual({ allowed: false });
     const plain = create({ startsAt: '2026-10-03T20:00:00.000Z' });
     confirmBooking(db, { bookingId: plain, by: P[1], now: NOW });
     cancelBooking(db, { bookingId: plain, by: P[0], now: NOW });
-    expect(bookingView(db, plain, { steamid: P[0], staff: false })!.repost).toEqual({ allowed: false });
+    expect(bookingView(db, plain, { steamid: P[0], staff: false }, NOW.getTime())!.repost).toEqual({ allowed: false });
+  });
+
+  it('is not offered once the start is 30 minutes away, nor once that side already re-posted it', () => {
+    const id = bookFromPost();
+    cancelBooking(db, { bookingId: id, by: P[0], now: NOW });
+    expect(bookingView(db, id, { steamid: P[0], staff: false }, at(START, -31).getTime())!.repost).toEqual({ allowed: true });
+    expect(bookingView(db, id, { steamid: P[0], staff: false }, at(START, -30).getTime())!.repost).toEqual({ allowed: false });
+    const r = repostFromBooking(db, { bookingId: id, by: P[0], now: NOW });
+    expect(r.ok).toBe(true);
+    expect(bookingView(db, id, { steamid: P[0], staff: false }, NOW.getTime())!.repost).toEqual({ allowed: false });
+    expect(bookingView(db, id, { steamid: P[1], staff: false }, NOW.getTime())!.repost).toEqual({ allowed: true });
   });
 });
 
