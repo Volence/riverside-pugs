@@ -3717,6 +3717,7 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .matchcard__when { display: block; padding: 0 var(--sp-2) var(--sp-1); font-size: var(--fs-dense); color: var(--text-muted); }
 .playtable { width: 100%; border-collapse: collapse; }
 .playtable th, .playtable td { padding: var(--sp-1) var(--sp-2); text-align: left; font-variant-numeric: tabular-nums; }
+.playtable th.num, .playtable td.num { text-align: right; }
 .playround { margin-top: var(--sp-3); }
 .playround__matches { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-2); margin-top: var(--sp-1); }
 

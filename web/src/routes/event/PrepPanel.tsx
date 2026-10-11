@@ -25,7 +25,8 @@ export function PrepPanel({ slug, entryId, teamName }: { slug: string; entryId: 
   }, [slug, entryId]);
 
   if (!p) return null;
-  const toggle = (s: string) => setFour((f) => (f.includes(s) ? f.filter((x) => x !== s) : [...f, s]));
+  // Any edit after a save clears its "Saved." so it never vouches for unsaved changes.
+  const toggle = (s: string) => { setNote(null); setFour((f) => (f.includes(s) ? f.filter((x) => x !== s) : [...f, s])); };
   const fourOk = four.length === 0 || four.length === 4;
   const save = async () => {
     setBusy(true);
@@ -60,7 +61,7 @@ export function PrepPanel({ slug, entryId, teamName }: { slug: string; entryId: 
       <section>
         <h4>Side</h4>
         <p class="muted">Used when your side-choice timer runs out.</p>
-        <select aria-label="Side" value={side} onChange={(e) => setSide((e.target as HTMLSelectElement).value as typeof side)}>
+        <select aria-label="Side" value={side} onChange={(e) => { setNote(null); setSide((e.target as HTMLSelectElement).value as typeof side); }}>
           <option value="">No preference (survivors first)</option>
           <option value="survivors">Survivors first</option>
           <option value="infected">Infected first</option>
@@ -73,7 +74,7 @@ export function PrepPanel({ slug, entryId, teamName }: { slug: string; entryId: 
           <ol class="prep__order">
             {(orders[s.stageId] ?? []).map((slugName, i, list) => {
               const name = nameOf(s.stageId, slugName);
-              const move = (by: -1 | 1) => setOrders((o) => ({ ...o, [s.stageId]: moveIn(list, i, by) }));
+              const move = (by: -1 | 1) => { setNote(null); setOrders((o) => ({ ...o, [s.stageId]: moveIn(list, i, by) })); };
               return (
                 <li key={slugName}>
                   <span>{name}</span>

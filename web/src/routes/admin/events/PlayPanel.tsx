@@ -4,7 +4,7 @@ import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
 import { useAction, type Run } from '../useAction';
 import { fromLocalInput, groupPrefix, playByText, whenText } from '../../../eventFormat';
-import { PHASE_TEXT } from '../../event/room/roomText';
+import { PHASE_TEXT, holdText } from '../../event/room/roomText';
 
 /** The real match.status values (src/events/play.ts MatchStatus) where a
  *  result may still be entered as a first result: before the room opens,
@@ -120,7 +120,7 @@ function DeskLine({ m }: { m: PlayMatch }) {
   const a = m.a?.name ?? 'TBD';
   const b = m.b?.name ?? 'TBD';
   const parts: string[] = [];
-  if (d.holdReason !== null) parts.push(`On hold (${d.holdReason}${d.holdFrom ? `, from ${PHASE_TEXT[d.holdFrom === 'veto' ? 'veto' : d.holdFrom === 'booking' ? 'server' : d.holdFrom as RoomPhase] ?? d.holdFrom}` : ''})`);
+  if (d.holdReason !== null) parts.push(`On hold${d.holdFrom ? ` (from ${PHASE_TEXT[d.holdFrom === 'veto' ? 'veto' : d.holdFrom === 'booking' ? 'server' : d.holdFrom as RoomPhase] ?? d.holdFrom})` : ''}: ${holdText(d.holdReason)}`);
   if (d.dispute) parts.push(`Disputed by ${d.dispute.byName} for ${d.dispute.side === 'a' ? a : b}: ${d.dispute.reason}`);
   if (d.frozen) parts.push('Frozen by staff');
   if (d.booking) parts.push(`Server: ${d.booking.serverName ?? 'none yet'}${d.booking.recovering ? ' (recovering)' : ''}`);

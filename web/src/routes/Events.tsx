@@ -44,15 +44,15 @@ export function Events({ session }: { session: Session }) {
   }, [session.kind]);
 
   const header = <PageHeader eyebrow="Competitive" title="Events" />;
-  if (closed) return <main class="page page--list">{header}<Empty>Events are not open yet.</Empty></main>;
+  if (closed) return <main class="page page--list eventspage">{header}<Empty>Events are not open yet.</Empty></main>;
   const head = <><CompeteTabs active="events" />{header}</>;
-  if (failed) return <main class="page page--list">{head}<p class="error" role="alert">Could not load events. Try again in a moment.</p></main>;
-  if (!events) return <main class="page page--list">{head}</main>;
+  if (failed) return <main class="page page--list eventspage">{head}<p class="error" role="alert">Could not load events. Try again in a moment.</p></main>;
+  if (!events) return <main class="page page--list eventspage">{head}</main>;
   const upcoming = events.filter((e) => !OVER.has(e.status));
   const past = events.filter((e) => OVER.has(e.status));
 
   return (
-    <main class="page page--list">
+    <main class="page page--list eventspage">
       {head}
       <Panel>
         <h3>Upcoming and running</h3>

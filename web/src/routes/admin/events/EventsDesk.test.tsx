@@ -66,4 +66,10 @@ describe('EventsDesk', () => {
     expect(await screen.findByText('Pick a start time.')).toBeTruthy();
     expect(mockAdmin.createEvent).not.toHaveBeenCalled();
   });
+
+  it('says so when the list fails to load, not Loading forever', async () => {
+    mockAdmin.events.mockRejectedValue(new Error('offline'));
+    show(false);
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load the events.');
+  });
 });

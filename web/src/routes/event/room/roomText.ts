@@ -77,3 +77,37 @@ export function resultLine(v: MatchRoomView): string {
     : `${w === 'a' ? s.winsA : s.winsB} games to ${w === 'a' ? s.winsB : s.winsA}`;
   return `${team(v, w)} beat ${team(v, l)} ${line}.`;
 }
+
+/** Plain text for every reason src/events passes to holdMatch (the room
+ *  clock, the series runner and a booking's end, booking_ plus its
+ *  end_reason). Staff also hold with a reason they type, which has no entry. */
+export const HOLD_TEXT: Record<string, string> = {
+  window_expired: 'The scheduling window ended with no time agreed.',
+  nobody_ready: 'Neither team readied up in time.',
+  lineup_short: 'A team did not have four players to lock a lineup.',
+  no_presence: 'The server could not be watched when the connect grace ended, so nobody was forfeited.',
+  no_show_both: 'Neither team had enough players on the server when the connect grace ended.',
+  game_aborted: 'A game was aborted before it finished.',
+  game_lost: 'The server went down during a game and it could not be restored.',
+  tiebreak_unknown: 'A game tied but its last chapter was not recorded, so no tiebreak could be set.',
+  tiebreak_refused: 'A game tied again and no further tiebreak could be added.',
+  no_result: 'The confirm window ended but the games do not add up to a result.',
+  dispute: 'A captain disputed the result.',
+  booking_time: 'The server booking ran out of time before the series finished.',
+  booking_idle: 'The server booking closed because nobody was on it.',
+  booking_captain: 'A captain ended the server booking before the series finished.',
+  booking_staff: 'Staff ended the server booking before the series finished.',
+  booking_cancelled: 'The server booking was cancelled.',
+  booking_declined: 'The server booking was declined.',
+  booking_no_show: 'The server booking closed because a team did not show.',
+  booking_setup_failed: 'The server could not be set up.',
+  booking_done: 'Everyone left the server before the series finished.',
+  booking_bumped: 'The server was needed for another match.',
+  booking_ended: 'The server booking ended before the series finished.',
+};
+
+/** A hold reason as text: the plain sentence for a known code, otherwise
+ *  what staff typed, as is. */
+export function holdText(reason: string): string {
+  return HOLD_TEXT[reason] ?? reason;
+}

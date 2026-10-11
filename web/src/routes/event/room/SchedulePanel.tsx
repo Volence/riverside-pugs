@@ -13,8 +13,8 @@ function TimeForm({ label, busy, onSubmit, onCancel }: { label: string; busy: bo
   const iso = fromLocalInput(time);
   return (
     <form class="inlinerow" onSubmit={(e) => { e.preventDefault(); if (iso) onSubmit(iso, note.trim()); }}>
-      <label>Proposed time <input type="datetime-local" aria-label="Proposed time" value={time} onInput={(e) => setTime((e.target as HTMLInputElement).value)} /></label>
-      <label>Note <input type="text" aria-label="Note" maxLength={300} value={note} onInput={(e) => setNote((e.target as HTMLInputElement).value)} /></label>
+      <label class="teamfield">Proposed time <input type="datetime-local" aria-label="Proposed time" value={time} onInput={(e) => setTime((e.target as HTMLInputElement).value)} /></label>
+      <label class="teamfield">Note <input type="text" aria-label="Note" maxLength={300} value={note} onInput={(e) => setNote((e.target as HTMLInputElement).value)} /></label>
       <button class="btn btn--sm" type="submit" disabled={busy || !iso}>{label}</button>
       {onCancel && <button class="btn btn--ghost btn--sm" type="button" onClick={onCancel}>Cancel</button>}
     </form>

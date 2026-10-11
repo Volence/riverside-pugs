@@ -11,21 +11,21 @@ function Standings({ rows, swiss }: { rows: PlayStanding[]; swiss: boolean }) {
       <table class="playtable">
         <thead>
           <tr>
-            <th>#</th><th>Team</th><th>W-L</th>
-            {swiss && <th>Pts</th>}
-            {swiss && <th>Buchholz</th>}
-            <th>Diff</th>
+            <th class="rank">#</th><th>Team</th><th class="num">W-L</th>
+            {swiss && <th class="num">Pts</th>}
+            {swiss && <th class="num">Buchholz</th>}
+            <th class="num">Diff</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.entry.id} class={r.entry.out ? 'muted' : ''}>
-              <td>{r.groupRank}</td>
-              <td>{r.entry.name}{r.entry.out && <span class="chip chip--bad">Disqualified</span>}</td>
-              <td>{r.wins}-{r.losses}</td>
-              {swiss && <td>{r.points}</td>}
-              {swiss && <td>{r.buchholz}</td>}
-              <td>{signed(r.scoreDiff)}</td>
+              <td class={`rank${r.groupRank <= 3 ? ' rank--top' : ''}`}>{r.groupRank}</td>
+              <td class="pname">{r.entry.name}{r.entry.out && <> <span class="teamchip teamchip--bad">Disqualified</span></>}</td>
+              <td class="num">{r.wins}-{r.losses}</td>
+              {swiss && <td class="num">{r.points}</td>}
+              {swiss && <td class="num">{r.buchholz}</td>}
+              <td class="num">{signed(r.scoreDiff)}</td>
             </tr>
           ))}
         </tbody>
@@ -39,7 +39,7 @@ function Standings({ rows, swiss }: { rows: PlayStanding[]; swiss: boolean }) {
 export function StagePlay({ stage, slug }: { stage: StagePlayView; slug: string }) {
   const swiss = stage.type === 'swiss';
   return (
-    <Panel>
+    <Panel class="stageplay">
       <h3>Stage {stage.ordinal}: {stage.layout === 'bracket' ? 'bracket' : 'standings'}{stage.status === 'finished' ? ' (finished)' : ''}</h3>
       {stage.layout === 'bracket' ? <Bracket stage={stage} slug={slug} /> : (
         <>

@@ -1,5 +1,5 @@
 // web/src/routes/event/draft/PickListDrawer.tsx
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError, eventsApi, type DraftCardsView } from '../../../api';
 
 /** The captain's ordered pick list (staff read it on the desk) (drafts plan D2b1
@@ -13,6 +13,20 @@ export function PickListDrawer({ slug, available, onClose }: { slug: string; ava
   const [saved, setSaved] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const closeBtn = useRef<HTMLButtonElement>(null);
+
+  // The room re-renders every second with a fresh onClose, so the listener
+  // reads it through a ref and the effect runs once (focus is not stolen back).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  // A fixed overlay: focus starts on Close, and Escape closes it.
+  useEffect(() => {
+    closeBtn.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     void Promise.all([eventsApi.draftCards(slug), eventsApi.draftList(slug)]).then(
@@ -49,10 +63,10 @@ export function PickListDrawer({ slug, available, onClose }: { slug: string; ava
   const rest = (cards?.cards ?? []).filter((c) => isFree(c.steamid) && !shown.includes(c.steamid)).sort((a, b) => b.sr - a.sr);
 
   return (
-    <aside class="picklist" aria-label="My pick list">
+    <aside class="picklist" role="dialog" aria-modal="true" aria-label="My pick list">
       <header class="picklist__head">
         <h3>My pick list</h3>
-        <button class="btn btn--ghost btn--sm" type="button" onClick={onClose}>Close</button>
+        <button ref={closeBtn} class="btn btn--ghost btn--sm" type="button" onClick={onClose}>Close</button>
       </header>
       <p class="muted">Used if captains pick live: when your turn comes and you are away, or your clock runs out, the site takes the highest player on this list who is still free. With no list, it takes the highest SR.</p>
       {problem && <p class="error" role="alert">{problem}</p>}

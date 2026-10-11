@@ -12,12 +12,15 @@ export function DraftIdentityPanel({ slug, mine, onChange }: { slug: string; min
   const [tag, setTag] = useState(mine.tag);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
   if (!mine.editable) return null;
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setError('');
+    setSaved(false);
     try {
       await fn();
+      setSaved(true);
       onChange();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.');
@@ -36,8 +39,8 @@ export function DraftIdentityPanel({ slug, mine, onChange }: { slug: string; min
         if (tag !== mine.tag) body.tag = tag;
         if (body.name !== undefined || body.tag !== undefined) void run(() => eventsApi.setIdentity(slug, mine.entryId, body));
       }}>
-        <label>Team name <input type="text" aria-label="Team name" maxLength={24} value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} /></label>
-        <label>Tag (optional) <input type="text" aria-label="Tag (optional)" maxLength={5} value={tag} onInput={(e) => setTag((e.target as HTMLInputElement).value)} /></label>
+        <label class="teamfield">Team name <input type="text" aria-label="Team name" maxLength={24} value={name} onInput={(e) => { setSaved(false); setName((e.target as HTMLInputElement).value); }} /></label>
+        <label class="teamfield teamfield--tag">Tag (optional) <input type="text" aria-label="Tag (optional)" maxLength={5} value={tag} onInput={(e) => { setSaved(false); setTag((e.target as HTMLInputElement).value); }} /></label>
         <button class="btn" type="submit" disabled={busy}>Save</button>
       </form>
       <label class="btn btn--ghost btn--sm">
@@ -47,6 +50,7 @@ export function DraftIdentityPanel({ slug, mine, onChange }: { slug: string; min
           if (f) void run(async () => eventsApi.setLogo(slug, mine.entryId, await toLogoPng(f)));
         }} />
       </label>
+      {saved && <p class="muted">Saved.</p>}
       {error && <p class="error" role="alert">{error}</p>}
     </Panel>
   );

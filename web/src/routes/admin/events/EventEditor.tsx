@@ -33,7 +33,42 @@ const ACTION_TEXT: Record<string, string> = {
   reschedule_accepted: 'Proposed time accepted', reschedule_declined: 'Proposed time declined', reschedule_countered: 'Proposed time countered',
   reschedule_withdrawn: 'Proposed time withdrawn', reschedule_auto_accepted: 'Unanswered proposal locked',
   reschedule_reminded: 'Proposal reminder sent', reschedule_expired: 'Proposal expired', match_time_set: 'Match time set',
+  entry_identity_set: 'Team name and tag set', entry_player_replaced: 'Player replaced on a roster', entry_captain_set: 'Team captain changed',
+  draft_teams_published: 'Draft teams published',
+  event_started: 'Event started', result_recorded: 'Result recorded', round_paired: 'Round paired', stage_finished: 'Stage finished',
+  draft_signup: 'Player signed up', draft_withdraw: 'Player withdrew', draft_signup_removed: 'Signup removed',
+  draft_signups_closed: 'Signups closed', draft_teams_set: 'Team count set', draft_captain_set: 'Captain choice changed',
+  draft_captains_picked: 'Captains picked', draft_swap: 'Pool and bench swapped', draft_cut_published: 'Draft cut published',
+  draft_offers_started: 'Captain offers started', draft_offers_stopped: 'Captain offers stopped', draft_offer_made: 'Captain offer sent',
+  draft_offer_answered: 'Captain offer answered', draft_offer_expired: 'Captain offer expired', draft_offers_met: 'Every captain seat filled',
+  draft_offers_exhausted: 'Captain offers ran out', draft_team_mode: 'Team making mode set', draft_teams_balanced: 'Teams balanced by SR',
+  draft_teams_swapped: 'Players swapped between teams', draft_room_settings: 'Draft room settings saved', draft_standin_margin: 'Stand-in SR margin set',
+  draft_room_started: 'Draft room started', draft_pick: 'Draft pick', draft_room_paused: 'Draft room paused', draft_room_resumed: 'Draft room resumed',
+  draft_pick_undone: 'Draft pick undone', draft_delegate_set: 'Pick delegate set', draft_room_reset: 'Draft room reset', draft_list_saved: 'Pick list saved',
+  keep_offered: 'Keep the team offered', keep_started: 'Keep the team started', keep_answered: 'Keep the team answered',
+  keep_closed: 'Keep the team closed', keep_team_made: 'Kept team made', keep_captain_capped: 'Keep the team captain at the limit',
+  standin_requested: 'Stand-in requested', standin_offered: 'Stand-in offer sent', standin_offer_expired: 'Stand-in offer expired',
+  standin_offer_held: 'Stand-in offer held', standin_offer_failed: 'Stand-in offer failed', standin_declined: 'Stand-in offer declined',
+  standin_placed: 'Stand-in placed', standin_ended: 'Stand-in ended', standin_cancelled: 'Stand-in request cancelled',
+  standin_unfilled: 'Stand-in request unfilled', standin_margin_lifted: 'Stand-in SR margin lifted',
+  room_opened: 'Match room opened', room_ready: 'Team ready', room_reset: 'Match room reset', room_resumed: 'Match room resumed',
+  match_held: 'Match put on hold', hold_released: 'Hold released', match_booked: 'Server booked', server_wait_alerted: 'Server wait alert sent',
+  match_connect: 'Connect window opened', match_live: 'Match live', game_started: 'Game started', game_recorded: 'Game recorded',
+  tiebreak_added: 'Tiebreak added', pick_opened: 'Veto step opened', veto_action: 'Veto step taken', veto_reopened: 'Veto reopened',
+  lineup_locked: 'Lineup locked', prefs_saved: 'Veto preferences saved', match_confirming: 'Result waiting for confirmation',
+  result_confirmed: 'Result confirmed', match_disputed: 'Result disputed', player_subbed: 'Player subbed', sub_reverted: 'Sub reverted',
+  match_frozen: 'Match frozen', match_unfrozen: 'Match unfrozen', grace_extended: 'Grace time extended', chapter_replayed: 'Chapter replayed',
+  server_moved: 'Match moved to another server', tech_pause: 'Tech pause', tech_pause_ended: 'Tech pause ended',
+  tech_overrun: 'Tech pause ran over', tech_flagged: 'Tech pause flagged', tech_penalty: 'Tech pause penalty',
 };
+
+/** A history line's words: the known text, else the code with spaces. */
+export function actionText(action: string): string {
+  const known = ACTION_TEXT[action];
+  if (known) return known;
+  const words = action.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 /** What a mod reads in place of the form (Ruling 2). */
 function Details({ ev }: { ev: AdminEventDetail }) {
@@ -54,7 +89,7 @@ function Details({ ev }: { ev: AdminEventDetail }) {
  *  server refuses every write from a mod regardless. */
 export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   const { data: ev, error: loadError, reload } = useFetch((s) => adminApi.event(id, s), [id]);
-  const { data: options } = useFetch((s) => adminApi.eventOptions(s), []);
+  const { data: options, error: optionsError } = useFetch((s) => adminApi.eventOptions(s), []);
   const { busy, error, run } = useAction(reload);
   const [editing, setEditing] = useState<number | 'new' | null>(null);
   const [scheduling, setScheduling] = useState<number | null>(null);
@@ -78,6 +113,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   }, [ev]);
 
   if (loadError instanceof ApiError && loadError.status === 404) return <Panel><Empty>No such event.</Empty></Panel>;
+  if (loadError || optionsError) return <Panel><p class="error" role="alert">Could not load the event.</p></Panel>;
   if (!ev || !options) return <Panel><p class="muted">Loading...</p></Panel>;
 
   const stagesOpen = canEdit && !STAGES_LOCKED.includes(ev.status);
@@ -227,7 +263,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
       <Panel>
         <h3>History</h3>
         <ul class="admin-list">
-          {ev.log.map((l, i) => <li key={i}>{fmtTime(l.at)} · {l.actorName ?? 'the clock'} · {ACTION_TEXT[l.action] ?? l.action}</li>)}
+          {ev.log.map((l, i) => <li key={i}>{fmtTime(l.at)} · {l.actorName ?? 'the clock'} · {actionText(l.action)}</li>)}
         </ul>
       </Panel>
     </div>

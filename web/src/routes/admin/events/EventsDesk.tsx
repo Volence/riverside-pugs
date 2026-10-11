@@ -12,7 +12,7 @@ import { FormRow } from './FormRow';
  *  A mod reads the list only (Ruling 2). */
 export function EventsDesk({ canEdit }: { canEdit: boolean }) {
   const { route } = useLocation();
-  const { data, reload } = useFetch((s) => adminApi.events(s), []);
+  const { data, error: loadError, reload } = useFetch((s) => adminApi.events(s), []);
   const { busy, error, run } = useAction(reload);
   const [name, setName] = useState('');
   const [start, setStart] = useState('');
@@ -79,7 +79,7 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
       )}
       <Panel>
         <h3>All events</h3>
-        {!data ? <p class="muted">Loading...</p> : data.events.length === 0 ? <Empty>No events yet.</Empty> : (
+        {loadError ? <p class="error" role="alert">Could not load the events.</p> : !data ? <p class="muted">Loading...</p> : data.events.length === 0 ? <Empty>No events yet.</Empty> : (
           <ul class="admin-list">
             {data.events.map((ev) => (
               <li key={ev.id}>

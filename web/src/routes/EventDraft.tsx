@@ -1,7 +1,7 @@
 // web/src/routes/EventDraft.tsx
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError, eventsApi, type DraftPickView, type DraftRoomView } from '../api';
-import { Empty, Panel } from '../components/bits';
+import { Empty, PageSkeleton, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { useHubEvent } from '../hooks/useHubEvent';
 import type { Session } from '../hooks/useLiveState';
@@ -25,6 +25,8 @@ const HUB_BEAT_MS = 3_000;
 export function EventDraftPage({ slug, session: _session }: { slug: string; session: Session }) {
   const [v, setV] = useState<DraftRoomView | null>(null);
   const [missing, setMissing] = useState<string | null>(null);
+  // A first load that failed for no known reason (not a 404 or 409): offers a retry.
+  const [failed, setFailed] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
   const hasView = useRef(false);
@@ -46,6 +48,7 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   const load = () => eventsApi.draftRoom(slug).then((x) => {
     hasView.current = true;
     setMissing(null);
+    setFailed(false);
     setLost(false);
     setV(x);
     setOffset(Date.parse(x.serverNow) - Date.now());
@@ -59,8 +62,9 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   }, (e) => {
     // Once the board is up, a failed refetch keeps it and says so; only a first load can be "missing".
     if (hasView.current) { setLost(true); return; }
-    setMissing(e instanceof ApiError && e.status === 404 ? 'No such draft.'
-      : e instanceof ApiError && e.status === 409 ? 'The draft room opens once the cut is published.' : 'Could not load the draft room.');
+    if (e instanceof ApiError && e.status === 404) setMissing('No such draft.');
+    else if (e instanceof ApiError && e.status === 409) setMissing('The draft room opens once the cut is published.');
+    else setFailed(true);
   });
 
   useEffect(() => { void load(); }, [slug]);
@@ -111,18 +115,26 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
     }
   };
 
-  if (missing) return <div class="page"><PageHeader title="Draft room" /><Empty>{missing}</Empty></div>;
-  if (!v) return <div class="page"><PageHeader title="Draft room" /></div>;
+  if (missing) return <main class="page page--list draftroom"><PageHeader title="Draft room" /><Empty>{missing}</Empty></main>;
+  if (failed) {
+    return (
+      <main class="page page--list draftroom">
+        <PageHeader title="Draft room" />
+        <p class="error" role="alert">Could not load the draft room. <button class="btn btn--ghost btn--sm" type="button" onClick={() => { setFailed(false); void load(); }}>Try again</button></p>
+      </main>
+    );
+  }
+  if (!v) return <PageSkeleton variant="profile" panels={3} />;
 
   const nameOf = (s: string) => v.order.find((o) => o.steamid === s)?.name ?? v.picks.find((p) => p.steamid === s)?.name
-    ?? v.pool.find((c) => c.steamid === s)?.name ?? s;
+    ?? v.pool.find((c) => c.steamid === s)?.name ?? 'a player';
   const left = deadline ? Date.parse(deadline) - (now + offset) : 0;
   const pool = sortedPool(v.pool, filter, sort);
   const onClock = v.status === 'running' ? v.onClock : null;
   const canPick = v.me.onClock && onClock !== null;
 
   return (
-    <div class="page draftroom">
+    <main class="page page--list draftroom">
       <PageHeader eyebrow="Draft room" title={v.eventName}>
         <p class="room__sub"><a href={`/event/${v.slug}`}>Back to the event</a></p>
       </PageHeader>
@@ -161,8 +173,8 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
               <h4>{t.captain.name}</h4>
               {(v.status === 'ready' || v.status === 'running' || v.status === 'paused') && (
                 v.present.includes(t.captain.steamid)
-                  ? <span class="chip chip--ok draftboard__here" aria-label={`${t.captain.name}: In the room`}>In the room</span>
-                  : <span class="chip draftboard__away" aria-label={`${t.captain.name}: Away`}>Away</span>
+                  ? <span class="teamchip teamchip--ok draftboard__here" aria-label={`${t.captain.name}: In the room`}>In the room</span>
+                  : <span class="teamchip draftboard__away" aria-label={`${t.captain.name}: Away`}>Away</span>
               )}
               <ol class="draftboard__slots">
                 {[0, 1, 2].map((i) => <li key={i}>{t.players[i]?.name ?? <span class="muted">Open</span>}</li>)}
@@ -201,14 +213,14 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
             {[...v.picks].reverse().map((p) => (
               <li key={pickKey(p)}>
                 <span>{`${nameOf(p.captain)} took ${p.name}`}</span>
-                {p.auto && <span class="chip">Auto</span>}
+                {p.auto && <> <span class="teamchip">Auto</span></>}
               </li>
             ))}
           </ol>
         </Panel>
       )}
       {drawer && <PickListDrawer slug={slug} available={v.pool.map((c) => c.steamid)} onClose={() => setDrawer(false)} />}
-    </div>
+    </main>
   );
 }
 

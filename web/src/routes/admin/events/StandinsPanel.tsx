@@ -44,6 +44,7 @@ export function StandinsPanel({ eventId, canEdit, gen = 0 }: { eventId: number; 
             {starters.map((s) => <option key={s.steamid} value={s.steamid}>{s.name}</option>)}
           </select>
           <fieldset>
+            <legend class="sr-only">For how long</legend>
             <label><input type="radio" name="desk-standin-scope" checked={scope === 'match'} onChange={() => setScope('match')} /> Next match</label>
             <label><input type="radio" name="desk-standin-scope" checked={scope === 'event'} onChange={() => setScope('event')} /> Rest of the event</label>
           </fieldset>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ApiError, bannerUrl, entryLogoUrl, eventsApi, type EventDraftView, type EventView, type MyEventView } from '../api';
 import { RichText } from '../components/RichText';
-import { Empty, Panel } from '../components/bits';
+import { Empty, PageSkeleton, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { STATUS_LABEL, placementText, untilText, whenText } from '../eventFormat';
@@ -48,7 +48,7 @@ function entryLines(ev: EventView): string[] {
 }
 
 function NameChips({ names }: { names: string[] }) {
-  return <p class="eventpool">{names.map((n, i) => <span key={`${i}:${n}`} class="chip">{n}</span>)}</p>;
+  return <p class="eventpool">{names.map((n, i) => <span key={`${i}:${n}`} class="teamchip">{n}</span>)}</p>;
 }
 
 /** The public draft section (drafts plan D1 Ruling 9): the clock line, then
@@ -130,8 +130,15 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
   }, [slug, ev?.status]);
 
   if (missing) return <main class="page page--profile"><PageHeader title="Event" /><Empty>No such event, or events are not open yet.</Empty></main>;
-  if (failed) return <main class="page page--profile"><PageHeader title="Event" /><p class="error" role="alert">Could not load this event. Try again in a moment.</p></main>;
-  if (!ev) return <main class="page page--profile"><PageHeader title="Event" /></main>;
+  if (failed) {
+    return (
+      <main class="page page--profile">
+        <PageHeader title="Event" />
+        <p class="error" role="alert">Could not load this event. <button class="btn btn--ghost btn--sm" type="button" onClick={bump}>Try again</button></p>
+      </main>
+    );
+  }
+  if (!ev) return <PageSkeleton variant="profile" panels={3} />;
 
   return (
     <main class="page page--profile eventpage">
@@ -171,7 +178,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
             {s.rulesetName ?? 'Ruleset'} · {s.veto} · {s.chapters} · {s.scheduling === 'window' ? 'played in scheduled windows' : 'played in one session'} · {s.gameConfig}
           </p>
           {s.rules.length > 0 && <ul class="eventrules">{s.rules.map((r) => <li key={r}>{r}</li>)}</ul>}
-          <p class="eventpool">{s.campaigns.map((c) => <span key={c.slug} class="chip">{c.name}</span>)}</p>
+          <p class="eventpool">{s.campaigns.map((c) => <span key={c.slug} class="teamchip">{c.name}</span>)}</p>
         </Panel>
       ))}
       <Panel>
@@ -203,10 +210,10 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
                 <li key={e.id} class="evententry">
                   {e.logoKey ? <img class="evententry__logo" src={entryLogoUrl(e.logoKey)} alt="" width={28} height={28} /> : <span class="evententry__logo evententry__logo--none" aria-hidden="true">{e.name.slice(0, 1).toUpperCase()}</span>}
                   <span class="evententry__name">{e.seed !== null && <span class="muted">#{e.seed} </span>}{e.name}{e.tag && <span class="muted"> [{e.tag}]</span>}</span>
-                  {ev.entryKind === 'team' && e.status === 'checked_in' && <span class="chip chip--ok">Checked in</span>}
-                  {e.waitlist !== null && <span class="chip">Waitlist {e.waitlist}</span>}
-                  {e.status === 'disqualified' && <span class="chip chip--bad">Disqualified</span>}
-                  {e.placement !== null && <span class="chip chip--ok">{placementText(e.placement)}</span>}
+                  {ev.entryKind === 'team' && e.status === 'checked_in' && <span class="teamchip teamchip--ok">Checked in</span>}
+                  {e.waitlist !== null && <span class="teamchip">Waitlist {e.waitlist}</span>}
+                  {e.status === 'disqualified' && <span class="teamchip teamchip--bad">Disqualified</span>}
+                  {e.placement !== null && <span class="teamchip teamchip--ok">{placementText(e.placement)}</span>}
                   {e.players && e.players.length > 0 && <span class="evententry__players muted">{e.players.join(', ')}</span>}
                 </li>
               ))}

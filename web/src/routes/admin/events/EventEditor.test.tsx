@@ -19,7 +19,7 @@ vi.mock('../../../api', async (importOriginal) => {
 });
 vi.mock('../../../components/Confirm', () => ({ confirm: mockConfirm }));
 vi.mock('../../../eventBanner', () => ({ toBannerImage: vi.fn(async () => 'BASE64') }));
-const { EventEditor } = await import('./EventEditor');
+const { EventEditor, actionText } = await import('./EventEditor');
 const { ApiError } = await import('../../../api');
 const { LocationProvider } = await import('preact-iso');
 
@@ -406,4 +406,29 @@ describe('EventEditor', () => {
     await waitFor(() => expect(mockAdmin.setRoundSchedule).toHaveBeenCalledTimes(2));
     expect(mockConfirm).toHaveBeenCalledTimes(1);
   });
+
+  it('words every history line, falling back to the code with spaces', async () => {
+    expect(actionText('draft_cut_published')).toBe('Draft cut published');
+    expect(actionText('keep_team_made')).toBe('Kept team made');
+    expect(actionText('some_future_thing')).toBe('Some future thing');
+    mockAdmin.event.mockResolvedValue(detail({ log: [
+      { at: '2026-10-01T12:00:00.000Z', actorName: null, action: 'stage_finished', detail: {} },
+      { at: '2026-10-01T12:00:00.000Z', actorName: 'boss', action: 'brand_new_action', detail: {} },
+    ] }));
+    render(<EventEditor id={3} canEdit />);
+    expect(await screen.findByText(/the clock · Stage finished/)).toBeTruthy();
+    expect(screen.getByText(/boss · Brand new action/)).toBeTruthy();
+  });
+
+  it('says so when the event or the options fail to load, not Loading forever', async () => {
+    mockAdmin.event.mockRejectedValue(new ApiError(500, 'boom'));
+    const first = render(<EventEditor id={3} canEdit />);
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load the event.');
+    first.unmount();
+    mockAdmin.event.mockResolvedValue(detail());
+    mockAdmin.eventOptions.mockRejectedValue(new Error('offline'));
+    render(<EventEditor id={3} canEdit />);
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not load the event.');
+  });
 });
+

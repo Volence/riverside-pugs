@@ -59,7 +59,7 @@ export function DraftTeamsPanel({ eventId, slug = '', canEdit, status, startsAt,
             const avg = avgOf(t);
             return (
               <div key={t.captain.steamid} class="maketeam">
-                <h4>{t.captain.name} <span class="chip">Captain</span></h4>
+                <h4>{t.captain.name} <span class="teamchip">Captain</span></h4>
                 {avg !== undefined && <p class="muted">{`Average SR ${Math.round(avg)}`}</p>}
                 <ul class="maketeam__players">
                   {t.players.map((p) => (

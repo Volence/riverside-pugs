@@ -1,18 +1,19 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { MatchRoomView } from '../../../api';
+import { whenText } from '../../../eventFormat';
 import { clockText } from './roomText';
-
-const hhmm = (iso: string): string => `${iso.slice(11, 16)} UTC`;
 
 /** The booked server: waiting, setting up, ready (the connect line for those
  *  who may see it, who is on, the grace), or closed. */
 export function ServerPanel({ v, now }: { v: MatchRoomView; now: number }) {
   const s = v.server;
   const [copied, setCopied] = useState(false);
+  const reset = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (reset.current !== null) clearTimeout(reset.current); }, []);
   const aName = v.a?.name ?? 'TBD';
   const bName = v.b?.name ?? 'TBD';
   if (!s) return <p>Booking a server.</p>;
-  if (s.state === 'waiting') return <p>{`Waiting for a server since ${hhmm(s.since)}. No box is free in the region right now; staff are told after 10 minutes.`}</p>;
+  if (s.state === 'waiting') return <p>{`Waiting for a server since ${whenText(s.since)}. No box is free in the region right now; staff are told after 10 minutes.`}</p>;
   if (s.state === 'setup') return <p>{`Setting up ${s.name ?? 'the server'}.`}</p>;
   if (s.state === 'ended') return <p>The server is closed.</p>;
   const line = s.connect ? `password ${s.connect.password}; connect ${s.connect.host}:${s.connect.port}` : null;
@@ -32,6 +33,8 @@ export function ServerPanel({ v, now }: { v: MatchRoomView; now: number }) {
         document.body.removeChild(ta);
       }
       setCopied(true);
+      if (reset.current !== null) clearTimeout(reset.current);
+      reset.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
     }

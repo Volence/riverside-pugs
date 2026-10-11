@@ -4,16 +4,38 @@ import { useFetch } from '../../hooks/useFetch';
 import { localLabel } from '../../bookingTime';
 import { useAction } from './useAction';
 
+/** Mirrors STATE_LABEL in routes/Bookings.tsx, the chip a captain sees. */
 const STATE_LABEL: Record<AdminBookingRow['state'], string> = {
-  scheduled: 'booked', held: 'server taken', setup: 'setting up', ready: 'ready', active: 'playing',
-  ended: 'over', cancelled: 'cancelled', no_show: 'no-show',
+  scheduled: 'Booked', held: 'Server taken', setup: 'Setting up', ready: 'Ready', active: 'Playing',
+  ended: 'Over', cancelled: 'Cancelled', no_show: 'No-show',
 };
 
 const PURPOSE_LABEL: Record<AdminBookingRow['purpose'], string> = { tournament: 'Match', scrim: 'Scrim' };
 
-/** The state cell: a bumped scrim says what bumped it (server priority Ruling 9). */
-const stateText = (b: AdminBookingRow): string =>
-  `${STATE_LABEL[b.state]}${b.endReason === 'bumped' ? ' (bumped by a match)' : b.endReason ? ` (${b.endReason})` : ''}`;
+/** Every end_reason the server writes (src/bookings close and closeBooking
+ *  callers, and the runner's endNow), in words. */
+const END_REASON_TEXT: Record<string, string> = {
+  time: 'time ran out', idle: 'nobody was on it', done: 'played out', captain: 'a captain ended it', staff: 'staff ended it',
+  cancelled: 'a side cancelled', declined: 'declined', bumped: 'bumped by a match', no_show: 'a side did not show',
+  unconfirmed: 'never confirmed', setup_failed: 'setup failed', no_server: 'no free server', server_lost: 'the server went down',
+};
+
+/** Why a booking ended, in words; an unknown code with its underscores as spaces. */
+export function endReasonText(reason: string): string {
+  return END_REASON_TEXT[reason] ?? reason.replace(/_/g, ' ');
+}
+
+/** The state cell: a chip, then why it ended (a bumped scrim says what bumped
+ *  it, server priority Ruling 9). A no-show's reason only repeats the chip. */
+function StateCell({ b }: { b: AdminBookingRow }) {
+  const why = b.endReason && !(b.state === 'no_show' && b.endReason === 'no_show') ? endReasonText(b.endReason) : null;
+  return (
+    <>
+      <span class={`teamchip teamchip--${b.state}`}>{STATE_LABEL[b.state] ?? b.state}</span>
+      {why && <>{' '}<span class="muted">{why}</span></>}
+    </>
+  );
+}
 
 /** How many of the scrim cap's servers scrims hold. The cap is per region:
  *  with one region (every box today is NA) the line names none, as nothing
@@ -62,18 +84,18 @@ export function BookingsPanel({ nudge }: { nudge: number }) {
                   <td>
                     <span class={`teamchip teamchip--${b.purpose}`}>{PURPOSE_LABEL[b.purpose]}</span>{' '}
                     <a href={`/booking/${b.id}`}>{b.aName} vs {b.bName}</a>
-                    {b.toxic.a && <span class="teamchip teamchip--toxic" title={`${b.aName}: repeated toxic tags`}>Toxic tags</span>}
-                    {b.toxic.b && <span class="teamchip teamchip--toxic" title={`${b.bName}: repeated toxic tags`}>Toxic tags</span>}
+                    {b.toxic.a && <>{' '}<span class="teamchip teamchip--toxic" title={`${b.aName}: repeated toxic tags`}>Toxic tags</span></>}
+                    {b.toxic.b && <>{' '}<span class="teamchip teamchip--toxic" title={`${b.bName}: repeated toxic tags`}>Toxic tags</span></>}
                   </td>
                   <td>{localLabel(b.startsAt)} to {localLabel(b.endsAt)}</td>
-                  <td>{stateText(b)}</td>
+                  <td><StateCell b={b} /></td>
                   <td>{b.server ?? ''}</td>
                   <td>{b.peak.a} / {b.peak.b}</td>
                   <td>
-                    {open && <button class="btn btn--ghost" disabled={busy}
+                    {open && <button class="btn btn--ghost btn--sm" disabled={busy}
                       onClick={() => run(() => adminApi.cancelBooking(b.id, ''), { title: `Cancel ${b.aName} vs ${b.bName}?`, body: 'Both sides are told. It counts against neither side.', confirmLabel: 'Cancel booking', danger: true })}>Cancel</button>}
-                    {open && <button class="btn btn--ghost" disabled={busy} onClick={() => run(() => adminApi.extendBooking(b.id))}>+1 campaign</button>}
-                    {running && <button class="btn btn--ghost" disabled={busy}
+                    {open && <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => run(() => adminApi.extendBooking(b.id))}>+1 campaign</button>}
+                    {running && <button class="btn btn--ghost btn--sm" disabled={busy}
                       onClick={() => run(() => adminApi.endBooking(b.id), { title: `End ${b.aName} vs ${b.bName} now?`, body: 'Everyone on the server is kicked and the box restarts.', confirmLabel: 'End now', danger: true })}>End</button>}
                   </td>
                 </tr>
