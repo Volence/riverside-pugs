@@ -3,6 +3,7 @@ import { useLocation } from 'preact-iso';
 import { api, type StateSnapshot } from '../api';
 import { campaignName } from '../format';
 import type { Session } from '../hooks/useLiveState';
+import { competeTabFor } from './CompeteTabs';
 import { hudTabFor } from './HudTabs';
 
 /** [href, label, target?].
@@ -18,7 +19,11 @@ import { hudTabFor } from './HudTabs';
  *  lists. The path stays /maps so nothing bookmarked breaks.
  *
  *  HUD is a section: the HUD editor, the crosshair maker and the community
- *  page share one item, and a tab strip on each page moves between them. */
+ *  page share one item, and a tab strip on each page moves between them.
+ *
+ *  Compete is a section the same way: Scrims, Bookings, Teams and Events
+ *  share one item (only for viewers the competitive switch lets in, so it is
+ *  added in Nav rather than listed here) and a tab strip on each list page. */
 export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/', 'Play'],
   ['/live', 'Live'],
@@ -34,13 +39,13 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
 
 /** Whether a nav item is the page being shown. The HUD item stands for its
  *  whole section, so it is current on the crosshair and community pages too,
- *  and Patch notes for the balance pages under it (Game values). */
+ *  and Patch notes for the balance pages under it (Game values). Compete is
+ *  the only item that points at /events or /scrims (it lands on one or the
+ *  other) and stands for every competitive page, detail pages included. */
 function isCurrent(href: string, path: string): boolean {
   if (href === '/hud') return hudTabFor(path) !== null;
   if (href === '/balance') return path === href || path.startsWith('/balance/');
-  if (href === '/teams') return path === '/teams' || path.startsWith('/team/');
-  if (href === '/bookings') return path === '/bookings' || path.startsWith('/booking/');
-  if (href === '/events') return path === '/events' || path.startsWith('/event/');
+  if (href === '/events' || href === '/scrims') return competeTabFor(path) !== null;
   return path === href;
 }
 
@@ -68,13 +73,12 @@ export function Nav(
   };
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   const live = state?.match && state.match.state === 'live' ? state.match : null;
-  // Teams, Bookings, Scrims and Events only for viewers the competitive switch lets in (/api/me teams).
+  // Compete only for viewers the competitive switch lets in (/api/me teams).
+  // It lands on Events while a tournament is open or about to start.
   const links = me?.teams
-    ? [
-      ...NAV_LINKS.slice(0, 5), ['/teams', 'Teams'] as const, ['/bookings', 'Bookings'] as const, ['/scrims', 'Scrims'] as const,
-      ['/events', 'Events'] as const, ...NAV_LINKS.slice(5),
-    ]
+    ? [...NAV_LINKS.slice(0, 5), [me.competeHome === 'events' ? '/events' : '/scrims', 'Compete'] as const, ...NAV_LINKS.slice(5)]
     : NAV_LINKS;
+  const myTeams = me?.teams ? me.myTeams ?? [] : [];
 
   return (
     <header class="nav">
@@ -110,6 +114,14 @@ export function Nav(
         <div class="nav__me">
           {me.avatar && <img src={me.avatar} alt="" />}
           <a href={`/player/${encodeURIComponent(me.steamid)}`}>{me.name}</a>
+          {/* One team: straight to it. Several: the Teams page, whose Your
+              teams section lists them with roles. */}
+          {myTeams.length > 0 && (
+            <a class="nav__team" href={myTeams.length === 1 ? `/team/${myTeams[0].slug}` : '/teams'}
+               title={myTeams.length === 1 ? myTeams[0].name : undefined}>
+              {myTeams.length === 1 ? 'Your team' : 'Your teams'}
+            </a>
+          )}
           <button type="button" class="nav__signout" onClick={signOut} disabled={leaving}>Sign out</button>
         </div>
       )}
