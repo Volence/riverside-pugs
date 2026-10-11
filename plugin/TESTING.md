@@ -1122,3 +1122,57 @@ this task; left for the owner.
    the team-chat key) and something in all chat.
    - [ ] the team-chat `PUGSAY` line has `scope=team`: ____
    - [ ] the all-chat `PUGSAY` line has `scope=all`: ____
+
+## Booked scrim placement (pug-match 0.3.33)
+
+`pug-booking.inc` places each booked scrim side on its own team and keeps the
+team lock on for an auto-tracked game while a booking is loaded. With
+`R() { RPORT=27055 python3 /home/volence/l4d/nightmode/rcon.py "$@"; }` on a
+local srcds started on 27055 (0 humans, `l4d_vs_hospital01_apartment`), the
+built plugin copied to `plugins/disabled/pug-match-scrim.smx` and swapped in
+for the installed `pug-match`:
+
+- [x] `R 'sm plugins list' | grep -i 'PUG Match'` printed `"PUG Match" (0.3.33)` (2026-10-11)
+- [x] `R 'sm_pug_book_status'` printed
+  `PUGOK book loaded=0 ids=0 staged=-1 first=none firstmap=1 active=0 teamlock=1 role=-1` (2026-10-11)
+- [x] `R 'sm_pug_book_begin' 'sm_pug_book_add a 76561199000000001 76561199000000002'
+  'sm_pug_book_add b 76561199000000003 123' 'sm_pug_book_add s 76561199000000004'
+  'sm_pug_book_add x 76561199000000005' 'sm_pug_book_commit b'` printed
+  `PUGOK book begin`, `PUGOK book add role=a added=2 skipped=0`,
+  `PUGOK book add role=b added=1 skipped=1`, `PUGOK book add role=s added=1 skipped=0`,
+  `PUGERR usage: sm_pug_book_add <a|b|s> <steamid64> [steamid64...]`,
+  `PUGOK book commit ids=4 first=b` (2026-10-11)
+- [x] `R 'sm_pug_book_status 76561199000000004'` printed
+  `PUGOK book loaded=1 ids=4 staged=-1 first=b firstmap=1 active=1 teamlock=1 role=3` (2026-10-11)
+- [x] `R 'sm_pug_book_begin' 'sm_pug_book_commit q' 'sm_pug_book_status'` printed
+  `PUGOK book begin`, `PUGERR usage: sm_pug_book_commit <a|b>, after sm_pug_book_begin`,
+  `PUGOK book loaded=1 ids=4 staged=0 first=b firstmap=1 active=1 teamlock=1 role=-1`
+  (the committed list stays in force) (2026-10-11)
+- [x] `R 'sm_pug_book_clear' 'sm_pug_book_status'` printed `PUGOK book clear`,
+  `PUGOK book loaded=0 ids=0 staged=-1 first=none firstmap=1 active=0 teamlock=1 role=-1` (2026-10-11)
+- [x] `R 'sm_pug_status' | head -3` answered normally (`STATUS state=none match=0 ...`) (2026-10-11)
+- [x] With `sm_cvar sv_cheats 1`, two `sb_add` and a list committed
+  (`a 76561199000000001`, `b 76561199000000003`, commit b), `R status` at 0, 5
+  and 10 s showed the same bots (userids 3, 4, 6) active throughout, and the
+  SourceMod error log had no line from the plugin: bots are never moved (2026-10-11)
+
+To swap back, unload by the path it was loaded from:
+`R 'sm plugins unload disabled/pug-match-scrim'` (a bare `pug-match-scrim`
+answers "is not loaded").
+
+Owner checks on a live booked scrim (placement needs real SteamID64s, which
+`sv_lan 1` does not give):
+
+1. [ ] Two sides join a booked box on campaign 1: the non-picker side (side b
+   under Casual Scrim) ends up on survivors within a few seconds, side a on
+   infected; nobody is dragged out of spectator after they chose it.
+2. [ ] A player who joins the other side's team is moved back with "That is
+   the other side's team".
+3. [ ] A `!allow`ed watcher who joins a team goes back to spectator with the
+   "ask a captain to type !sub" line; after `!sub` they land on their side's
+   team when it has a slot.
+4. [ ] Rotoblin's own team handling at a campaign load (`l4d_team_unscramble`,
+   `l4d2_spec_stays_spec`) does not fight the placement for more than a few
+   seconds.
+5. [ ] Campaign 2 starts with side a on survivors; `matches.booking_side_a` of
+   game 2 is `a` (game 1 `b`).
