@@ -12,6 +12,8 @@ import { createBooking } from '../src/bookings/bookings.js';
 import { getTeamBySlug } from '../src/teams/teams.js';
 import { currentSeasonId } from '../src/players.js';
 import { addServer } from '../src/serverPool.js';
+import * as E from '../src/events/events.js';
+import { cupId, must } from './eventFixture.js';
 
 const P = Array.from({ length: 6 }, (_, i) => `7656119900000020${i}`);
 const ADMIN = '76561199000000290';
@@ -59,6 +61,28 @@ describe('the switch', () => {
     expect((await call('GET', '/api/me', P[0])).json().teams).toBe(true);
     db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
     expect((await call('GET', '/api/me', P[0])).json().teams).toBe(false);
+  });
+
+  it('/api/me says where Compete lands: Scrims, or Events once a tournament is near', async () => {
+    expect((await call('GET', '/api/me', P[0])).json().competeHome).toBe('scrims');
+    const startsAt = new Date(Date.now() + 86_400_000).toISOString();
+    const ev = must(E.createEvent(db, { by: ADMIN, fields: { name: 'Open Cup', startsAt, entryKind: 'team' } }));
+    must(E.addStage(db, { eventId: ev.id, by: ADMIN, stage: { type: 'single_elim', rulesetId: cupId(db) } }));
+    must(E.publishEvent(db, { eventId: ev.id, by: ADMIN }));
+    expect((await call('GET', '/api/me', P[0])).json().competeHome).toBe('events');
+    db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'competitive_enabled'").run();
+    expect((await call('GET', '/api/me', P[0])).json().competeHome).toBeNull();
+    expect((await call('GET', '/api/me', ADMIN)).json().competeHome).toBe('events');
+  });
+
+  it('/api/me lists the teams the viewer is on, and none while the switch keeps them out', async () => {
+    expect((await call('GET', '/api/me', P[0])).json().myTeams).toEqual([]);
+    const slug = await create(P[0], 'Rats', 'RR');
+    expect((await call('GET', '/api/me', P[0])).json().myTeams).toEqual([{ slug, name: 'Rats' }]);
+    db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'competitive_enabled'").run();
+    const me = (await call('GET', '/api/me', P[0])).json();
+    expect(me.teams).toBe(false);
+    expect(me.myTeams).toEqual([]);
   });
 });
 

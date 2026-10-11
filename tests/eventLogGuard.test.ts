@@ -46,7 +46,7 @@ const DRAFT_WRITERS = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\
  *  in the same transaction that creates the draft's entries. */
 const TEAMS_MADE_WRITERS = /\bUPDATE\s+events\s+SET\b[^'"`;]*\bteams_made_at\s*=/gi;
 const ENGINE = new Set(['src/events/events.ts', 'src/events/entries.ts', 'src/events/play.ts', 'src/events/drafts.ts']);
-const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf', 'scheduleOf']);
+const READS = new Set(['getEvent', 'getEventBySlug', 'getStage', 'stagesOf', 'eventLog', 'fieldsOf', 'stageSettingsOf', 'stageContext', 'chainOf', 'scheduleOf', 'tournamentOpen']);
 /** Exported for entries.ts to write its own audit row; never a mutation itself. */
 const HELPERS = new Set(['logEvent']);
 

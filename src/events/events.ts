@@ -224,6 +224,24 @@ export function createEvent(db: DB, o: { by: string; fields: unknown; now?: Date
   })();
 }
 
+/** How near an announced event's start must be before the nav's Compete item
+ *  lands on Events rather than Scrims. Registration open needs no window. */
+export const COMPETE_SOON_DAYS = 3;
+
+/** Whether a tournament is open or about to start, for the nav's Compete item
+ *  (/api/me competeHome): a published event taking sign-ups, checking in or
+ *  being played, or one announced to start within COMPETE_SOON_DAYS. A draft
+ *  never counts; only staff can see it. starts_at is ISO UTC, so the string
+ *  comparison is a time comparison. */
+export function tournamentOpen(db: DB, now?: Date): boolean {
+  const soon = new Date((now ?? new Date()).getTime() + COMPETE_SOON_DAYS * 86_400_000).toISOString();
+  return db.prepare(
+    `SELECT 1 FROM events
+      WHERE status IN ('registration', 'checkin', 'live') OR (status = 'announced' AND starts_at <= ?)
+      LIMIT 1`,
+  ).get(soon) !== undefined;
+}
+
 export function updateEvent(db: DB, o: { eventId: number; by: string; fields: unknown; now?: Date }): EventResult<EventRow> {
   const at = iso(o.now);
   return db.transaction((): EventResult<EventRow> => {

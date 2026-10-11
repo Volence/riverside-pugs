@@ -14,6 +14,8 @@ import { activeBan } from '../admin/players.js';
 import { resolveAlias } from '../aliases.js';
 import { MERGED_MESSAGE, inGoodStanding } from '../standing.js';
 import { competitiveAccess } from '../teams/access.js';
+import { teamChipsOf } from '../teams/teams.js';
+import { tournamentOpen } from '../events/events.js';
 
 const NEXT_COOKIE = 'pug_next';
 
@@ -119,6 +121,8 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       publishAdminEvent({ kind: 'account', steamid, what: 'activated' });
       player = getPlayer(db, steamid)!;
     }
+    // The competitive switch, read per request: whether the nav shows Compete.
+    const competitive = competitiveAccess(db, inGoodStanding(db, player.steamid) ? player.steamid : null);
     return {
       steamid: player.steamid,
       name: player.name,
@@ -127,8 +131,14 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       isAdmin: player.is_admin === 1,
       isMod: player.is_mod === 1,
       isCaster: player.is_caster === 1,
-      // Whether to show Teams in the nav: the competitive switch, read per request.
-      teams: competitiveAccess(db, inGoodStanding(db, player.steamid) ? player.steamid : null),
+      // Whether to show Compete in the nav: the competitive switch, read per request.
+      teams: competitive,
+      // Where Compete lands: Events while a tournament is open or about to
+      // start, Scrims otherwise. Read with every /api/me, which the site
+      // re-reads on each websocket nudge, so no page fetches events for it.
+      competeHome: competitive ? (tournamentOpen(db) ? 'events' : 'scrims') : null,
+      // The nav's Your team link: the teams they are on, one per team.
+      myTeams: competitive ? teamChipsOf(db, player.steamid).map((t) => ({ slug: t.slug, name: t.name })) : [],
       discordEnabled: config.discord !== null,
       discord: player.discord_id ? { id: player.discord_id, name: player.discord_name ?? '' } : null,
       // Only your own session ever sees your twitch id. Everywhere public it
