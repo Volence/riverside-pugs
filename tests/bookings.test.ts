@@ -742,3 +742,55 @@ describe('bumped by a tournament match (server priority Rulings 5 and 7)', () =>
     expect(bookingMessage(db, 'https://riversidepug.com', id, 'booking_bumped', { slot: null })!.content).toContain('No other slot is free within 3 hours of the start: book another time from the booking page, or leave it.');
   });
 });
+
+describe('one side, one slot (owner, 2026-10-11)', () => {
+  // ['no_mercy', 'death_toll'] at the 60 minute fallback is a 180 minute slot.
+  it('createBooking refuses a side already booked over the slot, by whose side it is', () => {
+    const first = create();
+    confirmBooking(db, { bookingId: first, by: P[1], now: NOW });
+    expect(createBooking(db, base({ startsAt: at(START, 60).toISOString(), opponent: { steamid: P[2] } }) as Parameters<typeof createBooking>[1]))
+      .toEqual({ ok: false, error: 'busy_us' });
+    expect(createBooking(db, base({ by: P[3], startsAt: at(START, 60).toISOString(), opponent: { steamid: P[1] } }) as Parameters<typeof createBooking>[1]))
+      .toEqual({ ok: false, error: 'busy_them' });
+    expect(BOOKING_ERRORS.busy_us.text).toBe('Your side already has a booking at that time.');
+    expect(BOOKING_ERRORS.busy_them.text).toBe('The other side already has a booking at that time.');
+  });
+
+  it('back to back is fine, and a cancelled booking frees the slot', () => {
+    const first = create(); // 20:00 to 23:00
+    confirmBooking(db, { bookingId: first, by: P[1], now: NOW });
+    expect(create({ startsAt: at(START, 180).toISOString(), opponent: { steamid: P[2] } })).toBeGreaterThan(0); // 23:00
+    expect(create({ startsAt: at(START, -180).toISOString(), opponent: { steamid: P[3] } })).toBeGreaterThan(0); // ends 20:00
+    cancelBooking(db, { bookingId: first, by: P[0], now: NOW });
+    // Exactly the freed slot: P[0] is booked right before and right after it.
+    expect(create({ opponent: { steamid: P[4] } })).toBeGreaterThan(0);
+  });
+
+  it('an invite the other side has not confirmed does not make that side busy', () => {
+    create(); // P[1] invited, not confirmed
+    expect(create({ by: P[1], startsAt: at(START, 60).toISOString(), opponent: { steamid: P[2] } })).toBeGreaterThan(0);
+  });
+
+  it('confirmBooking says busy_us when the confirming side was booked over the slot since the invite', () => {
+    const invite = create(); // P[0] invites P[1]
+    const other = create({ by: P[2], startsAt: at(START, 60).toISOString(), opponent: { steamid: P[1] } });
+    confirmBooking(db, { bookingId: other, by: P[1], now: NOW });
+    expect(confirmBooking(db, { bookingId: invite, by: P[1], now: NOW })).toEqual({ ok: false, error: 'busy_us' });
+    // A second invite from a side already booked over that time is refused at once.
+    const mine = create({ by: P[4], startsAt: '2026-10-05T21:00:00.000Z', opponent: { steamid: P[6] } });
+    expect(mine).toBeGreaterThan(0);
+    expect(createBooking(db, base({ by: P[4], startsAt: '2026-10-05T20:00:00.000Z', opponent: { steamid: P[5] } }) as Parameters<typeof createBooking>[1]))
+      .toEqual({ ok: false, error: 'busy_us' });
+  });
+
+  it('confirmBooking says busy_them when the inviting side was booked over the slot since the invite', () => {
+    const invite = create(); // P[0] invites P[1]
+    // P[0] cannot be booked over its own open invite (side a is confirmed at
+    // creation), so set the invite aside while P[0] accepts another booking.
+    db.prepare("UPDATE bookings SET state = 'cancelled', ending_at = ? WHERE id = ?").run(NOW.toISOString(), invite);
+    const theirs = create({ by: P[7], startsAt: at(START, 60).toISOString(), opponent: { steamid: P[0] } });
+    confirmBooking(db, { bookingId: theirs, by: P[0], now: NOW });
+    db.prepare("UPDATE bookings SET state = 'scheduled', ending_at = NULL WHERE id = ?").run(invite);
+    expect(confirmBooking(db, { bookingId: invite, by: P[1], now: NOW })).toEqual({ ok: false, error: 'busy_them' });
+  });
+});

@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { addServer } from '../src/serverPool.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
-import { addPerson, confirmBooking, createBooking, removePerson, respondPerson } from '../src/bookings/bookings.js';
+import { addPerson, confirmBooking, createBooking, removePerson, respondPerson, sideRow } from '../src/bookings/bookings.js';
 import { BookingVoice } from '../src/bookings/voice.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
@@ -39,17 +39,17 @@ beforeEach(() => {
 });
 afterEach(() => unsubscribe());
 
-const book = (confirm = true) => {
+const book = (confirm = true, pair: [string, string] = [P[0], P[1]]) => {
   const r = createBooking(db, {
-    by: P[0], opponent: { steamid: P[1] }, startsAt: new Date(START).toISOString(), minutes: 120, playlist: ['no_mercy'], now: new Date(NOW),
+    by: pair[0], opponent: { steamid: pair[1] }, startsAt: new Date(START).toISOString(), minutes: 120, playlist: ['no_mercy'], now: new Date(NOW),
   });
   if (!r.ok) throw new Error(r.error);
-  if (confirm) confirmBooking(db, { bookingId: r.value.id, by: P[1], now: new Date(NOW) });
+  if (confirm) confirmBooking(db, { bookingId: r.value.id, by: pair[1], now: new Date(NOW) });
   return r.value.id;
 };
 
 const accept = (id: number, side: 'a' | 'b', steamid: string) => {
-  addPerson(db, { bookingId: id, by: side === 'a' ? P[0] : P[1], side, steamid, role: 'player', now: new Date(NOW) });
+  addPerson(db, { bookingId: id, by: sideRow(db, id, side)!.captain_steamid, side, steamid, role: 'player', now: new Date(NOW) });
   respondPerson(db, { bookingId: id, steamid, accept: true, now: new Date(NOW) });
 };
 
@@ -100,7 +100,7 @@ describe('BookingVoice.ensure', () => {
     expect(row(id)).toBeUndefined();
 
     connected = true;
-    const unconfirmed = book(false);
+    const unconfirmed = book(false, [P[2], P[3]]);
     await voice.ensure(unconfirmed);
     expect(t.channels.size).toBe(0);
     expect(row(unconfirmed)).toBeUndefined();
@@ -298,7 +298,7 @@ describe('BookingVoice.close', () => {
 
   it('closeEnded closes what an offline wind-down left behind, and only for ended bookings', async () => {
     const ended = book();
-    const running = book();
+    const running = book(true, [P[2], P[3]]);
     await voice.ensure(ended);
     await voice.ensure(running);
     connected = false;

@@ -92,13 +92,14 @@ beforeEach(() => {
 
 /** The slot is estimated from the campaigns (no PUG history, so 60 each):
  *  one campaign is a 90 minute slot (until 21:30 UTC), two are 180 (23:00). */
-const book = (o: { playlist?: string[]; confirm?: boolean } = {}) => {
+const book = (o: { playlist?: string[]; confirm?: boolean; pair?: [string, string] } = {}) => {
+  const [a, b] = o.pair ?? [P[0], P[1]];
   const r = createBooking(db, {
-    by: P[0], opponent: { steamid: P[1] }, startsAt: new Date(START).toISOString(),
+    by: a, opponent: { steamid: b }, startsAt: new Date(START).toISOString(),
     playlist: o.playlist ?? ['no_mercy'], now: new Date(now),
   });
   if (!r.ok) throw new Error(r.error);
-  if (o.confirm !== false) confirmBooking(db, { bookingId: r.value.id, by: P[1], now: new Date(now) });
+  if (o.confirm !== false) confirmBooking(db, { bookingId: r.value.id, by: b, now: new Date(now) });
   return r.value.id;
 };
 
@@ -130,7 +131,7 @@ describe('allocation', () => {
     runner.allocate();
     expect(getBooking(db, unconfirmed)!.state).toBe('scheduled');
     expect(preempts).toBe(0);
-    const id = book();
+    const id = book({ pair: [P[2], P[3]] });
     db.prepare("UPDATE servers SET status = 'live'").run();
     runner.allocate();
     expect(getBooking(db, id)!.state).toBe('scheduled');
@@ -272,9 +273,9 @@ describe('resume after a web restart', () => {
     const held = book();
     now = START - 15 * MIN;
     holdBox(db, held, 3, new Date(now));
-    const ending = book();
+    const ending = book({ pair: [P[2], P[3]] });
     holdBox(db, ending, 2, new Date(now));
-    cancelBooking(db, { bookingId: ending, by: P[0], now: new Date(now) });
+    cancelBooking(db, { bookingId: ending, by: P[2], now: new Date(now) });
     const fresh = build();
     fresh.resume();
     await fresh.idle();
@@ -615,8 +616,8 @@ describe('booked games (plan 4b)', () => {
   /** `YYYY-MM-DD HH:MM:SS`, as datetime('now') writes matches.ended_at. */
   const sqlTime = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
 
-  const running = async (playlist: string[] = ['no_mercy', 'death_toll'], r: BookingRunner = runner) => {
-    const id = book({ playlist });
+  const running = async (playlist: string[] = ['no_mercy', 'death_toll'], r: BookingRunner = runner, pair?: [string, string]) => {
+    const id = book({ playlist, pair });
     now = START - 15 * MIN;
     r.allocate();
     await r.idle();
@@ -636,7 +637,7 @@ describe('booked games (plan 4b)', () => {
   it('setup turns on auto-track with the min players setting and the ruleset pause rules, and no log lines without an address', async () => {
     await running(['no_mercy']);
     // `running` cleared `sent`; set up a second booking and look at its burst.
-    const id = book();
+    const id = book({ pair: [P[2], P[3]] });
     now = START - 15 * MIN;
     runner.allocate();
     await runner.idle();
@@ -680,7 +681,7 @@ describe('booked games (plan 4b)', () => {
     // A box with no secret gets the address only.
     db.prepare('UPDATE servers SET log_secret = NULL WHERE id = 2').run();
     sent = [];
-    const other = book();
+    const other = book({ pair: [P[2], P[3]] });
     now = START - 15 * MIN;
     r.allocate();
     await r.idle();
@@ -1476,15 +1477,15 @@ describe('booked games (plan 4b)', () => {
         },
       });
       const first = await running(['no_mercy']);
-      const second = await running(['no_mercy']);
-      for (const n of ['a', 'bb', 'ccc']) box[n].humans = [P[0], P[1]];
+      const second = await running(['no_mercy'], runner, [P[2], P[3]]);
+      for (const n of ['a', 'bb', 'ccc']) box[n].humans = [P[2], P[3]];
       now = START + 60 * MIN;
       finish(second);
       await flush();
       expect(closeAt(second)).not.toBeNull();
       expect(closeAt(first)).toBeNull();
       now = START + 66 * MIN;
-      hook = () => { expect(addCampaign(db, { bookingId: second, by: P[1], now: new Date(now) }).ok).toBe(true); };
+      hook = () => { expect(addCampaign(db, { bookingId: second, by: P[3], now: new Date(now) }).ok).toBe(true); };
       await runner.tick();
       await runner.idle();
       expect(hook).toBeNull();
@@ -2241,7 +2242,7 @@ describe('server priority (owner, 2026-10-07)', () => {
 
   it('bumps one scrim per waiting match: with two held scrims and one match, the latest row goes and the other stays while the box winds down (Ruling 4)', async () => {
     const first = book();
-    const second = book();
+    const second = book({ pair: [P[2], P[3]] });
     now = START - 15 * MIN;
     runner.allocate();
     await runner.idle();
@@ -2262,7 +2263,7 @@ describe('server priority (owner, 2026-10-07)', () => {
 
   it('one waiting match bumps at most one boxless scrim past its start, however many passes it waits through (Ruling 6)', () => {
     const first = book();
-    const second = book();
+    const second = book({ pair: [P[2], P[3]] });
     db.prepare("UPDATE servers SET status = 'live'").run();
     now = START + 2 * MIN;
     const match = tournament();
@@ -2351,7 +2352,7 @@ describe('server priority (owner, 2026-10-07)', () => {
 
   it('one scrim per waiting match: two scrims past their start and one match bump only the earlier-started one (Ruling 6)', () => {
     const first = book();
-    const second = book();
+    const second = book({ pair: [P[2], P[3]] });
     db.prepare("UPDATE servers SET status = 'live'").run();
     now = START + MIN;
     tournament();
@@ -2496,7 +2497,7 @@ describe('server priority (owner, 2026-10-07)', () => {
 
     it('a second scrim bumped for the same match (the first box did not come back) says so to staff, and a failed bump is logged', async () => {
       const first = book();
-      const second = book();
+      const second = book({ pair: [P[2], P[3]] });
       now = START - 15 * MIN;
       runner.allocate();
       await runner.idle();
@@ -2550,7 +2551,7 @@ describe('server priority (owner, 2026-10-07)', () => {
 
     it('two waiting matches, one held scrim and one boxless scrim past its start: each match takes one scrim, never two for one (deferred Task 3 minor)', async () => {
       const held = await heldScrim();
-      const boxless = book();
+      const boxless = book({ pair: [P[2], P[3]] });
       db.prepare("UPDATE servers SET status = 'live' WHERE id IN (1, 2)").run();
       now = START + 2 * MIN;
       const m1 = tournament();

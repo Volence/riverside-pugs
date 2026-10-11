@@ -20,7 +20,7 @@ import { canSeeReliability, reliability, type Reliability } from '../scrims/reli
 import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
 import { blocked } from '../scrims/blocks.js';
 import {
-  addCampaignMinutes, allowance, bookingLimits, capacityProblem, estimateMinutes, isLateCancel, iso, upcomingCount, OPEN_STATES_SQL,
+  addCampaignMinutes, allowance, bookedDuring, bookingLimits, capacityProblem, estimateMinutes, isLateCancel, iso, upcomingCount, OPEN_STATES_SQL,
   PEOPLE_PER_SIDE, SHOWN_MIN, UNCONFIRMED_CUTOFF_MS, UNCONFIRMED_TTL_MS, type BookingLimits, type BookingState, type Party,
 } from './rules.js';
 
@@ -100,6 +100,9 @@ export const BOOKING_ERRORS = {
   bad_campaign: { status: 400, text: 'Pick a campaign from the map pool.' },
   no_campaign_room: { status: 409, text: 'No server is free for another campaign after this slot.' },
   allowance: { status: 409, text: 'That side already has as many upcoming bookings as allowed.' },
+  // One side, one slot (owner, 2026-10-11): worded for the side asking.
+  busy_us: { status: 409, text: 'Your side already has a booking at that time.' },
+  busy_them: { status: 409, text: 'The other side already has a booking at that time.' },
   wrong_state: { status: 409, text: 'The booking is past that point.' },
   already_confirmed: { status: 409, text: 'Already confirmed.' },
   already_in: { status: 409, text: 'That player is already in this booking.' },
@@ -323,10 +326,13 @@ export function createBooking(db: DB, o: {
       bInvitee = opp.steamid;
     }
 
+    const bParty: Party = bTeam !== null ? { teamId: bTeam } : { captain: bCaptain };
     // A blocked pair never books each other, whichever side blocked.
-    if (blocked(db, aParty, bTeam !== null ? { teamId: bTeam } : { captain: bCaptain })) return fail('not_available');
+    if (blocked(db, aParty, bParty)) return fail('not_available');
 
     const endMs = startMs + minutes * 60_000;
+    if (bookedDuring(db, aParty, startMs, endMs)) return fail('busy_us');
+    if (bookedDuring(db, bParty, startMs, endMs)) return fail('busy_them');
     if (capacityProblem(db, { region, startMs, endMs }) !== null) return fail('no_capacity');
     const id = Number(db.prepare(
       `INSERT INTO bookings (purpose, region, starts_at, ends_at, password, tv_password, game_config, rules_json, ruleset_id, playlist_json, games_allowed, created_by, created_at)
@@ -485,6 +491,10 @@ export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?:
     // A scrim invite sent before a block cannot then be taken up.
     if (b.purpose === 'scrim' && blocked(db, partyOf(sideRow(db, b.id, 'a')!), party)) return fail('not_available');
     if (upcomingCount(db, party) >= allowance(db, party, now.getTime())) return fail('allowance');
+    // Either side may have been booked over this slot since the invite.
+    const slot = [Date.parse(b.starts_at), Date.parse(b.ends_at)] as const;
+    if (bookedDuring(db, party, slot[0], slot[1], b.id)) return fail('busy_us');
+    if (bookedDuring(db, partyOf(sideRow(db, b.id, 'a')!), slot[0], slot[1], b.id)) return fail('busy_them');
     if (capacityProblem(db, { region: b.region, startMs: Date.parse(b.starts_at), endMs: Date.parse(b.ends_at), exceptId: b.id, purpose: b.purpose }) !== null) {
       return fail('no_capacity');
     }
