@@ -32,6 +32,22 @@ describe('tournamentOpen', () => {
     }
   });
 
+  it('stops counting an announced or registration event once its start is over a day past', () => {
+    const { db, eventId } = eventFixture('announced');
+    expect(tournamentOpen(db, DAYS_BEFORE_START(-2))).toBe(false);
+    db.prepare("UPDATE events SET status = 'registration' WHERE id = ?").run(eventId);
+    expect(tournamentOpen(db, DAYS_BEFORE_START(-2))).toBe(false);
+    expect(tournamentOpen(db, DAYS_BEFORE_START(-0.5))).toBe(true);
+  });
+
+  it('still counts a check-in or live event however long past its start', () => {
+    const { db, eventId } = eventFixture('registration');
+    for (const status of ['checkin', 'live']) {
+      db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
+      expect(tournamentOpen(db, DAYS_BEFORE_START(-2))).toBe(true);
+    }
+  });
+
   it('never counts a finished or cancelled event', () => {
     const { db, eventId } = eventFixture('registration');
     for (const status of ['finished', 'cancelled']) {

@@ -228,18 +228,29 @@ export function createEvent(db: DB, o: { by: string; fields: unknown; now?: Date
  *  lands on Events rather than Scrims. Registration open needs no window. */
 export const COMPETE_SOON_DAYS = 3;
 
+/** How long past its start an announced or registration event still counts
+ *  for the nav's Compete item. Only staff advance an event, so one never
+ *  moved on would otherwise pin Compete on Events forever. */
+export const COMPETE_STALE_DAYS = 1;
+
 /** Whether a tournament is open or about to start, for the nav's Compete item
  *  (/api/me competeHome): a published event taking sign-ups, checking in or
- *  being played, or one announced to start within COMPETE_SOON_DAYS. A draft
- *  never counts; only staff can see it. starts_at is ISO UTC, so the string
+ *  being played, or one announced to start within COMPETE_SOON_DAYS. An
+ *  announced or registration event stops counting once its start is more than
+ *  COMPETE_STALE_DAYS past; check-in and live stay unbounded. A draft never
+ *  counts; only staff can see it. starts_at is ISO UTC, so the string
  *  comparison is a time comparison. */
 export function tournamentOpen(db: DB, now?: Date): boolean {
-  const soon = new Date((now ?? new Date()).getTime() + COMPETE_SOON_DAYS * 86_400_000).toISOString();
+  const t = (now ?? new Date()).getTime();
+  const soon = new Date(t + COMPETE_SOON_DAYS * 86_400_000).toISOString();
+  const stale = new Date(t - COMPETE_STALE_DAYS * 86_400_000).toISOString();
   return db.prepare(
     `SELECT 1 FROM events
-      WHERE status IN ('registration', 'checkin', 'live') OR (status = 'announced' AND starts_at <= ?)
+      WHERE status IN ('checkin', 'live')
+         OR (status = 'registration' AND starts_at >= ?)
+         OR (status = 'announced' AND starts_at BETWEEN ? AND ?)
       LIMIT 1`,
-  ).get(soon) !== undefined;
+  ).get(stale, stale, soon) !== undefined;
 }
 
 export function updateEvent(db: DB, o: { eventId: number; by: string; fields: unknown; now?: Date }): EventResult<EventRow> {
