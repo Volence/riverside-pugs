@@ -57,7 +57,9 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
       onSaved?.();
     }, correcting
       ? { title, body: `This changes the result of ${a} vs ${b}. Later matches move with it. A result that later matches already depend on is refused.` }
-      : { title });
+      // A result that finishes the stage (or, on the last stage, the event)
+      // settles it within seconds, and nothing can correct it after that.
+      : { title, body: 'Check it first: if this is the last match of the stage, the stage (or the whole event) finishes and its results can no longer be changed.' });
   };
   return (
     <div class="inlinerow">

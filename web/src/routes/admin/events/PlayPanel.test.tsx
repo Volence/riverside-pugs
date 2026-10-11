@@ -68,7 +68,7 @@ describe('PlayPanel', () => {
     fireEvent.change(screen.getByLabelText('Winner'), { target: { value: 'a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save result' }));
     await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'a', scoreA: 1200, scoreB: 900, forfeit: false }));
-    expect(confirm).toHaveBeenCalledWith({ title: 'Rats wins 1200 : 900?' });
+    expect(confirm).toHaveBeenCalledWith({ title: 'Rats wins 1200 : 900?', body: expect.stringMatching(/can no longer be changed/) });
   });
 
   it('disables Save until both scores are filled with a winner picked', async () => {
@@ -94,7 +94,7 @@ describe('PlayPanel', () => {
     fireEvent.change(screen.getAllByLabelText('Winner')[0]!, { target: { value: 'b' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Save result' })[0]!);
     await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'b', forfeit: true }));
-    expect(confirm).toHaveBeenCalledWith({ title: 'Bats wins by forfeit?' });
+    expect(confirm).toHaveBeenCalledWith({ title: 'Bats wins by forfeit?', body: expect.stringMatching(/can no longer be changed/) });
     expect(screen.getByRole('button', { name: 'Correct' })).toBeTruthy();
   });
 
