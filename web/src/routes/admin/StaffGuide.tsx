@@ -47,7 +47,7 @@ export function StaffGuide() {
       <Panel id="input">
         <h3>Input flags</h3>
         <p>
-          Shown as <code>N input flags (pounce_spam, pistol_rate, autobhop)</code>. The server records the timing of
+          Shown as <code>N input flags (pounce_spam, pistol_rate, autobhop, fakelag)</code>. The server records the timing of
           button presses and looks for speeds a hand cannot keep up. A hand clicking as fast as it can peaks
           at about 8 presses a second. A macro holds 13 or more for as long as it is on. A flag only exists
           once the pattern repeats within one match, so a single lucky burst never makes one.
@@ -67,6 +67,13 @@ export function StaffGuide() {
             A jump script. While bunnyhopping, 65% or more of the hops left the ground on the exact tick
             the player landed, over 20 or more chained hops. Scroll-wheel jumpers get about half at best;
             the confirmed Aimware cheater got 72%. A wheel bind does not explain this one.
+          </dd>
+          <dt><code>fakelag</code></dt>
+          <dd>
+            A hunter whose inputs stop and then all arrive at once, ten or more times caught mid-pounce, and
+            at least a quarter of their hunter stalls. On other screens it looks like teleporting, and a hunter
+            frozen mid-air cannot be skeeted. Bad connections stall too, but at random moments: the worst on
+            record hung mid-pounce 4 times, the confirmed Aimware cheater 29.
           </dd>
         </dl>
         <p>The file also says what the presses looked like, which is the part that matters most:</p>

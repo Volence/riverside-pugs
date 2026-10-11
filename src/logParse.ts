@@ -266,6 +266,13 @@ export type LogEvent =
   // The plugin's budget for one kind of burst ran out for this player this
   // round: everything of that kind after it, until the round ends, is missing.
   | { kind: 'input_cap'; steamid: string; burstKind: 'fire' | 'pounce' | 'bhop'; serverTick: number }
+  // l4d_inputstats 0.3.0: a live player's usercmds stopped for `gap` ticks and
+  // then `cmds` of them ran in one tick. `missed` cmdnums never arrived (loss);
+  // `lunging` is 1 for a hunter hung mid-pounce, 0 not, -1 not a hunter.
+  | {
+      kind: 'input_stall'; steamid: string; serverTick: number; gap: number; missed: number; cmds: number;
+      team: number; cls: number; lunging: number;
+    }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
   | { kind: 'entered'; steamid: string }
   // The look (time of day, weather, moon, event, power) l4d_nightmode is
@@ -660,6 +667,20 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
   if (body.startsWith('L4DM ')) {
     const f = kv(body.split(/\s+/).slice(1));
     const steamid = steamId64Of(f.id ?? '');
+    // A stall (plugin 0.3.0). Every field is a small integer the plugin made;
+    // anything else refuses the line.
+    if (f.k === 'stall') {
+      const n = (k: string, lo: number, hi: number): number | null => {
+        const v = intOf(f[k]);
+        return v !== null && v >= lo && v <= hi ? v : null;
+      };
+      const tick = n('st', 0, MAX_TICK_COUNTER), gap = n('gap', 1, 100), missed = n('miss', 0, 10_000);
+      const cmds = n('cmds', 0, 10_000), team = n('team', 0, 3), cls = n('cls', 0, 8);
+      const lunging = f.lunge === '-1' ? -1 : n('lunge', 0, 1);
+      if (!steamid || f.v !== '2') return null;
+      if (tick === null || gap === null || missed === null || cmds === null || team === null || cls === null || lunging === null) return null;
+      return { kind: 'input_stall', steamid, serverTick: tick, gap, missed, cmds, team, cls, lunging };
+    }
     // The budget marker: no burst on it, only which kind stopped being sent.
     if (f.k === 'cap') {
       const tick = intOf(f.st);

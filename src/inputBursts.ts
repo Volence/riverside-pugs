@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
+import { rerunStalls } from './inputStalls.js';
 import {
   DEFAULT_THRESHOLDS, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
   burstLabel, detectionLabel, encodeIntervals, holdStats, isWheel, matchDetections,
@@ -307,6 +308,9 @@ export function rerunSignatures(
       'SELECT DISTINCT match_id AS matchId, steamid FROM input_bursts WHERE match_id IS NOT NULL ORDER BY match_id, steamid',
     ).all() as { matchId: number; steamid: string }[];
     for (const g of groups) evaluateGroup(db, g.matchId, g.steamid, thresholds);
+    // The fakelag signature lives on stalls, not bursts, and the DELETE above
+    // took its rows too.
+    rerunStalls(db);
     const after = new Set((db.prepare(select).all() as Parameters<typeof key>[0][]).map(key));
     result = {
       bursts: (db.prepare('SELECT COUNT(*) AS c FROM input_bursts').get() as { c: number }).c,
