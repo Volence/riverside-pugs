@@ -2,7 +2,7 @@ import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import { rerunStalls } from './inputStalls.js';
 import {
-  DEFAULT_THRESHOLDS, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
+  DEFAULT_THRESHOLDS, MATCH_SIGNATURES, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
   burstLabel, detectionLabel, encodeIntervals, holdStats, isWheel, matchDetections,
   type BurstLabel, type HoldStats, type Thresholds,
 } from './inputStats.js';
@@ -95,12 +95,12 @@ export function recordInputBurst(
   const id = Number(info.lastInsertRowid);
   // A repeat needs a match to repeat within, and the group query below is only
   // worth running when this burst could have moved a count.
-  // A ground-0 hop is the only bhop line that can move the autobhop count.
-  const couldMatter = SIGNATURES.some((s) => s.qualifies(b, thresholds)) || (b.kind === 'bhop' && b.groundTicks === 0);
-  if (b.matchId === null || !couldMatter) {
+  if (b.matchId === null || !SIGNATURES.some((s) => s.qualifies(b, thresholds))) {
     return { id, detections: [], created: [] };
   }
-  const created = evaluateGroup(db, b.matchId, b.steamid, thresholds);
+  // Per-burst signatures only: the match ones wait for the match to end
+  // (scanEndedMatches).
+  const created = evaluateGroup(db, b.matchId, b.steamid, thresholds, { matchSignatures: false });
   return { id, detections: created.map((c) => c.signature), created };
 }
 
@@ -133,7 +133,7 @@ function evidenceNote(
  * bursts. Returns the signatures whose row was CREATED by this call.
  */
 function evaluateGroup(
-  db: DB, matchId: number, steamid: string, thresholds: Thresholds,
+  db: DB, matchId: number, steamid: string, thresholds: Thresholds, opts: { matchSignatures?: boolean } = {},
 ): { signature: string; note: string }[] {
   const rows = db.prepare(
     `SELECT id, kind, weapon, intervals, at, wire, holds, ground_ticks AS groundTicks, server_tick AS serverTick
@@ -144,7 +144,7 @@ function evaluateGroup(
     return intervals ? [{ ...r, intervals }] : [];
   });
   const created: { signature: string; note: string }[] = [];
-  for (const d of matchDetections(bursts, thresholds)) {
+  for (const d of matchDetections(bursts, thresholds, opts)) {
     const evidence = d.qualifying.map((i) => bursts[i]);
     // The burst that COMPLETED the repeat count dates and anchors the row, so
     // a rebuild from history lands on the same burst and the same time. A
@@ -326,4 +326,42 @@ export function rerunSignatures(
     if (err !== ROLLBACK) throw err;
   }
   return result;
+}
+
+/**
+ * The match-level signatures (autobhop), run once per match after it ends,
+ * over the whole match: the way they were calibrated and the way a re-run
+ * reads them. Called from the server's one-minute sweep, which catches every
+ * way a match ends (result, abandon, forfeit, abort) without hooking each.
+ * Only matches that ended inside `withinMs` are looked at, so the first run
+ * after a deploy does not post history; rerunSignatures covers that.
+ * Returns what each newly created row should be announced as.
+ */
+export function scanEndedMatches(
+  db: DB, thresholds: Thresholds = DEFAULT_THRESHOLDS, now = new Date(), withinMs = 6 * 3_600_000,
+): { matchId: number; steamid: string; signature: string; note: string }[] {
+  const since = new Date(now.getTime() - withinMs).toISOString().replace('T', ' ').slice(0, 19);
+  const matches = db.prepare(
+    `SELECT id FROM matches
+     WHERE state IN ('completed', 'aborted') AND COALESCE(ended_at, created_at) >= ?
+       AND NOT EXISTS (SELECT 1 FROM input_match_scans s WHERE s.match_id = matches.id)`,
+  ).all(since) as { id: number }[];
+  const out: { matchId: number; steamid: string; signature: string; note: string }[] = [];
+  const names = new Set(MATCH_SIGNATURES.map((s) => s.name));
+  for (const { id } of matches) {
+    db.transaction(() => {
+      // Claimed first, in the same transaction, so a second sweep cannot
+      // announce the same row.
+      db.prepare('INSERT OR IGNORE INTO input_match_scans (match_id, at) VALUES (?, ?)').run(id, now.toISOString());
+      const players = db.prepare(
+        "SELECT DISTINCT steamid FROM input_bursts WHERE match_id = ? AND kind = 'bhop'",
+      ).all(id) as { steamid: string }[];
+      for (const { steamid } of players) {
+        for (const c of evaluateGroup(db, id, steamid, thresholds)) {
+          if (names.has(c.signature)) out.push({ matchId: id, steamid, ...c });
+        }
+      }
+    })();
+  }
+  return out;
 }

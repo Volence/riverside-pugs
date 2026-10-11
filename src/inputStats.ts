@@ -553,13 +553,20 @@ export interface MatchDetection {
  * match. Pure, so the live path, the re-run tool and the calibration
  * simulation cannot disagree about what a detection is.
  */
-export function matchDetections(bursts: readonly SignatureBurst[], t: Thresholds): MatchDetection[] {
+export function matchDetections(
+  bursts: readonly SignatureBurst[], t: Thresholds, opts: { matchSignatures?: boolean } = {},
+): MatchDetection[] {
   const out: MatchDetection[] = [];
   for (const sig of SIGNATURES) {
     const qualifying: number[] = [];
     bursts.forEach((b, i) => { if (sig.qualifies(b, t)) qualifying.push(i); });
     if (qualifying.length >= sig.repeats) out.push({ signature: sig.name, qualifying });
   }
+  // Off on the live path. A match signature is a share over the WHOLE match
+  // and was calibrated that way; asked of every prefix as the hops arrive, an
+  // early lucky streak clears it (four honest matches at 20 hops), and the
+  // post cannot be taken back. It runs once the match is over instead.
+  if (opts.matchSignatures === false) return out;
   for (const sig of MATCH_SIGNATURES) {
     const d = sig.detect(bursts);
     if (d) out.push({ signature: sig.name, ...d });

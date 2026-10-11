@@ -1299,6 +1299,13 @@ CREATE TABLE IF NOT EXISTS input_stalls (
 );
 CREATE INDEX IF NOT EXISTS input_stalls_match ON input_stalls(match_id, steamid);
 
+-- Matches whose match-level input signatures (autobhop) have been run, once,
+-- after the match ended (scanEndedMatches in src/inputBursts.ts).
+CREATE TABLE IF NOT EXISTS input_match_scans (
+  match_id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL
+);
+
 -- One row per signature that fired on a burst. Separate from the burst so that
 -- re-running an improved signature adds rows without rewriting the evidence.
 CREATE TABLE IF NOT EXISTS input_detections (

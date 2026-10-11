@@ -90,7 +90,7 @@ import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestr
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
-import { inputThresholds, recordInputBurst, recordInputCap } from './inputBursts.js';
+import { inputThresholds, recordInputBurst, recordInputCap, scanEndedMatches } from './inputBursts.js';
 import { getServer, resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { resetMap, problemText } from './matchTeardown.js';
 import { makeServerCleaner } from './serverCleaner.js';
@@ -1675,6 +1675,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       if (integrityJobs && pendingRoundCount(deps.db) > 0) integrityJobs.start('pending');
     } catch (err) {
       console.error('[integrity] automatic pass failed:', err);
+    }
+    try {
+      // Match-level input signatures run once a match is over.
+      for (const d of scanEndedMatches(deps.db, inputThresholds(deps.db))) {
+        publishAdminEvent({ kind: 'input_flag', steamid: d.steamid, matchId: d.matchId, signature: d.signature, detail: d.note });
+      }
+    } catch (err) {
+      console.error('[inputstats] end-of-match scan failed:', err);
     }
     try {
       // The analysis child stores newcomer flags; telling the mods is ours.

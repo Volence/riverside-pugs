@@ -85,6 +85,14 @@ describe('stalls through storage', () => {
     expect(detectionsForPlayer(db, A).map((d) => d.signature)).toEqual(['fakelag']);
   });
 
+  it('drops the row when the match stops qualifying, as a rerun would', () => {
+    store(BELLA_631);
+    // A long run of hunter stalls that were not mid-pounce pulls the share
+    // under a quarter.
+    store(Array.from({ length: 80 }, () => [9, 0, 10, 3, 3, 0]));
+    expect(detectionsForPlayer(db, A)).toHaveLength(0);
+  });
+
   it('stores stalls outside a match without evaluating them', () => {
     expect(recordInputStall(db, { matchId: null, serverId: 1, steamid: A, serverTick: 1, gap: 11, missed: 0, cmds: 12, team: 3, cls: 3, lunging: 1 }).created).toBeNull();
     expect(evaluateStalls(db, 631, A)).toBeNull();

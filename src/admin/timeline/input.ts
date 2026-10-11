@@ -24,7 +24,9 @@ export const inputAdapter: TimelineAdapter = {
       at: toIso(r.at),
       source: 'input' as const,
       kind: r.signature,
-      summary: isWheel(r.note)
+      summary: r.signature === 'autobhop' || r.signature === 'fakelag'
+        ? `Input check ${r.signature}: ${r.note}. Read it beside the replay.`
+        : isWheel(r.note)
         ? `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}, the presses of a `
           + 'scroll wheel bind, which is allowed. Kept for the record, not a flag.'
         : `Input check ${r.signature} on ${r.hits} ${r.kind} burst${r.hits === 1 ? '' : 's'}`
