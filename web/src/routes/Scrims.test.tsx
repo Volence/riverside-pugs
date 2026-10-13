@@ -44,7 +44,7 @@ const MY_POST: ScrimBoardPost = {
   }],
 };
 
-const session = { kind: 'active', me: { steamid: '76561199000000300', name: 'me', avatar: null, status: 'active', isAdmin: false, teams: true } } as never;
+const session = { kind: 'active', me: { steamid: '76561199000000300', name: 'me', avatar: null, status: 'active', isAdmin: false, teams: true, scrims: true } } as never;
 
 const renderScrims = (path = '/scrims') => {
   history.replaceState(null, '', path);

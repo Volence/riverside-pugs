@@ -26,3 +26,23 @@ export function competitiveAccess(db: DB, viewer: string | null): boolean {
 export function competitivePublic(db: DB): boolean {
   return (getSetting(db, 'competitive_enabled') ?? 'off') === 'everyone';
 }
+
+/**
+ * Whether this viewer may see and use the scrim board: the competitive switch
+ * lets them in AND `scrims_enabled` (off | admins | everyone, default admins)
+ * does too, so events can go out to everyone while scrims stay with admins.
+ * Anything the setting does not recognise reads as off.
+ */
+export function scrimsAccess(db: DB, viewer: string | null): boolean {
+  if (!competitiveAccess(db, viewer)) return false;
+  const mode = getSetting(db, 'scrims_enabled') ?? 'admins';
+  if (mode === 'everyone') return true;
+  if (mode === 'admins') return getPlayer(db, viewer!)?.is_admin === 1;
+  return false;
+}
+
+/** Whether scrims are public (the Discord scrim cards and night reminder):
+ *  both switches all the way to `everyone`. */
+export function scrimsPublic(db: DB): boolean {
+  return competitivePublic(db) && (getSetting(db, 'scrims_enabled') ?? 'admins') === 'everyone';
+}

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { getPlayer } from '../players.js';
-import { competitiveAccess } from '../teams/access.js';
+import { scrimsAccess } from '../teams/access.js';
 import { inGoodStanding } from '../standing.js';
 import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool, settingNumber } from '../settings.js';
@@ -47,7 +47,7 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
   const allowed = (req: FastifyRequest, reply: FastifyReply): string | null => {
     const viewer = optionalViewer(req);
     const staffViewer = !!viewer && isStaff(viewer) && inGoodStanding(db, viewer);
-    if (!staffViewer && !competitiveAccess(db, viewer)) { reply.code(404).send(NOT_FOUND); return null; }
+    if (!staffViewer && !scrimsAccess(db, viewer)) { reply.code(404).send(NOT_FOUND); return null; }
     return requireActive(req, reply);
   };
   const refuse = (reply: FastifyReply, r: { error: S.ScrimError; text?: string; nearestSlot?: string | null; declined?: boolean }) => {

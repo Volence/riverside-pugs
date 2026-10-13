@@ -4,7 +4,7 @@ import { getPlayer } from '../players.js';
 import { logAdmin } from '../admin/audit.js';
 import { inGoodStanding } from '../standing.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
-import { competitiveAccess, competitivePublic } from '../teams/access.js';
+import { competitiveAccess, competitivePublic, scrimsAccess } from '../teams/access.js';
 import * as T from '../teams/teams.js';
 import { keptFrom } from '../events/keepTeam.js';
 import { checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
@@ -226,6 +226,8 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
     if (!t) return refuse(reply, 'not_found');
     const role = v.viewer ? T.roleOf(db, t.id, v.viewer) : null;
     if (role === null && !isStaff(v.viewer)) return refuse(reply, 'not_found');
+    // Not while the scrims switch keeps a member out (staff always see it).
+    if (!isStaff(v.viewer) && !scrimsAccess(db, v.viewer)) return refuse(reply, 'not_found');
     // The match links work for every current member (src/matchVisibility.ts),
     // but the booking page is only for its people, managers and staff.
     const who = { steamid: v.viewer ?? '', staff: isStaff(v.viewer) };

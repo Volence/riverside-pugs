@@ -49,6 +49,7 @@ beforeEach(async () => {
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
   setSetting(db, 'competitive_enabled', 'everyone');
+  setSetting(db, 'scrims_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_air']));
   for (const n of ['a', 'bb', 'ccc', 'dddd']) {
     const id = addServer(db, { name: n, host: 'h', port: 27000 + n.length, rconPort: 1, rconPassword: 'x' });
@@ -102,6 +103,21 @@ describe('the switch', () => {
 
     db.prepare("UPDATE players SET status = 'banned' WHERE steamid = ?").run(MOD);
     expect((await call('GET', '/api/scrims', MOD)).statusCode).toBe(404);
+  });
+
+  it('the scrims switch closes the board on its own while competitive is open to everyone; staff still pass', async () => {
+    setSetting(db, 'scrims_enabled', 'admins');
+    expect((await call('GET', '/api/scrims', P[0])).statusCode).toBe(404);
+    expect((await call('POST', '/api/scrims', P[0], postBody())).statusCode).toBe(404);
+    expect((await call('GET', '/api/scrims', ADMIN)).statusCode).toBe(200);
+    expect((await call('GET', '/api/scrims', MOD)).statusCode).toBe(200);
+
+    setSetting(db, 'scrims_enabled', 'off');
+    expect((await call('GET', '/api/scrims', P[0])).statusCode).toBe(404);
+    expect((await call('GET', '/api/scrims', ADMIN)).statusCode).toBe(200);
+
+    setSetting(db, 'scrims_enabled', 'everyone');
+    expect((await call('GET', '/api/scrims', P[0])).statusCode).toBe(200);
   });
 
   it('anonymous callers get 404, not 401, under every mode', async () => {

@@ -1608,6 +1608,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Competitive platform (teams, later bookings and events): off | admins |
   // everyone. Off hides every team page and route.
   competitive_enabled: 'off',
+  // The scrim board on its own (off | admins | everyone), inside the switch
+  // above: events can be open to everyone while scrims stay with admins.
+  scrims_enabled: 'admins',
   team_membership_cap: '3',
   // Server bookings (plan 4a). Every number in spec section 3 is a setting.
   booking_max_upcoming: '4',
