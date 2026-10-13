@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import { completedPug } from './matchKinds.js';
+import { notBannedSql } from './banState.js';
 
 /**
  * Post-match endorsements: every rule lives here, and both surfaces (the HTTP
@@ -270,7 +271,7 @@ export interface EndorseBoardRow {
  * the season it was earned in. Voided matches take their endorsements with
  * them, as on the profile.
  */
-export function endorsementBoard(db: DB, seasonId: number): EndorseBoardRow[] {
+export function endorsementBoard(db: DB, seasonId: number, now = new Date()): EndorseBoardRow[] {
   const rows = db.prepare(
     `SELECT e.to_id AS steamid, p.name,
             SUM(e.kind = 'caller') AS caller, SUM(e.kind = 'clutch') AS clutch, SUM(e.kind = 'vibes') AS vibes,
@@ -278,9 +279,9 @@ export function endorsementBoard(db: DB, seasonId: number): EndorseBoardRow[] {
      FROM endorsements e
      JOIN matches m ON m.id = e.match_id AND ${completedPug('m')} AND m.voided_at IS NULL
      JOIN players p ON p.steamid = e.to_id
-     WHERE m.season_id = ?
+     WHERE m.season_id = ? AND ${notBannedSql('e.to_id')}
      GROUP BY e.to_id`,
-  ).all(seasonId) as Omit<EndorseBoardRow, 'games'>[];
+  ).all(seasonId, now.toISOString()) as Omit<EndorseBoardRow, 'games'>[];
   if (rows.length === 0) return [];
   const games = new Map((db.prepare(
     `SELECT mp.player_id AS steamid, COUNT(*) AS games FROM match_players mp

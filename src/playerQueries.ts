@@ -13,6 +13,7 @@ import { chemistryFor } from './chemistry.js';
 import { allTitles, endorsementSummary } from './endorsements.js';
 import { playerWeeklyAwards } from './weeklyStore.js';
 import { completedPug } from './matchKinds.js';
+import { notBannedSql } from './banState.js';
 
 /** Read models shared by the HTTP routes and the Discord slash commands, so a
  *  number on the site and the same number in Discord come from one query. */
@@ -20,7 +21,7 @@ import { completedPug } from './matchKinds.js';
 const PROFILE_MATCH_LIMIT = 20;
 
 /** The season leaderboard, as GET /api/leaderboard returns it. */
-export function leaderboardData(db: DB, requestedSeason?: number) {
+export function leaderboardData(db: DB, requestedSeason?: number, now = new Date()) {
   const seasonId = requestedSeason ?? currentSeasonId(db);
   const season = db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string } | undefined;
   if (!season) return null;
@@ -28,8 +29,8 @@ export function leaderboardData(db: DB, requestedSeason?: number) {
     `SELECT pr.player_id AS steamid, p.name, p.avatar, pr.mu, pr.sigma, pr.wins, pr.losses,
             (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = pr.player_id AND rh.season_id = pr.season_id) AS games
      FROM player_ratings pr JOIN players p ON p.steamid = pr.player_id
-     WHERE pr.season_id = ?`,
-  ).all(seasonId) as { steamid: string; name: string; avatar: string | null; mu: number; sigma: number; wins: number; losses: number; games: number }[];
+     WHERE pr.season_id = ? AND ${notBannedSql('pr.player_id')}`,
+  ).all(seasonId, now.toISOString()) as { steamid: string; name: string; avatar: string | null; mu: number; sigma: number; wins: number; losses: number; games: number }[];
   // Per-player season totals, so the leaderboard can be sorted by any stat
   // client side without a request per column. Two queries for the whole
   // table rather than one per player.

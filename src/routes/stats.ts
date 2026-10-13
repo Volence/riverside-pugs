@@ -25,6 +25,7 @@ import { inGoodStanding } from '../standing.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
 import { leaderboardData, profileData } from '../playerQueries.js';
+import { notBannedSql } from '../banState.js';
 import { listSeasons } from '../seasons.js';
 import { sameName } from '../identity.js';
 import { sessionsForMatch } from '../sourcetvSessions.js';
@@ -123,10 +124,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
        JOIN matches m ON m.id = mps.match_id
        JOIN players p ON p.steamid = mps.player_id
        WHERE mps.stat = ? AND m.season_id = ? AND ${completedPug('m')}
+         AND ${notBannedSql('mps.player_id')}
        GROUP BY mps.player_id
        ORDER BY total DESC, p.name ASC
        LIMIT ?`,
-    ).all(key, seasonId, limit);
+    ).all(key, seasonId, new Date().toISOString(), limit);
 
     return { stat: def, seasonId, rows };
   });
