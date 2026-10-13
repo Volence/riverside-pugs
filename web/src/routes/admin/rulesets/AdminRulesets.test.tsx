@@ -95,7 +95,7 @@ describe('AdminRulesets', () => {
     fireEvent.input(screen.getByLabelText('Ruleset name'), { target: { value: 'Later Night' } });
     fireEvent.input(screen.getByLabelText('Pauses per team'), { target: { value: '2' } });
     fireEvent.input(screen.getByLabelText('No-show grace'), { target: { value: '20' } });
-    fireEvent.change(screen.getByLabelText('Side choice'), { target: { value: 'coin' } });
+    fireEvent.change(screen.getByLabelText('Scrim side choice'), { target: { value: 'coin' } });
     fireEvent.click(screen.getByLabelText('Only before damage'));
     fireEvent.click(screen.getByRole('button', { name: 'Save ruleset' }));
     await waitFor(() => expect(mockAdmin.updateRuleset).toHaveBeenCalled());
@@ -114,7 +114,7 @@ describe('AdminRulesets', () => {
     render(<AdminRulesets />);
     await screen.findByText('Late Night', { selector: 'strong' });
     fireEvent.click(within(rowOf('Late Night')).button('Edit')!);
-    const texts = Array.from((screen.getByLabelText('Side choice') as HTMLSelectElement).options).map((o) => o.textContent);
+    const texts = Array.from((screen.getByLabelText('Scrim side choice') as HTMLSelectElement).options).map((o) => o.textContent);
     expect(texts).toEqual(['Higher seed picks sides', 'Non-picker picks sides', 'Coin toss']);
     for (const t of texts) expect((t ?? '').length, t ?? '').toBeLessThanOrEqual(28);
   });

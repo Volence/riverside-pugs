@@ -29,7 +29,6 @@ describe('rules lines', () => {
       'Reconnect time: 10:00 per team per game; at zero the team forfeits the game',
       'Subs: 2 per match, one may come in mid-chapter for a disconnected player',
       'No-show grace: 15 minutes',
-      'Higher seed picks sides',
       'Boss spawns: random, shown in game',
       'Teams are locked once the match is live',
       'Team spectators see only their own side',
@@ -43,11 +42,16 @@ describe('rules lines', () => {
       'Reconnect time: 10:00 per team per game; at zero the team forfeits the game',
       'Subs: 2 per match, one may come in mid-chapter for a disconnected player',
       'No-show grace: 15 minutes',
-      'The team that did not pick the campaign picks sides',
       'Boss spawns: random, shown in game',
       'Teams are locked once the match is live',
       'A half can be restarted',
     ]);
+  });
+
+  it('leaves the side rule out: the stage veto decides sides in a tournament', () => {
+    for (const sideRule of ['higher_seed_chooses', 'non_picker_chooses', 'coin'] as const) {
+      expect(rulesLines({ ...TEMPLATES['Standard Cup'], sideRule }).some((l) => /sides/i.test(l))).toBe(false);
+    }
   });
 
   it('says the technical time, the reconnect time and the subs (plan T5)', () => {
@@ -71,18 +75,18 @@ describe('rules lines (plan T6)', () => {
 
 describe('rules summary', () => {
   it('says the pauses, the side rule and the no-show grace in one line', () => {
-    expect(rulesSummary(TEMPLATES.PUG)).toBe('3 pauses of 120 s · coin toss for sides · 10 min no-show grace');
-    expect(rulesSummary(TEMPLATES['Standard Cup'])).toBe('3 pauses of 120 s · higher seed picks sides · 15 min no-show grace');
-    expect(rulesSummary(TEMPLATES['Casual Scrim'])).toBe('Unlimited pauses · non-picker picks sides · 15 min no-show grace');
+    expect(rulesSummary(TEMPLATES.PUG)).toBe('3 pauses of 120 s · scrim sides: coin toss · 10 min no-show grace');
+    expect(rulesSummary(TEMPLATES['Standard Cup'])).toBe('3 pauses of 120 s · scrim sides: higher seed picks · 15 min no-show grace');
+    expect(rulesSummary(TEMPLATES['Casual Scrim'])).toBe('Unlimited pauses · scrim sides: non-picker picks · 15 min no-show grace');
   });
 
   it('reads one pause, no pauses, and unlimited pauses with a length', () => {
     const one = { ...TEMPLATES.PUG, pause: { ...TEMPLATES.PUG.pause, limit: 1, seconds: null } };
-    expect(rulesSummary(one)).toBe('1 pause · coin toss for sides · 10 min no-show grace');
+    expect(rulesSummary(one)).toBe('1 pause · scrim sides: coin toss · 10 min no-show grace');
     const none = { ...TEMPLATES.PUG, pause: { ...TEMPLATES.PUG.pause, limit: 0 } };
-    expect(rulesSummary(none)).toBe('No pauses · coin toss for sides · 10 min no-show grace');
+    expect(rulesSummary(none)).toBe('No pauses · scrim sides: coin toss · 10 min no-show grace');
     const long = { ...TEMPLATES.PUG, pause: { ...TEMPLATES.PUG.pause, limit: null, seconds: 60 } };
-    expect(rulesSummary(long)).toBe('Unlimited pauses of 60 s · coin toss for sides · 10 min no-show grace');
+    expect(rulesSummary(long)).toBe('Unlimited pauses of 60 s · scrim sides: coin toss · 10 min no-show grace');
   });
 });
 

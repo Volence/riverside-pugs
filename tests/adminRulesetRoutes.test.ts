@@ -86,7 +86,7 @@ describe('the Rulesets desk routes', () => {
     expect((await call('POST', `/api/admin/rulesets/${id}/archive`, ADMIN)).statusCode).toBe(200);
     expect((await call('POST', `/api/admin/rulesets/${id}/unarchive`, ADMIN)).statusCode).toBe(200);
     const mine = (await call('GET', '/api/admin/rulesets', ADMIN)).json().rulesets.find((r: { id: number }) => r.id === id);
-    expect(mine).toMatchObject({ name: 'Thursday Scrims', basedOn: 'Casual Scrim', archived: false, summary: 'Unlimited pauses · non-picker picks sides · 20 min no-show grace' });
+    expect(mine).toMatchObject({ name: 'Thursday Scrims', basedOn: 'Casual Scrim', archived: false, summary: 'Unlimited pauses · scrim sides: non-picker picks · 20 min no-show grace' });
     expect((db.prepare('SELECT action FROM admin_actions ORDER BY id').all() as { action: string }[]).map((a) => a.action))
       .toEqual(['ruleset_create', 'ruleset_update', 'ruleset_archive', 'ruleset_unarchive']);
   });

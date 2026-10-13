@@ -72,8 +72,8 @@ export function RulesetForm({ ruleset, rules, busy, error, onSave, onCancel }: {
             {BOSSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </FormRow>
-        <FormRow label="Side choice" for={id('side')}>
-          <select id={id('side')} aria-label="Side choice" value={d.sideRule} onChange={(e) => set({ sideRule: val(e) as MatchRules['sideRule'] })}>
+        <FormRow label="Scrim side choice" help="Scrims only. A tournament sets who picks sides in each stage's veto settings." for={id('side')}>
+          <select id={id('side')} aria-label="Scrim side choice" value={d.sideRule} onChange={(e) => set({ sideRule: val(e) as MatchRules['sideRule'] })}>
             {SIDE_RULES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </FormRow>
