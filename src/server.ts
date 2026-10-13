@@ -142,6 +142,7 @@ import { modCallRoutes } from './routes/modCalls.js';
 import { serverChatRoutes } from './routes/serverChat.js';
 import { castRoutes } from './routes/cast.js';
 import { liveHudStore } from './cast/liveHud.js';
+import { NoTankWatch, noTankText } from './noTankWatch.js';
 import { castStudioRoutes } from './routes/castStudio.js';
 import { statsRoutes } from './routes/stats.js';
 import { weeklyRoutes } from './routes/weekly.js';
@@ -895,6 +896,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             ORDER BY m.id DESC LIMIT 1`,
         ).get(serverId) as { currentMap: string | null } | undefined)?.currentMap ?? null;
       };
+      // Per listener, so tests that build several servers do not share it.
+      const noTankWatch = new NoTankWatch();
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
@@ -1173,6 +1176,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           return;
         }
         if (ev.kind === 'match_end') {
+          noTankWatch.forget(ev.token);
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
           if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
           return;
@@ -1346,13 +1350,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             const hm = liveMatchRow(ev.token);
             const rip = hm ? roundInProgress(deps.db, hm.id) : null;
             liveHudStore.record(ev.token, ev.line, Date.now(), rip ? { ordinal: rip.ordinal, half: rip.half } : null);
+            const noTank = hm ? noTankWatch.hud(ev.token, ev.line.prog, ev.line.tank, Date.now()) : null;
+            if (hm && noTank) publishAdminEvent({ kind: 'problem', matchId: hm.id, text: noTankText(hm.id, noTank), link: { label: 'Live board', path: `/admin/live?live=${hm.id}` } });
             return;
           }
-          else if (ev.kind === 'live_event') recordLiveEvent(deps.db, ev.token, ev);
+          else if (ev.kind === 'live_event') {
+            recordLiveEvent(deps.db, ev.token, ev);
+            noTankWatch.event(ev.token, ev.event);
+          }
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
           else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);
           else if (ev.kind === 'round_start') {
             recordRoundStart(deps.db, ev.token, ev);
+            noTankWatch.roundStart(ev.token, ev.map, ev.half);
             // A replayed half re-sends ROUND_START, and its per-round stats
             // and markers belong to the PREVIOUS attempt, so clear them now
             // that the round row (and its ordinal) is settled.
