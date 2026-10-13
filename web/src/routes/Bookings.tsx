@@ -184,7 +184,7 @@ export function Bookings({ session }: { session: Session }) {
   }
   return (
     <main class="page page--profile bookingpage">
-      <CompeteTabs active="bookings" />
+      <CompeteTabs active="bookings" session={session} />
       <PageHeader eyebrow="Competitive" title="Bookings" />
       {error && <p class="error" role="alert">{error}</p>}
       {loadFailed && <p class="error" role="alert">Could not load your bookings. <button class="btn btn--ghost btn--sm" onClick={load}>Try again</button></p>}

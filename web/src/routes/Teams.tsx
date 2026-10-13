@@ -90,7 +90,7 @@ export function Teams({ session }: { session: Session }) {
 
   return (
     <main class="page page--profile teampage">
-      <CompeteTabs active="teams" />
+      <CompeteTabs active="teams" session={session} />
       <PageHeader eyebrow="Competitive" title="Teams" aside={mine?.canCreate && !showForm
         ? <button class="btn btn--ghost" onClick={() => setCreating(true)}>Start a team</button>
         : undefined} />

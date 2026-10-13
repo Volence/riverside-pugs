@@ -35,8 +35,11 @@ export interface Me {
   /** Show Compete: the competitive switch lets this viewer in. */
   teams?: boolean;
   /** Where Compete lands: Events while a tournament is open or about to
-   *  start, Scrims otherwise. Null or absent reads as Scrims. */
+   *  start, or when the Scrims tab is hidden; Scrims otherwise. Null or
+   *  absent reads as Scrims. */
   competeHome?: 'events' | 'scrims' | null;
+  /** Show the Scrims tab: the scrims switch lets this viewer in (or staff). */
+  scrims?: boolean;
   /** The teams this viewer is on, for the nav's Your team link. Empty while
    *  the switch keeps them out. */
   myTeams?: { slug: string; name: string }[];

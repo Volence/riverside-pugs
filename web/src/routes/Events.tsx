@@ -45,7 +45,7 @@ export function Events({ session }: { session: Session }) {
 
   const header = <PageHeader eyebrow="Competitive" title="Events" />;
   if (closed) return <main class="page page--list eventspage">{header}<Empty>Events are not open yet.</Empty></main>;
-  const head = <><CompeteTabs active="events" />{header}</>;
+  const head = <><CompeteTabs active="events" session={session} />{header}</>;
   if (failed) return <main class="page page--list eventspage">{head}<p class="error" role="alert">Could not load events. Try again in a moment.</p></main>;
   if (!events) return <main class="page page--list eventspage">{head}</main>;
   const upcoming = events.filter((e) => !OVER.has(e.status));

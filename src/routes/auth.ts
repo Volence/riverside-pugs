@@ -13,7 +13,7 @@ import { publishAdminEvent } from '../adminFeed.js';
 import { activeBan } from '../admin/players.js';
 import { resolveAlias } from '../aliases.js';
 import { MERGED_MESSAGE, inGoodStanding } from '../standing.js';
-import { competitiveAccess } from '../teams/access.js';
+import { competitiveAccess, scrimsAccess } from '../teams/access.js';
 import { teamChipsOf } from '../teams/teams.js';
 import { tournamentOpen } from '../events/events.js';
 
@@ -122,7 +122,12 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       player = getPlayer(db, steamid)!;
     }
     // The competitive switch, read per request: whether the nav shows Compete.
-    const competitive = competitiveAccess(db, inGoodStanding(db, player.steamid) ? player.steamid : null);
+    const good = inGoodStanding(db, player.steamid);
+    const competitive = competitiveAccess(db, good ? player.steamid : null);
+    // The Scrims tab: the scrims switch on top of that, or staff in good
+    // standing, who may always open the board (src/routes/scrims.ts).
+    const scrims = competitive && (scrimsAccess(db, good ? player.steamid : null)
+      || (good && (player.is_admin === 1 || player.is_mod === 1)));
     return {
       steamid: player.steamid,
       name: player.name,
@@ -134,9 +139,12 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       // Whether to show Compete in the nav: the competitive switch, read per request.
       teams: competitive,
       // Where Compete lands: Events while a tournament is open or about to
-      // start, Scrims otherwise. Read with every /api/me, which the site
-      // re-reads on each websocket nudge, so no page fetches events for it.
-      competeHome: competitive ? (tournamentOpen(db) ? 'events' : 'scrims') : null,
+      // start, or for a viewer without the Scrims tab; Scrims otherwise.
+      // Read with every /api/me, which the site re-reads on each websocket
+      // nudge, so no page fetches events for it.
+      competeHome: competitive ? (tournamentOpen(db) || !scrims ? 'events' : 'scrims') : null,
+      // Whether the Compete tabs show Scrims.
+      scrims,
       // The nav's Your team link: the teams they are on, one per team.
       myTeams: competitive ? teamChipsOf(db, player.steamid).map((t) => ({ slug: t.slug, name: t.name })) : [],
       discordEnabled: config.discord !== null,

@@ -2,6 +2,8 @@
  *  section as one Compete item; this strip, at the top of each list page,
  *  moves between them. Each tab is a real link to its route, so deep links,
  *  Discord links and the back button all keep working. */
+import type { Session } from '../hooks/useLiveState';
+
 export type CompeteTab = 'scrims' | 'bookings' | 'teams' | 'events';
 
 /** [tab, list page, label, prefix of its detail pages]. */
@@ -23,10 +25,15 @@ export function competeTabFor(path: string): CompeteTab | null {
   return null;
 }
 
-export function CompeteTabs({ active }: { active: CompeteTab }) {
+/** Scrims shows only when /api/me says the scrims switch lets this viewer
+ *  in (`scrims`), so it stays hidden from signed-out visitors too; the page
+ *  itself still answers anyone who follows a link to it. */
+export function CompeteTabs({ active, session }: { active: CompeteTab; session: Session }) {
+  const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
+  const tabs = me?.scrims ? TABS : TABS.filter(([key]) => key !== 'scrims');
   return (
     <nav class="tabs competetabs" aria-label="Compete">
-      {TABS.map(([key, href, label]) => (
+      {tabs.map(([key, href, label]) => (
         <a
           key={key}
           href={href}

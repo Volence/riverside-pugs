@@ -29,6 +29,7 @@ beforeEach(() => {
   const ins = db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, ?, 'active')");
   P.forEach((id, i) => ins.run(id, `p${i}`));
   setSetting(db, 'competitive_enabled', 'everyone');
+  setSetting(db, 'scrims_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll']));
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: 'h', port: 27000 + n.length, rconPort: 1, rconPassword: 'x' });
@@ -120,6 +121,18 @@ describe('ScrimPoster', () => {
     await poster.tickNow();
     expect(cardRow(id)).toBeUndefined();
     expect(t.sends).toBe(0);
+  });
+
+  it('sends no new card while the scrims switch is below everyone, even with competitive open to everyone', async () => {
+    setSetting(db, 'discord_scrims_channel_id', CHANNEL);
+    const id = postId();
+    setSetting(db, 'scrims_enabled', 'admins');
+    await poster.tickNow();
+    expect(cardRow(id)).toBeUndefined();
+    expect(t.sends).toBe(0);
+    setSetting(db, 'scrims_enabled', 'everyone');
+    await poster.tickNow();
+    expect(t.sends).toBe(1);
   });
 
   it('sends no new card while competitive play is not public (admins or off), but keeps updating and closing one already posted', async () => {

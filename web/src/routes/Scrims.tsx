@@ -521,7 +521,7 @@ export function Scrims({ session }: { session: Session }) {
 
   return (
     <main class="page page--profile bookingpage">
-      <CompeteTabs active="scrims" />
+      <CompeteTabs active="scrims" session={session} />
       <PageHeader eyebrow="Competitive" title="Scrims" />
       {error && <p class="error" role="alert">{error}</p>}
 

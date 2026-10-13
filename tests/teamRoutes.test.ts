@@ -35,6 +35,7 @@ beforeEach(async () => {
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
   P.forEach((id, i) => db.prepare('UPDATE players SET name = ? WHERE steamid = ?').run(`player${i}`, id));
   db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'competitive_enabled'").run();
+  db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'scrims_enabled'").run();
 });
 afterEach(async () => { await app.close(); });
 
@@ -61,6 +62,18 @@ describe('the switch', () => {
     expect((await call('GET', '/api/me', P[0])).json().teams).toBe(true);
     db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
     expect((await call('GET', '/api/me', P[0])).json().teams).toBe(false);
+  });
+
+  it('/api/me hides Scrims behind its own switch and then lands Compete on Events; staff keep the tab', async () => {
+    db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'scrims_enabled'").run();
+    const me = (await call('GET', '/api/me', P[0])).json();
+    expect(me.teams).toBe(true);
+    expect(me.scrims).toBe(false);
+    expect(me.competeHome).toBe('events');
+    expect((await call('GET', '/api/me', ADMIN)).json().scrims).toBe(true);
+    expect((await call('GET', '/api/me', MOD)).json().scrims).toBe(true);
+    db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'scrims_enabled'").run();
+    expect((await call('GET', '/api/me', P[0])).json()).toMatchObject({ scrims: true, competeHome: 'scrims' });
   });
 
   it('/api/me says where Compete lands: Scrims, or Events once a tournament is near', async () => {
@@ -314,6 +327,14 @@ describe('scrims', () => {
     const slug = await create(P[0], 'Rats', 'RR');
     db.prepare("UPDATE settings SET value = 'off' WHERE key = 'competitive_enabled'").run();
     expect((await call('GET', `/api/teams/${slug}/scrims`, P[0])).statusCode).toBe(404);
+  });
+
+  it('the scrims switch hides the route from a member, never from staff', async () => {
+    const slug = await create(P[0], 'Rats', 'RR');
+    db.prepare("UPDATE settings SET value = 'admins' WHERE key = 'scrims_enabled'").run();
+    expect((await call('GET', `/api/teams/${slug}/scrims`, P[0])).statusCode).toBe(404);
+    expect((await call('GET', `/api/teams/${slug}/scrims`, ADMIN)).statusCode).toBe(200);
+    expect((await call('GET', `/api/teams/${slug}/scrims`, MOD)).statusCode).toBe(200);
   });
 
   // Plan 2: the reliability record rides on the team view for its members and
