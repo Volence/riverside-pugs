@@ -25,11 +25,6 @@ export function chaptersLabel(chapters: number | null): string {
   return chapters === null ? 'Every chapter but the finale' : `${chapters} chapter${chapters === 1 ? '' : 's'}`;
 }
 
-const SIDE_RULE: Record<MatchRules['sideRule'], string> = {
-  higher_seed_chooses: 'Higher seed picks sides',
-  non_picker_chooses: 'The team that did not pick the campaign picks sides',
-  coin: 'Sides by coin toss',
-};
 const BOSSES: Record<MatchRules['bosses'], string> = {
   random_published: 'Boss spawns: random, shown in game',
   fixed: 'Boss spawns: fixed',
@@ -37,7 +32,9 @@ const BOSSES: Record<MatchRules['bosses'], string> = {
 };
 
 /** A ruleset as the lines a player reads. `rated` is left out: a tournament
- *  match is never rated (rulesForKind). */
+ *  match is never rated (rulesForKind). So is the side rule: in a tournament
+ *  the stage's veto decides sides (veto.ts) and the veto summary says how, so
+ *  the ruleset's sideRule (bookings only) would contradict it. */
 export function rulesLines(r: MatchRules): string[] {
   const lines: string[] = [];
   lines.push(r.pause.limit === null
@@ -54,7 +51,6 @@ export function rulesLines(r: MatchRules): string[] {
     : `Subs: ${r.subs.perMatch} per match, between chapters`);
   if (r.series.carryScore) lines.push("Best of 2: game 2 starts with game 1's score, so later chapters follow the running total");
   lines.push(`No-show grace: ${r.noShowGraceMinutes} minutes`);
-  lines.push(SIDE_RULE[r.sideRule]);
   lines.push(BOSSES[r.bosses]);
   if (r.teamLock) lines.push('Teams are locked once the match is live');
   if (r.restartHalf.allowed) lines.push(r.restartHalf.lockAfterDamage ? 'A half can be restarted until damage is done' : 'A half can be restarted');
@@ -63,13 +59,14 @@ export function rulesLines(r: MatchRules): string[] {
 }
 
 const SIDE_SHORT: Record<MatchRules['sideRule'], string> = {
-  higher_seed_chooses: 'higher seed picks sides',
-  non_picker_chooses: 'non-picker picks sides',
-  coin: 'coin toss for sides',
+  higher_seed_chooses: 'scrim sides: higher seed picks',
+  non_picker_chooses: 'scrim sides: non-picker picks',
+  coin: 'scrim sides: coin toss',
 };
 
 /** A ruleset in one line, for a picker's help text and the Rulesets desk:
- *  the pauses, how sides are chosen and the no-show grace. */
+ *  the pauses, how scrim sides are chosen (a tournament's come from its
+ *  stage veto) and the no-show grace. */
 export function rulesSummary(r: MatchRules): string {
   const each = r.pause.seconds === null ? '' : ` of ${r.pause.seconds} s`;
   const pauses = r.pause.limit === null

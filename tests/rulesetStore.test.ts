@@ -84,7 +84,7 @@ describe('the ruleset list', () => {
     expect(list.map((r) => [r.name, r.template, r.readOnly, r.archived, r.basedOn])).toEqual([
       ['PUG', true, true, false, null], ['Standard Cup', true, false, false, null], ['Casual Scrim', true, false, false, null],
     ]);
-    expect(list[1].summary).toBe('3 pauses of 120 s · higher seed picks sides · 15 min no-show grace');
+    expect(list[1].summary).toBe('3 pauses of 120 s · scrim sides: higher seed picks · 15 min no-show grace');
     expect(list[1].rules).toEqual(TEMPLATES['Standard Cup']);
     // The fixture's announced event has two stages on Standard Cup: one event.
     expect(list[1].inUse).toEqual({ bookings: 0, events: 1 });
@@ -217,8 +217,8 @@ describe('picker options', () => {
     const { id } = okOf(createRuleset(db, { by: ADMIN, copyFrom: idOf('Casual Scrim'), name: 'Gone Soon' }));
     okOf(setRulesetArchived(db, { by: ADMIN, id, archived: true }));
     expect(rulesetOptions(db)).toEqual([
-      { id: idOf('Standard Cup'), name: 'Standard Cup', summary: '3 pauses of 120 s · higher seed picks sides · 15 min no-show grace' },
-      { id: idOf('Casual Scrim'), name: 'Casual Scrim', summary: 'Unlimited pauses · non-picker picks sides · 15 min no-show grace' },
+      { id: idOf('Standard Cup'), name: 'Standard Cup', summary: '3 pauses of 120 s · scrim sides: higher seed picks · 15 min no-show grace' },
+      { id: idOf('Casual Scrim'), name: 'Casual Scrim', summary: 'Unlimited pauses · scrim sides: non-picker picks · 15 min no-show grace' },
     ]);
   });
 });

@@ -107,7 +107,7 @@ describe('GET /api/events/:slug', () => {
     const mine = await get(`/api/events/${draft.slug}`, ADMIN);
     expect(mine.statusCode).toBe(200);
     // A draft has no snapshot yet: its rules are read from the chosen ruleset.
-    expect(mine.json().stages[0].rules).toContain('Higher seed picks sides');
+    expect(mine.json().stages[0].rules).toContain('No-show grace: 15 minutes');
   });
 
   it('shows a cancelled event with its reason', async () => {
