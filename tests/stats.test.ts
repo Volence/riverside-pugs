@@ -229,6 +229,33 @@ describe('stats routes', () => {
     expect(body.rows.every((r: any) => r.games === 3 && r.ranked === true)).toBe(true);
   });
 
+  it('leaderboard: a banned player is left off every board until the ban ends', async () => {
+    const banned = IDS[4];
+    const m = playCompletedMatch(db, 'b');
+    seedStats(db, m, banned, { skeets: 9 });
+    db.prepare("INSERT INTO endorsements (match_id, from_id, to_id, kind, created_at) VALUES (?, ?, ?, 'clutch', '2026-10-01T00:00:00.000Z')")
+      .run(m, IDS[5], banned);
+    banPlayer(db, banned, ME, 'cheating', null);
+
+    const boards = async () => ({
+      sr: (await app.inject({ method: 'GET', url: '/api/leaderboard' })).json().rows,
+      stat: (await app.inject({ method: 'GET', url: '/api/leaderboard/stat/skeets' })).json().rows,
+      endorse: (await app.inject({ method: 'GET', url: '/api/leaderboard/endorsements' })).json().rows,
+    });
+    let b = await boards();
+    expect(b.sr.map((r: any) => r.steamid)).not.toContain(banned);
+    expect(b.sr).toHaveLength(7);
+    expect(b.stat.map((r: any) => r.steamid)).not.toContain(banned);
+    expect(b.endorse.map((r: any) => r.steamid)).not.toContain(banned);
+
+    // Lifted: back on, with the record intact.
+    db.prepare("UPDATE bans SET lifted_at = '2026-10-02T00:00:00.000Z', lifted_by = ? WHERE player_id = ?").run(ME, banned);
+    b = await boards();
+    expect(b.sr.find((r: any) => r.steamid === banned)?.wins).toBe(1);
+    expect(b.stat.map((r: any) => r.steamid)).toContain(banned);
+    expect(b.endorse.map((r: any) => r.steamid)).toContain(banned);
+  });
+
   it('leaderboard: the rated-match count ignores another season', async () => {
     playCompletedMatch(db, 'b');
     db.prepare("INSERT INTO seasons (name) VALUES ('old')").run();
