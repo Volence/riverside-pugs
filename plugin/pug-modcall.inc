@@ -3,7 +3,7 @@
 // Spec: docs/superpowers/specs/2026-09-24-mod-call-design.md, Part 1
 // ("Player experience" and "The log line").
 //
-// A player types /mod (or /calladmin, or the ! forms), picks a reason and who
+// A player types /mod (or /mods, /calladmin, or the ! forms), picks a reason and who
 // it is about from two menus, optionally types details, and the plugin writes
 // one signed PUGCALL line. The web side (src/logParse.ts) turns that into a
 // card in the mod channel. The plugin knows only SteamIDs; names and Discord
@@ -47,6 +47,8 @@ void ModCall_Init()
 	g_smCooldown = new StringMap();
 	RegConsoleCmd("sm_mod", Cmd_Mod, "Call a moderator. Only mods see it.");
 	RegConsoleCmd("sm_calladmin", Cmd_Mod, "Call a moderator. Only mods see it.");
+	// Players type "!mods" too (three times on 2026-10-14, none of them filed).
+	RegConsoleCmd("sm_mods", Cmd_Mod, "Call a moderator. Only mods see it.");
 }
 
 /** Forget any call in progress. Sends nothing. The menu itself is left to
@@ -133,6 +135,7 @@ public Action OnClientSayCommand(int client, const char[] command, const char[] 
 	}
 
 	int rest = ModCall_TriggerEnd(text, "!mod");
+	if (rest < 0) rest = ModCall_TriggerEnd(text, "!mods");
 	if (rest < 0) rest = ModCall_TriggerEnd(text, "!calladmin");
 	if (rest < 0) return Plugin_Continue;
 
