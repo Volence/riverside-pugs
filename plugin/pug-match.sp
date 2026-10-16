@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.34"
+#define PLUGIN_VERSION "0.3.35"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -2747,7 +2747,12 @@ public Action Timer_EndKick(Handle timer)
  *    l4d_vs_hospital05_rooftop vs l4d_vs_smalltown01_caves    different */
 bool SameCampaign(const char[] mapA, const char[] mapB)
 {
-	int a = (StrContains(mapA, "l4d_", false) == 0) ? 4 : 0;
+	// Crash Center: our garage.txt chains Dead Center's c1m maps into Crash
+	// Course's l4d_garage01_alleys, so the game plays them as one mission.
+	// Without this a self-started match on Hotel read Alleys as a new campaign
+	// and ended after Mall (match 698, 2026-10-16).
+	if (IsCrashCenterMap(mapA) && IsCrashCenterMap(mapB)) return true;
+	int a =(StrContains(mapA, "l4d_", false) == 0) ? 4 : 0;
 	int b = (StrContains(mapB, "l4d_", false) == 0) ? 4 : 0;
 	int ca = L4D2CampaignLen(mapA, a);
 	int cb = L4D2CampaignLen(mapB, b);
@@ -2770,6 +2775,14 @@ bool SameCampaign(const char[] mapA, const char[] mapB)
 		i++;
 	}
 	return mapA[a + i] == mapB[b + i];
+}
+
+/** A map of the Crash Center chain: Dead Center's c1m<N> maps or Crash
+ *  Course's l4d_garage01 (Alleys). c10m and up are other campaigns. */
+bool IsCrashCenterMap(const char[] map)
+{
+	if (StrContains(map, "l4d_garage01", false) == 0) return true;
+	return L4D2CampaignLen(map, 0) == 2 && map[1] == '1';
 }
 
 /** Length of the c<digits> part when map[start] begins an L4D2 name
