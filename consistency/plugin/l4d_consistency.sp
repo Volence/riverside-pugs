@@ -51,7 +51,7 @@ int g_iNotInTable;
 public Plugin myinfo =
 {
 	name = "L4D1 File Consistency",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Forces the generated file list for consistency checking and marks signon drops",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com",

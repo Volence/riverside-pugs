@@ -4,7 +4,7 @@
 #define SMEXT_CONF_NAME			"L4D1 File Consistency"
 #define SMEXT_CONF_DESCRIPTION	"Exposes IVEngineServer::ForceExactFile, which L4D1's game DLL never calls"
 #define SMEXT_CONF_VERSION		"0.1.0"
-#define SMEXT_CONF_AUTHOR		"Riverside"
+#define SMEXT_CONF_AUTHOR		"Malevolence"
 #define SMEXT_CONF_URL			"https://riversidepug.com"
 #define SMEXT_CONF_LOGTAG		"CONSIST"
 #define SMEXT_CONF_LICENSE		"GPL"

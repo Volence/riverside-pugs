@@ -26,7 +26,7 @@ float g_firstShot, g_lastShot;
 // delay to set, or a marker: -1 leave the cvar as found, -2 unload the plugin first
 float g_plan[] = { -1.0, 0.075, 0.1, 0.125, 0.2, -2.0 };
 
-public Plugin myinfo = { name = "pistolrig (test rig)", author = "Riverside", description = "dual pistol fire rate rig", version = "0", url = "" };
+public Plugin myinfo = { name = "pistolrig (test rig)", author = "Malevolence", description = "dual pistol fire rate rig", version = "0", url = "" };
 
 public void OnPluginStart()
 {

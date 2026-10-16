@@ -179,7 +179,7 @@ int  g_iHopDownSeq[MAXPLAYERS + 1];
 
 public Plugin myinfo = {
 	name = "L4D1 Input Stats",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Ships input burst timing for macro detection. Captures only; never alters input.",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com",

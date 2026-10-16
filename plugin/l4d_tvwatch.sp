@@ -74,7 +74,7 @@ char g_sSlotName[TVWATCH_MAX_SLOT][128];
 
 public Plugin myinfo = {
 	name = "L4D1 SourceTV Watch",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Reports SourceTV spectator connects/disconnects and start/stop to the PUG site.",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com",

@@ -74,7 +74,7 @@ float g_placeVel[3];
 
 public Plugin myinfo =
 {
-	name = "skyrig (test rig)", author = "Riverside", description = "bot-driven test rig for l4d_skypounce",
+	name = "skyrig (test rig)", author = "Malevolence", description = "bot-driven test rig for l4d_skypounce",
 	version = "0", url = ""
 };
 

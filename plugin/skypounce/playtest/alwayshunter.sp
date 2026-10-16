@@ -13,7 +13,7 @@
 #define TEAM_INFECTED 3
 #define ZC_HUNTER 3
 
-public Plugin myinfo = { name = "alwayshunter (playtest)", author = "Riverside", description = "human infected ghosts become hunters", version = "0", url = "" };
+public Plugin myinfo = { name = "alwayshunter (playtest)", author = "Malevolence", description = "human infected ghosts become hunters", version = "0", url = "" };
 
 public void OnPluginStart()
 {

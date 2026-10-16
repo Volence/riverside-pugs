@@ -132,7 +132,7 @@ static const char g_sCmdWords[][] = { "nextmap", "stay", "end", "extend", "addca
 
 public Plugin myinfo = {
 	name = "L4D1 Booked Server",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Holds a booked server's private passwords across map changes.",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com",

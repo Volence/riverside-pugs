@@ -86,7 +86,7 @@ char g_log[PLATFORM_MAX_PATH];
 public Plugin myinfo =
 {
 	name = "L4D1 sky pounce block",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Stops hunters chaining pounces along the sky ceiling",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com"
