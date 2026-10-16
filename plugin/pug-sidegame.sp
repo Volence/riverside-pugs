@@ -86,7 +86,7 @@
 
 public Plugin myinfo = {
 	name = "PUG Side Game",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Queue side games (2v2/3v3) on a free box while the PUG queue fills",
 	version = PLUGIN_VERSION,
 	url = "",

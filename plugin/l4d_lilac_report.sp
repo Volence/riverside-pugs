@@ -97,7 +97,7 @@ float g_fAimlockStoredAt[MAXPLAYERS + 1] = { -1.0, ... };
 
 public Plugin myinfo = {
 	name = "L4D1 LilAC Reporter",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Reports Little Anti-Cheat detections to the PUG site. Never acts on a player.",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com",

@@ -62,7 +62,7 @@ int g_iTicks;
 
 public Plugin myinfo = {
 	name = "L4D1 Cvar Watch",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Reports client settings that matter for fairness to the PUG site, and keeps cpu_level 0 from readying up.",
 	version = PLUGIN_VERSION,
 	url = "https://riversidepug.com",

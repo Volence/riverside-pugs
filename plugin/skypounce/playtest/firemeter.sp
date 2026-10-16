@@ -23,7 +23,7 @@ int g_autoCmds[MAXPLAYERS + 1];
 int g_autoShots[MAXPLAYERS + 1];
 float g_autoFirst[MAXPLAYERS + 1], g_autoLast[MAXPLAYERS + 1];
 
-public Plugin myinfo = { name = "firemeter (playtest)", author = "Riverside", description = "reports real shots per second", version = "0", url = "" };
+public Plugin myinfo = { name = "firemeter (playtest)", author = "Malevolence", description = "reports real shots per second", version = "0", url = "" };
 
 public void OnPluginStart()
 {

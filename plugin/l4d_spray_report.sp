@@ -34,7 +34,7 @@ ConVar g_cvEnabled;
 public Plugin myinfo =
 {
 	name = "L4D Spray Report",
-	author = "Riverside",
+	author = "Malevolence",
 	description = "Reports crash spray attempts caught by spray_exploit_fixer to the PUG site",
 	version = PLUGIN_VERSION,
 	url = ""
