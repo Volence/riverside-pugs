@@ -310,6 +310,18 @@ describe('SelfStartedMatches', () => {
     await vi.waitFor(() => expect(setIds.length).toBe(1));
   });
 
+  // Match 698 (2026-10-16): started in game on Hotel, filed as Dead Center,
+  // while the game played it as Crash Center into Alleys.
+  it('files a match started in game on a Dead Center map as Crash Center', async () => {
+    adopter.handle(create(TOKEN, 2, 'c1m1_hotel'));
+    adopter.handle(roster(ids(2)[0], 'a', 'Alice'));
+    adopter.handle(roster(ids(2)[1], 'b', 'Bob'));
+    adopter.handle(end(2));
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(db.prepare('SELECT campaign FROM matches WHERE token = ?').get(TOKEN)).toEqual({ campaign: 'crash_center' });
+  });
+
   it('refuses an unknown map rather than filing it under a wrong campaign', async () => {
     adopter.handle(create(TOKEN, 2, 'de_dust2'));
     adopter.handle(roster(ids(2)[0], 'a', 'Alice'));

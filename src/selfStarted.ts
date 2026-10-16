@@ -281,7 +281,12 @@ export class SelfStartedMatches {
       return;
     }
 
-    const campaign = resolveCampaignForMap(this.deps.db, p.map);
+    // A Dead Center map started in game is Crash Center: our garage.txt
+    // claims every c1m map, so the game chains Mall into Crash Course's
+    // Alleys whatever the site would call it. Only a site-started match can be
+    // Dead Center, because only the site stops it after Mall.
+    const resolved = resolveCampaignForMap(this.deps.db, p.map);
+    const campaign = resolved === 'dead_center' ? 'crash_center' : resolved;
     if (!campaign) {
       // Better to drop the match than to file a custom or L4D2 map under a
       // real campaign and pollute that campaign's history.
