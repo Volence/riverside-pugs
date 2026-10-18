@@ -365,9 +365,18 @@ export function scanEndedMatches(
       }
     })();
     // Other once-per-ended-match checks (the evader fingerprint), after this
-    // match's own signatures and outside their transaction. The hook owns its
-    // errors: runFingerprintCheck never throws.
-    afterMatch?.(id);
+    // match's own signatures and outside their transaction. runFingerprintCheck
+    // never throws, but a later hook might: this match is already claimed, so
+    // a throw here would lose the flags in `out` for good (and stop the
+    // matches after it). Logged with the match id only, never an address.
+    try {
+      afterMatch?.(id);
+    } catch (err) {
+      // The message only, with anything shaped like an IPv4 address masked:
+      // no address ever reaches a log line.
+      const msg = (err instanceof Error ? err.message : String(err)).replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '<address>');
+      console.error(`[input] after-match hook failed for match ${id}: ${msg}`);
+    }
   }
   return out;
 }
