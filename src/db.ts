@@ -1299,6 +1299,18 @@ CREATE TABLE IF NOT EXISTS input_stalls (
 );
 CREATE INDEX IF NOT EXISTS input_stalls_match ON input_stalls(match_id, steamid);
 
+-- SI kills (l4d_inputstats 0.4.0): one row per human survivor's kill of a
+-- human SI in a live match, the raw material of the aim rules
+-- (src/aimRules.ts). Kept whole so a rule can be recalibrated and re-run
+-- over history. pre and back are degrees; back -1 is unknown.
+CREATE TABLE IF NOT EXISTS si_kills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER, server_id INTEGER, steamid TEXT NOT NULL,
+  weapon TEXT NOT NULL, headshot INTEGER NOT NULL, dist INTEGER NOT NULL,
+  pre REAL NOT NULL, back REAL NOT NULL, victim_class TEXT NOT NULL, at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS si_kills_match ON si_kills(match_id, steamid);
+
 -- Matches whose match-level input signatures (autobhop) have been run, once,
 -- after the match ended (scanEndedMatches in src/inputBursts.ts).
 CREATE TABLE IF NOT EXISTS input_match_scans (

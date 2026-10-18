@@ -1,3 +1,4 @@
+import type { DB } from './db.js';
 import type { LilacReason } from './logParse.js';
 import type { FlagSeverity } from './integrityFlags.js';
 
@@ -38,4 +39,27 @@ export function isBigSnap(kind: string, reason: LilacReason | undefined): boolea
 export function lilacSeverity(kind: string, banned: boolean, reason?: LilacReason): FlagSeverity {
   if (banned) return 'banned';
   return isBigSnap(kind, reason) ? 'high' : 'suspected';
+}
+
+export interface SiKillInput {
+  matchId: number | null;
+  serverId: number | null;
+  steamid: string;
+  weapon: string;
+  headshot: boolean;
+  dist: number;
+  pre: number;
+  back: number;
+  victimClass: string;
+}
+
+/** Store one SI kill. Rules A and C read these once the match is over
+ *  (scanAimMatches), never per kill: a mid-match prefix is not what they
+ *  were calibrated on. */
+export function recordSiKill(db: DB, k: SiKillInput, now = new Date()): number {
+  const info = db.prepare(
+    `INSERT INTO si_kills (match_id, server_id, steamid, weapon, headshot, dist, pre, back, victim_class, at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(k.matchId, k.serverId, k.steamid, k.weapon, k.headshot ? 1 : 0, k.dist, k.pre, k.back, k.victimClass, now.toISOString());
+  return Number(info.lastInsertRowid);
 }
