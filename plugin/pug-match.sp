@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.35"
+#define PLUGIN_VERSION "0.3.36"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -3431,6 +3431,7 @@ int g_iWitchDmg[WITCH_SLOTS][MAX_ROSTER];
 int g_iWitchStartler[WITCH_SLOTS];        // roster slot, -1 = not startled yet
 float g_fWitchStartledAt[WITCH_SLOTS];
 int g_iWitchIncaps[WITCH_SLOTS];
+int g_iWitchHealth[WITCH_SLOTS];          // m_iHealth after the last infected_hurt, 0 = not read yet
 
 /** A half going live: forget last half's witches, then take in any already
  *  standing (a witch spawned during ready-up is still crownable this half). */
@@ -3457,6 +3458,7 @@ int WitchSlot(int entity, bool create)
 		g_iWitchStartler[w] = -1;
 		g_fWitchStartledAt[w] = 0.0;
 		g_iWitchIncaps[w] = 0;
+		g_iWitchHealth[w] = GetEntProp(entity, Prop_Data, "m_iHealth");
 		return w;
 	}
 	return -1;
@@ -3476,13 +3478,27 @@ public void Event_InfectedHurt(Event event, const char[] name, bool dontBroadcas
 	if (!StatsActive()) return;
 	int w = WitchSlot(event.GetInt("entityid"), false);
 	if (w == -1) return;
+	// Credit the health she actually lost, not the event's amount. amount is
+	// the hit's float damage truncated, but CBaseCombatCharacter takes
+	// floorf(damage) and pays the fractions out of m_flDamageAccumulator a
+	// whole point at a time, so summed amounts came up short (a solo kill
+	// read 994 to 999). Raised after the damage is applied, so the drop to
+	// max(health, 0) also leaves out a killing blow's overkill. Every hit
+	// moves the baseline, counted or not, so the next hit's drop is its own.
+	int health = GetEntProp(event.GetInt("entityid"), Prop_Data, "m_iHealth");
+	int before = g_iWitchHealth[w];
+	g_iWitchHealth[w] = health;
+	int amount = event.GetInt("amount");
+	// At most one accumulator point over amount; anything more is damage no
+	// infected_hurt reported, which this hit did not do.
+	if (before > 0)
+	{
+		int lost = before - (health > 0 ? health : 0);
+		amount = lost < amount + 1 ? lost : amount + 1;
+	}
+	else if (health < 0) amount += health;
 	int attacker = GetClientOfUserId(event.GetInt("attacker"));
 	if (attacker < 1 || attacker > MaxClients || g_iClientRoster[attacker] < 0 || GetClientTeam(attacker) != TEAM_SURVIVOR) return;
-	int amount = event.GetInt("amount");
-	// Raised after the damage is applied: a killing blow's overkill (a crown
-	// shotgun blast does far more than her health) is not damage done.
-	int health = GetEntProp(event.GetInt("entityid"), Prop_Data, "m_iHealth");
-	if (health < 0) amount += health;
 	if (amount > 0) g_iWitchDmg[w][g_iClientRoster[attacker]] += amount;
 }
 
