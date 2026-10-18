@@ -42,7 +42,8 @@ export type AdminEvent =
   // evidence to look at, not a verdict.
   // Little Anti-Cheat raised a flag on a player. Posted once per player per
   // cheat per match; LilAC fires repeatedly while a cheat looks active.
-  | { kind: 'lilac_flag'; steamid: string; cheat: string; banned: boolean; matchId: number | null }
+  // bigSnap: rule B (src/aimRules.ts) marked it high, and this is the snap.
+  | { kind: 'lilac_flag'; steamid: string; cheat: string; banned: boolean; matchId: number | null; bigSnap?: number }
   // A player uploaded or sprayed a crash spray (src/logParse.ts spray_exploit).
   // Already blocked on the server; posted so staff know someone tried. Once
   // per player per spray file per hour.

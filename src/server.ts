@@ -88,6 +88,7 @@ import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
+import { lilacSeverity } from './aimRules.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap, scanEndedMatches } from './inputBursts.js';
@@ -924,18 +925,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             const serverId = serverOf(source, meta);
             const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
             const kind = cheatName(ev.cheat);
+            // Rule B (src/aimRules.ts): an aimbot flag with a 60+ degree
+            // aim-snap is stored high. Always on.
+            const severity = lilacSeverity(kind, ev.banned, ev.reason);
             // Stored whether or not the player is in a live match: unlike an
             // input burst, a LilAC flag is worth keeping in warmup or on a
             // spectator, and there is one row per event rather than thousands.
             const stored = recordIntegrityFlag(deps.db, {
               matchId, serverId, steamid: ev.steamid, source: 'lilac',
-              kind, severity: ev.banned ? 'banned' : 'suspected',
+              kind, severity,
               detail: ev.reason ? lilacReasonDetail(ev.reason) : '',
             });
             if (stored) {
               publishAdminEvent({
                 kind: 'lilac_flag', steamid: ev.steamid, cheat: kind,
                 banned: ev.banned, matchId,
+                ...(severity === 'high' ? { bigSnap: ev.reason!.ldelta! } : {}),
               });
             }
           } catch (err) {
