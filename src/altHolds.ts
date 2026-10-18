@@ -190,11 +190,18 @@ export function liftAltHold(db: DB, holdId: number, by: string, now = new Date()
 export function banFromHold(db: DB, holdId: number, by: string, reason: string, now = new Date()): boolean {
   const h = holdById(db, holdId);
   if (!h || h.resolvedAt) return false;
-  db.transaction(() => {
-    insertBan(db, h.steamid, by, reason, null, now);
-    closeHold(db, holdId, by, 'banned', now);
-  })();
+  db.transaction(() => banFromHoldTx(db, holdId, by, reason, now))();
   publishBanChange({ kind: 'ban', steamid: h.steamid, reason });
+  return true;
+}
+
+/** The writes of banFromHold, for a caller that owns the transaction and
+ *  publishes the ban change itself once that transaction has committed. */
+export function banFromHoldTx(db: DB, holdId: number, by: string, reason: string, now: Date): boolean {
+  const h = holdById(db, holdId);
+  if (!h || h.resolvedAt) return false;
+  insertBan(db, h.steamid, by, reason, null, now);
+  closeHold(db, holdId, by, 'banned', now);
   return true;
 }
 
