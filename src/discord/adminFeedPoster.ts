@@ -150,6 +150,16 @@ export class AdminFeedPoster {
       }
       case 'lilac_flag': {
         const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
+        // Rule B. Stated with the numbers it was calibrated on, and still as
+        // something to look at: one confirmed aimbot is one data point.
+        if (!e.banned && e.bigSnap !== undefined) {
+          return {
+            text: `🎯 ${this.name(e.steamid)} tripped Little Anti-Cheat's \`${e.cheat}\` check with a **${e.bigSnap} degree snap**${match}. `
+              + `Every honest aimbot flag on record snapped under 45 degrees; the confirmed aimbot snapped 143.5. `
+              + `Worth a look at the replay. [File](${this.file(e.steamid)})`,
+            color: COLOR.problem,
+          };
+        }
         // "suspected" is LilAC's own word for the soft case and it is the right
         // one: its docs say few and rare suspicions are likely false positives.
         return {

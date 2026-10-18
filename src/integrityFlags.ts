@@ -63,7 +63,9 @@ export function liveMatchOf(db: DB, serverId: number | null, steamid: string): n
  *  not every repetition, and an un-deduped feed would bury everything else. */
 export const DEDUPE_MS = 60_000;
 
-export type FlagSeverity = 'suspected' | 'banned';
+/** 'high': a rule calibrated on a confirmed cheater fired (src/aimRules.ts):
+ *  LilAC's big snap, or two aim rules in one match. */
+export type FlagSeverity = 'suspected' | 'banned' | 'high';
 
 export interface IntegrityFlagInput {
   matchId: number | null;
