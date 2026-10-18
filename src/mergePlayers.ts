@@ -68,6 +68,7 @@ const PLAIN: [table: string, column: string][] = [
   ['input_bursts', 'steamid'],
   ['input_detections', 'steamid'],
   ['input_stalls', 'steamid'],
+  ['si_kills', 'steamid'],
   ['signon_drops', 'steamid'],
   ['match_pauses', 'called_by'],
   // The losing account's open link is closed first, below: the survivor
