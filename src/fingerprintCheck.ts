@@ -9,6 +9,7 @@ import {
 import { fingerprintWorld, playerFingerprint } from './fingerprintData.js';
 import { candidatesOf, secondSigns } from './fingerprintSigns.js';
 import { extraVpnAsns, isVpnNetwork } from './networkKinds.js';
+import { isFingerprintDismissed } from './evaderPeople.js';
 
 /**
  * The evader fingerprint check, run once per ended match from the end-of-match
@@ -27,7 +28,8 @@ import { extraVpnAsns, isVpnNetwork } from './networkKinds.js';
  *     post and no hold.
  *
  * Each (account, person, level) fires once, and again only when the level
- * goes up. A cleared fingerprint hold is never placed again for that pair.
+ * goes up. A cleared fingerprint hold is never placed again for that pair,
+ * and a pair staff dismissed ("Not them") is never alerted on again.
  */
 
 export type FingerprintMode = 'off' | 'alert' | 'full';
@@ -97,6 +99,8 @@ export function checkMatchFingerprints(db: DB, matchId: number, now = new Date()
       if (!hit.matched) continue;
       const person = persons.find((p) => p.id === hit.personId);
       if (!person || person.members.length === 0) continue;
+      // Staff said "Not them" to this pair: never told about again.
+      if (isFingerprintDismissed(db, steamid, person.id)) continue;
       const signs = secondSigns(db, steamid, { members: person.members, membersInTop10: hit.membersInTop10, asnLoaded, extraVpn }, now);
       const before = storedLevel(db, steamid, person.id);
       let level = levelFor(mode, signs);

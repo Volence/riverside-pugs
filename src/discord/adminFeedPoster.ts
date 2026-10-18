@@ -464,6 +464,7 @@ export class AdminFeedPoster {
       case 'evader_member_add': return `${who} added ${target} to known evader **${escapeName(String(d.label ?? ''))}**`;
       case 'evader_member_remove': return `${who} removed ${d.kind === 'steam' ? target : 'a Discord account'} from a known evader`;
       case 'evader_person_close': return `${who} closed the known evader record **${escapeName(String(d.label ?? ''))}**`;
+      case 'evader_dismiss': return `${who} said ${target} is not known evader **${escapeName(String(d.label ?? ''))}** (fingerprint alert dismissed)`;
       case 'evader_ban_same': return `${who} banned ${target} as another account of known evader **${escapeName(String(d.label ?? ''))}**`;
       case 'ip_watch_add': return `${who} added a connection to the IP watch list${d.note ? `: ${escapeName(String(d.note))}` : ''}`;
       case 'ip_watch_remove': return `${who} removed a connection from the IP watch list`;

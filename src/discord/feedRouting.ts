@@ -42,7 +42,7 @@ export const FEED_DESTINATION: Record<AdminEvent['kind'], 'mod' | 'admin'> = {
 
 /** Audit actions that are moderation. Anything not listed is the admin log. */
 export const MOD_ACTIONS: ReadonlySet<string> = new Set([
-  'ban', 'unban', 'alt_lift', 'alt_ban', 'evader_flag', 'evader_clear', 'evader_person_create', 'evader_member_add', 'evader_member_remove', 'evader_person_close', 'evader_ban_same', 'ip_watch_add', 'ip_watch_remove', 'note', 'looked_at',
+  'ban', 'unban', 'alt_lift', 'alt_ban', 'evader_flag', 'evader_clear', 'evader_person_create', 'evader_member_add', 'evader_member_remove', 'evader_person_close', 'evader_ban_same', 'evader_dismiss', 'ip_watch_add', 'ip_watch_remove', 'note', 'looked_at',
   'clear_penalty', 'clear_penalties', 'queue_remove', 'practice_kick', 'leave_clock',
   'ticket_open', 'ticket_claim', 'ticket_restrict', 'ticket_access', 'ticket_close', 'ticket_reopen', 'ticket_ban',
   'ticket_remove', 'ticket_discord_sanction', 'ticket_discord_sanction_lift', 'ticket_contact', 'ticket_chat_join', 'ticket_chat_end',

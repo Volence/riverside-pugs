@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import type { KnownEvader } from '../../api';
 
-const { mockPeople } = vi.hoisted(() => ({
-  mockPeople: { evaders: vi.fn(), removeFromPerson: vi.fn(), closePerson: vi.fn(), banSamePerson: vi.fn(), createEvader: vi.fn() },
+const { mockPeople, mockConfirm } = vi.hoisted(() => ({
+  mockPeople: {
+    evaders: vi.fn(), removeFromPerson: vi.fn(), closePerson: vi.fn(), banSamePerson: vi.fn(), createEvader: vi.fn(),
+    dismissFingerprint: vi.fn(),
+  },
+  mockConfirm: vi.fn(),
 }));
+
+vi.mock('../../components/Confirm', () => ({ confirm: mockConfirm }));
 
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
@@ -26,7 +32,8 @@ const person: KnownEvader = {
 };
 
 beforeEach(() => {
-  for (const f of Object.values(mockPeople)) f.mockReset();
+  for (const f of [...Object.values(mockPeople), mockConfirm]) f.mockReset();
+  mockConfirm.mockResolvedValue(true);
   mockPeople.evaders.mockResolvedValue({ people: [person] });
 });
 afterEach(() => { cleanup(); });
@@ -52,5 +59,38 @@ describe('KnownEvaders', () => {
     render(<KnownEvaders isAdmin />);
     await screen.findByText('nepmir');
     expect(screen.getByRole('button', { name: 'Ban as same person' })).toBeTruthy();
+  });
+
+  it('offers "Not them" on each alert to moderators, confirms, and calls the API', async () => {
+    mockPeople.dismissFingerprint.mockResolvedValue({ ok: true });
+    render(<KnownEvaders isAdmin={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Not them' }));
+    await waitFor(() => expect(mockPeople.dismissFingerprint).toHaveBeenCalledWith(1, '76561198000000002'));
+    expect(mockConfirm.mock.calls[0][0].title).toBe('fresh is not dethisa?');
+    expect(mockConfirm.mock.calls[0][0].confirmLabel).toBe('Not them');
+  });
+
+  it('a dismissed alert shows so, with no Not them button (an admin can still ban as same person)', async () => {
+    mockPeople.evaders.mockResolvedValue({ people: [{ ...person, alerts: [{ ...person.alerts[0], dismissed: true }] }] });
+    render(<KnownEvaders isAdmin />);
+    expect(await screen.findByText('not them')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Not them' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Ban as same person' })).toBeTruthy();
+  });
+
+  it('a cancelled confirm calls nothing', async () => {
+    mockConfirm.mockResolvedValue(false);
+    render(<KnownEvaders isAdmin={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Not them' }));
+    await waitFor(() => expect(mockConfirm).toHaveBeenCalled());
+    expect(mockPeople.dismissFingerprint).not.toHaveBeenCalled();
+  });
+
+  it('removes a Discord member through the same confirm', async () => {
+    mockPeople.removeFromPerson.mockResolvedValue({ ok: true });
+    render(<KnownEvaders isAdmin={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Discord' }));
+    await waitFor(() => expect(mockPeople.removeFromPerson).toHaveBeenCalledWith(1, 'discord', '286250932470153217'));
+    expect(mockConfirm.mock.calls[0][0].title).toBe('Take Discord 286250932470153217 off dethisa?');
   });
 });

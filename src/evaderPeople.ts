@@ -83,6 +83,16 @@ export function ensureEvaderSchema(db: DB): void {
       created_at  TEXT NOT NULL,
       PRIMARY KEY (steamid, person_id, level)
     );
+    -- "Not them": staff looked at a fingerprint alert and say the account is
+    -- not this person. The check never alerts or holds the pair again.
+    CREATE TABLE IF NOT EXISTS fingerprint_dismissals (
+      steamid     TEXT NOT NULL,
+      person_id   INTEGER NOT NULL,
+      -- staff steamid
+      dismissed_by TEXT NOT NULL,
+      at          TEXT NOT NULL,
+      PRIMARY KEY (steamid, person_id)
+    );
   `);
   // People are never deleted, so an empty table with open flags means the
   // migration has not happened yet (first boot, or an earlier one was cut short).
@@ -234,4 +244,22 @@ export function closePerson(db: DB, personId: number, by: string, now = new Date
     if (closed) for (const steamid of steamMembersOf(db, personId)) unwatchAccount(db, steamid, by, at);
   })();
   return closed;
+}
+
+/**
+ * "Not them" on a fingerprint alert: staff say `steamid` is not person
+ * `personId`. From then on the fingerprint check (src/fingerprintCheck.ts)
+ * never alerts on the pair again at any level, and placeFingerprintHold
+ * refuses it as it refuses a pair staff cleared from a hold. Only the pair:
+ * the account is still checked against every other person. It does not
+ * touch an open hold, which is lifted on the Alts list as any other.
+ * Returns false when the pair was already dismissed.
+ */
+export function dismissFingerprint(db: DB, steamid: string, personId: number, by: string, now = new Date()): boolean {
+  return db.prepare('INSERT OR IGNORE INTO fingerprint_dismissals (steamid, person_id, dismissed_by, at) VALUES (?, ?, ?, ?)')
+    .run(steamid, personId, by, now.toISOString()).changes > 0;
+}
+
+export function isFingerprintDismissed(db: DB, steamid: string, personId: number): boolean {
+  return db.prepare('SELECT 1 FROM fingerprint_dismissals WHERE steamid = ? AND person_id = ?').get(steamid, personId) !== undefined;
 }
