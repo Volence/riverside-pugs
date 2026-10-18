@@ -1233,3 +1233,33 @@ per-player path needs a real box):
 7. [ ] Ruling 14: a player removed from the booking on the site while connected
    gets the "captain has N seconds" notice at the next minute re-push and is
    kicked after the grace unless a captain types `!allow` or `!sub`.
+
+## l4d_inputstats sikill verification (0.4.0)
+
+The aim rules' kill line (`docs/superpowers/specs/2026-10-17-aimbot-rules-design.md`). Local
+server only (`/home/volence/l4d1-ds`, rcon 27055, shared: `status` first).
+
+Status: NOT RUN yet. On 2026-10-17 nothing listened on rcon 27055 (only another session's
+srcds on 27015 was up), so none of the steps below were done and the captured lines are not
+pinned in `tests/siKillParse.test.ts`. The live 180 degree turn check also needs a client and
+is pending for the owner or the in-game harness. Known limitation: with a BOT attacker the
+plugin may print `id=BOT`, which the site parser rejects.
+
+1. Build both: `plugin/build-inputstats.sh && DEBUG=1 plugin/build-inputstats.sh`. Never stage
+   `l4d_inputstats_debug.smx`.
+2. Back up the box's `l4d_inputstats.smx`, copy the debug build over it, then
+   `sm plugins reload l4d_inputstats`, `log on`. `l4d_inputstats_version` reads `0.4.0`.
+3. `sm_inputstats_emit sikill` and `sm_inputstats_emit sikill_left`: the newest
+   `left4dead/logs/L*.log` gets `... pre=180.0 back=10.0 cls=hunter v=3` and the same with
+   `back=-1.0`.
+4. With a client: `sv_cheats 1`, `l4d_inputstats_bots 1` (TEST ONLY, lets a bot hunter count),
+   `director_stop`, `z_hunter_health 1`. As a survivor with an SMG, `z_spawn hunter` in the
+   crosshair and run
+   `alias flick "setang 0 <yaw+180> 0; wait 50; setang 0 <yaw> 0; +attack; wait 5; -attack; wait 20; setang 0 <yaw+180> 0"; flick`
+   with the yaw from `getpos`. Expect `pre >= 170`, `back <= 10`. A common or tank kill emits
+   nothing.
+5. Restore: the backed-up `.smx`, `l4d_inputstats_bots 0`, `z_hunter_health 250`,
+   `director_start`, reload.
+
+`back=-1` means the killer disconnected, died or left the survivors inside the second after the
+kill, or the map ended; the site never counts it as a return.
