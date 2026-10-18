@@ -116,6 +116,20 @@ export type AdminEvent =
   // and level, ever. `others` is every other account seen there for 'watch',
   // and the banned ones for 'banned'.
   | { kind: 'ip_match'; level: 'watch' | 'banned'; steamid: string; others: string[]; flagged: string | null; note: string }
+  // A new account's infected button holds match a known evader's
+  // (src/fingerprintCheck.ts). 'alert': the fingerprint alone. 'loud': the
+  // fingerprint and a second sign, with no hold (setting evader_fingerprint
+  // is 'alert', or the hold was refused). 'hold': the account is on an alt
+  // hold. loud and hold ping the mod call role. Once per account, person and
+  // level, and again only when the level goes up. A fingerprint is "could be
+  // them", never proof, and every post says so.
+  | {
+    kind: 'fingerprint_match'; level: 'alert' | 'loud' | 'hold'; steamid: string; matchId: number;
+    personId: number; personLabel: string; distance: number; threshold: number; rank: number;
+    signs: string[]; holdId: number | null;
+    medians: { cls: string; candidate: number | null; person: number | null }[];
+    connections: { country: string | null; asOrg: string | null; vpn: boolean }[];
+  }
   /** A ban appeal was filed, or denied at once for a slur. Quiet appeals
    *  (by staff, or from a restricted ticket) never publish this. */
   | { kind: 'appeal'; appealId: number; what: 'filed' | 'auto_denied'; name: string; slurs: string[] };
@@ -143,6 +157,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   rename_digest: 'admin_feed_renames',
   alt: 'admin_feed_problems',
   ip_match: 'admin_feed_problems',
+  fingerprint_match: 'admin_feed_problems',
   appeal: 'admin_feed_reports',
 };
 
