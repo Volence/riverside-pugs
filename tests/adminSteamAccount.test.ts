@@ -275,6 +275,9 @@ describe('steam account over HTTP', () => {
       // The Family Sharing lender as one edge on the Alts tab, served only
       // behind requireMod by src/routes/people.ts.
       'src/altHolds.ts',
+      // The evader fingerprint check reads account age and visibility as a
+      // second sign; it only ever lands in staff-only holds and alerts.
+      'src/fingerprintSigns.ts',
     ]);
     const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     const walk = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true })
