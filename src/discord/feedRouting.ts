@@ -37,6 +37,7 @@ export const FEED_DESTINATION: Record<AdminEvent['kind'], 'mod' | 'admin'> = {
   rename_digest: 'admin',
   alt: 'mod',
   ip_match: 'mod',
+  fingerprint_match: 'mod',
 };
 
 /** Audit actions that are moderation. Anything not listed is the admin log. */

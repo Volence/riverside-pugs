@@ -7,6 +7,7 @@ import { resolveAlias } from '../aliases.js';
 import { activeTimeout } from '../penalties.js';
 import { hasStaffFlag } from '../tickets/store.js';
 import { discordLabel, escapeName, identityOf } from '../identity.js';
+import { SIGN_TEXT, type SecondSign } from '../fingerprint.js';
 import type { BotInteraction, BotTransport, InteractionReply } from './transport.js';
 
 const COLOR = { report: 0xde4e40, action: 0xc9a45c, penalty: 0x8a7f73, account: 0x45b39c, problem: 0xde4e40 };
@@ -363,6 +364,38 @@ export class AdminFeedPoster {
           text: `🔗 ${this.name(e.steamid)} connected from the same connection as banned ${joinNames(others)}${more}. `
             + `Same connection is evidence, not proof. [File](${this.file(e.steamid)}) · [Alts](${desk})`,
           color: COLOR.problem,
+        };
+      }
+      case 'fingerprint_match': {
+        const desk = `${this.deps.publicUrl}/admin/people/alts`;
+        const label = `**${escapeName(e.personLabel)}**`;
+        const head = e.level === 'hold' ? '**Fingerprint hold:**'
+          : e.level === 'loud' ? '**Fingerprint match with a second sign:**' : 'Fingerprint match:';
+        const numbers = `#${e.rank} nearest of everyone on record, distance ${e.distance.toFixed(3)} against `
+          + `${label}'s limit of ${e.threshold.toFixed(3)}`;
+        const signs = e.signs.length
+          ? ` Second signs: ${e.signs.map((s) => SIGN_TEXT[s as SecondSign] ?? s).join(', ')}.`
+          : ' No second sign.';
+        const outcome = e.level === 'hold'
+          ? ' The account is **on hold** and cannot queue or play until a moderator looks.'
+          : e.level === 'loud' ? ' No hold was placed.' : ' Nothing was done to the account.';
+        // A code block shows the medians as a table. Backticks in a label
+        // would close it early.
+        const plain = (s: string) => s.replace(/`/g, "'");
+        const rows = e.medians.map((m) =>
+          `${plain(m.cls).padEnd(20)}${String(m.candidate ?? '-').padStart(6)}${String(m.person ?? '-').padStart(9)}`);
+        const table = rows.length
+          ? `\nMedian hold, ticks:\n\`\`\`\n${'class'.padEnd(20)}${'this'.padStart(6)}${plain(e.personLabel).slice(0, 8).padStart(9)}\n${rows.join('\n')}\n\`\`\``
+          : '';
+        const conns = e.connections.length
+          ? `\nConnections: ${e.connections.map((c) => `${c.country ?? '??'} ${escapeName(c.asOrg ?? 'unknown provider')}${c.vpn ? ' (VPN or hosting)' : ''}`).join(', ')}`
+          : '';
+        return {
+          text: `${head} ${this.name(e.steamid)} plays like known evader ${label} in match `
+            + `[#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}). ${numbers}.${signs}${outcome} `
+            + `A fingerprint alone is not proof. [File](${this.file(e.steamid)}) · [Alts](${desk})${table}${conns}`,
+          color: COLOR.problem,
+          ping: e.level !== 'alert',
         };
       }
       case 'rename_digest': {

@@ -521,4 +521,30 @@ describe('admin feed', () => {
     expect(lines[5]).toContain('allowed appeals again on appeal [#7](https://pug.test/admin/people/appeals/7)');
     for (const l of lines) expect(l).not.toMatch(/appeal (ask|accept|shorten|deny|final|unfinal) /);
   });
+
+  it('a fingerprint hold pings the mod role with the numbers; a fingerprint-only alert does not ping', async () => {
+    setSetting(db, 'mod_call_role_id', '123456789012345678');
+    const base = {
+      steamid: IDS[1], matchId, personId: 1, personLabel: 'dethisa', distance: 0.2031, threshold: 0.25, rank: 2,
+      medians: [{ cls: 'hunter claw', candidate: 12, person: 12 }],
+      connections: [{ country: 'GB', asOrg: 'DATACAMP-LIMITED', vpn: true }],
+    };
+    publishAdminEvent({ kind: 'fingerprint_match', level: 'alert', signs: [], holdId: null, ...base });
+    publishAdminEvent({ kind: 'fingerprint_match', level: 'hold', signs: ['vpn'], holdId: 4, ...base });
+    await settled();
+    const [alert, hold] = inFeed().map((m) => m.payload);
+    const a = JSON.stringify(alert);
+    expect(alert.content).toBeUndefined();
+    expect(a).toContain('plays like known evader **dethisa**');
+    expect(a).toContain('#2 nearest');
+    expect(a).toContain('distance 0.203');
+    expect(a).toContain('limit of 0.250');
+    expect(a).toContain('No second sign');
+    expect(a).toContain('hunter claw');
+    expect(a).toContain('DATACAMP-LIMITED (VPN or hosting)');
+    expect(a).toContain('not proof');
+    expect(hold.content).toBe('<@&123456789012345678>');
+    expect(JSON.stringify(hold)).toContain('**on hold**');
+    expect(JSON.stringify(hold)).toContain('a VPN or hosting connection');
+  });
 });
