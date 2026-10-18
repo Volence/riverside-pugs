@@ -63,3 +63,110 @@ export function recordSiKill(db: DB, k: SiKillInput, now = new Date()): number {
   ).run(k.matchId, k.serverId, k.steamid, k.weapon, k.headshot ? 1 : 0, k.dist, k.pre, k.back, k.victimClass, now.toISOString());
   return Number(info.lastInsertRowid);
 }
+
+// --- Rule A: headshot share ---------------------------------------------
+
+export const HS_MIN_KILLS = 10;
+export const HS_MAX_P = 1e-3;
+export const HS_POOL_DAYS = 30;
+/** Kills a group needs in the pool before its own rate replaces the fixed one. */
+export const HS_POOL_MIN = 500;
+
+export interface HsGroup {
+  name: 'auto' | 'rifle';
+  weapons: readonly string[];
+  /** The rate used until HS_POOL_MIN kills exist, or null for none. */
+  fallback: number | null;
+  enabled: boolean;
+}
+
+/**
+ * Survivor kills of human SI, per weapon group. `auto` is the nepmir case,
+ * and 0.367 is its pooled share in the log study. Honest snipers headshot a
+ * lot, so the hunting rifle is its own pool, off until its rate is measured
+ * (the calibration report, src/aimCalibration.ts, prints it). Shotguns are in
+ * no group: pump kills never report a headshot. Nor is the M16, whose game
+ * name is `rifle` (not this group, which is the hunting rifle).
+ */
+export const HS_GROUPS: readonly HsGroup[] = [
+  { name: 'auto', weapons: ['smg', 'pistol', 'dual_pistols'], fallback: 0.367, enabled: true },
+  { name: 'rifle', weapons: ['hunting_rifle'], fallback: null, enabled: false },
+];
+
+export function groupOf(weapon: string): HsGroup | null {
+  const w = weapon.startsWith('weapon_') ? weapon.slice('weapon_'.length) : weapon;
+  return HS_GROUPS.find((g) => g.weapons.includes(w)) ?? null;
+}
+
+/** P(X >= k) for X ~ Binomial(n, p), each term built in log space so a long
+ *  match cannot underflow or overflow the binomial coefficient. */
+export function binomialTail(k: number, n: number, p: number): number {
+  if (k <= 0) return 1;
+  if (k > n) return 0;
+  if (p <= 0) return 0;
+  if (p >= 1) return 1;
+  const lp = Math.log(p);
+  const lq = Math.log1p(-p);
+  let logC = 0; // log C(n, i), from i = 0
+  let sum = 0;
+  for (let i = 0; i <= n; i++) {
+    if (i > 0) logC += Math.log(n - i + 1) - Math.log(i);
+    if (i >= k) sum += Math.exp(logC + i * lp + (n - i) * lq);
+  }
+  return Math.min(1, sum);
+}
+
+export interface PooledRate { rate: number; poolKills: number; pooled: boolean }
+
+/** The headshot share a group's kills are judged against: every kill in the
+ *  trailing HS_POOL_DAYS except the judged match's own (a cheater's kills
+ *  would drag the pool toward them), or the fixed rate until the pool has
+ *  HS_POOL_MIN kills. Grouped in code, not SQL, so a weapon_ prefixed name
+ *  pools with its bare one. */
+export function pooledRate(db: DB, group: HsGroup, excludeMatch: number, now = new Date()): PooledRate | null {
+  const since = new Date(now.getTime() - HS_POOL_DAYS * 86_400_000).toISOString();
+  const rows = db.prepare(
+    `SELECT weapon, COUNT(*) AS n, SUM(headshot) AS hs FROM si_kills
+     WHERE match_id IS NOT NULL AND match_id <> ? AND at >= ? AND at <= ?
+     GROUP BY weapon`,
+  ).all(excludeMatch, since, now.toISOString()) as { weapon: string; n: number; hs: number }[];
+  let n = 0;
+  let hs = 0;
+  for (const r of rows) {
+    if (groupOf(r.weapon) !== group) continue;
+    n += r.n;
+    hs += r.hs;
+  }
+  if (n >= HS_POOL_MIN) return { rate: hs / n, poolKills: n, pooled: true };
+  return group.fallback === null ? null : { rate: group.fallback, poolKills: n, pooled: false };
+}
+
+/** One si_kills row as the rules read it. */
+export interface KillRow { id: number; weapon: string; headshot: number; pre: number; back: number; victimClass: string; at: string }
+
+export interface HsResult extends PooledRate { group: string; kills: number; headshots: number; p: number }
+
+/** Rule A over one player's kills in one match: the groups that fire. */
+export function hsShare(
+  kills: readonly Pick<KillRow, 'weapon' | 'headshot'>[], rateOf: (g: HsGroup) => PooledRate | null,
+): HsResult[] {
+  const out: HsResult[] = [];
+  for (const g of HS_GROUPS) {
+    if (!g.enabled) continue;
+    const mine = kills.filter((k) => groupOf(k.weapon) === g);
+    if (mine.length < HS_MIN_KILLS) continue;
+    const rate = rateOf(g);
+    if (!rate) continue;
+    const headshots = mine.filter((k) => k.headshot).length;
+    const p = binomialTail(headshots, mine.length, rate.rate);
+    if (p < HS_MAX_P) out.push({ group: g.name, kills: mine.length, headshots, p, ...rate });
+  }
+  return out;
+}
+
+export function hsNote(r: HsResult): string {
+  const pool = r.pooled
+    ? `${r.rate.toFixed(3)} pooled from ${r.poolKills} kills over ${HS_POOL_DAYS} days`
+    : `${r.rate.toFixed(3)} (fixed until ${HS_POOL_MIN} kills are on record, ${r.poolKills} so far)`;
+  return `${r.group} weapons: ${r.headshots} of ${r.kills} SI kills were headshots, p = ${r.p.toExponential(1)} against ${pool}`;
+}
