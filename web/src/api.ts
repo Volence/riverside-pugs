@@ -1606,8 +1606,10 @@ export interface PlayerFileData {
       names?: NameHistoryRow[];
       /** Alt holds naming this account on either side. Optional for an older server. */
       altHolds?: AltHold[];
-      /** Set while flagged as a ban evader. Optional for an older server. */
-      evaderFlag?: EvaderFlag | null;
+      /** The known evader this account belongs to. Optional for an older server. */
+      evaderPerson?: { id: number; label: string; closed: boolean } | null;
+      /** Open known evaders, which "Add to person" offers. */
+      evaderOptions?: { id: number; label: string }[];
     };
     standing: {
       activeBan: AdminBan | null;
@@ -1703,19 +1705,34 @@ export const peopleApi = {
   banFromHold: (id: number, reason: string) => post<{ ok: true }>(`/api/admin/people/alts/${id}/ban`, { reason }),
   pings: (signal?: AbortSignal) => get<PingTable>('/api/admin/people/pings', signal),
   ipWatch: (signal?: AbortSignal) =>
-    get<{ flags: EvaderFlag[]; entries: WatchEntry[] }>('/api/admin/people/ipwatch', signal),
+    get<{ entries: WatchEntry[] }>('/api/admin/people/ipwatch', signal),
+  evaders: (signal?: AbortSignal) => get<{ people: KnownEvader[] }>('/api/admin/people/evaders', signal),
+  createEvader: (label: string, note: string) =>
+    post<{ ok: true; id: number }>('/api/admin/people/evaders', { label, note }),
+  addToPerson: (steamid: string, to: { personId: number } | { label: string }) =>
+    post<{ ok: true; personId: number }>(`/api/admin/people/${encodeURIComponent(steamid)}/evader-person`, to),
+  removeFromPerson: (personId: number, kind: 'steam' | 'discord', ident: string) =>
+    post<{ ok: true }>(`/api/admin/people/evaders/${personId}/members/remove`, { kind, ident }),
+  closePerson: (personId: number) => post<{ ok: true }>(`/api/admin/people/evaders/${personId}/close`),
+  banSamePerson: (personId: number, steamid: string) =>
+    post<{ ok: true }>(`/api/admin/people/evaders/${personId}/ban-same-person`, { steamid }),
+  banHoldSamePerson: (holdId: number) => post<{ ok: true }>(`/api/admin/people/alts/${holdId}/ban-same-person`),
   watchIp: (ip: string, note: string) => post<{ ok: true }>('/api/admin/people/ipwatch', { ip, note }),
   unwatchIp: (hash: string) => post<{ ok: true }>(`/api/admin/people/ipwatch/${encodeURIComponent(hash)}/remove`),
-  flagEvader: (steamid: string, reason: string) =>
-    post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/evader`, { reason }),
-  clearEvader: (steamid: string) => post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/evader/clear`),
 };
 
-/** An account flagged as a ban evader: every connection it uses is watched.
- *  See src/ipWatch.ts. */
-export interface EvaderFlag {
-  steamid: string; name: string; reason: string;
-  createdAt: string; createdBy: string; createdByName: string | null;
+/** A known evader: one person, every account they were caught on. See
+ *  src/evaderPeople.ts and src/admin/knownEvaders.ts. */
+export interface KnownEvader {
+  id: number; label: string; note: string; createdAt: string; createdByName: string | null;
+  steam: { steamid: string; name: string; banned: boolean; held: boolean; lastSeen: string | null; how: string }[];
+  discord: { id: string; how: string }[];
+  connections: { ipHash: string; steamid: string; country: string | null; asOrg: string | null; vpn: boolean; lastSeen: string }[];
+  medians: { cls: string; person: number | null; population: number | null }[];
+  alerts: {
+    steamid: string; name: string; level: 'alert' | 'loud' | 'hold'; distance: number; threshold: number; rank: number;
+    signs: string[]; matchId: number | null; createdAt: string; banned: boolean;
+  }[];
 }
 
 /** One watched connection. The address itself is never stored or shown. */
@@ -1801,6 +1818,11 @@ export interface AltHold {
   resolvedAt: string | null;
   resolvedByName: string | null;
   resolution: 'cleared' | 'banned' | 'merged' | null;
+  /** 'fingerprint': held by the evader fingerprint check. Optional for an older server. */
+  source?: 'discord' | 'fingerprint';
+  personId?: number | null;
+  personLabel?: string | null;
+  fingerprint?: { distance: number; rank: number; threshold: number; signs: string[] } | null;
 }
 
 export type AltSignal = 'discord' | 'merged' | 'lender' | 'connection';
