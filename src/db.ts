@@ -1511,6 +1511,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   aim_rules: 'log',
   // AS numbers staff count as VPN or hosting on top of src/networkKinds.ts.
   vpn_asns_extra: '[]',
+  // The evader fingerprint check at each match end (src/fingerprintCheck.ts):
+  // off, alert (posts only) or full (posts and alt holds). Ships off.
+  evader_fingerprint: 'off',
   require_discord_to_queue: '1',
   // Pressing Ready needs that account to be in a voice channel on the guild.
   require_voice_to_ready: '1',

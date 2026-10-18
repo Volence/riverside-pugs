@@ -336,9 +336,11 @@ export function rerunSignatures(
  * Only matches that ended inside `withinMs` are looked at, so the first run
  * after a deploy does not post history; rerunSignatures covers that.
  * Returns what each newly created row should be announced as.
+ * afterMatch is called once per match claimed here, after its signatures.
  */
 export function scanEndedMatches(
   db: DB, thresholds: Thresholds = DEFAULT_THRESHOLDS, now = new Date(), withinMs = 6 * 3_600_000,
+  afterMatch?: (matchId: number) => void,
 ): { matchId: number; steamid: string; signature: string; note: string }[] {
   const since = new Date(now.getTime() - withinMs).toISOString().replace('T', ' ').slice(0, 19);
   const matches = db.prepare(
@@ -362,6 +364,10 @@ export function scanEndedMatches(
         }
       }
     })();
+    // Other once-per-ended-match checks (the evader fingerprint), after this
+    // match's own signatures and outside their transaction. The hook owns its
+    // errors: runFingerprintCheck never throws.
+    afterMatch?.(id);
   }
   return out;
 }
