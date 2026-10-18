@@ -32,6 +32,11 @@ export type SideLogEvent = typeof SIDE_EVENTS[number];
  *  older alias with no campaign. */
 export const BOOKING_CMDS = ['nextmap', 'stay', 'end', 'extend', 'addcampaign', 'allow', 'sub'] as const;
 export type BookingCmd = typeof BOOKING_CMDS[number];
+
+/** The SI an l4d_inputstats 0.4.0 sikill line can name. The tank is not
+ *  counted (spec: human SI, not the tank). Anything else refuses the line. */
+export const SI_KILL_CLASSES = ['smoker', 'boomer', 'hunter'] as const;
+export type SiKillClass = typeof SI_KILL_CLASSES[number];
 const SIDE_PLAYER_EVENTS: readonly SideLogEvent[] = ['join', 'part', 'ready', 'vote'];
 
 export interface Phase {
@@ -273,6 +278,16 @@ export type LogEvent =
       kind: 'input_stall'; steamid: string; serverTick: number; gap: number; missed: number; cmds: number;
       team: number; cls: number; lunging: number;
     }
+  // l4d_inputstats 0.4.0: a human survivor killed a human SI, for the aim
+  // rules (src/aimRules.ts). `pre` is the largest view change, in degrees
+  // (great-circle, pitch and yaw), between the kill and any view in the 300
+  // ms before it; `back` the closest the view came, in the 1000 ms after, to
+  // where it was 300 ms before. back -1: unknown (the killer left, died or
+  // changed team first), never a return.
+  | {
+      kind: 'si_kill'; steamid: string; weapon: string; headshot: boolean; dist: number;
+      pre: number; back: number; victimClass: SiKillClass;
+    }
   // The engine's own `"name<uid><STEAM_1:Y:Z><>" entered the game` line.
   | { kind: 'entered'; steamid: string }
   // The look (time of day, weather, moon, event, power) l4d_nightmode is
@@ -432,6 +447,13 @@ function measureOf(s: string | undefined): number | null {
   const v = floatOf(s);
   if (v === null) return null;
   return v === -1 || (v >= 0 && v <= 100000) ? v : null;
+}
+
+/** A view-angle distance l4d_inputstats measured: 0 to 180 degrees, since a
+ *  great-circle angle cannot be more. */
+function degreesOf(s: string | undefined): number | null {
+  const v = floatOf(s);
+  return v !== null && v >= 0 && v <= 180 ? v : null;
 }
 
 /** Field order the plugin itself formats them in: aimbot's, then aimlock's
@@ -680,6 +702,25 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
       if (!steamid || f.v !== '2') return null;
       if (tick === null || gap === null || missed === null || cmds === null || team === null || cls === null || lunging === null) return null;
       return { kind: 'input_stall', steamid, serverTick: tick, gap, missed, cmds, team, cls, lunging };
+    }
+    // An SI kill (plugin 0.4.0). Its own wire version, 3: the stall and
+    // burst branches still require 2, and this is a new shape. Every field is
+    // a number, a known class or a normalised weapon name; anything else
+    // refuses the line.
+    if (f.k === 'sikill') {
+      const weapon = f.w ?? '';
+      const dist = intRange(f.dist, 0, 100_000);
+      const pre = degreesOf(f.pre);
+      const back = floatOf(f.back) === -1 ? -1 : degreesOf(f.back);
+      const cls = f.cls ?? '';
+      if (!steamid || f.v !== '3') return null;
+      if (!/^[a-z0-9_]{1,32}$/.test(weapon)) return null;
+      if (f.hs !== '0' && f.hs !== '1') return null;
+      if (dist === null || pre === null || back === null) return null;
+      if (!(SI_KILL_CLASSES as readonly string[]).includes(cls)) return null;
+      return {
+        kind: 'si_kill', steamid, weapon, headshot: f.hs === '1', dist, pre, back, victimClass: cls as SiKillClass,
+      };
     }
     // The budget marker: no burst on it, only which kind stopped being sent.
     if (f.k === 'cap') {
