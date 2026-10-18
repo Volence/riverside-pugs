@@ -39,11 +39,12 @@ describe('replayHistory', () => {
     expect(r.matches).toBe(4);
     expect(r.excluded).toEqual([{ steamid: ALT, level: 'alert', matchId: 4 }]);
     expect(r.events.filter((e) => e.honest)).toEqual([]);
-    expect(r.weeks).toContainEqual({ week: '2026-09-28', alerts: 1, holds: 0, honestAlerts: 0, honestHolds: 0 });
+    expect(r.weeks).toContainEqual({ week: '2026-09-28', alerts: 1, louds: 0, holds: 0, honestAlerts: 0, honestLouds: 0, honestHolds: 0 });
     expect(r.honestTop5Rate === null || (r.honestTop5Rate >= 0 && r.honestTop5Rate <= 1)).toBe(true);
   });
 
   it('a second sign seen by then makes it a hold', () => {
+    db.prepare("INSERT INTO players (steamid, name) VALUES (?, 'alt')").run(ALT);
     db.prepare("INSERT INTO integrity_flags (match_id, steamid, source, kind, severity, at) VALUES (4, ?, 'lilac', 'aimbot', 'suspected', '2026-10-04T19:30:00.000Z')").run(ALT);
     const r = replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false });
     expect(r.excluded[0].level).toBe('hold');
@@ -146,5 +147,61 @@ describe('copyForReplay', () => {
     copy.prepare('DELETE FROM matches').run();
     copy.close();
     expect(readFileSync(src).equals(before)).toBe(true);
+  });
+});
+
+const FLAG = "INSERT INTO integrity_flags (match_id, steamid, source, kind, severity, at) VALUES (4, ?, 'lilac', 'aimbot', 'suspected', '2026-10-04T19:30:00.000Z')";
+
+describe('drift from the live check (fix round 1)', () => {
+  it('an alias of a seeded member is neither a candidate nor counted honest', () => {
+    const ALIAS = '76561198000000077';
+    db.prepare("INSERT INTO players (steamid, name) VALUES (?, 'm1')").run(M1);
+    db.prepare("INSERT INTO player_aliases (steamid, canonical_id, created_at, created_by) VALUES (?, ?, '2026-10-01T00:00:00.000Z', 'x')").run(ALIAS, M1);
+    playMatch(db, ALIAS, 4, 10, 80, '2026-10-04T19:00:00.000Z');
+    const r = replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false });
+    expect(r.events.map((e) => e.steamid)).toEqual([ALT]);
+    expect(r.events.filter((e) => e.honest)).toEqual([]);
+  });
+
+  it('a member of a person in the database (not the seed) is not a candidate, unless it is the account under test', () => {
+    const OTHER = '76561198000000078';
+    db.prepare("INSERT INTO evader_people (id, label, note, created_at, created_by) VALUES (9, 'db', '', '2026-10-01T00:00:00.000Z', 'x')").run();
+    for (const id of [OTHER, ALT]) {
+      db.prepare("INSERT INTO evader_members (person_id, kind, ident, added_at, added_by, how) VALUES (9, 'steam', ?, '2026-10-01T00:00:00.000Z', 'x', 'manual')").run(id);
+    }
+    playMatch(db, OTHER, 4, 10, 80, '2026-10-04T19:00:00.000Z');
+    const r = replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false });
+    expect(r.events.map((e) => e.steamid)).toEqual([ALT]);
+  });
+
+  it('an account held at match N is not a candidate at match N+1', () => {
+    const M2 = '76561198000000002';
+    db.prepare("INSERT INTO players (steamid, name) VALUES (?, 'alt')").run(ALT);
+    db.prepare(FLAG).run(ALT);
+    endedMatch(db, 5, '2026-10-05 20:00:00');
+    playMatch(db, M2, 5, 10, 60, '2026-10-05T19:00:00.000Z');
+    playMatch(db, ALT, 5, 10, 80, '2026-10-05T19:00:00.000Z');
+    const two = [...people, { label: 'shove', steam: [M2] }];
+    const r = replayHistory(db, { people: two, exclude: new Set([ALT]), asnLoaded: false });
+    expect(r.events.map((e) => [e.matchId, e.person, e.level])).toEqual([[4, 'dethisa', 'hold']]);
+  });
+
+  it('a hold live would refuse counts as loud: staff, an open hold by then, or no players row', () => {
+    db.prepare(FLAG).run(ALT);
+    expect(replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false }).excluded[0].level).toBe('loud');
+    db.prepare("INSERT INTO players (steamid, name, is_mod) VALUES (?, 'alt', 1)").run(ALT);
+    expect(replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false }).excluded[0].level).toBe('loud');
+    db.prepare('UPDATE players SET is_mod = 0 WHERE steamid = ?').run(ALT);
+    db.prepare("INSERT INTO alt_holds (steamid, other_steamid, discord_id, ban_id, created_at) VALUES (?, ?, '', 0, '2026-10-04T10:00:00.000Z')").run(ALT, M1);
+    const r = replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false });
+    expect(r.excluded[0].level).toBe('loud');
+    expect(r.weeks).toContainEqual({ week: '2026-09-28', alerts: 0, louds: 1, holds: 0, honestAlerts: 0, honestLouds: 0, honestHolds: 0 });
+    // A hold placed after the match end does not count yet.
+    db.prepare("UPDATE alt_holds SET created_at = '2026-10-05T10:00:00.000Z'").run();
+    expect(replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false }).excluded[0].level).toBe('hold');
+  });
+
+  it('the limits say candidates come only from base-class bursts', () => {
+    expect(REPLAY_LIMITS.join(' ')).toMatch(/base-class bursts/);
   });
 });

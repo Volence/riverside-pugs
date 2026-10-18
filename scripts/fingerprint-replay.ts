@@ -50,6 +50,13 @@ try {
     const byName = (names: readonly string[]) => names.flatMap((n) =>
       (db.prepare('SELECT steamid FROM players WHERE name = ?').all(n) as { steamid: string }[]).map((r) => r.steamid));
     const people = SEED_PEOPLE.map((p) => ({ label: p.label, steam: [...new Set([...p.steam, ...byName(p.steamByName)])] }));
+    // Shown so a wrong name match (say a stranger now called "dethisa (pre-ban)") is visible.
+    for (const p of SEED_PEOPLE) {
+      for (const n of p.steamByName) {
+        const ids = byName([n]);
+        console.log(`seed ${p.label}: name "${n}" resolved to ${ids.length ? ids.join(', ') : 'no account'}`);
+      }
+    }
     const asnLoaded = (db.prepare('SELECT COUNT(*) AS n FROM player_networks WHERE asn IS NOT NULL').get() as { n: number }).n > 0;
     const runs = args.required
       ? REPLAY_REQUIRED.map((r) => ({ title: `${r.name} taken out of the ${DETHISA.label} seed`, exclude: [r.steamid], expect: r.steamid as string | null }))
@@ -91,9 +98,11 @@ function print(title: string, r: ReplayReport, asnLoaded: boolean): void {
     + `(honest: ${r.honestFreshOnlyHolds} of ${holds.filter((e) => e.honest).length})`);
   console.log('limits:');
   for (const l of REPLAY_LIMITS) console.log(`  - ${l}`);
-  console.log('week        alerts holds honest-alerts honest-holds');
+  console.log('louds are holds live would have refused (staff, an open hold, no players row): an admin alert, no hold');
+  console.log('week        alerts louds holds honest-alerts honest-louds honest-holds');
   for (const w of r.weeks) {
-    console.log(`${w.week}  ${String(w.alerts).padStart(6)} ${String(w.holds).padStart(5)} ${String(w.honestAlerts).padStart(13)} ${String(w.honestHolds).padStart(12)}`);
+    console.log(`${w.week}  ${String(w.alerts).padStart(6)} ${String(w.louds).padStart(5)} ${String(w.holds).padStart(5)} `
+      + `${String(w.honestAlerts).padStart(13)} ${String(w.honestLouds).padStart(12)} ${String(w.honestHolds).padStart(12)}`);
   }
   for (const e of r.events) {
     console.log(`  match ${e.matchId} ${e.at.slice(0, 10)} ${e.steamid} ${e.level} vs ${e.person}: #${e.rank}, `
