@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import type { LilacReason } from './logParse.js';
-import { recordIntegrityFlag, type FlagSeverity } from './integrityFlags.js';
+import type { FlagSeverity } from './integrityFlags.js';
 import { getSetting } from './settings.js';
 
 /**
@@ -252,7 +252,13 @@ function storeAim(
     'SELECT 1 FROM integrity_flags WHERE steamid = ? AND match_id = ? AND source = ? AND kind = ?',
   ).get(steamid, matchId, AIM_SOURCE, kind);
   if (has) return false;
-  return recordIntegrityFlag(db, { matchId, serverId, steamid, source: AIM_SOURCE, kind, severity, detail }, now) !== null;
+  // Direct insert: recordIntegrityFlag's 60 s dedupe spans matches, and a
+  // catch-up sweep judging two ended matches would lose the second one's flag.
+  db.prepare(
+    `INSERT INTO integrity_flags (match_id, server_id, steamid, source, kind, severity, detail, at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(matchId, serverId, steamid, AIM_SOURCE, kind, severity, detail, now.toISOString());
+  return true;
 }
 
 /**
@@ -321,13 +327,22 @@ export function scanAimMatches(db: DB, now = new Date(), withinMs = 6 * 3_600_00
   const claim = db.prepare('INSERT OR IGNORE INTO aim_match_scans (match_id, at) VALUES (?, ?)');
   const out: AimPost[] = [];
   for (const { id } of matches) {
-    db.transaction(() => {
-      if (claim.run(id, now.toISOString()).changes === 0) return;
-      if (mode === 'off') return;
-      for (const f of evaluateAimMatch(db, id, now)) {
-        if (mode === 'on' && f.post) out.push({ matchId: f.matchId, steamid: f.steamid, kind: f.kind, detail: f.detail });
-      }
-    })();
+    const posts: AimPost[] = [];
+    try {
+      db.transaction(() => {
+        if (claim.run(id, now.toISOString()).changes === 0) return;
+        if (mode === 'off') return;
+        for (const f of evaluateAimMatch(db, id, now)) {
+          if (mode === 'on' && f.post) posts.push({ matchId: f.matchId, steamid: f.steamid, kind: f.kind, detail: f.detail });
+        }
+      })();
+    } catch (err) {
+      // Rolled back, claim included: this match is retried next sweep, and the
+      // others in this one still count.
+      console.error(`[aim] could not judge match ${id}; will retry on the next sweep:`, err);
+      continue;
+    }
+    out.push(...posts);
   }
   return out;
 }
