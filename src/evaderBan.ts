@@ -1,7 +1,8 @@
 import type { DB } from './db.js';
-import { addMember, personById } from './evaderPeople.js';
-import { banFromHold } from './altHolds.js';
-import { banPlayer } from './admin/players.js';
+import { addMember, personById, personOf } from './evaderPeople.js';
+import { banFromHoldTx, holdById, openHoldOf } from './altHolds.js';
+import { insertBan } from './admin/players.js';
+import { publishBanChange } from './banEvents.js';
 import { getPlayer } from './players.js';
 
 /**
@@ -19,8 +20,13 @@ export function sameReason(label: string): string {
   return `Ban evasion: another account of ${label}`;
 }
 
-export type BanSameResult = 'banned' | 'no_person' | 'closed' | 'hold_settled';
+export type BanSameResult = 'banned' | 'no_person' | 'closed' | 'hold_settled' | 'hold_mismatch' | 'member_elsewhere';
 
+/**
+ * Everything lands in one transaction (the ban, the hold it settles, both
+ * memberships) and the ban change is published once, after the commit, since
+ * a subscriber may dial RCON. Nothing is written when the answer is a refusal.
+ */
 export function banAsSamePerson(
   db: DB, opts: { steamid: string; personId: number; by: string; holdId?: number; now?: Date },
 ): BanSameResult {
@@ -28,14 +34,30 @@ export function banAsSamePerson(
   const person = personById(db, opts.personId);
   if (!person) return 'no_person';
   if (person.closedAt) return 'closed';
-  const reason = sameReason(person.label);
   if (opts.holdId !== undefined) {
-    if (!banFromHold(db, opts.holdId, opts.by, reason, now)) return 'hold_settled';
-  } else {
-    banPlayer(db, opts.steamid, opts.by, reason, null, now);
+    const h = holdById(db, opts.holdId);
+    if (h && h.steamid !== opts.steamid) return 'hold_mismatch';
   }
-  addMember(db, opts.personId, 'steam', opts.steamid, opts.by, 'ban as same person', now);
-  const discord = getPlayer(db, opts.steamid)?.discord_id;
-  if (discord) addMember(db, opts.personId, 'discord', discord, opts.by, 'ban as same person', now);
+  const discord = getPlayer(db, opts.steamid)?.discord_id ?? null;
+  for (const [kind, ident] of [['steam', opts.steamid], ...(discord ? [['discord', discord]] : [])] as ['steam' | 'discord', string][]) {
+    const other = personOf(db, kind, ident);
+    if (other && other.id !== opts.personId) return 'member_elsewhere';
+  }
+  const reason = sameReason(person.label);
+  const how = 'ban as same person';
+  let settled = true;
+  db.transaction(() => {
+    const holdId = opts.holdId ?? openHoldOf(db, opts.steamid)?.id;
+    if (holdId !== undefined) {
+      settled = banFromHoldTx(db, holdId, opts.by, reason, now);
+      if (!settled) return;
+    } else {
+      insertBan(db, opts.steamid, opts.by, reason, null, now);
+    }
+    addMember(db, opts.personId, 'steam', opts.steamid, opts.by, how, now);
+    if (discord) addMember(db, opts.personId, 'discord', discord, opts.by, how, now);
+  })();
+  if (!settled) return 'hold_settled';
+  publishBanChange({ kind: 'ban', steamid: opts.steamid, reason });
   return 'banned';
 }

@@ -60,4 +60,45 @@ describe('banAsSamePerson', () => {
     expect(banAsSamePerson(db, { steamid: NEW, personId, by: ADMIN })).toBe('closed');
     expect(hasActiveBan(db, NEW)).toBe(false);
   });
+
+  it('refuses a hold that belongs to another account and writes nothing', () => {
+    const other = '76561198000000003';
+    player(db, other, 'third');
+    const placed = placeFingerprintHold(db, other, personId, OLD) as { id: number };
+    expect(banAsSamePerson(db, { steamid: NEW, personId, by: ADMIN, holdId: placed.id })).toBe('hold_mismatch');
+    expect(hasActiveBan(db, NEW)).toBe(false);
+    expect(personOf(db, 'steam', NEW)).toBeNull();
+  });
+
+  it('refuses an account already on another person and writes nothing', () => {
+    const p2 = createPerson(db, 'someone', '', ADMIN);
+    addMember(db, p2, 'discord', DISCORD, ADMIN, 'seed');
+    const changes: string[] = [];
+    const off = subscribeBanChanges((c) => { changes.push(c.steamid); });
+    expect(banAsSamePerson(db, { steamid: NEW, personId, by: ADMIN })).toBe('member_elsewhere');
+    off();
+    expect(changes).toEqual([]);
+    expect(hasActiveBan(db, NEW)).toBe(false);
+    expect(personOf(db, 'steam', NEW)).toBeNull();
+  });
+
+  it('closes an open hold on the alert path without a second bans row', () => {
+    const placed = placeFingerprintHold(db, NEW, personId, OLD) as { id: number };
+    expect(banAsSamePerson(db, { steamid: NEW, personId, by: ADMIN })).toBe('banned');
+    const hold = db.prepare('SELECT resolution FROM alt_holds WHERE id = ?').get(placed.id) as { resolution: string };
+    expect(hold.resolution).toBe('banned');
+    const n = db.prepare("SELECT COUNT(*) AS n FROM bans WHERE player_id = ? AND lifted_at IS NULL").get(NEW) as { n: number };
+    expect(n.n).toBe(1);
+  });
+
+  it('rolls everything back and publishes nothing when a membership write fails', () => {
+    db.exec("CREATE TRIGGER boom BEFORE INSERT ON evader_members WHEN NEW.ident = '777000000000000001' BEGIN SELECT RAISE(ABORT, 'boom'); END");
+    const changes: string[] = [];
+    const off = subscribeBanChanges((c) => { changes.push(c.steamid); });
+    expect(() => banAsSamePerson(db, { steamid: NEW, personId, by: ADMIN })).toThrow();
+    off();
+    expect(changes).toEqual([]);
+    expect(hasActiveBan(db, NEW)).toBe(false);
+    expect(personOf(db, 'steam', NEW)).toBeNull();
+  });
 });
