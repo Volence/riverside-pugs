@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import { hasStaffFlag } from '../tickets/store.js';
-import { makeRequireMod } from './guards.js';
+import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
 import { addNote, searchPlayers } from '../admin/players.js';
 import { captureHealth } from '../integrityFlags.js';
@@ -16,6 +16,8 @@ import { resolveAlias } from '../aliases.js';
 import { pingPickEnabled, pingTable } from '../serverPick.js';
 import { altClusters, altHolds, banFromHold, holdById, liftAltHold } from '../altHolds.js';
 import { ipWatchView, unwatch, watchAddress } from '../ipWatch.js';
+import { knownEvaders } from '../admin/knownEvaders.js';
+import { banAsSamePerson, type BanSameResult } from '../evaderBan.js';
 import { EvaderError, addMember, closePerson, createPerson, personById, personOf, removeMember } from '../evaderPeople.js';
 
 export interface PeopleRouteOpts {
@@ -39,6 +41,7 @@ export interface PeopleRouteOpts {
 export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts): Promise<void> {
   const { db } = opts;
   const requireMod = makeRequireMod(db);
+  const requireAdmin = makeRequireAdmin(db);
 
   /** Staff, then a target whose file this viewer may act on with `action`.
    *
@@ -291,6 +294,57 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     const id = Number((req.params as { id: string }).id);
     if (!closePerson(db, id, me)) return reply.code(404).send({ error: 'no open person with that id' });
     logAdmin(db, me, 'evader_person_close', '', { personId: id, label: personById(db, id)?.label });
+    return { ok: true };
+  });
+
+  /** One status per refusal of banAsSamePerson, none of them a 500. */
+  const sameFailure = (reply: FastifyReply, r: Exclude<BanSameResult, 'banned'>) => {
+    switch (r) {
+      case 'no_person': return reply.code(404).send({ error: 'no such person' });
+      case 'closed': return reply.code(409).send({ error: 'that person record is closed' });
+      case 'member_elsewhere': return reply.code(409).send({ error: 'that account or its Discord already belongs to another person' });
+      case 'hold_mismatch': return reply.code(409).send({ error: 'that hold is on a different account' });
+      case 'hold_settled': return reply.code(409).send({ error: 'that hold has already been settled' });
+    }
+  };
+
+  app.get('/api/admin/people/evaders', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    return { people: knownEvaders(db, fileViewer(db, me)) };
+  });
+
+  /** "Ban as same person" from a fingerprint alert: an ordinary ban, and the
+   *  account (with its Discord) joins the person. An admin's call, like every
+   *  ban outside a ticket, so a moderator gets a 403. */
+  app.post('/api/admin/people/evaders/:id/ban-same-person', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return reply;
+    const viewer = fileViewer(db, me);
+    const personId = Number((req.params as { id: string }).id);
+    const { steamid } = (req.body ?? {}) as { steamid?: unknown };
+    if (typeof steamid !== 'string' || !/^\d{17}$/.test(steamid)) {
+      return reply.code(400).send({ error: 'a SteamID64 is 17 digits' });
+    }
+    if (!getPlayer(db, steamid) || !canDo(db, viewer, steamid, 'ban')) {
+      return reply.code(404).send({ error: 'no such player' });
+    }
+    const r = banAsSamePerson(db, { steamid, personId, by: me });
+    if (r !== 'banned') return sameFailure(reply, r);
+    logAdmin(db, me, 'evader_ban_same', steamid, { personId, label: personById(db, personId)?.label });
+    return { ok: true };
+  });
+
+  app.post('/api/admin/people/alts/:id/ban-same-person', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const t = onHold(req, reply, 'ban');
+    if (!t) return reply;
+    if (t.hold.source !== 'fingerprint' || t.hold.personId === null) {
+      return reply.code(409).send({ error: 'only a fingerprint hold names a person' });
+    }
+    const r = banAsSamePerson(db, { steamid: t.hold.steamid, personId: t.hold.personId, by: t.me, holdId: t.hold.id });
+    if (r !== 'banned') return sameFailure(reply, r);
+    logAdmin(db, t.me, 'evader_ban_same', t.hold.steamid, { personId: t.hold.personId, holdId: t.hold.id, label: personById(db, t.hold.personId)?.label });
     return { ok: true };
   });
 
