@@ -7,6 +7,8 @@ import {
 import { BASE_BURST_SQL } from './fingerprintData.js';
 import { activeBanAt, dbTimeMs, isNewAccount, secondSigns } from './fingerprintSigns.js';
 import { extraVpnAsns } from './networkKinds.js';
+import { resolveAlias } from './aliases.js';
+import { personOf } from './evaderPeople.js';
 
 /**
  * What the evader fingerprint rules would have done over everything on
@@ -18,23 +20,33 @@ import { extraVpnAsns } from './networkKinds.js';
  * Read-only: fingerprints are accumulated in memory as match ends go by, so
  * each decision sees only what existed then, and nothing is written. It is
  * still only ever run on a COPY (scripts/fingerprint-replay.ts makes one).
- * Decisions are as if the setting were 'full'.
+ * Decisions are as if the setting were 'full', including what the live
+ * check does around a hold: an account held at one match end is out of every
+ * later check (live, its alt_hold ban makes activeBanAt skip it), and a hold
+ * live would refuse (staff, an open hold by then, no players row) counts as
+ * 'loud'. Accounts the live check never looks at (database person members and
+ * aliases of any member) are skipped here too, except the account under test.
  */
+
+export type ReplayLevel = 'alert' | 'loud' | 'hold';
+const LEVEL_RANK: Record<ReplayLevel, number> = { alert: 1, loud: 2, hold: 3 };
 
 export interface ReplayPerson { label: string; steam: readonly string[] }
 export interface ReplayOptions { people: readonly ReplayPerson[]; exclude: ReadonlySet<string>; asnLoaded: boolean }
 export interface ReplayEvent {
-  matchId: number; at: string; steamid: string; person: string; level: 'alert' | 'hold';
+  matchId: number; at: string; steamid: string; person: string; level: ReplayLevel;
   distance: number; threshold: number; rank: number; signs: SecondSign[]; honest: boolean;
 }
-export interface ReplayWeek { week: string; alerts: number; holds: number; honestAlerts: number; honestHolds: number }
+export interface ReplayWeek {
+  week: string; alerts: number; louds: number; holds: number; honestAlerts: number; honestLouds: number; honestHolds: number;
+}
 export interface ReplayReport {
   matches: number;
   candidateChecks: number;
   events: ReplayEvent[];
   weeks: ReplayWeek[];
   /** Each excluded account: the highest level it reached and the match it first fired at. */
-  excluded: { steamid: string; level: 'alert' | 'hold' | null; matchId: number | null }[];
+  excluded: { steamid: string; level: ReplayLevel | null; matchId: number | null }[];
   /** Share of honest candidates (first check with enough data) that had any
    *  person in their top 5, threshold aside. The spec's baseline is 3%. */
   honestTop5Rate: number | null;
@@ -55,6 +67,9 @@ export const REPLAY_LIMITS: readonly string[] = [
   'Steam privacy, Steam account age and Discord links are read as of today, not as of each match: '
     + 'sign 2 (fresh identity) can be overstated, see the sign-2-only hold count',
   'sign 2\'s "Discord never linked elsewhere AND site account under 7 days" is true of nearly every honest first-week player',
+  'staff flags (is_admin, is_mod) are read as of today',
+  'candidates are drawn only from players with base-class bursts in the match (live looks at every player in the match\'s input_bursts, '
+    + 'but one without base-class holds has too little data to be checked anyway unless earlier matches gave them enough)',
   'only completed and aborted matches are walked, and bursts without a match id are left out '
     + '(the live check also counts those in a player\'s whole history)',
 ];
@@ -64,10 +79,14 @@ export const REPLAY_LIMITS: readonly string[] = [
  *  checks ask "caught as a dethisa candidate", not "caught as anyone". */
 export function caughtAs(
   report: ReplayReport, steamid: string, person: string,
-): { level: 'alert' | 'hold'; matchId: number } | null {
+): { level: ReplayLevel; matchId: number } | null {
   const mine = report.events.filter((e) => e.steamid === steamid && e.person === person);
   if (mine.length === 0) return null;
-  return { level: mine.some((e) => e.level === 'hold') ? 'hold' : 'alert', matchId: mine[0].matchId };
+  return { level: highest(mine), matchId: mine[0].matchId };
+}
+
+function highest(events: readonly ReplayEvent[]): ReplayLevel {
+  return events.reduce<ReplayLevel>((best, e) => (LEVEL_RANK[e.level] > LEVEL_RANK[best] ? e.level : best), 'alert');
 }
 
 export interface ReplayArgs { db: string; required: boolean; exclude: string[]; json: boolean }
@@ -143,7 +162,31 @@ export function replayHistory(db: DB, opts: ReplayOptions): ReplayReport {
   const members = new Set(people.flatMap((p) => p.members));
   const known = new Set(opts.people.flatMap((p) => p.steam));
   const extraVpn = extraVpnAsns(db);
-  const fired = new Map<string, { level: 'alert' | 'hold'; matchId: number }>();
+  // As candidatesOf: a member of a database person, or an alias of any
+  // member, is never looked at. The account under test is exempt (the
+  // database seed holds it too, which is the point of taking it out).
+  const elsewhere = (id: string): boolean => {
+    if (opts.exclude.has(id)) return false;
+    const canon = resolveAlias(db, id);
+    return members.has(canon) || personOf(db, 'steam', id) !== null || personOf(db, 'steam', canon) !== null;
+  };
+  const isKnown = (id: string): boolean => known.has(id) || known.has(resolveAlias(db, id)) || elsewhere(id);
+  const openHoldAt = db.prepare(
+    'SELECT 1 FROM alt_holds WHERE steamid = ? AND created_at <= ? AND (resolved_at IS NULL OR resolved_at > ?) LIMIT 1',
+  );
+  const playerRow = db.prepare('SELECT is_admin, is_mod FROM players WHERE steamid = ?');
+  /** Whether live placeFingerprintHold would refuse a hold at `at` (it then
+   *  sends a loud alert instead). The 'cleared' refusal needs real person ids
+   *  and is not modelled. */
+  const refusesHold = (id: string, at: Date): boolean => {
+    const iso = at.toISOString();
+    if (heldInReplay.has(id) || openHoldAt.get(id, iso, iso)) return true;
+    const p = playerRow.get(id) as { is_admin: number; is_mod: number } | undefined;
+    return !p || p.is_admin === 1 || p.is_mod === 1;
+  };
+  /** Accounts the replay itself held: out of every later match, as live. */
+  const heldInReplay = new Set<string>();
+  const fired = new Map<string, { level: ReplayLevel; matchId: number }>();
   const events: ReplayEvent[] = [];
   const firstChecked = new Set<string>();
   let candidateChecks = 0;
@@ -172,11 +215,12 @@ export function replayHistory(db: DB, opts: ReplayOptions): ReplayReport {
       ...models.map((p) => ({ subject: `person:${p.id}`, fp: p.pooled })),
     ];
     for (const steamid of thisMatch.keys()) {
-      if (members.has(steamid) || activeBanAt(db, steamid, at) || !isNewAccount(db, steamid, at)) continue;
+      if (members.has(steamid) || heldInReplay.has(steamid) || elsewhere(steamid)) continue;
+      if (activeBanAt(db, steamid, at) || !isNewAccount(db, steamid, at)) continue;
       const hits = matchPersons(whole.get(steamid)!, steamid, field, models);
       if (hits.length === 0) continue;
       candidateChecks += 1;
-      const honest = !known.has(steamid);
+      const honest = !isKnown(steamid);
       if (honest && !firstChecked.has(steamid)) {
         firstChecked.add(steamid);
         honestChecks += 1;
@@ -187,10 +231,18 @@ export function replayHistory(db: DB, opts: ReplayOptions): ReplayReport {
         const person = models.find((p) => p.id === hit.personId)!;
         if (person.members.length === 0) continue;
         const signs = secondSigns(db, steamid, { members: person.members, membersInTop10: hit.membersInTop10, asnLoaded: opts.asnLoaded, extraVpn }, at);
-        const level: 'alert' | 'hold' = signs.length > 0 ? 'hold' : 'alert';
+        let level: ReplayLevel = signs.length > 0 ? 'hold' : 'alert';
         const key = `${steamid}/${person.id}`;
         const before = fired.get(key);
-        if (before && (before.level === 'hold' || before.level === level)) continue;
+        if (before && LEVEL_RANK[before.level] >= LEVEL_RANK[level]) continue;
+        if (level === 'hold') {
+          if (refusesHold(steamid, at)) {
+            level = 'loud';
+            if (before && LEVEL_RANK[before.level] >= LEVEL_RANK.loud) continue;
+          } else {
+            heldInReplay.add(steamid);
+          }
+        }
         fired.set(key, { level, matchId: before?.matchId ?? m.id });
         events.push({
           matchId: m.id, at: at.toISOString(), steamid, person: person.label, level,
@@ -202,15 +254,17 @@ export function replayHistory(db: DB, opts: ReplayOptions): ReplayReport {
 
   const weeks = new Map<string, ReplayWeek>();
   for (const e of events) {
-    const w = entry(weeks, weekOf(new Date(e.at)), () => ({ week: weekOf(new Date(e.at)), alerts: 0, holds: 0, honestAlerts: 0, honestHolds: 0 }));
+    const w = entry(weeks, weekOf(new Date(e.at)), () => ({
+      week: weekOf(new Date(e.at)), alerts: 0, louds: 0, holds: 0, honestAlerts: 0, honestLouds: 0, honestHolds: 0,
+    }));
     if (e.level === 'alert') { w.alerts += 1; if (e.honest) w.honestAlerts += 1; }
+    else if (e.level === 'loud') { w.louds += 1; if (e.honest) w.honestLouds += 1; }
     else { w.holds += 1; if (e.honest) w.honestHolds += 1; }
   }
   const freshOnly = events.filter((e) => e.level === 'hold' && e.signs.length === 1 && e.signs[0] === 'fresh_identity');
   const excluded = [...opts.exclude].map((steamid) => {
     const mine = events.filter((e) => e.steamid === steamid);
-    const level = mine.some((e) => e.level === 'hold') ? 'hold' as const : mine.length > 0 ? 'alert' as const : null;
-    return { steamid, level, matchId: mine[0]?.matchId ?? null };
+    return { steamid, level: mine.length > 0 ? highest(mine) : null, matchId: mine[0]?.matchId ?? null };
   });
   return {
     matches: matches.length, candidateChecks, events,
