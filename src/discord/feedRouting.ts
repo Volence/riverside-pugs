@@ -25,6 +25,8 @@ export const FEED_DESTINATION: Record<AdminEvent['kind'], 'mod' | 'admin'> = {
   input_flag: 'admin',
   // Mods act on cheating reports, and the case this exists for was theirs.
   newcomer_flag: 'mod',
+  // Rare, calibrated on a confirmed cheater, and a moderator acts on it.
+  aim_flag: 'mod',
   cvar_flag: 'admin',
   conduct_flag: 'mod',
   lilac_flag: 'admin',

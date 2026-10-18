@@ -88,7 +88,7 @@ import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
-import { lilacSeverity, recordSiKill } from './aimRules.js';
+import { lilacSeverity, recordSiKill, scanAimMatches } from './aimRules.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap, scanEndedMatches } from './inputBursts.js';
@@ -1715,6 +1715,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       }
     } catch (err) {
       console.error('[inputstats] end-of-match scan failed:', err);
+    }
+    try {
+      // The aim rules judge whole matches, once each ends (src/aimRules.ts).
+      // Empty unless aim_rules is on; log mode still writes the rows.
+      for (const f of scanAimMatches(deps.db)) {
+        publishAdminEvent({ kind: 'aim_flag', steamid: f.steamid, matchId: f.matchId, rule: f.kind, detail: f.detail });
+      }
+    } catch (err) {
+      console.error('[aim] end-of-match scan failed:', err);
     }
     try {
       // The analysis child stores newcomer flags; telling the mods is ours.

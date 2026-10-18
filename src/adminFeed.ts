@@ -52,6 +52,10 @@ export type AdminEvent =
   /** A player too new for the analyzer board whose one match scored in its
    *  top 1% (src/integrity/newcomer.ts). */
   | { kind: 'newcomer_flag'; steamid: string; matchId: number; detail: string }
+  /** An aim rule fired on a whole ended match (src/aimRules.ts). Only with
+   *  aim_rules on. aimbot_multi (two or more rules, or one and a LilAC big
+   *  snap) pings the mod call role; a single rule does not. */
+  | { kind: 'aim_flag'; steamid: string; matchId: number; rule: 'hs_share' | 'flick_return' | 'aimbot_multi'; detail: string }
   // A client setting out of bounds (cpu_level 0). Posted once per player per
   // match, and only for a player in a live match.
   // A slur in chat or in a name, from any human on a game server, in a match
@@ -128,6 +132,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   signon_drop: 'admin_feed_problems',
   input_flag: 'admin_feed_problems',
   newcomer_flag: 'admin_feed_problems',
+  aim_flag: 'admin_feed_problems',
   cvar_flag: 'admin_feed_problems',
   conduct_flag: 'admin_feed_conduct',
   lilac_flag: 'admin_feed_problems',
