@@ -79,3 +79,25 @@ describe('lines in the 0.4.0 format', () => {
     expect(parseLogLine(FORMAT_0_4[1])).toMatchObject({ back: -1 });
   });
 });
+
+// Captured from the 0.4.0 debug build on the local test server on 2026-10-18,
+// a real client killing bot hunters (sv_lan 1, so the id is the STEAM_ form).
+// The first two are setang flicks: 180 degrees away and back onto the hunter
+// in one usercmd, then fire, then away again. The last two are kills with no
+// turn. A bot tank killed the same way printed no line at all.
+const CAPTURED_0_4 = [
+  'L 10/18/2026 - 02:13:30: L4DM id=STEAM_1:1:35074132 k=sikill w=smg hs=0 dist=107 pre=171.9 back=8.0 cls=hunter v=3',
+  'L 10/18/2026 - 02:16:02: L4DM id=STEAM_1:1:35074132 k=sikill w=smg hs=0 dist=107 pre=179.9 back=0.0 cls=hunter v=3',
+  'L 10/18/2026 - 02:14:50: L4DM id=STEAM_1:1:35074132 k=sikill w=smg hs=0 dist=107 pre=0.0 back=0.0 cls=hunter v=3',
+  'L 10/18/2026 - 02:30:35: L4DM id=STEAM_1:1:35074132 k=sikill w=dual_pistols hs=0 dist=180 pre=0.0 back=0.0 cls=hunter v=3',
+];
+
+describe('lines captured from a real 0.4.0 run', () => {
+  it('parse, and the flicks read as flicks', () => {
+    const [flick1, flick2, still, pistols] = CAPTURED_0_4.map((l) => parseLogLine(l));
+    expect(flick1).toMatchObject({ kind: 'si_kill', weapon: 'smg', headshot: false, dist: 107, pre: 171.9, back: 8, victimClass: 'hunter' });
+    expect(flick2).toMatchObject({ pre: 179.9, back: 0 });
+    expect(still).toMatchObject({ pre: 0, back: 0 });
+    expect(pistols).toMatchObject({ weapon: 'dual_pistols', dist: 180 });
+  });
+});
