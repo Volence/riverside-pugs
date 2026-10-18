@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import type { DB } from './db.js';
+import { currentAsnTable, type AsnLookup } from './asnTable.js';
 import { getSetting, setSetting } from './settings.js';
 
 /**
@@ -76,24 +77,30 @@ export function hashIp(db: DB, ip: string): string {
 }
 
 /** Record one sighting. Repeats bump a counter rather than adding rows.
- *  Returns the address's hash, or null for one that identifies nobody. */
+ *  Returns the address's hash, or null for one that identifies nobody.
+ *  `asn` tags the row with its network; it defaults to the table the web
+ *  process loaded, and tests pass their own. */
 export function recordPlayerNet(
   db: DB, ev: { steamid: string; ip: string; country: string | null }, now = new Date(),
+  asn: AsnLookup | null = currentAsnTable(),
 ): string | null {
   if (!usable(ev.ip)) return null;
   const at = now.toISOString();
   const ipHash = hashIp(db, ev.ip);
+  const net = asn?.lookup(ev.ip) ?? null;
   db.prepare(
-    `INSERT INTO player_networks (player_id, ip_hash, country, first_seen, last_seen, seen_count)
-     VALUES (?, ?, ?, ?, ?, 1)
+    `INSERT INTO player_networks (player_id, ip_hash, country, first_seen, last_seen, seen_count, asn, as_org)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?)
      ON CONFLICT(player_id, ip_hash) DO UPDATE SET
        last_seen  = excluded.last_seen,
        seen_count = player_networks.seen_count + 1,
        -- A later lookup wins only when it actually resolved. A country that
        -- was read once should not be erased by a sighting that could not
-       -- read one.
-       country    = COALESCE(excluded.country, player_networks.country)`,
-  ).run(ev.steamid, ipHash, ev.country, at, at);
+       -- read one. The network likewise.
+       country    = COALESCE(excluded.country, player_networks.country),
+       asn        = COALESCE(excluded.asn, player_networks.asn),
+       as_org     = COALESCE(excluded.as_org, player_networks.as_org)`,
+  ).run(ev.steamid, ipHash, ev.country, at, at, net?.asn ?? null, net?.org ?? null);
   return ipHash;
 }
 
