@@ -1365,7 +1365,8 @@ export interface IntegrityFlag {
   steamid: string;
   source: string;
   kind: string;
-  severity: 'suspected' | 'banned';
+  /** 'high': a rule calibrated on a confirmed cheater fired (LilAC's big snap, or two aim rules in one match). */
+  severity: 'suspected' | 'banned' | 'high';
   detail: string;
   at: string;
 }

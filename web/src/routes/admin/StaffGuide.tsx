@@ -123,6 +123,10 @@ export function StaffGuide() {
             total, and the trigger presses. A real snap shows a big single change. Autoshoot with a tiny
             single change (under a degree or two) and lots of one-input presses is a wheel or rapid-fire
             pattern, not an aimbot.
+            {' '}A flag whose single biggest snap (LilAC's own aim-snap reading) was <strong>60 degrees or
+            more</strong> is marked <strong>high severity</strong> and called a big snap. Every honest aimbot
+            flag on record snapped under 45; the confirmed aimbot (nepmir, match 722) snapped 143.5. Unlike
+            the rest of LilAC, one of these is worth opening on its own.
           </dd>
           <dt><code>aimlock</code></dt>
           <dd>
