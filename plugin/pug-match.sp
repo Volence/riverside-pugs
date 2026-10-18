@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.36"
+#define PLUGIN_VERSION "0.3.37"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -2904,10 +2904,34 @@ void SanitizeName(int client, char[] out, int maxlen)
  *  second tv_record would simply be refused, so stop first. tv_stoprecord is
  *  harmless when nothing is recording. The resulting pug_* name is what links
  *  the demo to its match, rather than guessing from timestamps, and is also
- *  what the prune cron keys on to retain match demos longer than autorecords. */
+ *  what the prune cron keys on to retain match demos longer than autorecords.
+ *
+ *  The tv_record waits DEMO_START_DELAY seconds. A SourceTV demo started at map
+ *  start (OnMapStart, or tv_autorecord's own file) writes its signon before the
+ *  level's string tables have their user data: every entry, the gamerules class
+ *  name included, goes out empty. A stock client that plays such a demo before
+ *  loading any map crashes in OnGameRulesCreationStringChanged (NULL class
+ *  name), which is why "load a versus map first" was needed. Proven 2026-10-18
+ *  on a local SourceTV server: OnMapStart demo empty and crashing, the same demo
+ *  started 2 s later complete and playable (docs in l4d-source,
+ *  docs/annotated/client-viewmodel/README.md). The round clock is unaffected:
+ *  the demo tick is read at go-live, long after this. */
+#define DEMO_START_DELAY 2.0
+int g_iDemoStartSerial;                  // bumps to cancel a pending deferred tv_record
+
 void StartMatchDemo()
 {
 	if (!g_cvRecordDemos.BoolValue || g_State == MS_None) return;
+	g_iDemoStartSerial++;
+	// NO_MAPCHANGE: a level change before it fires drops it, and the next
+	// map's OnMapStart asks again.
+	CreateTimer(DEMO_START_DELAY, Timer_StartMatchDemo, g_iDemoStartSerial, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_StartMatchDemo(Handle timer, int serial)
+{
+	if (serial != g_iDemoStartSerial) return Plugin_Stop;  // superseded or cancelled
+	if (!g_cvRecordDemos.BoolValue || g_State == MS_None) return Plugin_Stop;
 	ServerCommand("tv_stoprecord");
 	ServerCommand("tv_record pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
 	g_bMatchDemoOpen = true;
@@ -2919,12 +2943,14 @@ void StartMatchDemo()
 	g_iDemoDelayTicks = delay != null ? RoundToNearest(delay.FloatValue / GetTickInterval()) : 0;
 	g_fDemoEngineAt = GetEngineTime();
 	PugDebug("demo: pug_%s_%d_%s", g_sToken, g_iMapCount, g_sCurrentMap);
+	return Plugin_Stop;
 }
 
 /** Close the match demo we opened, and only that: tv_autorecord's own file
  *  for a map we did not record is left alone. */
 void StopMatchDemo()
 {
+	g_iDemoStartSerial++;  // a tv_record still waiting must not start after this
 	if (!g_bMatchDemoOpen) return;
 	g_bMatchDemoOpen = false;
 	ServerCommand("tv_stoprecord");
@@ -3177,6 +3203,7 @@ void ResetMatchState()
 	g_iLastSurvLogical = 0;
 	g_bMismatchWarned = false;
 	g_bMatchDemoOpen = false;
+	g_iDemoStartSerial++;  // drop a tv_record still waiting (StartMatchDemo)
 	g_iRoundDemoTick = -1;
 	g_iDemoShiftCount = 0;
 	g_iDemoShiftSum = 0;
