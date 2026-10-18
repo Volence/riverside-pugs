@@ -4,7 +4,8 @@ import { upsertPlayer } from '../src/players.js';
 import { banPlayer } from '../src/admin/players.js';
 import { recordPlayerNet } from '../src/playerNetworks.js';
 import { addAlias } from '../src/aliases.js';
-import { checkConnection, clearEvader, flagEvader, ipWatchView, unwatch, watchAddress } from '../src/ipWatch.js';
+import { checkConnection, ipWatchView, isFlagged, unwatch, watchAddress } from '../src/ipWatch.js';
+import { addMember, createPerson, personByLabel, removeMember } from '../src/evaderPeople.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 
 const EVADER = '76561198000000001';
@@ -20,6 +21,12 @@ let off: () => void;
 function connect(steamid: string, ip: string) {
   const h = recordPlayerNet(db, { steamid, ip, country: 'US' });
   if (h) checkConnection(db, steamid, h);
+}
+
+/** Flag `steamid` the way staff now do: make it a member of the person dethisa. */
+function flagEvader(steamid: string) {
+  const id = personByLabel(db, 'dethisa')?.id ?? createPerson(db, 'dethisa', '', STAFF);
+  addMember(db, id, 'steam', steamid, STAFF, 'manual');
 }
 
 beforeEach(() => {
@@ -67,7 +74,7 @@ describe('shared connection with a banned account', () => {
 describe('the watch list', () => {
   it('watches every address a flagged evader used, and new ones as they appear', () => {
     connect(EVADER, '8.8.8.8');
-    flagEvader(db, EVADER, 'dethisa', STAFF);
+    flagEvader(EVADER);
     connect(EVADER, '1.1.1.1');
     const hashes = ipWatchView(db).entries.map((e) => e.steamid);
     expect(hashes).toEqual([EVADER, EVADER]);
@@ -76,7 +83,7 @@ describe('the watch list', () => {
 
   it('pings on another account turning up on a watched address, once', () => {
     connect(EVADER, '8.8.8.8');
-    flagEvader(db, EVADER, 'dethisa', STAFF);
+    flagEvader(EVADER);
     connect(ALT, '8.8.8.8');
     connect(ALT, '8.8.8.8');
     expect(events).toEqual([{ kind: 'ip_match', level: 'watch', steamid: ALT, others: [EVADER], flagged: EVADER, note: '' }]);
@@ -84,7 +91,7 @@ describe('the watch list', () => {
 
   it('takes the watch alert over the banned one for the same connect', () => {
     connect(EVADER, '8.8.8.8');
-    flagEvader(db, EVADER, 'dethisa', STAFF);
+    flagEvader(EVADER);
     banPlayer(db, EVADER, STAFF, 'evading', null);
     connect(ALT, '8.8.8.8');
     expect(events.map((e) => e.level)).toEqual(['watch']);
@@ -100,23 +107,23 @@ describe('the watch list', () => {
     expect(events).toEqual([{ kind: 'ip_match', level: 'watch', steamid: HOUSEMATE, others: [], flagged: null, note: 'from another league' }]);
   });
 
-  it('clearing a flag stops watching what it added, but not what staff added', () => {
+  it('removing a member stops watching what it added, but not what staff added', () => {
     connect(EVADER, '8.8.8.8');
     connect(EVADER, '9.9.9.9');
     watchAddress(db, '9.9.9.9', 'by hand', STAFF);
-    flagEvader(db, EVADER, 'dethisa', STAFF);
-    expect(clearEvader(db, EVADER, STAFF)).toBe(true);
+    flagEvader(EVADER);
+    expect(removeMember(db, 'steam', EVADER, STAFF)).toBe(true);
     const left = ipWatchView(db).entries;
     expect(left).toHaveLength(1);
     expect(left[0].note).toBe('by hand');
-    expect(ipWatchView(db).flags).toEqual([]);
+    expect(isFlagged(db, EVADER)).toBe(false);
     connect(ALT, '8.8.8.8');
     expect(events).toEqual([]);
   });
 
   it('treats a merged-in alias of a flagged evader as the evader', () => {
     connect(EVADER, '8.8.8.8');
-    flagEvader(db, EVADER, 'dethisa', STAFF);
+    flagEvader(EVADER);
     addAlias(db, { steamid: ALT, canonical: EVADER, by: STAFF });
     connect(ALT, '1.1.1.1');
     expect(events).toEqual([]);
