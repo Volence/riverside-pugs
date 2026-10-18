@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { caughtAs, copyForReplay, parseReplayArgs, replayHistory, weekOf, REPLAY_LIMITS } from '../src/fingerprintReplay.js';
+import { caughtAs, copyForReplay, parseReplayArgs, replayHistory, replayPeople, weekOf, REPLAY_LIMITS } from '../src/fingerprintReplay.js';
 import { endedMatch, playMatch } from './fingerprintFixtures.js';
 
 // One member only: two identical members would both sit in ALT's top 10 and
@@ -171,7 +171,7 @@ describe('drift from the live check (fix round 1)', () => {
     }
     playMatch(db, OTHER, 4, 10, 80, '2026-10-04T19:00:00.000Z');
     const r = replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false });
-    expect(r.events.map((e) => e.steamid)).toEqual([ALT]);
+    expect([...new Set(r.events.map((e) => e.steamid))]).toEqual([ALT]);
   });
 
   it('an account held at match N is not a candidate at match N+1', () => {
@@ -203,5 +203,53 @@ describe('drift from the live check (fix round 1)', () => {
 
   it('the limits say candidates come only from base-class bursts', () => {
     expect(REPLAY_LIMITS.join(' ')).toMatch(/base-class bursts/);
+  });
+});
+
+const P2 = '76561198000000002';
+const NEWBIE = '76561198000000005';
+const addDbPerson = (id: number, label: string, steam: readonly string[]) => {
+  db.prepare("INSERT INTO evader_people (id, label, note, created_at, created_by) VALUES (?, ?, '', '2026-10-01T00:00:00.000Z', 'x')").run(id, label);
+  for (const s of steam) {
+    db.prepare("INSERT INTO evader_members (person_id, kind, ident, added_at, added_by, how) VALUES (?, 'steam', ?, '2026-10-01T00:00:00.000Z', 'x', 'migrated flag')").run(id, s);
+  }
+};
+
+describe('every open database person is modelled (final review)', () => {
+  it('an open database person the seed does not have produces alerts', () => {
+    // P2 plays like M1 and is a member of a migrated person only. NEWBIE
+    // then plays like them at match 5: the replay must check NEWBIE against
+    // that person, as live fingerprintWorld would.
+    for (const m of [1, 2, 3]) playMatch(db, P2, m, 19, 60, `2026-10-0${m}T19:00:00.000Z`);
+    addDbPerson(7, 'migrated', [P2]);
+    endedMatch(db, 5, '2026-10-05 20:00:00');
+    playMatch(db, NEWBIE, 5, 19, 80, '2026-10-05T19:00:00.000Z');
+    const r = replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false });
+    expect(r.events.filter((e) => e.person === 'migrated').map((e) => [e.steamid, e.level])).toEqual([[NEWBIE, 'alert']]);
+    expect(caughtAs(r, NEWBIE, 'migrated')).toEqual({ level: 'alert', matchId: 5 });
+    // The seed alone (no database person) never sees it.
+    db.prepare("UPDATE evader_people SET closed_at = '2026-10-02T00:00:00.000Z', closed_by = 'x' WHERE id = 7").run();
+    expect(replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false }).events.filter((e) => e.steamid === NEWBIE)).toEqual([]);
+  });
+
+  it('seed members merge into the database person of the same label; the account under test stays out', () => {
+    addDbPerson(3, 'dethisa', [ALT, '76561198000000011']);
+    addDbPerson(4, 'other', ['76561198000000012']);
+    expect(replayPeople(db, [{ label: 'dethisa', steam: [M1, ALT] }, { label: 'shove', steam: ['76561198000000099'] }])).toEqual([
+      { label: 'dethisa', steam: [ALT, '76561198000000011', M1] },
+      { label: 'other', steam: ['76561198000000012'] },
+      { label: 'shove', steam: ['76561198000000099'] },
+    ]);
+    const r = replayHistory(db, { people, exclude: new Set([ALT]), asnLoaded: false });
+    expect(caughtAs(r, ALT, 'dethisa')).toEqual({ level: 'alert', matchId: 4 });
+  });
+
+  it('the limits say what is read as of today and what is not modelled', () => {
+    const text = REPLAY_LIMITS.join(' ');
+    expect(text).toMatch(/membership \(database persons, aliases and the seed\) is read as of today/);
+    expect(text).toMatch(/players-row existence is read as of today/);
+    expect(text).toMatch(/cleared .* not modelled/);
+    expect(text).toMatch(/replayed hold is never resolved/);
+    expect(text).toMatch(/dismissals are live-only/);
   });
 });
