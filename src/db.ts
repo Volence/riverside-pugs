@@ -2180,6 +2180,12 @@ export function openDb(path: string): DB {
     resolution    TEXT CHECK (resolution IN ('cleared', 'banned', 'merged'))
   )`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_alt_holds_steamid ON alt_holds (steamid)');
+  // Where a hold came from: a Discord account moving ('discord'), or a new
+  // account's press fingerprint matching a known evader plus a second sign
+  // ('fingerprint', src/fingerprintCheck.ts). A cleared pair is suppressed
+  // per source: lifting a Discord hold says nothing about a fingerprint.
+  ensureColumn(db, 'alt_holds', 'source', "TEXT NOT NULL DEFAULT 'discord' CHECK (source IN ('discord', 'fingerprint'))");
+  ensureColumn(db, 'alt_holds', 'person_id', 'INTEGER');
   // "Somebody has looked at this file." What takes a player off the Needs a
   // look list, and what puts them back when something newer arrives.
   //
