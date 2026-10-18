@@ -202,6 +202,26 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'aim_flag': {
+        const match = `match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        // Loud only for the combination: one rule alone is calibrated on one
+        // cheater and is something to watch, not something to drop
+        // everything for.
+        if (e.rule === 'aimbot_multi') {
+          return {
+            text: `🚨 **Aim rules:** ${this.name(e.steamid)} tripped two or more aim rules in ${match} (${e.detail}). `
+              + `Nothing was done to the account. Watch the replay before deciding anything. [File](${this.file(e.steamid)})`,
+            color: COLOR.problem,
+            ping: true,
+          };
+        }
+        const what = e.rule === 'hs_share' ? 'headshot share' : 'flick and return';
+        return {
+          text: `🎯 ${this.name(e.steamid)} tripped the \`${e.rule}\` aim rule (${what}) in ${match} (${e.detail}). `
+            + `Evidence to weigh against the replay, not a verdict. [File](${this.file(e.steamid)})`,
+          color: COLOR.problem,
+        };
+      }
       case 'cvar_flag': {
         // Worded by what the plugin did. With the ready gate on, a Low player
         // cannot ready, so `held` is the common case and nobody has played on
