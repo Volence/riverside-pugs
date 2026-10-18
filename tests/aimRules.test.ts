@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { getSetting, setSetting } from '../src/settings.js';
 import { SETTINGS_SCHEMA, validateSetting } from '../src/settingsSchema.js';
@@ -149,5 +149,30 @@ describe('scanAimMatches', () => {
     db.prepare("UPDATE matches SET state = 'aborted' WHERE id = 722").run();
     play(A, 14, 0);
     expect(scanAimMatches(db, NOW).map((p) => p.kind)).toEqual(['hs_share']);
+  });
+
+  it('keeps each ended match\'s flag for the same player in one sweep', () => {
+    setSetting(db, 'aim_rules', 'on');
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, ended_at) VALUES (721, 1, 'completed', 'farm', '2026-10-17 21:30:00')").run();
+    play(A, 14, 0, 721);
+    play(A, 14, 0, 722);
+    const posts = scanAimMatches(db, NOW);
+    expect(posts.map((p) => [p.matchId, p.kind])).toEqual([[721, 'hs_share'], [722, 'hs_share']]);
+    expect(aimRows()).toHaveLength(2);
+  });
+
+  it('a match that throws does not stop the others, and is retried', () => {
+    setSetting(db, 'aim_rules', 'on');
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, ended_at) VALUES (723, 1, 'completed', 'farm', '2026-10-17 21:50:00')").run();
+    play(A, 14, 0, 722);
+    play(B, 14, 0, 723);
+    db.exec("CREATE TRIGGER boom BEFORE INSERT ON integrity_flags WHEN NEW.match_id = 722 BEGIN SELECT RAISE(ABORT, 'boom'); END");
+    const errs = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(scanAimMatches(db, NOW).map((p) => [p.matchId, p.steamid])).toEqual([[723, B]]);
+    expect(errs).toHaveBeenCalled();
+    errs.mockRestore();
+    expect(db.prepare('SELECT match_id FROM aim_match_scans').all()).toEqual([{ match_id: 723 }]);
+    db.exec('DROP TRIGGER boom');
+    expect(scanAimMatches(db, NOW).map((p) => [p.matchId, p.steamid])).toEqual([[722, A]]);
   });
 });
