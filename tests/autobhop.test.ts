@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { detectionsForPlayer, recordInputBurst, rerunSignatures, scanEndedMatches } from '../src/inputBursts.js';
 import { AUTOBHOP_MIN_CHAINED, autobhop, matchDetections, DEFAULT_THRESHOLDS, type SignatureBurst } from '../src/inputStats.js';
@@ -93,6 +93,24 @@ describe('autobhop through storage', () => {
     end();
     expect(scanEndedMatches(db, undefined, NOW)).toEqual([]);
     expect(detectionsForPlayer(db, A)).toHaveLength(0);
+  });
+
+  it('a throwing after-match hook keeps the claimed flags and reaches the next match', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    store(BELLA_631);
+    end();
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, ended_at) VALUES (632, 1, 'completed', 'death_toll', '2026-10-10 21:50:00')").run();
+    const seen: number[] = [];
+    const fired = scanEndedMatches(db, undefined, NOW, undefined, (id) => { seen.push(id); throw new Error(`boom ${id} from 198.51.100.4`); });
+    expect(fired).toEqual([{ matchId: 631, steamid: A, signature: 'autobhop', note: '72% of 36 chained hops on the landing tick, longest run 10' }]);
+    expect(seen.sort()).toEqual([631, 632]);
+    const lines = err.mock.calls.map((c) => c.map(String).join(' '));
+    expect(lines).toEqual(expect.arrayContaining([
+      expect.stringContaining('after-match hook failed for match 631'),
+      expect.stringContaining('after-match hook failed for match 632'),
+    ]));
+    for (const l of lines) expect(l).not.toContain('198.51.100.4');
+    err.mockRestore();
   });
 
   it('a rebuild from history lands on the same row', () => {
