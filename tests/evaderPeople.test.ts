@@ -116,3 +116,53 @@ describe('the evader_flags migration', () => {
     expect((db.prepare('SELECT COUNT(*) AS n FROM evader_flags').get() as { n: number }).n).toBe(1);
   });
 });
+
+describe('migration robustness', () => {
+  const flag = (steamid: string) => db.prepare(
+    `INSERT INTO evader_flags (steamid, reason, created_by, created_at) VALUES (?, 'r', ?, '2026-10-08T00:00:00.000Z')`,
+  ).run(steamid, STAFF);
+
+  it('a migration that throws rolls the table creation back, and the next boot migrates', () => {
+    db.exec('DROP TABLE evader_members; DROP TABLE evader_people;');
+    flag(DETHISA.steam[0]);
+    // dropping the flags table makes the migration's own query throw
+    db.exec('DROP TABLE evader_flags');
+    expect(() => ensureEvaderSchema(db)).toThrow();
+    expect(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'evader_people'").get()).toBeUndefined();
+    db.exec(`CREATE TABLE evader_flags (steamid TEXT PRIMARY KEY, reason TEXT NOT NULL, created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL, cleared_by TEXT, cleared_at TEXT)`);
+    flag(DETHISA.steam[0]);
+    ensureEvaderSchema(db);
+    expect(isFlagged(db, DETHISA.steam[0])).toBe(true);
+  });
+
+  it('an existing but empty evader_people with open flags migrates on the next call', () => {
+    flag(DETHISA.steam[0]);
+    expect(openPeople(db)).toEqual([]);
+    ensureEvaderSchema(db);
+    expect(isFlagged(db, DETHISA.steam[0])).toBe(true);
+  });
+
+  it('running twice migrates once', () => {
+    flag(DETHISA.steam[0]);
+    ensureEvaderSchema(db);
+    ensureEvaderSchema(db);
+    expect(openPeople(db)).toHaveLength(1);
+    expect(steamMembersOf(db, openPeople(db)[0].id)).toEqual([DETHISA.steam[0]]);
+  });
+
+  it('dethisa takes the label first, a stranger named dethisa gets a suffixed one, long names are clamped', () => {
+    player(db, '76561198000000007', 'dethisa');
+    player(db, '76561198000000008', 'dethisa (pre-ban)');
+    player(db, '76561198000000010', 'x'.repeat(60));
+    flag('76561198000000007');
+    flag('76561198000000008');
+    flag('76561198000000010');
+    ensureEvaderSchema(db);
+    const d = personByLabel(db, 'dethisa')!;
+    expect(steamMembersOf(db, d.id)).toEqual(['76561198000000008']);
+    const labels = openPeople(db).map((p) => p.label);
+    expect(labels).toContain('dethisa (76561198000000007)');
+    expect(labels.every((l) => l.length >= 1 && l.length <= 40)).toBe(true);
+  });
+});

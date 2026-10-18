@@ -2822,7 +2822,8 @@ export function openDb(path: string): DB {
   // Ban appeals. Last, after widenTicketIdentity has created discord_sanctions.
   ensureAppealSchema(db);
 
-  // Evader flags, the IP watch list and same-connection alerts (src/ipWatch.ts).
+  // The IP watch list, the read-only legacy evader flags and same-connection
+  // alerts (src/ipWatch.ts).
   ensureIpWatchSchema(db);
   // Known evaders as people, their press fingerprints and fingerprint alerts
   // (src/evaderPeople.ts). After the watch list: the first boot migrates the

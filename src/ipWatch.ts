@@ -64,7 +64,6 @@ export function ensureIpWatchSchema(db: DB): void {
   `);
 }
 
-
 /** A Steam member of an open person record (src/evaderPeople.ts). The name
  *  is kept from the evader flags it replaced, so every caller still reads
  *  "is this a known evader's account". */
