@@ -19,6 +19,7 @@ export const SOURCE_LABEL: Record<TimelineSource, string> = {
   cvar: 'Client setting',
   conduct: 'Chat and names',
   spray: 'Crash spray',
+  aim: 'Aim rules',
 };
 
 export function SourceBadge({ source }: { source: TimelineSource }) {
