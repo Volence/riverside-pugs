@@ -92,6 +92,7 @@ import { lilacSeverity, recordSiKill, scanAimMatches } from './aimRules.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap, scanEndedMatches } from './inputBursts.js';
+import { runFingerprintCheck } from './fingerprintCheck.js';
 import { getServer, resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
 import { resetMap, problemText } from './matchTeardown.js';
 import { makeServerCleaner } from './serverCleaner.js';
@@ -1710,7 +1711,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
     try {
       // Match-level input signatures run once a match is over.
-      for (const d of scanEndedMatches(deps.db, inputThresholds(deps.db))) {
+      // The evader fingerprint check rides the same once-per-ended-match claim.
+      for (const d of scanEndedMatches(deps.db, inputThresholds(deps.db), new Date(), undefined,
+        (matchId) => { runFingerprintCheck(deps.db, matchId); })) {
         publishAdminEvent({ kind: 'input_flag', steamid: d.steamid, matchId: d.matchId, signature: d.signature, detail: d.note });
       }
     } catch (err) {
