@@ -20,7 +20,10 @@ import { steamId64Of } from './steamId.js';
  * Addresses are held in memory for the run and never written or printed.
  */
 
-const JOIN_LINE = /\((STEAM_\d:[01]:\d{1,10})\s*\|\s*(\d{1,3}(?:\.\d{1,3}){3})\)/;
+// `[HH:MM:SS] (STEAM_x:y:z <pad> | a.b.c.d <pad>) name has joined.`: the logger
+// pads both columns, and anchoring on the timestamp and the trailing "has
+// joined." keeps a chat message that merely quotes a join from counting.
+const JOIN_LINE = /^\[\d\d:\d\d:\d\d\] \((STEAM_\d:[01]:\d{1,10})\s*\|\s*(\d{1,3}(?:\.\d{1,3}){3})\s*\) .* has joined\.\s*$/;
 export const CHAT_LOG_NAME = /^server_\d+_chat_\d{4}_\d{2}_\d{2}\.log(\.gz)?$/;
 
 export function parseChatJoinLine(line: string): { steamid: string; ip: string } | null {
