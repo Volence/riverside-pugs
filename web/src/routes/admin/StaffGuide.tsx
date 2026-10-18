@@ -1,4 +1,5 @@
 import { Panel } from '../../components/bits';
+import { SIGN_ORDER, SIGN_TEXT, type SecondSign } from '../../../../src/fingerprint';
 
 /**
  * What every line on Needs a look and on a player's file means, for staff.
@@ -9,6 +10,16 @@ import { Panel } from '../../components/bits';
  * same change. Moderators asked for it so they can judge a file themselves
  * instead of asking what a line means.
  */
+
+/** One line per second sign. A Record, so a new sign does not compile until
+ *  it is explained here. */
+const SIGN_HELP: Record<SecondSign, string> = {
+  vpn: 'One of their connections comes from a VPN or hosting provider (Datacamp, M247, Vultr and the like). Evaders hide behind these; so do some honest players.',
+  fresh_identity: 'The Steam account is under a year old or private, the Discord account is under 90 days old, or the Discord is new to us on a site account under a week old. Private profiles are common: this counts only next to a fingerprint.',
+  cheat_flag: 'They have an aimbot, aimlock or newcomer wallhack flag from a match they played.',
+  two_members: 'Two or more of the known evader\'s own accounts are among their 10 nearest fingerprints, not just the pooled record.',
+  shared_connection: 'They have used a connection one of the evader\'s accounts used. This also posts its own watch-list alert.',
+};
 export function StaffGuide() {
   return (
     <div class="stack">
@@ -22,6 +33,7 @@ export function StaffGuide() {
           <li><a href="#replay">Replay moments</a></li>
           <li><a href="#ranking">Analyzer ranking</a></li>
           <li><a href="#steam">Steam</a></li>
+          <li><a href="#fingerprint">Fingerprint alerts</a></li>
           <li><a href="#drops">Connect drops</a></li>
           <li><a href="#slurs">Slurs</a></li>
           <li><a href="#appeals">Appeals</a></li>
@@ -273,10 +285,52 @@ export function StaffGuide() {
         </dl>
       </Panel>
 
+      <Panel id="fingerprint">
+        <h3>Fingerprint alerts</h3>
+        <p>
+          The site times how long every player holds infected buttons: the hunter, smoker and boomer claw, and
+          attacks in the air. A hand holds them for a typical length of its own, and no aimbot drives these
+          presses, so the pattern follows a person from one Steam account to the next. At the end of every match,
+          each new account (under 15 rated matches, or a site account under 30 days old) is compared with every
+          known evader on People &gt; Alts.
+        </p>
+        <dl class="howto-cmds">
+          <dt>Fingerprint match</dt>
+          <dd>
+            The account holds buttons like that evader, and nothing else points at them. Nothing is done to the
+            account. Look at the file, the matches and the connections before you decide anything.
+          </dd>
+          <dt>Fingerprint match with a second sign</dt>
+          <dd>The same, plus one of the signs below. It pings the mod role, and nobody is held.</dd>
+          <dt>Fingerprint hold</dt>
+          <dd>
+            A fingerprint match plus a second sign while holds are switched on. The account is on hold until a
+            moderator looks: lift it, or (admins) use <strong>Ban as same person</strong>, which bans it and adds it
+            and its Discord to the evader's record.
+          </dd>
+        </dl>
+        <p>
+          <strong>Reading the numbers.</strong> The distance is 0 for identical hold patterns and 1 for nothing in
+          common. "#2 nearest" means one fingerprint on record, out of everyone, is closer to this account than the
+          evader's is. The limit is the evader's own: how far their accounts' single matches sit from the rest of
+          them. A match needs the evader in the 5 nearest and under that limit.
+        </p>
+        <p>
+          <strong>A fingerprint alone is not proof.</strong> Across the first matches of 183 honest players, the
+          evader's record landed in the 5 nearest for about 3% of them. That is why a fingerprint alone only posts,
+          and a hold needs one of these as well:
+        </p>
+        <dl class="howto-cmds">
+          {SIGN_ORDER.flatMap((s) => [
+            <dt key={`${s}-t`}>{SIGN_TEXT[s]}</dt>,
+            <dd key={`${s}-d`}>{SIGN_HELP[s]}</dd>,
+          ])}
+        </dl>
+      </Panel>
       <Panel id="drops">
         <h3>Repeated connect drops</h3>
         <p>
-          The player dropped out while loading in, twice within ten minutes with no successful join between.
+
           The server checks certain game files on connect and the player's own game disconnects at the first
           one that has been modified, so repeated drops can mean a skin or no-foliage mod. A cancelled loading
           screen or a bad connection looks exactly the same, so ask before assuming.

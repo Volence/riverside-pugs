@@ -3,6 +3,7 @@ import { render, cleanup } from '@testing-library/preact';
 import { StaffGuide } from './StaffGuide';
 import { LILAC_CHEATS } from '../../../../src/integrityFlags';
 import { SIGNATURES } from '../../../../src/inputStats';
+import { SIGN_TEXT } from '../../../../src/fingerprint';
 
 afterEach(cleanup);
 
@@ -26,5 +27,16 @@ describe('StaffGuide', () => {
       if (name === 'noisemaker_spam' || name === 'macro') continue;
       expect(text, name).toContain(name);
     }
+  });
+
+  // A second sign or a fingerprint level the guide cannot explain would reach
+  // the mod channel with nothing for a moderator to read.
+  it('explains every second sign and every fingerprint post', () => {
+    const text = render(<StaffGuide />).container.textContent!;
+    for (const s of Object.values(SIGN_TEXT)) expect(text, s).toContain(s);
+    for (const head of ['Fingerprint match', 'Fingerprint match with a second sign', 'Fingerprint hold']) {
+      expect(text, head).toContain(head);
+    }
+    expect(text).toContain('not proof');
   });
 });
