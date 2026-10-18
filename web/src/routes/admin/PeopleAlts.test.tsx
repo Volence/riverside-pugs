@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
 import type { AltCluster, AltHold } from '../../api';
 
-const { mockPeople } = vi.hoisted(() => ({ mockPeople: { alts: vi.fn(), liftHold: vi.fn(), banFromHold: vi.fn() } }));
+const { mockPeople } = vi.hoisted(() => ({
+  mockPeople: { alts: vi.fn(), liftHold: vi.fn(), banFromHold: vi.fn(), banHoldSamePerson: vi.fn(), evaders: vi.fn(), ipWatch: vi.fn() },
+}));
 
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
@@ -40,6 +42,8 @@ const weak: AltCluster = {
 beforeEach(() => {
   for (const f of Object.values(mockPeople)) f.mockReset();
   mockPeople.alts.mockResolvedValue({ open: [hold], settled: [], clusters: [strong, weak] });
+  mockPeople.evaders.mockResolvedValue({ people: [] });
+  mockPeople.ipWatch.mockResolvedValue({ entries: [] });
 });
 afterEach(() => { cleanup(); });
 
@@ -67,5 +71,20 @@ describe('PeopleAlts', () => {
     expect(screen.queryByText('housemate')).toBeNull();
     fireEvent.click(screen.getByLabelText(/Also show 1 group tied only by a shared connection/));
     expect(await screen.findByText('housemate')).toBeTruthy();
+  });
+
+  it('marks a fingerprint hold, says who it plays like, and offers Ban as same person to admins', async () => {
+    const fp: AltHold = {
+      ...hold, id: 8, source: 'fingerprint', personId: 1, personLabel: 'dethisa', discordId: '', discordName: '',
+      fingerprint: { distance: 0.203, rank: 2, threshold: 0.25, signs: ['vpn'] },
+    };
+    mockPeople.alts.mockResolvedValue({ open: [fp], settled: [], clusters: [] });
+    render(<PeopleAlts isAdmin />);
+    expect(await screen.findByText('fingerprint')).toBeTruthy();
+    expect(screen.getAllByText('dethisa').length).toBeGreaterThan(0);
+    expect(screen.getByText(/distance 0\.203 \(limit 0\.250\)/)).toBeTruthy();
+    expect(screen.getByText(/a VPN or hosting connection/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ban as same person' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Ban' })).toBeNull();
   });
 });

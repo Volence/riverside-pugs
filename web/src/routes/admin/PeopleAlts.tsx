@@ -5,6 +5,8 @@ import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
 import { fileUrl } from './adminRoutes';
+import { KnownEvaders } from './KnownEvaders';
+import { SIGN_TEXT, type SecondSign } from '../../../../src/fingerprint';
 
 const SIGNAL_LABEL: Record<AltSignal, string> = {
   discord: 'Discord moved',
@@ -14,6 +16,8 @@ const SIGNAL_LABEL: Record<AltSignal, string> = {
 };
 
 const RESOLUTION_LABEL = { cleared: 'lifted', banned: 'banned', merged: 'merged' } as const;
+
+const signText = (s: string): string => SIGN_TEXT[s as SecondSign] ?? s;
 
 /**
  * Alts: every second account the site knows about, in one place.
@@ -48,16 +52,26 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
     danger: true,
   });
 
+  const banSame = (h: AltHold) => run(() => peopleApi.banHoldSamePerson(h.id), {
+    title: `Ban ${h.name} as ${h.personLabel ?? 'the known evader'}?`,
+    body: `A permanent ban, shown on the public ban list as ban evasion. ${h.name} and their Discord join `
+      + `${h.personLabel ?? 'that person'}'s record, so their connections are watched and their presses join the fingerprint. The hold is closed.`,
+    confirmLabel: 'Ban as same person',
+    danger: true,
+  });
+
   return (
     <>
+      <KnownEvaders isAdmin={isAdmin} />
+
       <IpWatchPanel />
 
       <Panel class="panel--table">
         <h3>On hold</h3>
         <p class="muted">
-          Held because their Discord account came from another Steam account. They cannot queue or play,
-          and the hold is not on the public ban list. Lift it once they have explained, or ban it if it is an
-          alt.
+          Held because their Discord account came from another Steam account, or because they hold infected
+          buttons like a known evader and a second sign fired (marked fingerprint). They cannot queue or play, and
+          the hold is not on the public ban list. Lift it once they have explained, or ban it if it is an alt.
         </p>
         {error && <p class="error">{error}</p>}
         {loadError && <Empty>Could not load the alts.</Empty>}
@@ -66,22 +80,40 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
           <div class="table-wrap">
             <table class="admin-table">
               <thead>
-                <tr><th>Held account</th><th>Discord came from</th><th>Discord</th><th>Held</th><th /></tr>
+                <tr><th>Held account</th><th>Why</th><th>Discord</th><th>Held</th><th /></tr>
               </thead>
               <tbody>
                 {data.open.map((h) => (
                   <tr key={h.id}>
                     <td><a href={fileUrl(h.steamid)}>{h.name}</a><div class="mono muted">{h.steamid}</div></td>
                     <td>
-                      <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a>
-                      {h.otherBanned && <> <span class="admin-status admin-status--banned">banned</span></>}
-                      <div class="mono muted">{h.otherSteamid}</div>
+                      {h.source === 'fingerprint' ? (
+                        <>
+                          <span class="chip">fingerprint</span> plays like <strong>{h.personLabel ?? 'a known evader'}</strong>,
+                          nearest account <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a>
+                          {h.otherBanned && <> <span class="admin-status admin-status--banned">banned</span></>}
+                          {h.fingerprint && (
+                            <div class="muted">
+                              #{h.fingerprint.rank} nearest, distance {h.fingerprint.distance.toFixed(3)} (limit {h.fingerprint.threshold.toFixed(3)})
+                              {h.fingerprint.signs.length > 0 ? `; ${h.fingerprint.signs.map(signText).join(', ')}` : ''}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          Discord came from <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a>
+                          {h.otherBanned && <> <span class="admin-status admin-status--banned">banned</span></>}
+                          <div class="mono muted">{h.otherSteamid}</div>
+                        </>
+                      )}
                     </td>
                     <td>{h.discordName || h.discordId}</td>
                     <td class="muted">{fmtTime(h.createdAt)}</td>
                     <td class="admin-actions">
                       <button class="btn" disabled={busy} onClick={() => lift(h)}>Lift hold</button>
-                      {isAdmin && <button class="btn btn--danger" disabled={busy} onClick={() => ban(h)}>Ban</button>}
+                      {isAdmin && (h.source === 'fingerprint'
+                        ? <button class="btn btn--danger" disabled={busy} onClick={() => banSame(h)}>Ban as same person</button>
+                        : <button class="btn btn--danger" disabled={busy} onClick={() => ban(h)}>Ban</button>)}
                     </td>
                   </tr>
                 ))}
@@ -156,7 +188,7 @@ function ClusterCard({ c }: { c: AltCluster }) {
 }
 
 /**
- * The IP watch list (src/ipWatch.ts). A flagged ban evader's connections are
+ * The IP watch list (src/ipWatch.ts). A known evader's connections are
  * watched, and any other account turning up on one pings the mod call role.
  * Staff can also watch an address by hand; it is hashed on arrival and never
  * kept, so the list shows a short fingerprint, not the address.
@@ -177,33 +209,13 @@ function IpWatchPanel() {
     <Panel class="panel--table">
       <h3>IP watch list</h3>
       <p class="muted">
-        Flag a ban evader from the Identity section of their file and every connection they use is watched,
-        including new ones. Any other account connecting from a watched connection pings the mod role in the
-        mod channel. Separately, any account sharing a connection with a banned account gets a plain alert.
-        Nothing here bans or holds anyone.
+        Every connection a known evader's account uses is watched, including new ones (add an account to a person
+        from the Identity section of its file, or on the Known evaders card). Any other account connecting from a
+        watched connection pings the mod role in the mod channel. Separately, any account sharing a connection with
+        a banned account gets a plain alert. Nothing here bans or holds anyone.
       </p>
       {error && <p class="error">{error}</p>}
       {loadError && <Empty>Could not load the watch list.</Empty>}
-
-      {data && data.flags.length > 0 && (
-        <>
-          <p><strong>Flagged ban evaders</strong></p>
-          <ul class="admin-list">
-            {data.flags.map((f) => (
-              <li key={f.steamid}>
-                <a href={fileUrl(f.steamid)}>{f.name}</a> <span class="mono muted">{f.steamid}</span>{' '}
-                <span class="muted">{f.reason} · {fmtTime(f.createdAt)}{f.createdByName ? ` by ${f.createdByName}` : ''}</span>{' '}
-                <button class="chip" type="button" disabled={busy}
-                  onClick={() => run(() => peopleApi.clearEvader(f.steamid), {
-                    title: `Clear the flag on ${f.name}?`,
-                    body: 'The connections this flag put on the watch list stop being watched.',
-                    confirmLabel: 'Clear flag',
-                  })}>Clear</button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
 
       {data && data.entries.length === 0 && <Empty>No connections are being watched.</Empty>}
       {data && data.entries.length > 0 && (

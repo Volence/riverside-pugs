@@ -23,7 +23,8 @@ export function IdentitySection(
   const [into, setInto] = useState('');
   const [plan, setPlan] = useState<MergePlan | null>(null);
   const [planError, setPlanError] = useState('');
-  const [evaderReason, setEvaderReason] = useState('');
+  const [personChoice, setPersonChoice] = useState('');
+  const [newLabel, setNewLabel] = useState('');
   const countries = [...new Set(id.networks.map((n) => n.country).filter(Boolean))].map(countryName);
 
   const preview = async () => {
@@ -41,28 +42,36 @@ export function IdentitySection(
     <Panel class="file-section">
       <h3 id="identity">Identity</h3>
 
-      {id.evaderFlag ? (
+      {id.evaderPerson ? (
         <p>
-          <span class="admin-status admin-status--banned">ban evader</span>{' '}
-          Every connection this account uses is on the <a href="/admin/people/alts">IP watch list</a>.{' '}
-          <span class="muted">{id.evaderFlag.reason} · {fmtTime(id.evaderFlag.createdAt)}{id.evaderFlag.createdByName ? ` by ${id.evaderFlag.createdByName}` : ''}</span>{' '}
-          {can('looked_at') && (
-            <button class="chip" type="button" disabled={busy}
-              onClick={() => run(() => peopleApi.clearEvader(d.steamid), `Clear the ban evader flag on ${d.header.name}?`)}>Clear flag</button>
-          )}
+          <span class="admin-status admin-status--banned">known evader</span>{' '}
+          One of <a href="/admin/people/alts">{id.evaderPerson.label}</a>'s accounts
+          {id.evaderPerson.closed ? ' (record closed)' : '. Every connection it uses is on the IP watch list.'}{' '}
+          <span class="muted">Remove it from the Known evaders card on Alts.</span>
         </p>
       ) : can('looked_at') && (
         <form class="admin-merge" onSubmit={(e) => {
           e.preventDefault();
-          void run(() => peopleApi.flagEvader(d.steamid, evaderReason.trim()), {
-            title: `Flag ${d.header.name} as a ban evader?`,
-            body: 'Every connection they have used, and any they use later, goes on the IP watch list. Any other account connecting from one pings the mod role. It does not ban anyone.',
-            confirmLabel: 'Flag',
-          }).then(() => setEvaderReason(''));
+          const to = personChoice === 'new' ? { label: newLabel.trim() } : { personId: Number(personChoice) };
+          const who = personChoice === 'new' ? newLabel.trim() : (id.evaderOptions ?? []).find((o) => String(o.id) === personChoice)?.label;
+          void run(() => peopleApi.addToPerson(d.steamid, to), {
+            title: `Add ${d.header.name} to ${who ?? 'that person'}?`,
+            body: 'Every connection they have used, and any they use later, goes on the IP watch list, and their presses join the person\'s fingerprint. It does not ban anyone.',
+            confirmLabel: 'Add to person',
+          }).then(() => { setPersonChoice(''); setNewLabel(''); });
         }}>
-          <input value={evaderReason} placeholder="Why (e.g. dethisa, 4th account)" aria-label="Ban evader reason" maxLength={300}
-            onInput={(e) => setEvaderReason((e.target as HTMLInputElement).value)} />
-          <button class="btn" type="submit" disabled={busy || !evaderReason.trim()}>Flag as ban evader</button>
+          <select value={personChoice} aria-label="Known evader"
+            onChange={(e) => setPersonChoice((e.target as HTMLSelectElement).value)}>
+            <option value="">Add to person...</option>
+            {(id.evaderOptions ?? []).map((o) => <option key={o.id} value={String(o.id)}>{o.label}</option>)}
+            <option value="new">New person</option>
+          </select>
+          {personChoice === 'new' && (
+            <input value={newLabel} placeholder="Label (e.g. dethisa)" aria-label="New person label" maxLength={40}
+              onInput={(e) => setNewLabel((e.target as HTMLInputElement).value)} />
+          )}
+          <button class="btn" type="submit"
+            disabled={busy || !personChoice || (personChoice === 'new' && !newLabel.trim())}>Add to person</button>
         </form>
       )}
 
@@ -72,9 +81,13 @@ export function IdentitySection(
           <ul class="admin-list">
             {id.altHolds!.map((h) => (
               <li key={h.id}>
-                {h.steamid === d.steamid
-                  ? <>Held because Discord {h.discordName || h.discordId} came from <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a></>
-                  : <>Discord {h.discordName || h.discordId} moved from here to <a href={fileUrl(h.steamid)}>{h.name}</a>, which was held</>}
+                {h.source === 'fingerprint'
+                  ? (h.steamid === d.steamid
+                    ? <>Held on a press fingerprint match with <strong>{h.personLabel ?? 'a known evader'}</strong> (nearest account <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a>)</>
+                    : <>The nearest account to <a href={fileUrl(h.steamid)}>{h.name}</a>, held on a fingerprint match with {h.personLabel ?? 'a known evader'}</>)
+                  : h.steamid === d.steamid
+                    ? <>Held because Discord {h.discordName || h.discordId} came from <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a></>
+                    : <>Discord {h.discordName || h.discordId} moved from here to <a href={fileUrl(h.steamid)}>{h.name}</a>, which was held</>}
                 {' '}
                 <span class="muted">
                   {fmtTime(h.createdAt)}
