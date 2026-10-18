@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { REPLAY_REQUIRED, SEED_PEOPLE, DETHISA } from '../src/evaderSeed.js';
 import {
-  REPLAY_LIMITS, caughtAs, copyForReplay, parseReplayArgs, replayHistory, type ReplayArgs, type ReplayReport,
+  REPLAY_LIMITS, caughtAs, copyForReplay, parseReplayArgs, replayHistory, replayPeople, type ReplayArgs, type ReplayReport,
 } from '../src/fingerprintReplay.js';
 
 let args: ReplayArgs;
@@ -57,6 +57,9 @@ try {
         console.log(`seed ${p.label}: name "${n}" resolved to ${ids.length ? ids.join(', ') : 'no account'}`);
       }
     }
+    // The replay matches against every open person in this copy with the
+    // seed on top, as live does. Listed so a missing or extra person shows.
+    for (const p of replayPeople(db, people)) console.log(`person ${p.label}: ${p.steam.length} Steam accounts`);
     const asnLoaded = (db.prepare('SELECT COUNT(*) AS n FROM player_networks WHERE asn IS NOT NULL').get() as { n: number }).n > 0;
     const runs = args.required
       ? REPLAY_REQUIRED.map((r) => ({ title: `${r.name} taken out of the ${DETHISA.label} seed`, exclude: [r.steamid], expect: r.steamid as string | null }))

@@ -8,7 +8,7 @@ import { BASE_BURST_SQL } from './fingerprintData.js';
 import { activeBanAt, dbTimeMs, isNewAccount, secondSigns } from './fingerprintSigns.js';
 import { extraVpnAsns } from './networkKinds.js';
 import { resolveAlias } from './aliases.js';
-import { personOf } from './evaderPeople.js';
+import { openPeople, personOf, steamMembersOf } from './evaderPeople.js';
 
 /**
  * What the evader fingerprint rules would have done over everything on
@@ -26,13 +26,25 @@ import { personOf } from './evaderPeople.js';
  * live would refuse (staff, an open hold by then, no players row) counts as
  * 'loud'. Accounts the live check never looks at (database person members and
  * aliases of any member) are skipped here too, except the account under test.
+ *
+ * The persons matched against are those live matches against: every open
+ * person in the copied database, as of the copy, with the seed applied on
+ * top (a seed person's accounts are merged into the database person of the
+ * same label, or it is added when there is none). Production carries
+ * persons the seed does not (a migrated evader flag), and leaving them out
+ * would undercount both catches and honest alerts.
  */
 
 export type ReplayLevel = 'alert' | 'loud' | 'hold';
 const LEVEL_RANK: Record<ReplayLevel, number> = { alert: 1, loud: 2, hold: 3 };
 
 export interface ReplayPerson { label: string; steam: readonly string[] }
-export interface ReplayOptions { people: readonly ReplayPerson[]; exclude: ReadonlySet<string>; asnLoaded: boolean }
+export interface ReplayOptions {
+  /** The seed, applied on top of the database's open persons (replayPeople). */
+  people: readonly ReplayPerson[];
+  exclude: ReadonlySet<string>;
+  asnLoaded: boolean;
+}
 export interface ReplayEvent {
   matchId: number; at: string; steamid: string; person: string; level: ReplayLevel;
   distance: number; threshold: number; rank: number; signs: SecondSign[]; honest: boolean;
@@ -63,7 +75,11 @@ export interface ReplayReport {
 /** What the replay cannot know about the past. Printed with every report so
  *  the numbers are read for what they are. */
 export const REPLAY_LIMITS: readonly string[] = [
-  'membership is the seed as of today, not as each account was discovered',
+  'membership (database persons, aliases and the seed) is read as of today, not as each account was discovered',
+  'players-row existence is read as of today: an account with a players row now is holdable at every match end',
+  'a hold refused because staff cleared it before is not modelled, and a replayed hold is never resolved '
+    + '(the account stays out of every later check)',
+  '"Not them" dismissals are live-only and are not honoured here',
   'Steam privacy, Steam account age and Discord links are read as of today, not as of each match: '
     + 'sign 2 (fresh identity) can be overstated, see the sign-2-only hold count',
   'sign 2\'s "Discord never linked elsewhere AND site account under 7 days" is true of nearly every honest first-week player',
@@ -143,6 +159,20 @@ export function weekOf(at: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Every open person in `db` with `seed` merged on top by label: a seed
+ *  person's accounts join the database person of that label, and a seed
+ *  person the database does not have is added. Database persons first, in id
+ *  order, so a report reads the same from run to run. */
+export function replayPeople(db: DB, seed: readonly ReplayPerson[]): ReplayPerson[] {
+  const out = openPeople(db).map((p) => ({ label: p.label, steam: steamMembersOf(db, p.id) }));
+  for (const s of seed) {
+    const same = out.find((p) => p.label === s.label);
+    if (same) same.steam = [...new Set([...same.steam, ...s.steam])];
+    else out.push({ label: s.label, steam: [...new Set(s.steam)] });
+  }
+  return out;
+}
+
 function entry<K, V>(map: Map<K, V>, key: K, init: () => V): V {
   let v = map.get(key);
   if (v === undefined) { v = init(); map.set(key, v); }
@@ -158,9 +188,10 @@ export function replayHistory(db: DB, opts: ReplayOptions): ReplayReport {
   const burstsOf = db.prepare(`SELECT steamid, kind, weapon, holds FROM input_bursts WHERE match_id = ? AND ${BASE_BURST_SQL}`);
   const whole = new Map<string, Fingerprint>();
   const perMatch = new Map<string, Fingerprint[]>();
-  const people = opts.people.map((p, i) => ({ id: i + 1, label: p.label, members: p.steam.filter((s) => !opts.exclude.has(s)) }));
+  const modelled = replayPeople(db, opts.people);
+  const people = modelled.map((p, i) => ({ id: i + 1, label: p.label, members: p.steam.filter((s) => !opts.exclude.has(s)) }));
   const members = new Set(people.flatMap((p) => p.members));
-  const known = new Set(opts.people.flatMap((p) => p.steam));
+  const known = new Set(modelled.flatMap((p) => p.steam));
   const extraVpn = extraVpnAsns(db);
   // As candidatesOf: a member of a database person, or an alias of any
   // member, is never looked at. The account under test is exempt (the
