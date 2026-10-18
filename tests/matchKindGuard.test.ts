@@ -34,6 +34,7 @@ const ALLOWED: Record<string, number> = {
   'src/cast/access.ts': 2,          // caster picker and canCastMatch's recent window
   'src/inputBursts.ts': 1,          // end-of-match input checks, every kind (a scrim cheater is still one)
   'src/aimRules.ts': 1,             // end-of-match aim sweep, every kind (same reason as inputBursts)
+  'src/fingerprintReplay.ts': 1,    // replays every match end, every kind, as the end-of-match sweep does
 };
 
 const RAW = /state\s*=\s*'completed'|state\s+IN\s*\([^)]*'completed'/g;
