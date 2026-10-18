@@ -176,7 +176,9 @@ export function EvidenceDetail(
             {e.flags.map((f) => (
               <li key={f.id}>
                 {fmtTime(f.at)}: <code>{f.kind}</code>
-                {f.severity === 'banned' ? <strong class="admin-warn"> · banned by LilAC</strong> : <span class="muted"> · suspected</span>}
+                {f.severity === 'banned' ? <strong class="admin-warn"> · banned by LilAC</strong>
+                  : f.severity === 'high' ? <strong class="admin-warn"> · high severity</strong>
+                  : <span class="muted"> · suspected</span>}
                 {f.matchId ? <> · <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
               </li>
             ))}

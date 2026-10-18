@@ -392,6 +392,22 @@ const integrityRound = (over: Partial<IntegrityRound> = {}): IntegrityRound => (
 });
 
 describe('the evidence detail', () => {
+  it('marks a high severity flag as such', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: null, rounds: [], clips: [], inputFlags: [], inputCaps: [],
+          signonDrops: { count: 0, lastAt: null, rows: [] },
+          flags: [{ id: 3, matchId: 722, steamid: P, source: 'lilac', kind: 'aimbot', severity: 'high', detail: 'lflags=4 ldelta=143.5', at: '2026-10-17T21:04:13.000Z' }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.getByText(/high severity/)).toBeTruthy();
+  });
+
   it('shows the input bursts, the drops and the clips, and lets an admin review a round', async () => {
     mockPeople.file.mockResolvedValue(file({
       sections: {

@@ -11,6 +11,7 @@ import { setSetting } from '../src/settings.js';
 import { publishAdminEvent, subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
 import { BIG_SNAP_DEG, isBigSnap, lilacSeverity } from '../src/aimRules.js';
+import { playerTimeline } from '../src/admin/playerTimeline.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const P = '76561198129925325';
@@ -114,5 +115,28 @@ describe('the big snap on the admin feed', () => {
     publishAdminEvent({ kind: 'lilac_flag', steamid: P, cheat: 'aimbot', banned: false, matchId: null });
     await feed.idle();
     expect(JSON.stringify(t.live()[0].payload)).toContain('Few and rare suspicions are usually false positives');
+  });
+});
+
+describe('the big snap on the file', () => {
+  const STAFF = '76561198000000009';
+  const flag = (severity: string, detail: string) => db.prepare(
+    `INSERT INTO integrity_flags (match_id, server_id, steamid, source, kind, severity, detail, at)
+     VALUES (722, 1, ?, 'lilac', 'aimbot', ?, ?, datetime('now'))`,
+  ).run(P, severity, detail);
+
+  it('says big snap, with LilAC\'s reason after it', () => {
+    flag('high', 'lflags=4 ldelta=143.5 ltd=200 maxd=143.5 totd=300 taps=3 taps1=1');
+    const s = playerTimeline(db, P, STAFF)[0].summary;
+    expect(s).toMatch(/^Little Anti-Cheat suspected aimbot with a big snap \(60 degrees or more in one input\)\./);
+    expect(s).toMatch(/LilAC's reason: Aim-Snap\./);
+    expect(s).not.toMatch(/Few and rare suspicions/);
+  });
+
+  it('reads exactly as before for a suspected flag', () => {
+    flag('suspected', '');
+    expect(playerTimeline(db, P, STAFF)[0].summary).toBe(
+      'Little Anti-Cheat suspected aimbot. Few and rare suspicions are usually false positives; a run of them is what matters.',
+    );
   });
 });

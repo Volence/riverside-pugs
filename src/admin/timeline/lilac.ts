@@ -1,4 +1,5 @@
 import type { DB } from '../../db.js';
+import { BIG_SNAP_DEG } from '../../aimRules.js';
 import { ZOMBIE_CLASSES } from '../../replayFormat.js';
 import { ROW_LIMIT, marks, toIso, type TimelineAdapter, type TimelineItem } from './types.js';
 
@@ -129,7 +130,12 @@ export const lilacAdapter: TimelineAdapter = {
       kind: r.kind,
       summary: (r.severity === 'banned'
         ? `Little Anti-Cheat banned this account on the game server for ${r.kind}.`
-        : `Little Anti-Cheat suspected ${r.kind}. Few and rare suspicions are usually false positives; a run of them is what matters.`)
+        // Rule B (src/aimRules.ts): the one LilAC flag that is not "few and
+        // rare", because it was calibrated on the confirmed aimbot.
+        : r.severity === 'high'
+          ? `Little Anti-Cheat suspected ${r.kind} with a big snap (${BIG_SNAP_DEG} degrees or more in one input). `
+            + 'Every honest aimbot flag on record snapped under 45 degrees; the confirmed aimbot snapped 143.5. This one is worth a look on its own.'
+          : `Little Anti-Cheat suspected ${r.kind}. Few and rare suspicions are usually false positives; a run of them is what matters.`)
         + reasonSentences(r.kind, r.detail),
       matchId: r.match_id,
       replay: null,
