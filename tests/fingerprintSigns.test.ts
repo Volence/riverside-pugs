@@ -165,4 +165,27 @@ describe('second signs', () => {
     expect(secondSigns(db, CAND, ctx(), AT)).toEqual(['shared_connection']);
     expect(secondSigns(db, CAND, ctx({ members: [] }), AT)).toEqual([]);
   });
+
+  it('a shared commercial VPN exit is not a shared connection, table loaded or not', () => {
+    const t1 = new Date('2026-10-17T19:00:00Z');
+    const t2 = new Date('2026-10-17T20:00:00Z');
+    recordPlayerNet(db, { steamid: MEMBER, ip: '203.0.113.9', country: 'NL' }, t1, net(212238, 'DATACAMP-LIMITED'));
+    // The candidate's row was recorded with no lookup (NULL asn): the
+    // member's row tags the hash as a VPN, which is enough.
+    recordPlayerNet(db, { steamid: CAND, ip: '203.0.113.9', country: 'NL' }, t2, null);
+    expect(secondSigns(db, CAND, ctx({ asnLoaded: true }), AT)).toEqual([]);
+    expect(secondSigns(db, CAND, ctx({ asnLoaded: false }), AT)).toEqual([]);
+    // Staff's own list counts as well.
+    recordPlayerNet(db, { steamid: MEMBER, ip: '203.0.113.10', country: 'US' }, t1, net(64500, 'Example Telecom'));
+    recordPlayerNet(db, { steamid: CAND, ip: '203.0.113.10', country: 'US' }, t2, null);
+    expect(secondSigns(db, CAND, ctx({ asnLoaded: false, extraVpn: new Set([64500]) }), AT)).toEqual([]);
+    // A residential one shared beside it still counts.
+    expect(secondSigns(db, CAND, ctx({ asnLoaded: false }), AT)).toEqual(['shared_connection']);
+  });
+
+  it('an untagged (unknown) shared connection still counts with no ASN table', () => {
+    recordPlayerNet(db, { steamid: MEMBER, ip: '203.0.113.9', country: 'US' }, new Date('2026-10-17T19:00:00Z'), null);
+    recordPlayerNet(db, { steamid: CAND, ip: '203.0.113.9', country: 'US' }, new Date('2026-10-17T20:00:00Z'), null);
+    expect(secondSigns(db, CAND, ctx({ asnLoaded: false }), AT)).toEqual(['shared_connection']);
+  });
 });
