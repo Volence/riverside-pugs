@@ -39,6 +39,12 @@ export interface AltHoldRow {
   resolvedAt: string | null;
   resolvedByName: string | null;
   resolution: 'cleared' | 'banned' | 'merged' | null;
+  /** 'fingerprint': placed by the evader fingerprint check, not a Discord move. */
+  source: 'discord' | 'fingerprint';
+  personId: number | null;
+  personLabel: string | null;
+  /** The numbers behind a fingerprint hold, from fingerprint_alerts. */
+  fingerprint: { distance: number; rank: number; threshold: number; signs: string[] } | null;
 }
 
 /** The Steam account this Discord was on just before `steamid`, when that
@@ -75,7 +81,7 @@ export function placeAltHold(
   db: DB, steamid: string, otherSteamid: string, discordId: string, discordName: string, now = new Date(),
 ): number | null {
   const cleared = db.prepare(
-    "SELECT 1 FROM alt_holds WHERE steamid = ? AND other_steamid = ? AND resolution = 'cleared'",
+    "SELECT 1 FROM alt_holds WHERE steamid = ? AND other_steamid = ? AND source = 'discord' AND resolution = 'cleared'",
   ).get(steamid, otherSteamid);
   if (cleared) return null;
   if (openHoldOf(db, steamid)) return null;
@@ -96,6 +102,45 @@ export function placeAltHold(
   return id;
 }
 
+/** Shown to the held player. Deliberately says nothing about how: telling an
+ *  evader which signal caught them is telling them what to change. */
+export const FINGERPRINT_HOLD_REASON = 'On hold for review: a moderator needs to check this account before it can play';
+
+export type FingerprintHoldResult = { id: number } | { refused: 'cleared' | 'open_hold' | 'staff' | 'unknown' };
+
+/**
+ * Hold `steamid` because its press fingerprint matches person `personId`
+ * and a second sign fired (src/fingerprintCheck.ts). `otherSteamid` is the
+ * person's nearest member account, which the Alts list shows as "plays like".
+ * The bans row and the release path are exactly those of a Discord hold.
+ *
+ * Refused when staff cleared this (account, person) pair before, when a hold
+ * is already open on the account, for staff, and for an account with no
+ * players row (a bans row needs one). The caller tells the mods either way.
+ */
+export function placeFingerprintHold(
+  db: DB, steamid: string, personId: number, otherSteamid: string, now = new Date(),
+): FingerprintHoldResult {
+  const cleared = db.prepare(
+    "SELECT 1 FROM alt_holds WHERE steamid = ? AND person_id = ? AND source = 'fingerprint' AND resolution = 'cleared'",
+  ).get(steamid, personId);
+  if (cleared) return { refused: 'cleared' };
+  if (openHoldOf(db, steamid)) return { refused: 'open_hold' };
+  const p = getPlayer(db, steamid);
+  if (!p) return { refused: 'unknown' };
+  if (p.is_admin === 1 || p.is_mod === 1) return { refused: 'staff' };
+  let id = 0;
+  db.transaction(() => {
+    const banId = insertBan(db, steamid, 'system', FINGERPRINT_HOLD_REASON, null, now, 'alt_hold');
+    id = Number(db.prepare(
+      `INSERT INTO alt_holds (steamid, other_steamid, discord_id, discord_name, ban_id, created_at, source, person_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'fingerprint', ?)`,
+    ).run(steamid, otherSteamid, p.discord_id ?? '', p.discord_name ?? '', banId, now.toISOString(), personId).lastInsertRowid);
+  })();
+  publishBanChange({ kind: 'ban', steamid, reason: FINGERPRINT_HOLD_REASON });
+  return { id };
+}
+
 export function openHoldOf(db: DB, steamid: string): { id: number; banId: number } | null {
   const r = db.prepare(
     'SELECT id, ban_id FROM alt_holds WHERE steamid = ? AND resolved_at IS NULL ORDER BY id DESC LIMIT 1',
@@ -103,10 +148,17 @@ export function openHoldOf(db: DB, steamid: string): { id: number; banId: number
   return r ? { id: r.id, banId: r.ban_id } : null;
 }
 
-export function holdById(db: DB, id: number): { id: number; steamid: string; otherSteamid: string; banId: number; resolvedAt: string | null } | null {
-  const r = db.prepare('SELECT id, steamid, other_steamid, ban_id, resolved_at FROM alt_holds WHERE id = ?').get(id) as
-    | { id: number; steamid: string; other_steamid: string; ban_id: number; resolved_at: string | null } | undefined;
-  return r ? { id: r.id, steamid: r.steamid, otherSteamid: r.other_steamid, banId: r.ban_id, resolvedAt: r.resolved_at } : null;
+export function holdById(db: DB, id: number): {
+  id: number; steamid: string; otherSteamid: string; banId: number; resolvedAt: string | null;
+  source: 'discord' | 'fingerprint'; personId: number | null;
+} | null {
+  const r = db.prepare('SELECT id, steamid, other_steamid, ban_id, resolved_at, source, person_id FROM alt_holds WHERE id = ?').get(id) as
+    | { id: number; steamid: string; other_steamid: string; ban_id: number; resolved_at: string | null; source: 'discord' | 'fingerprint'; person_id: number | null }
+    | undefined;
+  return r ? {
+    id: r.id, steamid: r.steamid, otherSteamid: r.other_steamid, banId: r.ban_id, resolvedAt: r.resolved_at,
+    source: r.source, personId: r.person_id,
+  } : null;
 }
 
 /** Close the hold and lift its bans row, inside the caller's transaction.
@@ -163,16 +215,31 @@ export function closeHoldsForMerge(db: DB, from: string, into: string, by: strin
   return freed;
 }
 
-const HOLD_SELECT = `SELECT h.*, p.name AS name, o.name AS other_name, r.name AS resolved_by_name
+const HOLD_SELECT = `SELECT h.*, p.name AS name, o.name AS other_name, r.name AS resolved_by_name,
+    ep.label AS person_label, fa.distance AS fp_distance, fa.rank AS fp_rank, fa.threshold AS fp_threshold,
+    fa.signs_json AS fp_signs
   FROM alt_holds h
   LEFT JOIN players p ON p.steamid = h.steamid
   LEFT JOIN players o ON o.steamid = h.other_steamid
-  LEFT JOIN players r ON r.steamid = h.resolved_by`;
+  LEFT JOIN players r ON r.steamid = h.resolved_by
+  LEFT JOIN evader_people ep ON ep.id = h.person_id
+  LEFT JOIN fingerprint_alerts fa ON fa.steamid = h.steamid AND fa.person_id = h.person_id AND fa.level = 'hold'`;
 
 interface HoldDbRow {
   id: number; steamid: string; other_steamid: string; discord_id: string; discord_name: string;
   created_at: string; resolved_at: string | null; resolved_by: string | null; resolution: AltHoldRow['resolution'];
   name: string | null; other_name: string | null; resolved_by_name: string | null;
+  source: 'discord' | 'fingerprint'; person_id: number | null; person_label: string | null;
+  fp_distance: number | null; fp_rank: number | null; fp_threshold: number | null; fp_signs: string | null;
+}
+
+function signsOf(json: string | null): string[] {
+  try {
+    const v: unknown = JSON.parse(json ?? '[]');
+    return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 function toHold(db: DB, r: HoldDbRow, now: Date): AltHoldRow {
@@ -183,6 +250,9 @@ function toHold(db: DB, r: HoldDbRow, now: Date): AltHoldRow {
     discordId: r.discord_id, discordName: r.discord_name,
     createdAt: r.created_at, resolvedAt: r.resolved_at,
     resolvedByName: r.resolved_by === 'system' ? 'system' : r.resolved_by_name, resolution: r.resolution,
+    source: r.source, personId: r.person_id, personLabel: r.person_label,
+    fingerprint: r.fp_distance === null || r.fp_rank === null || r.fp_threshold === null ? null
+      : { distance: r.fp_distance, rank: r.fp_rank, threshold: r.fp_threshold, signs: signsOf(r.fp_signs) },
   };
 }
 
