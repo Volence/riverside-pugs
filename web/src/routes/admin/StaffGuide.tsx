@@ -16,7 +16,7 @@ import { SIGN_ORDER, SIGN_TEXT, type SecondSign } from '../../../../src/fingerpr
 const SIGN_HELP: Record<SecondSign, string> = {
   vpn: 'One of their connections comes from a VPN or hosting provider (Datacamp, M247, Vultr and the like). Evaders hide behind these; so do some honest players.',
   fresh_identity: 'The Steam account is under a year old or private, the Discord account is under 90 days old, or the Discord is new to us on a site account under a week old. Private profiles are common: this counts only next to a fingerprint.',
-  cheat_flag: 'They have an aimbot, aimlock or newcomer wallhack flag from a match they played.',
+  cheat_flag: 'They have an aimbot-type flag (LilAC aimbot or aimlock, or one of the aim rules: headshot share, flick return, or aimbot multi) or a newcomer wallhack flag from a match they played.',
   two_members: 'Two or more of the known evader\'s own accounts are among their 10 nearest fingerprints, not just the pooled record.',
   shared_connection: 'They have used a connection one of the evader\'s accounts used. This also posts its own watch-list alert.',
 };
@@ -301,7 +301,7 @@ export function StaffGuide() {
             account. Look at the file, the matches and the connections before you decide anything.
           </dd>
           <dt>Fingerprint match with a second sign</dt>
-          <dd>The same, plus one of the signs below. It pings the mod role, and nobody is held.</dd>
+          <dd>The same, plus one of the signs below. It pings the mod role. A hold is not placed if holds are switched off (the setting is alert-only) or if a hold cannot be placed (for example if the account is staff or already on hold).</dd>
           <dt>Fingerprint hold</dt>
           <dd>
             A fingerprint match plus a second sign while holds are switched on. The account is on hold until a
@@ -327,10 +327,11 @@ export function StaffGuide() {
           ])}
         </dl>
       </Panel>
+
       <Panel id="drops">
         <h3>Repeated connect drops</h3>
         <p>
-
+          The player dropped out while loading in, twice within ten minutes with no successful join between.
           The server checks certain game files on connect and the player's own game disconnects at the first
           one that has been modified, so repeated drops can mean a skin or no-foliage mod. A cancelled loading
           screen or a bad connection looks exactly the same, so ask before assuming.
