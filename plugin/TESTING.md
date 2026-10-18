@@ -1240,10 +1240,13 @@ The aim rules' kill line (`docs/superpowers/specs/2026-10-17-aimbot-rules-design
 server only (`/home/volence/l4d1-ds`, rcon 27055, shared with the owner and other sessions).
 Never touch a production box.
 
-Status: NOT RUN yet. On 2026-10-17 nothing listened on rcon 27055, so none of the steps below
-were done and the captured lines are not pinned in `tests/siKillParse.test.ts`. The live run
-is deferred to the rollout gate. The live 180 degree turn (steps 6 to 8) needs a client and is
-pending for the owner or the in-game harness.
+Status: RUN 2026-10-18 on the local server at port 27015 (27055 was down), with the owner's
+client driven through the in-game harness. Two setang flicks onto a bot hunter read
+`pre=171.9 back=8.0` and `pre=179.9 back=0.0`; kills with no turn read `pre=0.0`; a bot tank
+kill printed no line; the dual pistols arrive as `w=dual_pistols` (in the `auto` group). Not
+checked: a common infected kill, and the hunting rifle (the server config blocks it, and the
+`rifle` group ships disabled). The captured lines are pinned in `tests/siKillParse.test.ts`.
+The original smx, cvars and the owner's game files were restored afterwards.
 
 Every command below is `RPORT=27055 python3 /home/volence/l4d/nightmode/rcon.py '<cmd>' ...`.
 `PL=/home/volence/l4d1-ds/server/left4dead/addons/sourcemod/plugins`.
