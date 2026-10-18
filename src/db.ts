@@ -1975,6 +1975,12 @@ export function openDb(path: string): DB {
     PRIMARY KEY (player_id, ip_hash)
   )`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_player_networks_hash ON player_networks (ip_hash)');
+  // Which network a connection came from (src/asnTable.ts, iptoasn.com), for
+  // telling a VPN or hosting exit from a house. The AS number and provider
+  // name only: the address is still never stored. NULL is "unknown", never
+  // "residential".
+  ensureColumn(db, 'player_networks', 'asn', 'INTEGER');
+  ensureColumn(db, 'player_networks', 'as_org', 'TEXT');
   // A voided match: an admin decided the result must not count. It is also
   // set to 'aborted', which is what drops it from every stat query.
   // SourceTV, per server: anyone can watch a live match, and the tv_delay is

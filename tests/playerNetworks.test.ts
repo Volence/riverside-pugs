@@ -3,6 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import { hashIp, networksOf, recordPlayerNet, sharesAddressWith } from '../src/playerNetworks.js';
 import { parseLogDatagram } from '../src/logParse.js';
+import type { AsnLookup } from '../src/asnTable.js';
 
 const MAIN = '76561198005192652';
 const ALT = '76561199861598482';
@@ -154,5 +155,29 @@ describe('PUGTV parsing', () => {
   // thing after the engine's stamp, which no player-controlled text can be.
   it('is not forgeable from chat, where the marker cannot be first', () => {
     expect(parse('"bob<2><STEAM_1:0:5><Survivor>" say "PUGTV event=start"')).toBeNull();
+  });
+});
+
+describe('network tag', () => {
+  const table: AsnLookup = {
+    lookup: (ip) => (ip === '198.51.100.4' ? { asn: 212238, org: 'DATACAMP-LIMITED' } : null),
+  };
+  const row = () => db.prepare('SELECT asn, as_org FROM player_networks WHERE player_id = ?').get(MAIN) as { asn: number | null; as_org: string | null };
+
+  it('stores the provider next to the hash, never the address', () => {
+    recordPlayerNet(db, { steamid: MAIN, ip: '198.51.100.4', country: 'GB' }, new Date(), table);
+    expect(row()).toEqual({ asn: 212238, as_org: 'DATACAMP-LIMITED' });
+    expect(JSON.stringify(db.prepare('SELECT * FROM player_networks').all())).not.toContain('198.51.100.4');
+  });
+
+  it('keeps a known provider when a later lookup has none', () => {
+    recordPlayerNet(db, { steamid: MAIN, ip: '198.51.100.4', country: 'GB' }, new Date(), table);
+    recordPlayerNet(db, { steamid: MAIN, ip: '198.51.100.4', country: 'GB' }, new Date(), null);
+    expect(row().asn).toBe(212238);
+  });
+
+  it('leaves it unknown without a table', () => {
+    recordPlayerNet(db, { steamid: MAIN, ip: '203.0.113.9', country: 'US' }, new Date(), null);
+    expect(row()).toEqual({ asn: null, as_org: null });
   });
 });
