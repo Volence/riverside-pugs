@@ -88,7 +88,7 @@ import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
-import { lilacSeverity } from './aimRules.js';
+import { lilacSeverity, recordSiKill } from './aimRules.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
 import { inputThresholds, recordInputBurst, recordInputCap, scanEndedMatches } from './inputBursts.js';
@@ -1034,6 +1034,23 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             }
           } catch (err) {
             console.error('[inputstats] failed to record a stall:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'si_kill') {
+          // The aim rules' raw material (src/aimRules.ts). Same rules as a
+          // burst: evidence only, rostered players in a live match only, and
+          // never on the critical path.
+          try {
+            const serverId = serverOf(source, meta);
+            const matchId = liveMatchOf(deps.db, serverId, ev.steamid);
+            if (matchId === null) return;
+            recordSiKill(deps.db, {
+              matchId, serverId, steamid: ev.steamid, weapon: ev.weapon, headshot: ev.headshot,
+              dist: ev.dist, pre: ev.pre, back: ev.back, victimClass: ev.victimClass,
+            });
+          } catch (err) {
+            console.error('[aim] failed to record an SI kill:', err);
           }
           return;
         }
