@@ -4,7 +4,11 @@
  * Design: docs/superpowers/specs/2026-09-21-input-macro-detection-design.md
  *
  * Captures the timing of button PRESS EDGES, and how long each press was held,
- * and ships one line per burst. It computes no verdicts: every statistic and
+ * and ships one line per burst.
+ * Since 0.4.0 it also keeps each survivor's last few hundred milliseconds of
+ * view angles and ships one line per human SI kill (k=sikill), for the aim
+ * rules (docs/superpowers/specs/2026-10-17-aimbot-rules-design.md).
+ * It computes no verdicts: every statistic and
  * threshold lives on the web side, so a signature can be improved and re-run
  * over stored history without anything being redeployed to a game server. That
  * matters here because the cheats are frozen (nobody writes new ones for a 2008
@@ -20,7 +24,7 @@
 #include <sdktools>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.3.0"
+#define PLUGIN_VERSION "0.4.0"
 
 /** A burst closes after this much silence. 30 ticks at 100 tick = 300ms.
  *  Measured, not guessed: a human sample containing one 31-second idle gap had
@@ -86,6 +90,28 @@ char g_sKind[KIND_COUNT][8] = { "fire", "pounce", "bhop" };
 #define ENC_BASE 48
 
 #define TEAM_INFECTED 3
+#define TEAM_SURVIVOR 2
+/** m_zombieClass of the SI a kill line names. The tank (5) is not counted. */
+#define ZC_SMOKER 1
+#define ZC_BOOMER 2
+#define ZC_HUNTER 3
+
+/** The sikill line's own wire version. NOT WIRE_VERSION: src/logParse.ts
+ *  still requires v=2 on the stall and burst lines, and reads this new shape
+ *  as v=3. */
+#define SIKILL_WIRE 3
+
+/** View angles of the last ANG_RING usercmds per survivor: 400 ms at 100
+ *  tick, 312 ms at 128, either way enough for the 300 ms before a kill. */
+#define ANG_RING 40
+#define PRE_SECONDS 0.3
+#define BACK_SECONDS 1.0
+/** Kills per survivor waiting on their one second look back. Nobody kills
+ *  four SI inside a second; a fifth is simply not recorded. */
+#define MAX_PENDING 4
+#define PENDING_SLOTS ((MAXPLAYERS + 1) * MAX_PENDING)
+/** g_fKillBack before any usercmd arrived after the kill: emitted as -1. */
+#define BACK_NONE 999.0
 
 ConVar g_cvEnabled;
 ConVar g_cvBots;
@@ -167,6 +193,28 @@ int  g_iStClass[MAXPLAYERS + 1];
 int  g_iStLunging[MAXPLAYERS + 1];
 int  g_iStallsThisRound[MAXPLAYERS + 1];
 
+// --- view angles and SI kills (0.4.0) ----------------------------------------
+float g_fRingPitch[MAXPLAYERS + 1][ANG_RING];
+float g_fRingYaw[MAXPLAYERS + 1][ANG_RING];
+int   g_iRingTick[MAXPLAYERS + 1][ANG_RING];
+int   g_iRingHead[MAXPLAYERS + 1];		// next slot to write
+int   g_iRingLen[MAXPLAYERS + 1];		// entries written since the last reset
+
+// One kill waiting on its look back, per slot. A client's slots are
+// client * MAX_PENDING .. client * MAX_PENDING + MAX_PENDING - 1, flattened
+// so no array needs a third dimension.
+bool  g_bKillOpen[PENDING_SLOTS];
+int   g_iKillSerial[PENDING_SLOTS];		// which timer owns the slot
+float g_fKillRefPitch[PENDING_SLOTS];	// the view 300 ms before the kill
+float g_fKillRefYaw[PENDING_SLOTS];
+float g_fKillPre[PENDING_SLOTS];
+float g_fKillBack[PENDING_SLOTS];		// closest to the reference since the kill
+int   g_iKillHs[PENDING_SLOTS];
+int   g_iKillDist[PENDING_SLOTS];
+int   g_iKillClass[PENDING_SLOTS];
+char  g_sKillWeapon[PENDING_SLOTS][32];
+int   g_iKillSerialNext;
+
 // Ground phase, the `bhop` anchor: how long a player stays on the ground before
 // jumping again. A script jumps on the exact tick of landing, every time.
 bool g_bGroundTimed[MAXPLAYERS + 1];
@@ -202,9 +250,11 @@ public void OnPluginStart()
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
 	HookEvent("round_end", Event_RoundEnd, EventHookMode_PostNoCopy);
 	HookEvent("player_death", Event_PlayerDeath);
+	HookEvent("player_spawn", Event_PlayerSpawn);
+	HookEvent("player_team", Event_PlayerTeam);
 #if defined DEBUG
 	RegAdminCmd("sm_inputstats_emit", Cmd_Emit, ADMFLAG_ROOT,
-		"DEBUG BUILD: sm_inputstats_emit <fire|pounce|bhop> <intervals> - ship a synthetic burst through the real encode and emit path.");
+		"DEBUG BUILD: sm_inputstats_emit <fire|pounce|bhop> <intervals> | sikill | sikill_left - ship a synthetic line through the real encode and emit path.");
 #endif
 }
 
@@ -225,11 +275,21 @@ public Action Cmd_Emit(int client, int args)
 	char kind[16], sn[8];
 	GetCmdArg(1, kind, sizeof(kind));
 	GetCmdArg(2, sn, sizeof(sn));
+	// The sikill line, with angles run through the real AngleBetween: a
+	// 180 degree turn for pre and a 10 degree pitch for back, so the wire
+	// should read pre=180.0 back=10.0 (or back=-1.0 for the left case).
+	if (StrEqual(kind, "sikill") || StrEqual(kind, "sikill_left")) {
+		float pre = AngleBetween(0.0, 0.0, 0.0, 180.0);
+		float back = StrEqual(kind, "sikill") ? AngleBetween(10.0, 0.0, 0.0, 0.0) : -1.0;
+		EmitSiKillLine("76561197960287930", "test_weapon", 1, 512, pre, back, "hunter");
+		ReplyToCommand(client, "[inputstats] emitted a synthetic %s line for the test steamid", kind);
+		return Plugin_Handled;
+	}
 	int n = StringToInt(sn);
 	bool hop = StrEqual(kind, "bhop");
 	if (hop) n = 1;
 	if ((!hop && !StrEqual(kind, "fire") && !StrEqual(kind, "pounce")) || n < 1 || n > MAX_INTERVALS) {
-		ReplyToCommand(client, "usage: sm_inputstats_emit <fire|pounce|bhop> <intervals 1..%d>", MAX_INTERVALS);
+		ReplyToCommand(client, "usage: sm_inputstats_emit <fire|pounce|bhop> <intervals 1..%d> | sikill | sikill_left", MAX_INTERVALS);
 		return Plugin_Handled;
 	}
 	int ticks[MAX_INTERVALS], holds[MAX_HOLDS];
@@ -251,6 +311,8 @@ public Action Cmd_Emit(int client, int args)
 public void OnClientDisconnect(int client)
 {
 	FlushAll(client);
+	// The killer left before the look back: those kills go out as unknown.
+	CloseKills(client);
 	ResetClient(client);
 }
 
@@ -258,8 +320,35 @@ public void Event_PlayerDeath(Event e, const char[] n, bool b)
 {
 	int client = GetClientOfUserId(e.GetInt("userid"));
 	if (client < 1) return;
+	// First, while the victim is still what they were: the record reads the
+	// ATTACKER's ring and the victim's class, never the victim's capture.
+	TakeSiKill(e, client);
+	// A survivor who dies with kills still waiting never looks back.
+	CloseKills(client);
 	FlushAll(client);
 	ResetCapture(client);
+}
+
+public void Event_PlayerSpawn(Event e, const char[] n, bool b)
+{
+	int client = GetClientOfUserId(e.GetInt("userid"));
+	if (client > 0) ResetRing(client);
+}
+
+public void Event_PlayerTeam(Event e, const char[] n, bool b)
+{
+	int client = GetClientOfUserId(e.GetInt("userid"));
+	if (client < 1) return;
+	// Leaving the survivors is leaving: the look back is unknown.
+	CloseKills(client);
+	ResetRing(client);
+}
+
+/** Timers die with the map (TIMER_FLAG_NO_MAPCHANGE), so anything still
+ *  waiting goes out now as unknown rather than never. */
+public void OnMapEnd()
+{
+	for (int i = 1; i <= MaxClients; i++) CloseKills(i);
 }
 
 public void Event_RoundEnd(Event e, const char[] n, bool b)
@@ -314,6 +403,13 @@ void ResetClient(int c)
 	g_iPrevButtons[c] = 0;
 	ResetCapture(c);
 	ResetBudget(c);
+	ResetRing(c);
+}
+
+void ResetRing(int c)
+{
+	g_iRingHead[c] = 0;
+	g_iRingLen[c] = 0;
 }
 
 /** Forget every burst in flight without emitting it, and nothing else: the
@@ -365,6 +461,175 @@ int Lunging(int client)
 	int ability = GetEntPropEnt(client, Prop_Send, "m_customAbility");
 	if (ability <= MaxClients || !IsValidEntity(ability) || !HasEntProp(ability, Prop_Send, "m_isLunging")) return -1;
 	return GetEntProp(ability, Prop_Send, "m_isLunging");
+}
+
+/** Push this usercmd's view onto the ring, and bring every kill waiting on
+ *  its look back closer if this view is nearer where the flick started. */
+void TrackView(int client, const float angles[3], int tick)
+{
+	int h = g_iRingHead[client];
+	g_fRingPitch[client][h] = angles[0];
+	g_fRingYaw[client][h] = angles[1];
+	g_iRingTick[client][h] = tick;
+	g_iRingHead[client] = (h + 1) % ANG_RING;
+	if (g_iRingLen[client] < ANG_RING) g_iRingLen[client]++;
+
+	int first = client * MAX_PENDING;
+	for (int s = first; s < first + MAX_PENDING; s++) {
+		if (!g_bKillOpen[s]) continue;
+		float d = AngleBetween(angles[0], angles[1], g_fKillRefPitch[s], g_fKillRefYaw[s]);
+		if (d < g_fKillBack[s]) g_fKillBack[s] = d;
+	}
+}
+
+/** The great-circle angle between two views (pitch, yaw; roll ignored), in
+ *  degrees: a roll-free 180 degree turn reads as 180. */
+float AngleBetween(float p1, float y1, float p2, float y2)
+{
+	float a[3], b[3], va[3], vb[3];
+	a[0] = p1; a[1] = y1; a[2] = 0.0;
+	b[0] = p2; b[1] = y2; b[2] = 0.0;
+	GetAngleVectors(a, va, NULL_VECTOR, NULL_VECTOR);
+	GetAngleVectors(b, vb, NULL_VECTOR, NULL_VECTOR);
+	float dot = GetVectorDotProduct(va, vb);
+	if (dot > 1.0) dot = 1.0;
+	else if (dot < -1.0) dot = -1.0;
+	return RadToDeg(ArcCosine(dot));
+}
+
+/**
+ * A human survivor killed a human SI (not a ghost, not a bot, not a common,
+ * not the tank): record what the attacker's view did in the 300 ms before,
+ * and start the one second look back. Bots on either side only with the
+ * TEST ONLY l4d_inputstats_bots, so the local rig can kill a bot hunter.
+ */
+void TakeSiKill(Event e, int victim)
+{
+	if (!g_cvEnabled.BoolValue || !IsClientInGame(victim) || GetClientTeam(victim) != TEAM_INFECTED) return;
+	bool bots = g_cvBots.BoolValue;
+	if (IsFakeClient(victim) && !bots) return;
+	// A ghost cannot be shot, but a ghost death (a slay, a team swap) is no kill.
+	if (GetEntProp(victim, Prop_Send, "m_isGhost") != 0) return;
+	int cls = GetEntProp(victim, Prop_Send, "m_zombieClass");
+	if (cls < ZC_SMOKER || cls > ZC_HUNTER) return;
+	int attacker = GetClientOfUserId(e.GetInt("attacker"));
+	if (attacker < 1 || attacker == victim || !IsClientInGame(attacker) || GetClientTeam(attacker) != TEAM_SURVIVOR) return;
+	if (IsFakeClient(attacker) && !bots) return;
+
+	int slot = -1;
+	int first = attacker * MAX_PENDING;
+	for (int s = first; s < first + MAX_PENDING; s++) {
+		if (!g_bKillOpen[s]) { slot = s; break; }
+	}
+	if (slot < 0) return;
+
+	// The kill-tick view is the newest usercmd's. pre is the largest distance
+	// from it to any view in the 300 ms before; the reference for the look
+	// back is the oldest view inside that window ("the view 300 ms before").
+	float killP, killY;
+	int len = g_iRingLen[attacker];
+	if (len == 0) {
+		float eye[3];
+		GetClientEyeAngles(attacker, eye);
+		killP = eye[0]; killY = eye[1];
+	} else {
+		int newest = (g_iRingHead[attacker] + ANG_RING - 1) % ANG_RING;
+		killP = g_fRingPitch[attacker][newest];
+		killY = g_fRingYaw[attacker][newest];
+	}
+	float pre = 0.0, refP = killP, refY = killY;
+	if (len > 1) {
+		int newest = (g_iRingHead[attacker] + ANG_RING - 1) % ANG_RING;
+		int oldest = g_iRingTick[attacker][newest] - RoundToCeil(PRE_SECONDS / GetTickInterval());
+		for (int i = 1; i < len; i++) {
+			int s = (newest + ANG_RING - i) % ANG_RING;
+			if (g_iRingTick[attacker][s] < oldest) break;
+			float d = AngleBetween(killP, killY, g_fRingPitch[attacker][s], g_fRingYaw[attacker][s]);
+			if (d > pre) pre = d;
+			refP = g_fRingPitch[attacker][s];
+			refY = g_fRingYaw[attacker][s];
+		}
+	}
+
+	float from[3], to[3];
+	GetClientAbsOrigin(attacker, from);
+	GetClientAbsOrigin(victim, to);
+	char weapon[32];
+	e.GetString("weapon", weapon, sizeof(weapon));
+	// The wire refuses anything outside [a-z0-9_]; normalise rather than
+	// ship a line the parser drops.
+	for (int i = 0; weapon[i] != '\0'; i++) {
+		if (!IsCharLower(weapon[i]) && !IsCharNumeric(weapon[i]) && weapon[i] != '_') weapon[i] = '_';
+	}
+	if (weapon[0] == '\0') strcopy(weapon, sizeof(weapon), "unknown");
+
+	g_bKillOpen[slot] = true;
+	g_iKillSerial[slot] = ++g_iKillSerialNext;
+	g_fKillRefPitch[slot] = refP;
+	g_fKillRefYaw[slot] = refY;
+	g_fKillPre[slot] = pre;
+	g_fKillBack[slot] = BACK_NONE;
+	g_iKillHs[slot] = e.GetBool("headshot") ? 1 : 0;
+	g_iKillDist[slot] = RoundToNearest(GetVectorDistance(from, to));
+	g_iKillClass[slot] = cls;
+	strcopy(g_sKillWeapon[slot], sizeof(g_sKillWeapon[]), weapon);
+
+	DataPack pack;
+	CreateDataTimer(BACK_SECONDS, Timer_KillBack, pack, TIMER_FLAG_NO_MAPCHANGE);
+	pack.WriteCell(slot);
+	pack.WriteCell(g_iKillSerial[slot]);
+}
+
+public Action Timer_KillBack(Handle timer, DataPack pack)
+{
+	pack.Reset();
+	int slot = pack.ReadCell();
+	int serial = pack.ReadCell();
+	// Not ours any more: the killer left, died or changed team, and the
+	// line already went out as unknown.
+	if (g_bKillOpen[slot] && g_iKillSerial[slot] == serial) EmitSiKill(slot / MAX_PENDING, slot, false);
+	return Plugin_Stop;
+}
+
+/** Everything this client has waiting goes out now, with back unknown. */
+void CloseKills(int client)
+{
+	if (client < 1 || client > MaxClients) return;
+	int first = client * MAX_PENDING;
+	for (int s = first; s < first + MAX_PENDING; s++) {
+		if (g_bKillOpen[s]) EmitSiKill(client, s, true);
+	}
+}
+
+void EmitSiKill(int client, int slot, bool unknown)
+{
+	g_bKillOpen[slot] = false;
+	if (!IsClientConnected(client)) return;
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) {
+		// Under sv_lan 1 the 64-bit form is unavailable; the web normalises the
+		// STEAM_ form, same as every other L4DM line.
+		if (!GetClientAuthId(client, AuthId_Steam2, id, sizeof(id))) return;
+	}
+	float back = (unknown || g_fKillBack[slot] >= BACK_NONE) ? -1.0 : g_fKillBack[slot];
+	char cls[8];
+	switch (g_iKillClass[slot]) {
+		case ZC_SMOKER: strcopy(cls, sizeof(cls), "smoker");
+		case ZC_BOOMER: strcopy(cls, sizeof(cls), "boomer");
+		default: strcopy(cls, sizeof(cls), "hunter");
+	}
+	EmitSiKillLine(id, g_sKillWeapon[slot], g_iKillHs[slot], g_iKillDist[slot], g_fKillPre[slot], back, cls);
+}
+
+/**
+ * The ONE place the sikill format exists, so the self-test cannot drift from
+ * the real path. Same anchoring as every L4DM line: the marker opens the
+ * line and the only identity on it is a steamid. About 130 bytes signed.
+ */
+void EmitSiKillLine(const char[] id, const char[] weapon, int hs, int dist, float pre, float back, const char[] cls)
+{
+	PugLog("L4DM id=%s k=sikill w=%s hs=%d dist=%d pre=%.1f back=%.1f cls=%s v=%d",
+		id, weapon, hs, dist, pre, back, cls, SIKILL_WIRE);
 }
 
 void EmitStall(int client)
@@ -439,6 +704,10 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 		g_bCapturing[client] = true;
 	}
 	TrackStall(client, tick, seq);
+	// Survivors only: the ring is read for a survivor's SI kill. Float stores
+	// and, only while a kill waits on its look back, one AngleBetween per
+	// waiting kill. Still nothing formatted here.
+	if (GetClientTeam(client) == TEAM_SURVIVOR) TrackView(client, angles, tick);
 
 	// Release edges first, so a press let go on this usercmd has its hold
 	// written before anything below decides to emit the burst it belongs to.

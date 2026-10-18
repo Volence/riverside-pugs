@@ -62,3 +62,20 @@ describe('canonicalise covers SI kills', () => {
     expect((canonicalise(db, ev) as { steamid: string }).steamid).toBe(A);
   });
 });
+
+/**
+ * Plugin 0.4.0 lines, written out from EmitSiKillLine's format string in
+ * plugin/l4d_inputstats.sp (the DEBUG self-test's fixed values), field for
+ * field. Replace with lines captured off the local server in Task 11.
+ */
+const FORMAT_0_4 = [
+  'L 10/17/2026 - 21:00:00: L4DM id=76561197960287930 k=sikill w=test_weapon hs=1 dist=512 pre=180.0 back=10.0 cls=hunter v=3',
+  'L 10/17/2026 - 21:00:01: L4DM id=76561197960287930 k=sikill w=test_weapon hs=1 dist=512 pre=180.0 back=-1.0 cls=hunter v=3',
+];
+
+describe('lines in the 0.4.0 format', () => {
+  it('parse to what the self-test means', () => {
+    expect(parseLogLine(FORMAT_0_4[0])).toMatchObject({ kind: 'si_kill', weapon: 'test_weapon', headshot: true, dist: 512, pre: 180, back: 10, victimClass: 'hunter' });
+    expect(parseLogLine(FORMAT_0_4[1])).toMatchObject({ back: -1 });
+  });
+});
