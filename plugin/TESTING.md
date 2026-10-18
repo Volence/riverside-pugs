@@ -1237,29 +1237,74 @@ per-player path needs a real box):
 ## l4d_inputstats sikill verification (0.4.0)
 
 The aim rules' kill line (`docs/superpowers/specs/2026-10-17-aimbot-rules-design.md`). Local
-server only (`/home/volence/l4d1-ds`, rcon 27055, shared: `status` first).
+server only (`/home/volence/l4d1-ds`, rcon 27055, shared with the owner and other sessions).
+Never touch a production box.
 
-Status: NOT RUN yet. On 2026-10-17 nothing listened on rcon 27055 (only another session's
-srcds on 27015 was up), so none of the steps below were done and the captured lines are not
-pinned in `tests/siKillParse.test.ts`. The live 180 degree turn check also needs a client and
-is pending for the owner or the in-game harness. Known limitation: with a BOT attacker the
-plugin may print `id=BOT`, which the site parser rejects.
+Status: NOT RUN yet. On 2026-10-17 nothing listened on rcon 27055, so none of the steps below
+were done and the captured lines are not pinned in `tests/siKillParse.test.ts`. The live run
+is deferred to the rollout gate. The live 180 degree turn (steps 6 to 8) needs a client and is
+pending for the owner or the in-game harness.
 
-1. Build both: `plugin/build-inputstats.sh && DEBUG=1 plugin/build-inputstats.sh`. Never stage
+Every command below is `RPORT=27055 python3 /home/volence/l4d/nightmode/rcon.py '<cmd>' ...`.
+`PL=/home/volence/l4d1-ds/server/left4dead/addons/sourcemod/plugins`.
+
+Expected line (one per human SI kill, in the newest `left4dead/logs/L*.log`):
+
+    L4DM id=<STEAM_x:y:z> k=sikill w=<weapon> hs=<0|1> dist=<units> pre=<deg> back=<deg> cls=<victim class> v=3 lseq=<n> mac=<hex>
+
+On the sv_lan 1 local server the id is the `STEAM_` form (the site parser takes it; production
+sends steamid64). `lseq`/`mac` is the trailer PugLog adds when the box has a log secret. The
+site parser accepts cls smoker|boomer|hunter only.
+
+1. Check the server is free: run `status`. If a human you did not put there is on, or another
+   session is clearly using it, STOP and change nothing. If rcon refuses, the server is not up:
+   stop; do not start, restart or kill a srcds you did not start (kill only by PID you started).
+2. Record current values before changing anything: run `sv_cheats`, `l4d_inputstats_bots`,
+   `z_hunter_health` and note the director state (`director_start` is the default). Write them
+   down; the restore step puts these exact values back.
+3. Build both: `plugin/build-inputstats.sh && DEBUG=1 plugin/build-inputstats.sh`. Never stage
    `l4d_inputstats_debug.smx`.
-2. Back up the box's `l4d_inputstats.smx`, copy the debug build over it, then
-   `sm plugins reload l4d_inputstats`, `log on`. `l4d_inputstats_version` reads `0.4.0`.
-3. `sm_inputstats_emit sikill` and `sm_inputstats_emit sikill_left`: the newest
-   `left4dead/logs/L*.log` gets `... pre=180.0 back=10.0 cls=hunter v=3` and the same with
-   `back=-1.0`.
-4. With a client: `sv_cheats 1`, `l4d_inputstats_bots 1` (TEST ONLY, lets a bot hunter count),
-   `director_stop`, `z_hunter_health 1`. As a survivor with an SMG, `z_spawn hunter` in the
-   crosshair and run
-   `alias flick "setang 0 <yaw+180> 0; wait 50; setang 0 <yaw> 0; +attack; wait 5; -attack; wait 20; setang 0 <yaw+180> 0"; flick`
-   with the yaw from `getpos`. Expect `pre >= 170`, `back <= 10`. A common or tank kill emits
-   nothing.
-5. Restore: the backed-up `.smx`, `l4d_inputstats_bots 0`, `z_hunter_health 250`,
-   `director_start`, reload.
+4. Back up and install:
+   `cp "$PL/l4d_inputstats.smx" /tmp/claude-1000/l4d_inputstats.smx.bak`, `md5sum` it, then
+   `cp plugin/l4d_inputstats_debug.smx "$PL/l4d_inputstats.smx"`, then rcon
+   `sm plugins reload l4d_inputstats`, `log on`, `l4d_inputstats_version`. It MUST read
+   `0.4.0`; if not, restore and stop.
+5. Self-test: `sm_inputstats_emit sikill` and `sm_inputstats_emit sikill_left`, then
+   `grep -h 'k=sikill' $(ls -t /home/volence/l4d1-ds/server/left4dead/logs/L*.log | head -1) | tail -2`.
+   Expect two lines ending `pre=180.0 back=10.0 cls=hunter v=3` and
+   `pre=180.0 back=-1.0 cls=hunter v=3` (plus the `lseq`/`mac` trailer).
+6. Real kill (needs a client). The KILLER must be the human client; the bot is only the
+   victim. Never use a bot killer: it prints `id=BOT`, which the site parser rejects. On the
+   server: `sv_cheats 1`, `l4d_inputstats_bots 1` (TEST ONLY: lets a bot SI victim count),
+   `director_stop`, `z_hunter_health 1`. In the client console as a survivor with an SMG
+   (`give smg`) facing open ground: `getpos`, `z_spawn hunter`, then
+   `alias flick "setang 0 <yaw+180> 0; wait 50; setang 0 <yaw> 0; +attack; wait 5; -attack; wait 20; setang 0 <yaw+180> 0"`.
+   Use the yaw `getpos` printed for `<yaw>` so the hunter sits in the crosshair, and
+   `<yaw+180>` wrapped into -180..180 (yaw 90 gives -90, not 270). Run `flick`. Expect one
+   `k=sikill` line for the client's `STEAM_` id with `w=smg`, `cls=hunter`, `pre>=170.0`,
+   `back<=10.0`.
+7. Negative cases: kill a hunter WITHOUT turning (`pre` small). Kill a common infected, and a
+   tank (`z_spawn tank`, `z_tank_health 1`): both must emit NO sikill line.
+8. Weapon names: kill one SI each with the pistol, dual pistols (`give pistol` twice) and the
+   hunting rifle; record the `w=` values. If any differs from `smg`, `pistol`, `dual_pistols`,
+   `hunting_rifle`, update `HS_GROUPS` in `src/aimRules.ts` and the `weapon groups` test in
+   `tests/aimHeadshots.test.ts` to the real names and say so in the commit message.
+9. Clean up bots: `kill` or `sm_kick` any leftover bot you spawned (`z_spawn` victims, none
+   should remain), so no infected bots persist for the next user.
+10. Restore everything: copy the backup over `$PL/l4d_inputstats.smx` and check
+    `md5sum "$PL/l4d_inputstats.smx"` equals the backup md5 from step 4; then rcon
+    `l4d_inputstats_bots <recorded>`, `z_hunter_health <recorded, 250 default>`,
+    `sv_cheats <recorded>`, `director_start` (if it was running), `sm plugins reload
+    l4d_inputstats`. Read each cvar back to confirm.
+11. Pin the lines: paste the captured step 5 and step 6 lines verbatim (keep any `lseq`/`mac`
+    trailer; the parser ignores it) into `tests/siKillParse.test.ts` replacing the two
+    `FORMAT_0_4` entries, and change the comment above them to say they were captured off the
+    local server on the run date. Keep the assertions; for the step 6 line assert
+    `{ kind: 'si_kill', weapon: 'smg', victimClass: 'hunter' }`, `pre >= 170`, `back <= 10`.
+    Run `npx vitest run tests/siKillParse.test.ts`; it must pass. Commit with
+    `git add plugin/TESTING.md tests/siKillParse.test.ts` (plus `src/aimRules.ts` and
+    `tests/aimHeadshots.test.ts` if step 8 changed names) and
+    `git commit -m "<one sentence>" -- <same files>`.
 
 `back=-1` means the killer disconnected, died or left the survivors inside the second after the
 kill, or the map ended; the site never counts it as a return.
