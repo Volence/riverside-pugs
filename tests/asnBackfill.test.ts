@@ -27,6 +27,19 @@ describe('parseChatJoinLine', () => {
       .toEqual({ steamid: '76561198129925325', ip: '142.111.152.210' });
   });
 
+  // The chat logger pads the address column, so most real join lines carry
+  // spaces between the address and the closing bracket (2026-10-18: 94% of
+  // 36,919 join lines on the five boxes looked like this).
+  it('reads a join line whose address is padded', () => {
+    expect(parseChatJoinLine('[01:01:52] (STEAM_1:0:342441048  | 198.51.100.7   ) Yuriware                  has joined.'))
+      .toEqual({ steamid: '76561198645147824', ip: '198.51.100.7' });
+  });
+
+  it('ignores a chat message that only quotes a join', () => {
+    expect(parseChatJoinLine('[23:17:01] [Sur] name : (STEAM_1:0:1 | 198.51.100.7) has joined.')).toBeNull();
+    expect(parseChatJoinLine('[23:17:01] (STEAM_1:0:1   | 198.51.100.7) name : gg')).toBeNull();
+  });
+
   it('ignores chat and malformed lines', () => {
     expect(parseChatJoinLine('[23:17:01] name: gg')).toBeNull();
     expect(parseChatJoinLine('[23:17:01] (STEAM_1:0:1 | not-an-ip) name has joined.')).toBeNull();
