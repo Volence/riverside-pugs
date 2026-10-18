@@ -80,4 +80,44 @@ describe('loading and refreshing', () => {
     expect(existsSync(path)).toBe(false);
     expect(currentAsnTable()).toBeNull();
   });
+
+  it('replaces a fresh but corrupt file with a valid download', async () => {
+    const path = join(dir(), 'ip2asn-v4.tsv.gz');
+    writeFileSync(path, Buffer.alloc(0));
+    expect(await refreshAsnTable({ path, fetchFn: okFetch, minRanges: 1 })).toBe('downloaded');
+    expect(readFileSync(path).equals(gz)).toBe(true);
+    expect(currentAsnTable()?.lookup('1.0.0.1')?.asn).toBe(13335);
+  });
+
+  it('keeps the table in memory when a corrupt file meets a failing download', async () => {
+    const path = join(dir(), 'ip2asn-v4.tsv.gz');
+    writeFileSync(path, Buffer.from('not gzip'));
+    const boom = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+    expect(await refreshAsnTable({ path, fetchFn: boom, minRanges: 1 })).toBe('failed'); // resolves, never rejects
+    expect(readFileSync(path).toString()).toBe('not gzip');
+    expect(currentAsnTable()).toBeNull();
+    // with a table already in memory, a failing download leaves it in place
+    setAsnTable(parseIp2AsnTsv(SAMPLE));
+    expect(await refreshAsnTable({ path, fetchFn: boom, maxAgeMs: 0, minRanges: 1 })).toBe('failed');
+    expect(currentAsnTable()?.lookup('1.0.0.1')?.asn).toBe(13335);
+  });
+
+  it('fails on a non-200 response and leaves the file alone', async () => {
+    const path = join(dir(), 'ip2asn-v4.tsv.gz');
+    writeFileSync(path, gz);
+    const old = readFileSync(path);
+    const f = (async () => new Response('nope', { status: 503 })) as unknown as typeof fetch;
+    expect(await refreshAsnTable({ path, fetchFn: f, maxAgeMs: 0, minRanges: 1 })).toBe('failed');
+    expect(readFileSync(path).equals(old)).toBe(true);
+  });
+
+  it('fails on a truncated gzip body and leaves the file alone', async () => {
+    const path = join(dir(), 'ip2asn-v4.tsv.gz');
+    writeFileSync(path, gz);
+    const old = readFileSync(path);
+    const cut = gz.subarray(0, gz.length - 12);
+    const f = (async () => new Response(cut as unknown as BodyInit)) as unknown as typeof fetch;
+    expect(await refreshAsnTable({ path, fetchFn: f, maxAgeMs: 0, minRanges: 1 })).toBe('failed');
+    expect(readFileSync(path).equals(old)).toBe(true);
+  });
 });
