@@ -116,14 +116,32 @@ export function setAsnTable(t: AsnTable | null): void {
 export async function refreshAsnTable(opts: {
   path: string; url?: string; fetchFn?: typeof fetch; now?: Date; maxAgeMs?: number; minRanges?: number;
 }): Promise<'fresh' | 'downloaded' | 'failed'> {
+  if (inflight) return inflight;
+  inflight = refreshOnce(opts).finally(() => { inflight = null; });
+  return inflight;
+}
+
+let inflight: Promise<'fresh' | 'downloaded' | 'failed'> | null = null;
+/** A download that hangs is cut off, so it cannot hold the refresh guard forever. */
+const FETCH_TIMEOUT_MS = 120_000;
+
+async function refreshOnce(opts: {
+  path: string; url?: string; fetchFn?: typeof fetch; now?: Date; maxAgeMs?: number; minRanges?: number;
+}): Promise<'fresh' | 'downloaded' | 'failed'> {
   const now = opts.now ?? new Date();
   const maxAge = opts.maxAgeMs ?? ASN_MAX_AGE_MS;
-  if (existsSync(opts.path) && Math.max(0, now.getTime() - statSync(opts.path).mtimeMs) < maxAge) {
-    if (!current) current = loadAsnFile(opts.path);
-    return 'fresh';
+  // A fresh file that does not load (zero bytes, bad gzip after a crash) is
+  // not fresh: fall through to the download, which replaces it only if valid.
+  try {
+    if (existsSync(opts.path) && Math.max(0, now.getTime() - statSync(opts.path).mtimeMs) < maxAge) {
+      if (!current) current = loadAsnFile(opts.path);
+      return 'fresh';
+    }
+  } catch (err) {
+    console.error('[asn] the table on disk is unusable, downloading a new one:', err);
   }
   try {
-    const res = await (opts.fetchFn ?? fetch)(opts.url ?? IP2ASN_URL);
+    const res = await (opts.fetchFn ?? fetch)(opts.url ?? IP2ASN_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const gz = Buffer.from(await res.arrayBuffer());
     const table = parseIp2AsnTsv(gunzipSync(gz).toString('utf8'));
@@ -153,7 +171,9 @@ export function startAsnRefresh(opts: { path: string; download: boolean }): () =
     try { current = loadAsnFile(opts.path); } catch (err) { console.error('[asn] could not load the table on disk:', err); }
   }
   if (!opts.download) return () => {};
-  const tick = () => { void refreshAsnTable({ path: opts.path }); };
+  const tick = () => {
+    refreshAsnTable({ path: opts.path }).catch((err) => console.error('[asn] refresh crashed:', err));
+  };
   tick();
   const timer = setInterval(tick, 86_400_000);
   timer.unref();
