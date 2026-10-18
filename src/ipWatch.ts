@@ -3,6 +3,7 @@ import { hashIp } from './playerNetworks.js';
 import { resolveAlias } from './aliases.js';
 import { hasActiveBan } from './banState.js';
 import { publishAdminEvent } from './adminFeed.js';
+import { isOpenMember } from './evaderPeople.js';
 
 /**
  * Same-connection alerts and the IP watch list (owner, 2026-10-08, after
@@ -31,6 +32,8 @@ import { publishAdminEvent } from './adminFeed.js';
 
 export function ensureIpWatchSchema(db: DB): void {
   db.exec(`
+    -- Read-only since person records (src/evaderPeople.ts) took over: kept
+    -- for one release so the migration can be checked, then dropped.
     CREATE TABLE IF NOT EXISTS evader_flags (
       steamid    TEXT PRIMARY KEY,
       reason     TEXT NOT NULL,
@@ -61,8 +64,12 @@ export function ensureIpWatchSchema(db: DB): void {
   `);
 }
 
+
+/** A Steam member of an open person record (src/evaderPeople.ts). The name
+ *  is kept from the evader flags it replaced, so every caller still reads
+ *  "is this a known evader's account". */
 export function isFlagged(db: DB, steamid: string): boolean {
-  return db.prepare('SELECT 1 FROM evader_flags WHERE steamid = ? AND cleared_at IS NULL').get(steamid) !== undefined;
+  return isOpenMember(db, steamid);
 }
 
 /** Watch one address on behalf of a flagged account (or by hand, steamid
@@ -79,35 +86,18 @@ function watch(db: DB, ipHash: string, steamid: string | null, note: string, by:
   ).run(ipHash, steamid, note, by, at);
 }
 
-/** Flag an account as a ban evader: every address it has used goes on the
- *  watch list, and every address it turns up on later joins them. */
-export function flagEvader(db: DB, steamid: string, reason: string, by: string, now = new Date()): void {
-  const at = now.toISOString();
-  db.transaction(() => {
-    db.prepare(
-      `INSERT INTO evader_flags (steamid, reason, created_by, created_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(steamid) DO UPDATE SET reason = excluded.reason, created_by = excluded.created_by,
-         created_at = excluded.created_at, cleared_by = NULL, cleared_at = NULL`,
-    ).run(steamid, reason, by, at);
-    for (const { ip_hash } of db.prepare('SELECT ip_hash FROM player_networks WHERE player_id = ?').all(steamid) as { ip_hash: string }[]) {
-      watch(db, ip_hash, steamid, '', by, at);
-    }
-  })();
+/** Watch every address this account has used: it has just become a member
+ *  of a known evader's record. Later addresses join through checkConnection. */
+export function watchAccount(db: DB, steamid: string, by: string, at: string): void {
+  for (const { ip_hash } of db.prepare('SELECT ip_hash FROM player_networks WHERE player_id = ?').all(steamid) as { ip_hash: string }[]) {
+    watch(db, ip_hash, steamid, '', by, at);
+  }
 }
 
-/** Clear the flag and stop watching the addresses it put on the list.
- *  Addresses added by hand, or by another flagged account, stay. */
-export function clearEvader(db: DB, steamid: string, by: string, now = new Date()): boolean {
-  const at = now.toISOString();
-  let cleared = false;
-  db.transaction(() => {
-    cleared = db.prepare('UPDATE evader_flags SET cleared_by = ?, cleared_at = ? WHERE steamid = ? AND cleared_at IS NULL')
-      .run(by, at, steamid).changes > 0;
-    if (cleared) {
-      db.prepare('UPDATE ip_watch SET removed_by = ?, removed_at = ? WHERE steamid = ? AND removed_at IS NULL').run(by, at, steamid);
-    }
-  })();
-  return cleared;
+/** Stop watching the addresses this account put on the list. Addresses
+ *  added by hand, or by another evader's account, stay. */
+export function unwatchAccount(db: DB, steamid: string, by: string, at: string): void {
+  db.prepare('UPDATE ip_watch SET removed_by = ?, removed_at = ? WHERE steamid = ? AND removed_at IS NULL').run(by, at, steamid);
 }
 
 /** Watch a raw address typed by staff. Returns false for something that is
@@ -167,11 +157,6 @@ export function checkConnection(db: DB, steamid: string, ipHash: string, now = n
   }
 }
 
-export interface EvaderFlag {
-  steamid: string; name: string; reason: string;
-  createdAt: string; createdBy: string; createdByName: string | null;
-}
-
 export interface WatchEntry {
   ipHash: string; country: string | null; note: string;
   steamid: string | null; name: string | null;
@@ -180,22 +165,7 @@ export interface WatchEntry {
   accounts: { steamid: string; name: string; banned: boolean; flagged: boolean; lastSeen: string }[];
 }
 
-export function evaderFlagOf(db: DB, steamid: string): EvaderFlag | null {
-  return (db.prepare(
-    `SELECT f.steamid, COALESCE(p.name, f.steamid) AS name, f.reason, f.created_at AS createdAt,
-            f.created_by AS createdBy, c.name AS createdByName
-       FROM evader_flags f LEFT JOIN players p ON p.steamid = f.steamid LEFT JOIN players c ON c.steamid = f.created_by
-      WHERE f.steamid = ? AND f.cleared_at IS NULL`,
-  ).get(steamid) as EvaderFlag | undefined) ?? null;
-}
-
-export function ipWatchView(db: DB, now = new Date()): { flags: EvaderFlag[]; entries: WatchEntry[] } {
-  const flags = db.prepare(
-    `SELECT f.steamid, COALESCE(p.name, f.steamid) AS name, f.reason, f.created_at AS createdAt,
-            f.created_by AS createdBy, c.name AS createdByName
-       FROM evader_flags f LEFT JOIN players p ON p.steamid = f.steamid LEFT JOIN players c ON c.steamid = f.created_by
-      WHERE f.cleared_at IS NULL ORDER BY f.created_at DESC`,
-  ).all() as EvaderFlag[];
+export function ipWatchView(db: DB, now = new Date()): { entries: WatchEntry[] } {
   const rows = db.prepare(
     `SELECT w.ip_hash AS ipHash, w.note, w.steamid, p.name, w.created_at AS createdAt, c.name AS createdByName
        FROM ip_watch w LEFT JOIN players p ON p.steamid = w.steamid LEFT JOIN players c ON c.steamid = w.created_by
@@ -217,5 +187,5 @@ export function ipWatchView(db: DB, now = new Date()): { flags: EvaderFlag[]; en
       })),
     };
   });
-  return { flags, entries };
+  return { entries };
 }

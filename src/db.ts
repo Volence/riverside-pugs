@@ -9,6 +9,7 @@ import { deploySlug } from './releaseStage.js';
 import { seedRulesetTemplates } from './rulesets.js';
 import { ensureAppealSchema } from './appeals/schema.js';
 import { ensureIpWatchSchema } from './ipWatch.js';
+import { ensureEvaderSchema } from './evaderPeople.js';
 import { ensureNewcomerSchema } from './integrity/newcomer.js';
 import { ensureDataFeedsSchema } from './dataFeeds.js';
 
@@ -2823,6 +2824,10 @@ export function openDb(path: string): DB {
 
   // Evader flags, the IP watch list and same-connection alerts (src/ipWatch.ts).
   ensureIpWatchSchema(db);
+  // Known evaders as people, their press fingerprints and fingerprint alerts
+  // (src/evaderPeople.ts). After the watch list: the first boot migrates the
+  // open evader_flags into person records.
+  ensureEvaderSchema(db);
   ensureNewcomerSchema(db);
 
   // pug-match's data feeds: connection funnel, survivor downs, SI lives
