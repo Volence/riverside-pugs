@@ -170,3 +170,32 @@ export function hsNote(r: HsResult): string {
     : `${r.rate.toFixed(3)} (fixed until ${HS_POOL_MIN} kills are on record, ${r.poolKills} so far)`;
   return `${r.group} weapons: ${r.headshots} of ${r.kills} SI kills were headshots, p = ${r.p.toExponential(1)} against ${pool}`;
 }
+
+// --- Rule C: flick and return ---------------------------------------------
+
+export const FLICK_PRE_DEG = 90;
+export const FLICK_BACK_DEG = 45;
+export const FLICK_MIN_KILLS = 2;
+
+/** A kill whose view swung FLICK_PRE_DEG+ in the 300 ms before and came back
+ *  within FLICK_BACK_DEG of where it started in the second after. back -1
+ *  (the killer left or died first) is unknown and never a return. */
+export function isFlickReturn(k: Pick<KillRow, 'pre' | 'back'>): boolean {
+  return k.back >= 0 && k.pre >= FLICK_PRE_DEG && k.back <= FLICK_BACK_DEG;
+}
+
+export interface FlickResult { kills: number; flicks: KillRow[] }
+
+/** Rule C over one player's kills in one match. nepmir had 2; no honest
+ *  player of 520 had more than 1. */
+export function flickReturns(kills: readonly KillRow[]): FlickResult | null {
+  const flicks = kills.filter(isFlickReturn);
+  return flicks.length >= FLICK_MIN_KILLS ? { kills: kills.length, flicks } : null;
+}
+
+/** The kills, their degrees and when the site heard of them (UTC; the line
+ *  carries no game clock, so this is about a second after the kill). */
+export function flickNote(r: FlickResult): string {
+  const each = r.flicks.map((k) => `${k.at.slice(11, 19)} ${k.victimClass} (pre ${k.pre.toFixed(1)}, back ${k.back.toFixed(1)})`);
+  return `${r.flicks.length} of ${r.kills} SI kills were a ${FLICK_PRE_DEG}+ degree flick and back within ${FLICK_BACK_DEG}: ${each.join(', ')} UTC`;
+}
