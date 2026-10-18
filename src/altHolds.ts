@@ -104,8 +104,11 @@ export function placeAltHold(
 }
 
 /** Shown to the held player. Deliberately says nothing about how: telling an
- *  evader which signal caught them is telling them what to change. */
-export const FINGERPRINT_HOLD_REASON = 'On hold for review: a moderator needs to check this account before it can play';
+ *  evader which signal caught them is telling them what to change. Both
+ *  places it is shown already say the account is on hold (banMessage reads
+ *  "Your account is on hold. <reason>.", the Play page heads it "Your account
+ *  is on hold"), so it does not say so again. */
+export const FINGERPRINT_HOLD_REASON = 'A moderator needs to check this account before it can play';
 
 export type FingerprintHoldResult = { id: number } | { refused: 'cleared' | 'open_hold' | 'staff' | 'unknown' };
 
