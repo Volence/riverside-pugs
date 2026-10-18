@@ -33,7 +33,9 @@ const PERSON_SELECT = `SELECT id, label, note, created_by AS createdBy, created_
   FROM evader_people`;
 
 export function ensureEvaderSchema(db: DB): void {
-  const isNew = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'evader_people'").get() === undefined;
+  // One transaction (SQLite DDL is transactional): a migration that dies
+  // rolls the table creation back, so the next boot tries again.
+  db.transaction(() => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS evader_people (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +84,11 @@ export function ensureEvaderSchema(db: DB): void {
       PRIMARY KEY (steamid, person_id, level)
     );
   `);
-  if (isNew) migrateEvaderFlags(db);
+  // People are never deleted, so an empty table with open flags means the
+  // migration has not happened yet (first boot, or an earlier one was cut short).
+  const none = (db.prepare('SELECT COUNT(*) AS n FROM evader_people').get() as { n: number }).n === 0;
+  if (none) migrateEvaderFlags(db);
+  })();
 }
 
 function insertPerson(db: DB, label: string, note: string, by: string, at: string): number {
@@ -92,7 +98,10 @@ function insertPerson(db: DB, label: string, note: string, by: string, at: strin
 
 /** A label nobody has: the account's name, or the name and the id. */
 function freeLabel(db: DB, name: string, steamid: string): string {
-  return personByLabel(db, name) ? `${name} (${steamid})` : name;
+  const base = name.trim().slice(0, 40) || steamid;
+  if (!personByLabel(db, base)) return base;
+  const withId = `${base.slice(0, 40 - steamid.length - 3)} (${steamid})`;
+  return personByLabel(db, withId) ? steamid : withId;
 }
 
 /**
@@ -110,9 +119,16 @@ export function migrateEvaderFlags(db: DB): void {
   ).all() as { steamid: string; reason: string; createdBy: string; createdAt: string; name: string | null }[];
   if (flags.length === 0) return;
   const dethisa = new Set(DETHISA.steam);
+  const isKnown = (f: { steamid: string; name: string | null }) =>
+    dethisa.has(f.steamid) || (f.name !== null && DETHISA.steamByName.includes(f.name));
   db.transaction(() => {
+    // dethisa first, so an unrelated account named "dethisa" can never take the label.
+    const first = flags.find(isKnown);
+    if (first && !personByLabel(db, DETHISA.label)) {
+      insertPerson(db, DETHISA.label, 'Made from the evader flags.', first.createdBy, first.createdAt);
+    }
     for (const f of flags) {
-      const known = dethisa.has(f.steamid) || (f.name !== null && DETHISA.steamByName.includes(f.name));
+      const known = isKnown(f);
       const label = known ? DETHISA.label : freeLabel(db, f.name ?? f.steamid, f.steamid);
       const id = personByLabel(db, label)?.id
         ?? insertPerson(db, label, known ? 'Made from the evader flags.' : f.reason, f.createdBy, f.createdAt);
