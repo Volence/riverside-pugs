@@ -1310,6 +1310,7 @@ CREATE TABLE IF NOT EXISTS si_kills (
   pre REAL NOT NULL, back REAL NOT NULL, victim_class TEXT NOT NULL, at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS si_kills_match ON si_kills(match_id, steamid);
+CREATE INDEX IF NOT EXISTS si_kills_at ON si_kills(at);
 
 -- Ended matches the aim rules have been run over, once (scanAimMatches in
 -- src/aimRules.ts). Claimed even with the rules off, so turning them on

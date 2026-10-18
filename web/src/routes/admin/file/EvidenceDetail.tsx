@@ -165,7 +165,7 @@ export function EvidenceDetail(
       </ul>
 
       <h4>Live anti-cheat</h4>
-      {e.flags.length === 0 ? <p class="muted">Nothing flagged by the live anti-cheat.</p> : (
+      {e.flags.filter((f) => f.source === 'lilac').length === 0 ? <p class="muted">Nothing flagged by the live anti-cheat.</p> : (
         <>
           <p class="muted">
             Raised by Little Anti-Cheat during play, not by replay analysis, so there is no clip to
@@ -173,7 +173,7 @@ export function EvidenceDetail(
             a pattern is what matters.
           </p>
           <ul class="admin-list">
-            {e.flags.map((f) => (
+            {e.flags.filter((f) => f.source === 'lilac').map((f) => (
               <li key={f.id}>
                 {fmtTime(f.at)}: <code>{f.kind}</code>
                 {f.severity === 'banned' ? <strong class="admin-warn"> · banned by LilAC</strong>

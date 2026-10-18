@@ -1260,8 +1260,10 @@ site parser accepts cls smoker|boomer|hunter only.
    session is clearly using it, STOP and change nothing. If rcon refuses, the server is not up:
    stop; do not start, restart or kill a srcds you did not start (kill only by PID you started).
 2. Record current values before changing anything: run `sv_cheats`, `l4d_inputstats_bots`,
-   `z_hunter_health` and note the director state (`director_start` is the default). Write them
-   down; the restore step puts these exact values back.
+   `z_hunter_health` and `z_tank_health` (default 4000, but Rotoblin configs may override it, so
+   read the actual value). Write them down; the restore step puts these exact values back.
+   Step 6 runs `director_stop`, so if you see the
+   director already stopped before you start, note that now.
 3. Build both: `plugin/build-inputstats.sh && DEBUG=1 plugin/build-inputstats.sh`. Never stage
    `l4d_inputstats_debug.smx`.
 4. Back up and install:
@@ -1294,8 +1296,9 @@ site parser accepts cls smoker|boomer|hunter only.
 10. Restore everything: copy the backup over `$PL/l4d_inputstats.smx` and check
     `md5sum "$PL/l4d_inputstats.smx"` equals the backup md5 from step 4; then rcon
     `l4d_inputstats_bots <recorded>`, `z_hunter_health <recorded, 250 default>`,
-    `sv_cheats <recorded>`, `director_start` (if it was running), `sm plugins reload
-    l4d_inputstats`. Read each cvar back to confirm.
+    `z_tank_health <recorded>`, `sv_cheats <recorded>`, then `director_start` (always, unless
+    you saw the director already stopped before starting), `sm plugins reload
+    l4d_inputstats`. Read each cvar back (including `z_tank_health`) to confirm.
 11. Pin the lines: paste the captured step 5 and step 6 lines verbatim (keep any `lseq`/`mac`
     trailer; the parser ignores it) into `tests/siKillParse.test.ts` replacing the two
     `FORMAT_0_4` entries, and change the comment above them to say they were captured off the

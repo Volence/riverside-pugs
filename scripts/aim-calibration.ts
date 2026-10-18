@@ -18,16 +18,24 @@ import { aimCalibration } from '../src/aimCalibration.js';
 const args = process.argv.slice(2);
 const flag = (name: string): string | undefined => {
   const i = args.indexOf(name);
-  return i >= 0 ? args[i + 1] : undefined;
+  if (i < 0) return undefined;
+  const v = args[i + 1];
+  if (v === undefined || v.startsWith('--')) {
+    console.error(`${name} needs a value`);
+    process.exit(1);
+  }
+  return v;
 };
 
 // A read-only handle, not openDb(): openDb creates tables and sets pragmas.
-const db = new Database(flag('--db') ?? process.env.DB_PATH ?? 'pug.db', { readonly: true, fileMustExist: true }) as DB;
-const days = Number(flag('--days') ?? 7);
+const dbPath = flag('--db') ?? process.env.DB_PATH ?? 'pug.db';
+const daysArg = flag('--days');
+const days = Number(daysArg ?? 7);
 if (!Number.isInteger(days) || days < 1 || days > 90) {
-  console.error(`--days is a whole number of days, 1 to 90; got ${flag('--days')}`);
+  console.error(`--days is a whole number of days, 1 to 90; got ${daysArg}`);
   process.exit(1);
 }
+const db = new Database(dbPath, { readonly: true, fileMustExist: true }) as DB;
 const r = aimCalibration(db, new Date(), days);
 
 console.log(`since ${r.since}: ${r.playerMatches} player-matches with SI kills`);

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { openDb, type DB } from '../src/db.js';
 import { recordSiKill } from '../src/aimRules.js';
 import { aimCalibration } from '../src/aimCalibration.js';
@@ -36,4 +37,19 @@ describe('aimCalibration', () => {
     expect(r.flicks.counts).toEqual([{ flicks: 0, playerMatches: 2 }, { flicks: 1, playerMatches: 1 }, { flicks: 2, playerMatches: 1 }]);
     expect(r.flicks.top[0]).toMatchObject({ steamid: 'cheat', matchId: 3, flicks: 2, kills: 16 });
   });
+});
+
+describe('si_kills schema and the calibration script', () => {
+  it('indexes si_kills by at', () => {
+    const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'si_kills'").all() as { name: string }[];
+    expect(names.map((n) => n.name)).toContain('si_kills_at');
+  });
+
+  it('exits with an error when a flag has no value', () => {
+    for (const a of [['--db'], ['--days'], ['--db', '--days', '3']]) {
+      const r = spawnSync('npx', ['tsx', 'scripts/aim-calibration.ts', ...a], { encoding: 'utf8' });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/needs a value/);
+    }
+  }, 30000);
 });

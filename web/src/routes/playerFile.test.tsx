@@ -392,6 +392,23 @@ const integrityRound = (over: Partial<IntegrityRound> = {}): IntegrityRound => (
 });
 
 describe('the evidence detail', () => {
+  it('keeps aim-rule rows out of the LilAC list', async () => {
+    mockPeople.file.mockResolvedValue(file({
+      sections: {
+        ...file().sections,
+        evidence: {
+          analyzer: null, rounds: [], clips: [], inputFlags: [], inputCaps: [],
+          signonDrops: { count: 0, lastAt: null, rows: [] },
+          flags: [{ id: 9, matchId: 5, steamid: P, source: 'aim', kind: 'hs_share', severity: 'suspected', detail: '', at: '2026-10-17T21:04:13.000Z' }],
+        },
+      },
+    }));
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.queryByText(/hs_share/)).toBeNull();
+    expect(screen.getByText(/Nothing flagged by the live anti-cheat/)).toBeTruthy();
+  });
+
   it('marks a high severity flag as such', async () => {
     mockPeople.file.mockResolvedValue(file({
       sections: {
