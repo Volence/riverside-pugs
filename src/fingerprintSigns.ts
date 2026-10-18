@@ -92,7 +92,8 @@ export interface SignContext {
   members: readonly string[];
   /** From matchPersons: member accounts among the candidate's 10 nearest. */
   membersInTop10: number;
-  /** False when no ASN table is loaded: then sign 1 is not counted at all. */
+  /** False when no ASN table is loaded: then sign 1 is not counted at all.
+   *  Sign 5 reads the stored tags either way. */
   asnLoaded: boolean;
   extraVpn: ReadonlySet<number>;
 }
@@ -132,12 +133,20 @@ export function secondSigns(db: DB, steamid: string, ctx: SignContext, at: Date)
   if (cheat) found.add('cheat_flag');
   if (ctx.membersInTop10 >= 2) found.add('two_members');
   if (ctx.members.length > 0) {
-    const shared = db.prepare(
-      `SELECT 1 FROM player_networks a JOIN player_networks b ON b.ip_hash = a.ip_hash
+    // A commercial VPN exit is shared by strangers, so a hash tagged VPN or
+    // hosting on any of its rows does not count (sign 1 covers it). This
+    // reads the tags stored on the rows, so it holds with no ASN table
+    // loaded: an untagged row (NULL asn) is "unknown", never a VPN, and
+    // still counts as a shared connection.
+    const hashes = (db.prepare(
+      `SELECT DISTINCT a.ip_hash AS h FROM player_networks a JOIN player_networks b ON b.ip_hash = a.ip_hash
         WHERE a.player_id = ? AND a.first_seen <= ?
-          AND b.player_id IN (${ctx.members.map(() => '?').join(', ')}) AND b.first_seen <= ? LIMIT 1`,
-    ).get(steamid, iso, ...ctx.members, iso);
-    if (shared) found.add('shared_connection');
+          AND b.player_id IN (${ctx.members.map(() => '?').join(', ')}) AND b.first_seen <= ?`,
+    ).all(steamid, iso, ...ctx.members, iso) as { h: string }[]).map((r) => r.h);
+    const tags = db.prepare('SELECT asn, as_org FROM player_networks WHERE ip_hash = ?');
+    const vpnHash = (h: string): boolean => (tags.all(h) as { asn: number | null; as_org: string | null }[])
+      .some((n) => isVpnNetwork(n.asn, n.as_org, ctx.extraVpn));
+    if (hashes.some((h) => !vpnHash(h))) found.add('shared_connection');
   }
   return SIGN_ORDER.filter((s) => found.has(s));
 }
