@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { linkDiscord } from '../src/players.js';
 import { hasActiveBan } from '../src/banState.js';
-import { altHolds, holdById, liftAltHold, placeAltHold, placeFingerprintHold } from '../src/altHolds.js';
+import { FINGERPRINT_HOLD_REASON, altHolds, holdById, liftAltHold, placeAltHold, placeFingerprintHold } from '../src/altHolds.js';
+import { banMessage } from '../src/admin/players.js';
 import { addMember, createPerson } from '../src/evaderPeople.js';
 import { fileViewer } from '../src/admin/fileAccess.js';
 import { player } from './fingerprintFixtures.js';
@@ -33,6 +34,15 @@ describe('fingerprint holds', () => {
     const ban = db.prepare('SELECT kind FROM bans WHERE player_id = ?').get(NEW) as { kind: string };
     expect(ban.kind).toBe('alt_hold');
     expect(holdById(db, id)).toMatchObject({ source: 'fingerprint', personId });
+  });
+
+  it('tells the held player plainly and vaguely, without saying "on hold" twice', () => {
+    idOf(placeFingerprintHold(db, NEW, personId, OLD));
+    expect(FINGERPRINT_HOLD_REASON).toBe('A moderator needs to check this account before it can play');
+    const text = banMessage(db, NEW);
+    expect(text).toBe('Your account is on hold. A moderator needs to check this account before it can play.');
+    expect(text.match(/on hold/gi)).toHaveLength(1);
+    expect(text).not.toMatch(/fingerprint|press|hold time|dethisa|nepmir/i);
   });
 
   it('lists with the person and the numbers behind it', () => {
