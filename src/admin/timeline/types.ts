@@ -11,12 +11,12 @@ import type { DB } from '../../db.js';
  */
 export type TimelineSource =
   | 'input' | 'lilac' | 'analyzer' | 'drop' | 'ticket' | 'penalty' | 'ban'
-  | 'note' | 'steam' | 'discord_link' | 'cvar' | 'conduct' | 'spray';
+  | 'note' | 'steam' | 'discord_link' | 'cvar' | 'conduct' | 'spray' | 'aim';
 
 /** The sources that mean somebody should take a look. Needs a look is built
  *  from these and nothing else: a ban or a note is a record of a decision
  *  already taken, not something waiting for one. */
-export type EvidenceSource = 'input' | 'lilac' | 'analyzer' | 'drop' | 'steam' | 'cvar' | 'conduct' | 'spray';
+export type EvidenceSource = 'input' | 'lilac' | 'analyzer' | 'drop' | 'steam' | 'cvar' | 'conduct' | 'spray' | 'aim';
 
 export interface TimelineItem {
   at: string;
@@ -82,5 +82,5 @@ export function isEvidence(item: TimelineItem): boolean {
   if (item.source === 'cvar') return !item.kind.endsWith('_fixed');
   return item.source === 'input' || item.source === 'lilac'
     || item.source === 'analyzer' || item.source === 'steam' || item.source === 'conduct'
-    || item.source === 'spray';
+    || item.source === 'spray' || item.source === 'aim';
 }

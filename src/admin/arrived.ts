@@ -31,6 +31,8 @@ export function arrivedSince(items: readonly TimelineItem[], since: string | nul
     for (const i of lilac) counts.set(i.kind, (counts.get(i.kind) ?? 0) + 1);
     parts.push(`Little Anti-Cheat: ${[...counts].map(([k, n]) => (n > 1 ? `${k} ×${n}` : k)).join(', ')}`);
   }
+  const aim = by('aim');
+  if (aim.length > 0) parts.push(`aim rules: ${[...new Set(aim.map((i) => i.kind))].sort().join(', ')}`);
   const cvar = by('cvar');
   if (cvar.length > 0) {
     const kinds = [...new Set(cvar.map((i) => i.kind))].join(', ');

@@ -17,6 +17,7 @@ export function StaffGuide() {
           <li><a href="#reading">Reading the list</a></li>
           <li><a href="#input">Input flags</a></li>
           <li><a href="#lilac">Little Anti-Cheat</a></li>
+          <li><a href="#aim">Aim rules</a></li>
           <li><a href="#setting">Client settings</a></li>
           <li><a href="#replay">Replay moments</a></li>
           <li><a href="#ranking">Analyzer ranking</a></li>
@@ -155,6 +156,38 @@ export function StaffGuide() {
           <dt><code>anti_duck_delay</code></dt>
           <dd>Crouching faster than the game's crouch delay allows.</dd>
         </dl>
+      </Panel>
+
+      <Panel id="aim">
+        <h3>Aim rules</h3>
+        <p>
+          Shown as <code>aim rules: hs_share, aimbot_multi</code>. Three rules learned from the first
+          confirmed aimbot (nepmir, match 722). They judge a whole match once it ends, never a moment, and
+          they never ban or kick anyone.
+        </p>
+        <dl class="howto-cmds">
+          <dt><code>hs_share</code></dt>
+          <dd>
+            Ten or more kills of human infected with the SMG or pistols in one match, with a headshot share
+            so far above everyone else's that the odds of it by chance are under 1 in 1000. The file gives the
+            kills, the headshots, the odds and the rate it was compared with. nepmir: 14 of 16.
+          </dd>
+          <dt><code>flick_return</code></dt>
+          <dd>
+            Two or more infected kills in one match where the view swung 90 degrees or more onto the kill in
+            the 0.3 s before it, then came back within 45 degrees of where it started in the second after.
+            nepmir did it twice; nobody else on record more than once.
+          </dd>
+          <dt><code>aimbot_multi</code></dt>
+          <dd>
+            Two of the three (the two above, or one of them plus a Little Anti-Cheat big snap) in the same
+            match. High severity, and it pings the mod role. Still evidence: watch the replay.
+          </dd>
+        </dl>
+        <p>
+          While the rules are in log mode (Settings, Aim rules) these sit on the file without putting it in
+          Needs a look, because the thresholds are being re-measured.
+        </p>
       </Panel>
 
       <Panel id="setting">
