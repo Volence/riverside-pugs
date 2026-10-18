@@ -308,6 +308,12 @@ export function StaffGuide() {
             moderator looks: lift it, or (admins) use <strong>Ban as same person</strong>, which bans it and adds it
             and its Discord to the evader's record.
           </dd>
+          <dt>Not them</dt>
+          <dd>
+            On any alert in Known evaders. You looked, and the account is not that evader: it is never alerted on
+            or held as them again (it is still checked against every other evader). It does not lift a hold that is
+            already open: do that on the Alts list.
+          </dd>
         </dl>
         <p>
           <strong>Reading the numbers.</strong> The distance is 0 for identical hold patterns and 1 for nothing in

@@ -28,6 +28,8 @@ export interface KnownEvader {
   alerts: {
     steamid: string; name: string; level: 'alert' | 'loud' | 'hold'; distance: number; threshold: number; rank: number;
     signs: string[]; matchId: number | null; createdAt: string; banned: boolean;
+    /** Staff said "Not them": the pair is never alerted on again. */
+    dismissed: boolean;
   }[];
 }
 
@@ -45,6 +47,7 @@ export function knownEvaders(db: DB, viewer: FileViewer, now = new Date()): Know
   const population = cachedPopulation(db);
   const held = new Set((db.prepare('SELECT steamid FROM alt_holds WHERE resolved_at IS NULL').all() as { steamid: string }[]).map((r) => r.steamid));
   const lastSeen = db.prepare('SELECT MAX(last_seen) AS t FROM player_networks WHERE player_id = ?');
+  const dismissed = db.prepare('SELECT 1 FROM fingerprint_dismissals WHERE steamid = ? AND person_id = ?');
   const out: KnownEvader[] = [];
   for (const p of openPeople(db)) {
     const members = membersOf(db, p.id);
@@ -82,6 +85,7 @@ export function knownEvaders(db: DB, viewer: FileViewer, now = new Date()): Know
       alerts: alerts.map((a) => ({
         steamid: a.steamid, name: a.name, level: a.level, distance: a.distance, threshold: a.threshold, rank: a.rank,
         signs: signsOf(a.signs_json), matchId: a.match_id, createdAt: a.created_at, banned: hasActiveBan(db, a.steamid, now),
+        dismissed: dismissed.get(a.steamid, p.id) !== undefined,
       })),
     });
   }

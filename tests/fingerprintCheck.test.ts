@@ -3,9 +3,9 @@ import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { banPlayer } from '../src/admin/players.js';
 import { hasActiveBan } from '../src/banState.js';
-import { liftAltHold } from '../src/altHolds.js';
+import { liftAltHold, placeFingerprintHold } from '../src/altHolds.js';
 import { setAsnTable } from '../src/asnTable.js';
-import { addMember, createPerson } from '../src/evaderPeople.js';
+import { addMember, createPerson, dismissFingerprint, isFingerprintDismissed } from '../src/evaderPeople.js';
 import { checkMatchFingerprints, runFingerprintCheck } from '../src/fingerprintCheck.js';
 import { scanEndedMatches } from '../src/inputBursts.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
@@ -97,6 +97,31 @@ describe('checkMatchFingerprints', () => {
     expect(checkMatchFingerprints(db, 901, NOW)).toEqual([]);
     expect(hasActiveBan(db, CAND)).toBe(false);
     expect(events).toHaveLength(1);
+  });
+
+  it('a dismissed pair ("Not them") never alerts or holds again, however many more matches it plays', () => {
+    expect(checkMatchFingerprints(db, 900, NOW)[0].level).toBe('alert');
+    expect(dismissFingerprint(db, CAND, personId, STAFF, NOW)).toBe(true);
+    expect(dismissFingerprint(db, CAND, personId, STAFF, NOW)).toBe(false);
+    expect(isFingerprintDismissed(db, CAND, personId)).toBe(true);
+    // Now a second sign and holds switched on: still nothing for this pair.
+    setSetting(db, 'evader_fingerprint', 'full');
+    cheatFlag();
+    for (const m of [901, 902, 903]) {
+      endedMatch(db, m, '2026-10-17 20:40:00');
+      playMatch(db, CAND, m, 10, 80, '2026-10-17T20:30:00.000Z');
+      expect(checkMatchFingerprints(db, m, NOW)).toEqual([]);
+    }
+    expect(hasActiveBan(db, CAND)).toBe(false);
+    expect(events).toHaveLength(1);
+    expect(placeFingerprintHold(db, CAND, personId, MEMBER, NOW)).toEqual({ refused: 'cleared' });
+    // Only the pair: the account is still checked against another person.
+    const other = createPerson(db, 'shove', '', STAFF);
+    addMember(db, other, 'steam', '76561198000000077', STAFF, 'manual');
+    playMatch(db, '76561198000000077', 800, 10, 100, '2026-10-16T19:00:00.000Z');
+    const later = checkMatchFingerprints(db, 903, NOW).map((o) => o.personId);
+    expect(later).not.toContain(personId);
+    expect(later).toContain(other);
   });
 
   it('posts loud when the hold is refused (staff)', () => {

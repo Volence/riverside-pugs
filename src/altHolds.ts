@@ -5,6 +5,7 @@ import { insertBan, restoreStatus } from './admin/players.js';
 import { hasActiveBan } from './banState.js';
 import { getPlayer } from './players.js';
 import { canOpenFile, type FileViewer } from './admin/fileAccess.js';
+import { isFingerprintDismissed } from './evaderPeople.js';
 
 /**
  * Alt holds: the account a Discord moves to is held until staff look.
@@ -114,7 +115,8 @@ export type FingerprintHoldResult = { id: number } | { refused: 'cleared' | 'ope
  * person's nearest member account, which the Alts list shows as "plays like".
  * The bans row and the release path are exactly those of a Discord hold.
  *
- * Refused when staff cleared this (account, person) pair before, when a hold
+ * Refused when staff cleared this (account, person) pair before (a lifted
+ * fingerprint hold, or "Not them" on the alert), when a hold
  * is already open on the account, for staff, and for an account with no
  * players row (a bans row needs one). The caller tells the mods either way.
  */
@@ -124,7 +126,8 @@ export function placeFingerprintHold(
   const cleared = db.prepare(
     "SELECT 1 FROM alt_holds WHERE steamid = ? AND person_id = ? AND source = 'fingerprint' AND resolution = 'cleared'",
   ).get(steamid, personId);
-  if (cleared) return { refused: 'cleared' };
+  // A "Not them" dismissal is the same answer given from the alert.
+  if (cleared || isFingerprintDismissed(db, steamid, personId)) return { refused: 'cleared' };
   if (openHoldOf(db, steamid)) return { refused: 'open_hold' };
   const p = getPlayer(db, steamid);
   if (!p) return { refused: 'unknown' };

@@ -12,6 +12,10 @@ import { placeFingerprintHold, placeAltHold } from '../src/altHolds.js';
 import { hasActiveBan } from '../src/banState.js';
 import { recordPlayerNet } from '../src/playerNetworks.js';
 import { playMatch } from './fingerprintFixtures.js';
+import { isFingerprintDismissed } from '../src/evaderPeople.js';
+import { setSetting } from '../src/settings.js';
+import { AdminFeedPoster } from '../src/discord/adminFeedPoster.js';
+import { FakeTransport } from './fakes/fakeTransport.js';
 
 const EVADER = '76561198000000001';
 const PLAYER = '76561198000000004';
@@ -142,5 +146,65 @@ describe('known evaders view and ban as same person', () => {
     upsertPlayer(db, { steamid: PLAYER, name: 'other', avatar: null }, []);
     const d = placeAltHold(db, PLAYER, EVADER, '111', 'dethisa')!;
     expect((await post(`/api/admin/people/alts/${d}/ban-same-person`, {}, admin)).statusCode).toBe(409);
+  });
+});
+
+describe('"Not them" on a fingerprint alert', () => {
+  const NEW = '76561198000000002';
+  let personId: number;
+  const alert = (steamid: string, person: number) => db.prepare(
+    `INSERT INTO fingerprint_alerts (steamid, person_id, level, distance, threshold, rank, signs_json, match_id, created_at)
+     VALUES (?, ?, 'alert', 0.1, 0.25, 1, '[]', 900, '2026-10-17T21:00:00.000Z')`,
+  ).run(steamid, person);
+
+  beforeEach(() => {
+    upsertPlayer(db, { steamid: NEW, name: 'fresh', avatar: null }, []);
+    personId = createPerson(db, 'dethisa', '', MOD);
+    addMember(db, personId, 'steam', EVADER, MOD, 'seed');
+    alert(NEW, personId);
+  });
+
+  it('a moderator dismisses the pair, the view says so, and the mod channel is told', async () => {
+    setSetting(db, 'discord_admin_channel_id', 'admins');
+    setSetting(db, 'discord_mod_channel_id', 'mods');
+    const t = new FakeTransport();
+    const feed = new AdminFeedPoster({ db, transport: t, publicUrl: 'https://pug.test' });
+    feed.start();
+    try {
+      const res = await post(`/api/admin/people/evaders/${personId}/dismiss`, { steamid: NEW });
+      expect(res.statusCode).toBe(200);
+      expect(isFingerprintDismissed(db, NEW, personId)).toBe(true);
+      await feed.idle();
+      const lines = t.live().filter((m) => JSON.stringify(m.payload).includes('is not known evader'));
+      expect(lines.map((m) => m.channelId)).toEqual(['mods']);
+      expect(JSON.stringify(lines[0].payload)).toContain('dethisa');
+      // Twice is fine, and logged once.
+      expect((await post(`/api/admin/people/evaders/${personId}/dismiss`, { steamid: NEW })).statusCode).toBe(200);
+      expect((db.prepare("SELECT COUNT(*) AS n FROM admin_actions WHERE action = 'evader_dismiss'").get() as { n: number }).n).toBe(1);
+    } finally {
+      feed.stop();
+    }
+    const view = (await app.inject({ method: 'GET', url: '/api/admin/people/evaders', cookies: mod })).json() as {
+      people: { alerts: { steamid: string; dismissed: boolean }[] }[];
+    };
+    expect(view.people[0].alerts).toEqual([expect.objectContaining({ steamid: NEW, dismissed: true })]);
+  });
+
+  it('is a 403 for a plain player and writes nothing', async () => {
+    const player = authedCookie(app, db, PLAYER);
+    expect((await post(`/api/admin/people/evaders/${personId}/dismiss`, { steamid: NEW }, player)).statusCode).toBe(403);
+    expect(isFingerprintDismissed(db, NEW, personId)).toBe(false);
+  });
+
+  it('validates the steamid and needs an alert on that pair', async () => {
+    const url = `/api/admin/people/evaders/${personId}/dismiss`;
+    expect((await post(url, { steamid: 'nope' })).statusCode).toBe(400);
+    expect((await post(url, {})).statusCode).toBe(400);
+    expect((await post('/api/admin/people/evaders/999/dismiss', { steamid: NEW })).statusCode).toBe(404);
+    expect((await post(url, { steamid: PLAYER })).statusCode).toBe(404);
+    // A staff account's alert is not this moderator's to see.
+    db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(NEW);
+    expect((await post(url, { steamid: NEW })).statusCode).toBe(404);
+    expect(isFingerprintDismissed(db, NEW, personId)).toBe(false);
   });
 });

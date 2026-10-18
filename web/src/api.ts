@@ -1714,6 +1714,9 @@ export const peopleApi = {
   removeFromPerson: (personId: number, kind: 'steam' | 'discord', ident: string) =>
     post<{ ok: true }>(`/api/admin/people/evaders/${personId}/members/remove`, { kind, ident }),
   closePerson: (personId: number) => post<{ ok: true }>(`/api/admin/people/evaders/${personId}/close`),
+  /** "Not them": the pair is never alerted on or held again. */
+  dismissFingerprint: (personId: number, steamid: string) =>
+    post<{ ok: true }>(`/api/admin/people/evaders/${personId}/dismiss`, { steamid }),
   banSamePerson: (personId: number, steamid: string) =>
     post<{ ok: true }>(`/api/admin/people/evaders/${personId}/ban-same-person`, { steamid }),
   banHoldSamePerson: (holdId: number) => post<{ ok: true }>(`/api/admin/people/alts/${holdId}/ban-same-person`),
@@ -1732,6 +1735,8 @@ export interface KnownEvader {
   alerts: {
     steamid: string; name: string; level: 'alert' | 'loud' | 'hold'; distance: number; threshold: number; rank: number;
     signs: string[]; matchId: number | null; createdAt: string; banned: boolean;
+    /** Staff said "Not them". Optional for an older server. */
+    dismissed?: boolean;
   }[];
 }
 

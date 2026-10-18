@@ -18,7 +18,9 @@ import { altClusters, altHolds, banFromHold, holdById, liftAltHold } from '../al
 import { ipWatchView, unwatch, watchAddress } from '../ipWatch.js';
 import { knownEvaders } from '../admin/knownEvaders.js';
 import { banAsSamePerson, type BanSameResult } from '../evaderBan.js';
-import { EvaderError, addMember, closePerson, createPerson, personById, personOf, removeMember } from '../evaderPeople.js';
+import {
+  EvaderError, addMember, closePerson, createPerson, dismissFingerprint, personById, personOf, removeMember,
+} from '../evaderPeople.js';
 
 export interface PeopleRouteOpts {
   db: DB;
@@ -294,6 +296,35 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     const id = Number((req.params as { id: string }).id);
     if (!closePerson(db, id, me)) return reply.code(404).send({ error: 'no open person with that id' });
     logAdmin(db, me, 'evader_person_close', '', { personId: id, label: personById(db, id)?.label });
+    return { ok: true };
+  });
+
+  /**
+   * "Not them" on a fingerprint alert: staff looked and the account is not
+   * this person. The check never alerts on or holds the pair again
+   * (dismissFingerprint). A moderator's call, like lifting a hold: it only
+   * ever stops a message, never acts on an account. Only a pair that has
+   * alerted can be dismissed, and only by someone who may open the
+   * account's file (a 404 otherwise, as everywhere on this desk).
+   */
+  app.post('/api/admin/people/evaders/:id/dismiss', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const viewer = fileViewer(db, me);
+    const personId = Number((req.params as { id: string }).id);
+    const { steamid } = (req.body ?? {}) as { steamid?: unknown };
+    if (typeof steamid !== 'string' || !/^\d{17}$/.test(steamid)) {
+      return reply.code(400).send({ error: 'a SteamID64 is 17 digits' });
+    }
+    const person = Number.isInteger(personId) ? personById(db, personId) : null;
+    if (!person) return reply.code(404).send({ error: 'no such person' });
+    const alerted = db.prepare('SELECT 1 FROM fingerprint_alerts WHERE steamid = ? AND person_id = ? LIMIT 1').get(steamid, personId);
+    if (!alerted || !canOpenFile(db, viewer, steamid)) {
+      return reply.code(404).send({ error: 'no fingerprint alert for that account and person' });
+    }
+    if (dismissFingerprint(db, steamid, personId, me)) {
+      logAdmin(db, me, 'evader_dismiss', steamid, { personId, label: person.label });
+    }
     return { ok: true };
   });
 

@@ -80,7 +80,15 @@ function EvaderCard({ p, busy, run, isAdmin }: { p: KnownEvader; busy: boolean; 
           </li>
         ))}
         {p.discord.map((d) => (
-          <li key={d.id}>Discord <code>{d.id}</code> <span class="muted">{d.how}</span></li>
+          <li key={d.id}>
+            Discord <code>{d.id}</code> <span class="muted">{d.how}</span>{' '}
+            <button class="chip" type="button" disabled={busy}
+              onClick={() => run(() => peopleApi.removeFromPerson(p.id, 'discord', d.id), {
+                title: `Take Discord ${d.id} off ${p.label}?`,
+                body: 'The record stops listing this Discord account.',
+                confirmLabel: 'Remove',
+              })}>Remove Discord</button>
+          </li>
         ))}
       </ul>
       {p.connections.length > 0 && (
@@ -125,6 +133,15 @@ function EvaderCard({ p, busy, run, isAdmin }: { p: KnownEvader; busy: boolean; 
                   {a.matchId ? `, match #${a.matchId}` : ''}, {fmtTime(a.createdAt)}
                 </span>
                 {a.banned && <> <span class="admin-status admin-status--banned">banned</span></>}
+                {a.dismissed && <> <span class="chip">not them</span></>}
+                {!a.dismissed && !a.banned && (
+                  <>{' '}<button class="chip" type="button" disabled={busy}
+                    onClick={() => run(() => peopleApi.dismissFingerprint(p.id, a.steamid), {
+                      title: `${a.name} is not ${p.label}?`,
+                      body: `${a.name} is never alerted on or held as ${p.label} again. They are still checked against every other known evader. An open hold is not lifted by this: lift it on the Alts list.`,
+                      confirmLabel: 'Not them',
+                    })}>Not them</button></>
+                )}
                 {isAdmin && !a.banned && (
                   <>{' '}<button class="btn btn--danger" type="button" disabled={busy}
                     onClick={() => run(() => peopleApi.banSamePerson(p.id, a.steamid), {
