@@ -368,7 +368,8 @@ export class AdminFeedPoster {
       }
       case 'fingerprint_match': {
         const desk = `${this.deps.publicUrl}/admin/people/alts`;
-        const label = `**${escapeName(e.personLabel)}**`;
+        const clipTo = (v: string, n: number) => (v.length > n ? `${v.slice(0, n - 3)}...` : v);
+        const label = `**${escapeName(clipTo(e.personLabel, 40))}**`;
         const head = e.level === 'hold' ? '**Fingerprint hold:**'
           : e.level === 'loud' ? '**Fingerprint match with a second sign:**' : 'Fingerprint match:';
         const numbers = `#${e.rank} nearest of everyone on record, distance ${e.distance.toFixed(3)} against `
@@ -387,13 +388,15 @@ export class AdminFeedPoster {
         const table = rows.length
           ? `\nMedian hold, ticks:\n\`\`\`\n${'class'.padEnd(20)}${'this'.padStart(6)}${plain(e.personLabel).slice(0, 8).padStart(9)}\n${rows.join('\n')}\n\`\`\``
           : '';
-        const conns = e.connections.length
-          ? `\nConnections: ${e.connections.map((c) => `${c.country ?? '??'} ${escapeName(c.asOrg ?? 'unknown provider')}${c.vpn ? ' (VPN or hosting)' : ''}`).join(', ')}`
+        const shown = e.connections.slice(0, 6);
+        const connMore = e.connections.length > 6 ? `, +${e.connections.length - 6} more` : '';
+        const conns = shown.length
+          ? `\nConnections: ${shown.map((c) => `${c.country ?? '??'} ${escapeName(clipTo(c.asOrg ?? 'unknown provider', 40))}${c.vpn ? ' (VPN or hosting)' : ''}`).join(', ')}${connMore}`
           : '';
         return {
-          text: `${head} ${this.name(e.steamid)} plays like known evader ${label} in match `
+          text: clipTo(`${head} ${this.name(e.steamid)} plays like known evader ${label} in match `
             + `[#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId}). ${numbers}.${signs}${outcome} `
-            + `A fingerprint alone is not proof. [File](${this.file(e.steamid)}) · [Alts](${desk})${table}${conns}`,
+            + `A fingerprint alone is not proof. [File](${this.file(e.steamid)}) · [Alts](${desk})${table}${conns}`, 3900),
           color: COLOR.problem,
           ping: e.level !== 'alert',
         };

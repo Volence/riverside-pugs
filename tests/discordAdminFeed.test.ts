@@ -547,4 +547,19 @@ describe('admin feed', () => {
     expect(JSON.stringify(hold)).toContain('**on hold**');
     expect(JSON.stringify(hold)).toContain('a VPN or hosting connection');
   });
+
+  it('a fingerprint post with 20 long connections stays under the embed limit and says how many more; loud pings', async () => {
+    setSetting(db, 'mod_call_role_id', '123456789012345678');
+    const connections = Array.from({ length: 20 }, (_, i) => ({ country: 'GB', asOrg: `PROVIDER-${i}-${'X'.repeat(300)}`, vpn: true }));
+    publishAdminEvent({
+      kind: 'fingerprint_match', level: 'loud', signs: ['vpn'], holdId: null, steamid: IDS[1], matchId, personId: 1,
+      personLabel: 'L'.repeat(500), distance: 0.2, threshold: 0.25, rank: 1, medians: [], connections,
+    });
+    await settled();
+    const [m] = inFeed().map((x) => x.payload);
+    const description = m.embeds[0].description ?? '';
+    expect(description.length).toBeLessThan(4096);
+    expect(description).toContain('+14 more');
+    expect(m.content).toBe('<@&123456789012345678>');
+  });
 });
