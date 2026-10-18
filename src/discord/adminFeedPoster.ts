@@ -424,6 +424,10 @@ export class AdminFeedPoster {
       case 'alt_lift': return `${who} lifted the alt hold on ${target}`;
       case 'evader_flag': return `${who} flagged ${target} as a ban evader: ${escapeName(String(d.reason ?? ''))}`;
       case 'evader_clear': return `${who} cleared the ban evader flag on ${target}`;
+      case 'evader_person_create': return `${who} recorded a known evader: **${escapeName(String(d.label ?? ''))}**`;
+      case 'evader_member_add': return `${who} added ${target} to known evader **${escapeName(String(d.label ?? ''))}**`;
+      case 'evader_member_remove': return `${who} removed ${d.kind === 'steam' ? target : 'a Discord account'} from a known evader`;
+      case 'evader_person_close': return `${who} closed the known evader record **${escapeName(String(d.label ?? ''))}**`;
       case 'ip_watch_add': return `${who} added a connection to the IP watch list${d.note ? `: ${escapeName(String(d.note))}` : ''}`;
       case 'ip_watch_remove': return `${who} removed a connection from the IP watch list`;
       case 'alt_ban': return `${who} turned the alt hold on ${target} into a ban: ${escapeName(String(d.reason ?? ''))}`;

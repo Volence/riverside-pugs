@@ -15,7 +15,8 @@ import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
 import { pingPickEnabled, pingTable } from '../serverPick.js';
 import { altClusters, altHolds, banFromHold, holdById, liftAltHold } from '../altHolds.js';
-import { clearEvader, flagEvader, ipWatchView, unwatch, watchAddress } from '../ipWatch.js';
+import { ipWatchView, unwatch, watchAddress } from '../ipWatch.js';
+import { EvaderError, addMember, closePerson, createPerson, personById, personOf, removeMember } from '../evaderPeople.js';
 
 export interface PeopleRouteOpts {
   db: DB;
@@ -220,23 +221,76 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     return { ok: true };
   });
 
-  app.post('/api/admin/people/:steamid/evader', async (req, reply) => {
+  /**
+   * Known evaders (src/evaderPeople.ts): one record per person, grouping the
+   * accounts they have been caught on. Moderators run it, like the watch list
+   * it feeds: a member's connections are watched, and the person's pooled
+   * press fingerprint is what new accounts are checked against.
+   */
+  app.post('/api/admin/people/evaders', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const { label, note } = (req.body ?? {}) as { label?: unknown; note?: unknown };
+    if (typeof label !== 'string' || (note !== undefined && typeof note !== 'string')) {
+      return reply.code(400).send({ error: 'a person needs a label' });
+    }
+    try {
+      const id = createPerson(db, label, typeof note === 'string' ? note : '', me);
+      logAdmin(db, me, 'evader_person_create', '', { personId: id, label: label.trim() });
+      return { ok: true, id };
+    } catch (err) {
+      if (err instanceof EvaderError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post('/api/admin/people/:steamid/evader-person', async (req, reply) => {
     const t = onFile(req, reply, 'looked_at');
     if (!t) return reply;
-    const { reason } = (req.body ?? {}) as { reason?: unknown };
-    if (typeof reason !== 'string' || !reason.trim() || reason.length > 300) {
-      return reply.code(400).send({ error: 'a reason is required (up to 300 characters)' });
+    const { personId, label } = (req.body ?? {}) as { personId?: unknown; label?: unknown };
+    let id: number;
+    if (typeof personId === 'number' && Number.isInteger(personId)) {
+      id = personId;
+    } else if (typeof label === 'string') {
+      if (personOf(db, 'steam', t.steamid)) return reply.code(409).send({ error: 'that account already belongs to a person' });
+      try {
+        id = createPerson(db, label, '', t.me);
+      } catch (err) {
+        if (err instanceof EvaderError) return reply.code(400).send({ error: err.message });
+        throw err;
+      }
+      logAdmin(db, t.me, 'evader_person_create', '', { personId: id, label: label.trim() });
+    } else {
+      return reply.code(400).send({ error: 'pick a person or name a new one' });
     }
-    flagEvader(db, t.steamid, reason.trim(), t.me);
-    logAdmin(db, t.me, 'evader_flag', t.steamid, { reason: reason.trim() });
+    const r = addMember(db, id, 'steam', t.steamid, t.me, 'manual');
+    if (r === 'no_person') return reply.code(404).send({ error: 'no such person' });
+    if (r === 'other_person') return reply.code(409).send({ error: 'that account already belongs to another person' });
+    if (r === 'invalid') return reply.code(400).send({ error: 'not a Steam account' });
+    if (r === 'added') logAdmin(db, t.me, 'evader_member_add', t.steamid, { personId: id, label: personById(db, id)?.label });
+    return { ok: true, personId: id };
+  });
+
+  app.post('/api/admin/people/evaders/:id/members/remove', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const { kind, ident } = (req.body ?? {}) as { kind?: unknown; ident?: unknown };
+    if ((kind !== 'steam' && kind !== 'discord') || typeof ident !== 'string') {
+      return reply.code(400).send({ error: 'name the account to remove' });
+    }
+    if (personOf(db, kind, ident)?.id !== id) return reply.code(404).send({ error: 'that account is not on this person' });
+    removeMember(db, kind, ident, me);
+    logAdmin(db, me, 'evader_member_remove', kind === 'steam' ? ident : '', { personId: id, kind });
     return { ok: true };
   });
 
-  app.post('/api/admin/people/:steamid/evader/clear', async (req, reply) => {
-    const t = onFile(req, reply, 'looked_at');
-    if (!t) return reply;
-    if (!clearEvader(db, t.steamid, t.me)) return reply.code(404).send({ error: 'that account is not flagged' });
-    logAdmin(db, t.me, 'evader_clear', t.steamid, {});
+  app.post('/api/admin/people/evaders/:id/close', async (req, reply) => {
+    const me = requireMod(req, reply);
+    if (!me) return reply;
+    const id = Number((req.params as { id: string }).id);
+    if (!closePerson(db, id, me)) return reply.code(404).send({ error: 'no open person with that id' });
+    logAdmin(db, me, 'evader_person_close', '', { personId: id, label: personById(db, id)?.label });
     return { ok: true };
   });
 
