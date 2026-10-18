@@ -51,6 +51,12 @@ describe('compareFleet', () => {
     expect(rows[0]).toMatchObject({ perBox: true, differs: false });
   });
 
+  it('myhost.txt is per box: each box has its own join panel text', () => {
+    const H = 'left4dead/myhost.txt';
+    const rows = compareFleet(null, null, [box(1, { [H]: sig('a') }), box(2, { [H]: sig('a') }), box(3, { [H]: sig('b') })]);
+    expect(rows[0]).toMatchObject({ perBox: true, differs: false });
+  });
+
   it('without a reference the minority is highlighted; a tie highlights everyone', () => {
     const rows = compareFleet(null, null, [box(1, { [X]: sig('a') }), box(2, {}), box(3, {}), box(4, {})]);
     expect(rows[0].cells[1]).toMatchObject({ label: 'neither', highlight: true });
