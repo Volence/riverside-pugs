@@ -101,4 +101,26 @@ describe('banAsSamePerson', () => {
     expect(hasActiveBan(db, NEW)).toBe(false);
     expect(personOf(db, 'steam', NEW)).toBeNull();
   });
+
+  it('an account already banned for good gets no second ban row, but still joins the person, and nothing is published', () => {
+    db.prepare("INSERT INTO fingerprint_cache (subject, classes_json, holds, built_at) VALUES (?, '{}', 0, 'x')").run(`person:${personId}`);
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at, kind) VALUES (?, 'cheating', ?, '2026-10-01T00:00:00.000Z', 'ban')").run(NEW, ADMIN);
+    const changes: string[] = [];
+    const off = subscribeBanChanges((c) => { changes.push(`${c.kind}:${c.steamid}`); });
+    expect(banAsSamePerson(db, { steamid: NEW, personId, by: ADMIN })).toBe('banned');
+    off();
+    const live = db.prepare('SELECT reason FROM bans WHERE player_id = ? AND lifted_at IS NULL').all(NEW) as { reason: string }[];
+    expect(live).toEqual([{ reason: 'cheating' }]);
+    expect(personOf(db, 'steam', NEW)?.label).toBe('dethisa');
+    expect(personOf(db, 'discord', DISCORD)?.label).toBe('dethisa');
+    expect((db.prepare('SELECT built_at FROM fingerprint_cache WHERE subject = ?').get(`person:${personId}`) as { built_at: string }).built_at).toBe('');
+    expect(changes).toEqual([]);
+  });
+
+  it('a timeout that runs out is not enough: the permanent evasion ban is still added', () => {
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at, expires_at, kind) VALUES (?, 'toxic', ?, '2026-10-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z', 'ban')").run(NEW, ADMIN);
+    expect(banAsSamePerson(db, { steamid: NEW, personId, by: ADMIN })).toBe('banned');
+    const live = db.prepare('SELECT reason FROM bans WHERE player_id = ? AND lifted_at IS NULL ORDER BY id').all(NEW) as { reason: string }[];
+    expect(live.map((b) => b.reason)).toEqual(['toxic', 'Ban evasion: another account of dethisa']);
+  });
 });

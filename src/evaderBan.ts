@@ -20,6 +20,15 @@ export function sameReason(label: string): string {
   return `Ban evasion: another account of ${label}`;
 }
 
+/** An ordinary (not alt_hold) ban in force with no end. A timeout that runs
+ *  out is not enough: the evasion ban is permanent and must outlast it. */
+function permanentlyBanned(db: DB, steamid: string, now: Date): boolean {
+  return db.prepare(
+    `SELECT 1 FROM bans WHERE player_id = ? AND kind <> 'alt_hold' AND lifted_at IS NULL AND expires_at IS NULL
+       AND created_at <= ? LIMIT 1`,
+  ).get(steamid, now.toISOString()) !== undefined;
+}
+
 export type BanSameResult = 'banned' | 'no_person' | 'closed' | 'hold_settled' | 'hold_mismatch' | 'member_elsewhere';
 
 /**
@@ -46,18 +55,23 @@ export function banAsSamePerson(
   const reason = sameReason(person.label);
   const how = 'ban as same person';
   let settled = true;
+  let banned = false;
   db.transaction(() => {
     const holdId = opts.holdId ?? openHoldOf(db, opts.steamid)?.id;
     if (holdId !== undefined) {
       settled = banFromHoldTx(db, holdId, opts.by, reason, now);
       if (!settled) return;
-    } else {
+      banned = true;
+    } else if (!permanentlyBanned(db, opts.steamid, now)) {
       insertBan(db, opts.steamid, opts.by, reason, null, now);
+      banned = true;
     }
+    // Already banned for good: no second live ban row (and no second
+    // engine ban), but the account still joins the person.
     addMember(db, opts.personId, 'steam', opts.steamid, opts.by, how, now);
     if (discord) addMember(db, opts.personId, 'discord', discord, opts.by, how, now);
   })();
   if (!settled) return 'hold_settled';
-  publishBanChange({ kind: 'ban', steamid: opts.steamid, reason });
+  if (banned) publishBanChange({ kind: 'ban', steamid: opts.steamid, reason });
   return 'banned';
 }
