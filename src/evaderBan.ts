@@ -1,0 +1,41 @@
+import type { DB } from './db.js';
+import { addMember, personById } from './evaderPeople.js';
+import { banFromHold } from './altHolds.js';
+import { banPlayer } from './admin/players.js';
+import { getPlayer } from './players.js';
+
+/**
+ * "Ban as same person": a moderator looked at a fingerprint hold or alert and
+ * agrees the account is that known evader. It becomes an ordinary permanent
+ * ban (the public list shows it), and the account, with its Discord if one is
+ * linked, joins the person's record: its connections are watched from now on
+ * and its presses join the pooled fingerprint (the cache is marked stale by
+ * addMember), so the next account is checked against everything they have
+ * played on. The reason shown to the player stays vague about how they were
+ * caught. Admin-only is enforced by the route, not here.
+ */
+
+export function sameReason(label: string): string {
+  return `Ban evasion: another account of ${label}`;
+}
+
+export type BanSameResult = 'banned' | 'no_person' | 'closed' | 'hold_settled';
+
+export function banAsSamePerson(
+  db: DB, opts: { steamid: string; personId: number; by: string; holdId?: number; now?: Date },
+): BanSameResult {
+  const now = opts.now ?? new Date();
+  const person = personById(db, opts.personId);
+  if (!person) return 'no_person';
+  if (person.closedAt) return 'closed';
+  const reason = sameReason(person.label);
+  if (opts.holdId !== undefined) {
+    if (!banFromHold(db, opts.holdId, opts.by, reason, now)) return 'hold_settled';
+  } else {
+    banPlayer(db, opts.steamid, opts.by, reason, null, now);
+  }
+  addMember(db, opts.personId, 'steam', opts.steamid, opts.by, 'ban as same person', now);
+  const discord = getPlayer(db, opts.steamid)?.discord_id;
+  if (discord) addMember(db, opts.personId, 'discord', discord, opts.by, 'ban as same person', now);
+  return 'banned';
+}
