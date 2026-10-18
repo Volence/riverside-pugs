@@ -1311,6 +1311,14 @@ CREATE TABLE IF NOT EXISTS si_kills (
 );
 CREATE INDEX IF NOT EXISTS si_kills_match ON si_kills(match_id, steamid);
 
+-- Ended matches the aim rules have been run over, once (scanAimMatches in
+-- src/aimRules.ts). Claimed even with the rules off, so turning them on
+-- later never posts history.
+CREATE TABLE IF NOT EXISTS aim_match_scans (
+  match_id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL
+);
+
 -- Matches whose match-level input signatures (autobhop) have been run, once,
 -- after the match ended (scanEndedMatches in src/inputBursts.ts).
 CREATE TABLE IF NOT EXISTS input_match_scans (
@@ -1495,6 +1503,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   input_pounce_min_rate: '12',
   // The same, for primary fire on a pistol sustained over three seconds.
   input_pistol_min_rate: '12',
+  // The aim rules A and C and their escalation (src/aimRules.ts): off, log
+  // (flags on the file, nothing posted) or on. log until the thresholds are
+  // re-measured on plugin data. Rule B (LilAC's big snap) is always on.
+  aim_rules: 'log',
   require_discord_to_queue: '1',
   // Pressing Ready needs that account to be in a voice channel on the guild.
   require_voice_to_ready: '1',

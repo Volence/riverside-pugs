@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import type { LilacReason } from './logParse.js';
-import type { FlagSeverity } from './integrityFlags.js';
+import { recordIntegrityFlag, type FlagSeverity } from './integrityFlags.js';
+import { getSetting } from './settings.js';
 
 /**
  * Aimbot rules from the nepmir ground truth.
@@ -198,4 +199,135 @@ export function flickReturns(kills: readonly KillRow[]): FlickResult | null {
 export function flickNote(r: FlickResult): string {
   const each = r.flicks.map((k) => `${k.at.slice(11, 19)} ${k.victimClass} (pre ${k.pre.toFixed(1)}, back ${k.back.toFixed(1)})`);
   return `${r.flicks.length} of ${r.kills} SI kills were a ${FLICK_PRE_DEG}+ degree flick and back within ${FLICK_BACK_DEG}: ${each.join(', ')} UTC`;
+}
+
+// --- Mode, escalation and the sweep -------------------------------------
+
+export type AimMode = 'off' | 'log' | 'on';
+
+/** aim_rules, read fresh each sweep. Anything unreadable is log: it records
+ *  without posting, the safe middle. Rule B does not read this. */
+export function aimRulesMode(db: DB): AimMode {
+  const v = getSetting(db, 'aim_rules');
+  return v === 'off' || v === 'on' ? v : 'log';
+}
+
+/** integrity_flags.source for A, C and escalation. Not 'analyzer': the
+ *  analyzer's timeline adapter reads every one of those as newcomer_esp. */
+export const AIM_SOURCE = 'aim';
+/** Read by name by the evader fingerprints plan's "cheat flag" sign. */
+export const AIM_KINDS = ['hs_share', 'flick_return', 'aimbot_multi'] as const;
+export type AimKind = typeof AIM_KINDS[number];
+
+export interface AimFlag {
+  matchId: number;
+  steamid: string;
+  kind: AimKind;
+  detail: string;
+  /** False for a single rule's row when aimbot_multi fired: the multi is the post. */
+  post: boolean;
+}
+
+export interface AimPost { matchId: number; steamid: string; kind: AimKind; detail: string }
+
+/** Rule B's biggest snap for this player in this match, from the LilAC rows
+ *  Task 1 stored high, or null. */
+function bigSnapIn(db: DB, matchId: number, steamid: string): number | null {
+  const rows = db.prepare(
+    "SELECT detail FROM integrity_flags WHERE source = 'lilac' AND severity = 'high' AND match_id = ? AND steamid = ?",
+  ).all(matchId, steamid) as { detail: string }[];
+  let best: number | null = null;
+  for (const r of rows) {
+    const m = /(?:^| )ldelta=(\d+(?:\.\d+)?)/.exec(r.detail);
+    if (m && (best === null || Number(m[1]) > best)) best = Number(m[1]);
+  }
+  return best;
+}
+
+/** One row per player, match and kind, ever. */
+function storeAim(
+  db: DB, matchId: number, serverId: number | null, steamid: string, kind: AimKind, severity: FlagSeverity, detail: string, now: Date,
+): boolean {
+  const has = db.prepare(
+    'SELECT 1 FROM integrity_flags WHERE steamid = ? AND match_id = ? AND source = ? AND kind = ?',
+  ).get(steamid, matchId, AIM_SOURCE, kind);
+  if (has) return false;
+  return recordIntegrityFlag(db, { matchId, serverId, steamid, source: AIM_SOURCE, kind, severity, detail }, now) !== null;
+}
+
+/**
+ * Rules A and C over one ended match, then escalation with B. Every rule
+ * that fires keeps its own row (so each is on the file and readable by
+ * name); when two or more of A/B/C fire for one player, one aimbot_multi row
+ * at severity high is added and is the only one to post. Returns the rows
+ * this call created.
+ */
+export function evaluateAimMatch(db: DB, matchId: number, now = new Date()): AimFlag[] {
+  const players = db.prepare(
+    'SELECT steamid, MIN(server_id) AS serverId FROM si_kills WHERE match_id = ? GROUP BY steamid ORDER BY MIN(id)',
+  ).all(matchId) as { steamid: string; serverId: number | null }[];
+  const out: AimFlag[] = [];
+  for (const { steamid, serverId } of players) {
+    const kills = db.prepare(
+      `SELECT id, weapon, headshot, pre, back, victim_class AS victimClass, at
+       FROM si_kills WHERE match_id = ? AND steamid = ? ORDER BY id`,
+    ).all(matchId, steamid) as KillRow[];
+    const hs = hsShare(kills, (g) => pooledRate(db, g, matchId, now));
+    const flick = flickReturns(kills);
+    const snap = bigSnapIn(db, matchId, steamid);
+
+    const parts: { rule: string; detail: string }[] = [];
+    if (hs.length > 0) parts.push({ rule: 'hs_share', detail: hs.map(hsNote).join('; ') });
+    if (flick) parts.push({ rule: 'flick_return', detail: flickNote(flick) });
+    if (snap !== null) parts.push({ rule: 'big_snap', detail: `LilAC aim-snap ${snap} degrees` });
+    const multi = parts.length >= 2;
+
+    for (const p of parts) {
+      // B's row is LilAC's own, stored and posted live by src/server.ts.
+      if (p.rule === 'big_snap') continue;
+      const kind = p.rule as AimKind;
+      if (storeAim(db, matchId, serverId, steamid, kind, 'suspected', p.detail, now)) {
+        out.push({ matchId, steamid, kind, detail: p.detail, post: !multi });
+      }
+    }
+    if (multi) {
+      const detail = `${parts.map((p) => p.rule).join(' + ')}. ${parts.map((p) => `${p.rule}: ${p.detail}`).join('. ')}`;
+      if (storeAim(db, matchId, serverId, steamid, 'aimbot_multi', 'high', detail, now)) {
+        out.push({ matchId, steamid, kind: 'aimbot_multi', detail, post: true });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The aim rules, once per match after it ends, from the server's one-minute
+ * sweep (beside scanEndedMatches): whole matches only, the way the rules
+ * were calibrated. Each match is claimed in the same transaction that judges
+ * it, so a second sweep cannot announce the same row, and is claimed even
+ * with the rules off or the post suppressed, so switching to on never posts
+ * history. Only matches that ended inside `withinMs` are looked at.
+ * Returns what to publish: nothing unless aim_rules is on.
+ */
+export function scanAimMatches(db: DB, now = new Date(), withinMs = 6 * 3_600_000): AimPost[] {
+  const mode = aimRulesMode(db);
+  const since = new Date(now.getTime() - withinMs).toISOString().replace('T', ' ').slice(0, 19);
+  const matches = db.prepare(
+    `SELECT id FROM matches
+     WHERE state IN ('completed', 'aborted') AND COALESCE(ended_at, created_at) >= ?
+       AND NOT EXISTS (SELECT 1 FROM aim_match_scans s WHERE s.match_id = matches.id)
+     ORDER BY id`,
+  ).all(since) as { id: number }[];
+  const claim = db.prepare('INSERT OR IGNORE INTO aim_match_scans (match_id, at) VALUES (?, ?)');
+  const out: AimPost[] = [];
+  for (const { id } of matches) {
+    db.transaction(() => {
+      if (claim.run(id, now.toISOString()).changes === 0) return;
+      if (mode === 'off') return;
+      for (const f of evaluateAimMatch(db, id, now)) {
+        if (mode === 'on' && f.post) out.push({ matchId: f.matchId, steamid: f.steamid, kind: f.kind, detail: f.detail });
+      }
+    })();
+  }
+  return out;
 }

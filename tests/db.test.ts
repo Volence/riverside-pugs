@@ -13,7 +13,7 @@ describe('openDb', () => {
       .all()
       .map((r: any) => r.name);
     expect(names).toEqual([
-      'admin_actions',
+      'admin_actions', 'aim_match_scans',
       'alt_holds',
       'appeal_message', 'appeal_messages', 'appeals',
       'balance_ignored_plugins', 'balance_patch_servers', 'balance_patches', 'balance_rollout_servers', 'balance_rollouts', 'balance_server_state',
