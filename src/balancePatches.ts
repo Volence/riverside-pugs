@@ -462,7 +462,7 @@ export function serverDrift(db: DB, ignored: string[] = []): {
   differsFrom: { name: string; diff: string }[];
 }[] {
   const rows = db.prepare(`SELECT st.server_id, s.name, st.patch_id, st.since, st.inventory_json, st.watch
-    FROM balance_server_state st JOIN servers s ON s.id = st.server_id ORDER BY s.id`).all() as {
+    FROM balance_server_state st JOIN servers s ON s.id = st.server_id WHERE s.retired = 0 ORDER BY s.id`).all() as {
       server_id: number; name: string; patch_id: number; since: string; inventory_json: string; watch: string | null }[];
   // A stored inventory may predate a plugin joining the ignored list.
   const inv = (json: string) => withoutIgnored(JSON.parse(json) as Inventory, ignored);
@@ -496,10 +496,12 @@ function alertText(db: DB, serverId: number, patchNumber: number, newPatch: bool
       : `Balance config on ${name} seen for the first time (patch #${patchNumber}${pending ? ', needs triage' : ''}).`;
   const vsOwn = prev ? ` Changed: ${formatDiff(diffInventories(JSON.parse(prev.inventory_json) as Inventory, inv))}.` : '';
   // A box that has not played since may simply not have had the change yet,
-  // so each drift clause says when that box was last seen.
+  // so each drift clause says when that box was last seen. A retired box
+  // never plays again, so it is left out.
   const others = db.prepare(`SELECT st.server_id, st.inventory_json,
       (SELECT MAX(ps.last_seen_at) FROM balance_patch_servers ps WHERE ps.server_id = st.server_id) AS last_seen
-    FROM balance_server_state st WHERE st.server_id != ?`)
+    FROM balance_server_state st JOIN servers s ON s.id = st.server_id
+    WHERE st.server_id != ? AND s.retired = 0`)
     .all(serverId) as { server_id: number; inventory_json: string; last_seen: string | null }[];
   const drift = others
     .map((o) => ({ who: serverName(db, o.server_id), seen: o.last_seen, d: driftBetween(JSON.parse(o.inventory_json) as Inventory, inv) }))

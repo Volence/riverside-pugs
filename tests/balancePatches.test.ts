@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.js';
-import { addServer } from '../src/serverPool.js';
+import { addServer, retireServer } from '../src/serverPool.js';
 import { subscribeAdminEvents } from '../src/adminFeed.js';
 import { diffInventories, fingerprintOf, formatDiff, listPatches, pluginFile, recordBalanceSighting, refingerprintPatches, serverDrift, watchListOnly, withoutIgnored } from '../src/balancePatches.js';
 
@@ -88,6 +88,17 @@ describe('recordBalanceSighting', () => {
     expect(problems[0]).toMatch(/chicago/);
     expect(problems[0]).toMatch(/added p:l4d_itemlimiter\.smx/);
     expect(problems[0]).toMatch(/differs from dallas/);
+  });
+
+  it('leaves a retired box out of drift alerts and the drift view', () => {
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
+    recordBalanceSighting(db, { matchId: 1, serverId: 2, half: 1, inventory: INV, versionless: [] });
+    retireServer(db, 2);
+    problems.length = 0;
+    recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { ...INV, 'p:l4d_itemlimiter.smx': '50.cccc0001' }, versionless: [] });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).not.toMatch(/chicago/);
+    expect(serverDrift(db).map((d) => d.name)).toEqual(['dallas']);
   });
 
   it('words a server\'s first sighting of a known patch as such, and dates each drift clause', () => {

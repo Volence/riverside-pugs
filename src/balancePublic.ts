@@ -234,8 +234,10 @@ export function publicEntry(db: DB, id: number, opts: { knobs: KnobLabels | null
   // return to an older config reuses that patch's row, which stays older in
   // the timeline, so "newest" alone would keep the reverted patch live and
   // its countdown running. Otherwise (no state yet, or every server on a
-  // config still in triage) the newest patch is the live one.
-  const running = new Set((db.prepare('SELECT patch_id FROM balance_server_state').all() as { patch_id: number }[])
+  // config still in triage) the newest patch is the live one. A retired box's
+  // last config is not running anywhere.
+  const running = new Set((db.prepare(`SELECT patch_id FROM balance_server_state
+      WHERE server_id NOT IN (SELECT id FROM servers WHERE retired = 1)`).all() as { patch_id: number }[])
     .map((st) => resolvePatch(db, st.patch_id)));
   const live = line.some((p) => running.has(p.id)) ? running.has(id) : line[line.length - 1].id === id;
   return { ...strip(self), live, previous: base ? { id: base.id, name: base.name } : null, status, changes, changesUnavailable, effect };
