@@ -4038,3 +4038,37 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .matchcard--bye { opacity: 0.6; }
 /* "Pickup" and five-letter tags are wider than the 40px badge square. */
 .scrimside .teambadge--tag { width: auto; min-width: 40px; padding: 0 var(--sp-1); }
+
+/* Season ranks (src/seasonRules.ts). Tier colours are fixed metal/gem hues,
+   not theme tokens: Gold has to read as gold in any theme. */
+.rankbadge {
+  display: inline-flex; align-items: center; gap: 0.35em;
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em;
+  text-transform: uppercase; white-space: nowrap; vertical-align: middle;
+  color: var(--rank-c); border: 1px solid color-mix(in srgb, var(--rank-c) 55%, transparent);
+  background: color-mix(in srgb, var(--rank-c) 12%, transparent);
+  border-radius: 2px; padding: 0 var(--sp-1);
+}
+.rankbadge__gem { width: 0.6em; height: 0.6em; transform: rotate(45deg); background: var(--rank-c); flex: none; }
+.rankbadge--bronze   { --rank-c: #c3804f; }
+.rankbadge--silver   { --rank-c: #b9c1c9; }
+.rankbadge--gold     { --rank-c: #e3b341; }
+.rankbadge--platinum { --rank-c: #5fc9bd; }
+.rankbadge--diamond  { --rank-c: #6fa8ff; }
+.rankbadge--master   { --rank-c: #c88cff; }
+.placingtag {
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-muted); white-space: nowrap;
+}
+.top10tag {
+  display: inline-block; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 2px; padding: 0 var(--sp-1); margin-left: var(--sp-2); vertical-align: middle; white-space: nowrap;
+}
+.sr-placed { color: var(--text-bright, var(--text)); font-weight: 600; white-space: nowrap; }
+.lb__rankcol { white-space: nowrap; }
+.season-history { width: 100%; }
+.season-history td, .season-history th { padding: var(--sp-1) var(--sp-2); }
+.rank-progress { display: grid; gap: var(--sp-1); margin-top: var(--sp-2); }
+.rank-progress__bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.rank-progress__fill { height: 100%; background: var(--accent); }

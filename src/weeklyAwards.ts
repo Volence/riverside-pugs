@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
-import { displaySr } from './rating.js';
+import { gamePhase, seasonRules, srUnder } from './seasonRules.js';
 import { settingNumber } from './settings.js';
 import type { EndorseKind } from './endorsements.js';
 
@@ -192,11 +192,19 @@ function longestRun(seq: string[]): number {
   return best;
 }
 
-/** Displayed SR after the last rated match of the week minus before the first. */
+/** Displayed SR after the last rated match of the week minus before the first.
+ *
+ *  Ranked games only (src/seasonRules.ts gamePhase): a placement game's SR is
+ *  hidden, so a climb through placement would give it away, and the climb
+ *  starts from the SR the player placed at. A week a new season starts in
+ *  counts only the new season's games, since two seasons' SRs do not
+ *  subtract. */
 function srClimbs(db: DB, week: string): Map<string, number> {
   const { from, to } = weekBounds(week);
   const rows = db.prepare(
-    `SELECT rh.player_id AS steamid, rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
+    `SELECT rh.player_id AS steamid, rh.season_id, rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after,
+            (SELECT COUNT(*) FROM rating_history x
+              WHERE x.player_id = rh.player_id AND x.season_id = rh.season_id AND x.id <= rh.id) AS game_no
      FROM rating_history rh JOIN matches m ON m.id = rh.match_id
      WHERE m.id IN (${WEEK_MATCHES})
         -- An abandon loss on a match with no result (2026-10-10) is a rating
@@ -205,11 +213,14 @@ function srClimbs(db: DB, week: string): Map<string, number> {
         OR (m.state = 'aborted' AND m.kind = 'pug' AND m.ended_at >= ? AND m.ended_at < ?
             AND EXISTS (SELECT 1 FROM match_abandons a WHERE a.match_id = m.id AND a.restored_at IS NULL))
      ORDER BY m.ended_at, m.id`,
-  ).all(from, to, from, to) as { steamid: string; mu_before: number; sigma_before: number; mu_after: number; sigma_after: number }[];
+  ).all(from, to, from, to) as { steamid: string; season_id: number; mu_before: number; sigma_before: number; mu_after: number; sigma_after: number; game_no: number }[];
   const first = new Map<string, number>(); const last = new Map<string, number>();
+  const season = rows.reduce((n, r) => Math.max(n, r.season_id), 0);
+  const rules = seasonRules(db, season);
   for (const r of rows) {
-    if (!first.has(r.steamid)) first.set(r.steamid, displaySr(r.mu_before, r.sigma_before));
-    last.set(r.steamid, displaySr(r.mu_after, r.sigma_after));
+    if (r.season_id !== season || gamePhase(rules, r.game_no).kind !== 'ranked') continue;
+    if (!first.has(r.steamid)) first.set(r.steamid, srUnder(rules, r.mu_before, r.sigma_before));
+    last.set(r.steamid, srUnder(rules, r.mu_after, r.sigma_after));
   }
   return new Map([...first].map(([id, sr]) => [id, last.get(id)! - sr]));
 }

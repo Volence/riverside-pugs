@@ -3,7 +3,7 @@ import type { Matchmaker } from '../matchmaker.js';
 import type { Hub } from '../ws.js';
 import { QUEUE_SIZE } from '../queue.js';
 import { campaignDisplayName, campaignVoteName } from '../campaignRegistry.js';
-import { displaySr } from '../rating.js';
+import { matchSrChange, playerSeasonState, seasonRules, srUnder } from '../seasonRules.js';
 import { spectateFor } from '../spectate.js';
 import { currentSeasonId } from '../players.js';
 import {
@@ -574,24 +574,35 @@ export class DiscordSync {
     const { db } = this.deps;
     const p = db.prepare('SELECT name, discord_id, discord_name FROM players WHERE steamid = ?').get(steamid) as
       | { name: string; discord_id: string | null; discord_name: string | null } | undefined;
-    const r = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?')
-      .get(steamid, currentSeasonId(db)) as { mu: number; sigma: number } | undefined;
+    // Null while placing: the SR is not theirs to show yet.
+    const season = currentSeasonId(db);
+    const state = playerSeasonState(db, season, steamid);
     return {
       name: p?.name ?? steamid, discordId: p?.discord_id ?? null, discordName: p?.discord_name ?? null,
-      sr: r ? displaySr(r.mu, r.sigma) : null,
+      sr: state?.placed ? state.sr : null,
     };
   }
 
   private resultPlayer(steamid: string, matchId: number): ResultPlayer {
-    const h = this.deps.db.prepare(
-      'SELECT mu_before, sigma_before, mu_after, sigma_after FROM rating_history WHERE match_id = ? AND player_id = ?',
-    ).get(matchId, steamid) as { mu_before: number; sigma_before: number; mu_after: number; sigma_after: number } | undefined;
+    const { db } = this.deps;
+    const h = db.prepare(
+      `SELECT season_id, mu_before, sigma_before, mu_after, sigma_after,
+              (SELECT COUNT(*) FROM rating_history x
+                WHERE x.player_id = rh.player_id AND x.season_id = rh.season_id AND x.id <= rh.id) AS game_no
+       FROM rating_history rh WHERE match_id = ? AND player_id = ?`,
+    ).get(matchId, steamid) as { season_id: number; mu_before: number; sigma_before: number; mu_after: number; sigma_after: number; game_no: number } | undefined;
     const base = this.player(steamid);
+    if (!h) return { ...base, sr: null, srBefore: null, srAfter: null };
+    const rules = seasonRules(db, h.season_id);
+    const change = matchSrChange(rules, h.game_no, h);
     return {
       ...base,
       sr: null,
-      srBefore: h ? displaySr(h.mu_before, h.sigma_before) : null,
-      srAfter: h ? displaySr(h.mu_after, h.sigma_after) : null,
+      srBefore: srUnder(rules, h.mu_before, h.sigma_before),
+      srAfter: srUnder(rules, h.mu_after, h.sigma_after),
+      placing: change.placement?.kind === 'placing' ? { played: change.placement.played, of: change.placement.of } : null,
+      placed: change.placement?.kind === 'placed',
+      placedRank: change.placedRank,
     };
   }
 }

@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import { campaignDisplayName, campaignRegistry } from '../campaignRegistry.js';
 import { stopAfterMap } from '../stopPoint.js';
 import { phaseFor, roundInProgress, currentOrdinal } from '../liveView.js';
-import { displaySr } from '../rating.js';
+import { playerSeasonState } from '../seasonRules.js';
 import { currentSeasonId } from '../players.js';
 import { completedPug } from '../matchKinds.js';
 import { getSetting } from '../settings.js';
@@ -184,7 +184,6 @@ export function buildMatchView(
   }
   const season = currentSeasonId(db);
   const srOn = showSr(db, m.kind);
-  const srOf = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?');
   const player = (r: (typeof ps)[number]): CastPlayer => {
     let stats: Record<string, number>;
     if (completed) {
@@ -196,10 +195,11 @@ export function buildMatchView(
     } else {
       stats = liveStats.get(r.steamid) ?? {};
     }
-    const rating = srOn ? srOf.get(r.steamid, season) as { mu: number; sigma: number } | undefined : undefined;
+    // Null while placing: a caster overlay is as public as it gets.
+    const state = srOn ? playerSeasonState(db, season, r.steamid) : null;
     return {
       steamid: r.steamid, name: r.name, avatar: r.avatar, stats,
-      sr: rating ? displaySr(rating.mu, rating.sigma) : null,
+      sr: state?.placed ? state.sr : null,
       // PUG numbers only on a PUG (owner, 2026-10-02): a scrim or a
       // tournament lineup is the team's roster, not anyone's PUG record.
       career: m.kind === 'pug' ? career(db, r.steamid) : null,

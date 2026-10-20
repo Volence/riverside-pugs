@@ -18,7 +18,8 @@ import { getCampaignPool } from '../settings.js';
 import { completedPug } from '../matchKinds.js';
 import { viewerFor, canViewMatch, visibleMatchesSql } from '../matchVisibility.js';
 import { mapDetail, mapIndex } from '../playerStats.js';
-import { displaySr, matchForecast } from '../rating.js';
+import { matchForecast } from '../rating.js';
+import { gameNumbers, matchSrChange, seasonRules } from '../seasonRules.js';
 import { currentSeasonId, getPlayer, saveProfileFields } from '../players.js';
 import { getSession } from '../session.js';
 import { inGoodStanding } from '../standing.js';
@@ -266,6 +267,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       byPlayer.set(sr.player_id, bucket);
     }
     const titles = allTitles(db);
+    // A placement game shows no SR change, the game that completed placement
+    // shows the rank it placed into (src/seasonRules.ts gamePhase).
+    const matchSeason = (db.prepare('SELECT season_id FROM matches WHERE id = ?').get(id) as { season_id: number } | undefined)?.season_id;
+    const rules = matchSeason === undefined ? null : seasonRules(db, matchSeason);
+    const gameNo = gameNumbers(db, id);
     const players = (db.prepare(
       `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team,
               mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
@@ -284,8 +290,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       title: titles.get(p.steamid) ?? null,
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       // Null, not 0, when the rating never touched them: "+0" claims a result.
-      srDelta: p.mu_after === null ? null
-        : displaySr(p.mu_after, p.sigma_after) - displaySr(p.mu_before, p.sigma_before),
+      ...matchSrChange(rules, gameNo.get(p.steamid), p),
       stats: visibleStats(byPlayer.get(p.steamid) ?? {}, p.steamid, viewer),
     }));
     // Per-round side attribution. Derived, not stored: see src/roundStats.ts.

@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import { aliasesOf } from '../aliases.js';
 import { networksOf, sharesAddressWith } from '../playerNetworks.js';
-import { displaySr } from '../rating.js';
+import { seasonRules, srUnder } from '../seasonRules.js';
 import { currentSeasonId, discordHistoryOf, getPlayer } from '../players.js';
 import { activeTimeout, penaltyHistory, recentOffenses } from '../penalties.js';
 import { signonDropSummary } from '../signonDrops.js';
@@ -214,9 +214,11 @@ export function searchPlayers(db: DB, q: string, limit = 200): AdminPlayerRow[] 
     steamid: string; name: string; avatar: string | null; status: string; is_admin: number; is_mod: number; discord_name: string | null;
     created_at: string; mu: number | null; sigma: number | null; games: number;
   }[];
+  // Staff see the SR under the season's rules, placing or not.
+  const rules = seasonRules(db, season);
   return rows.map((r) => ({
     steamid: r.steamid, name: r.name, avatar: r.avatar, status: r.status, isAdmin: r.is_admin === 1, isMod: r.is_mod === 1,
-    discordName: r.discord_name, sr: r.mu === null ? null : displaySr(r.mu, r.sigma!), games: r.games, createdAt: r.created_at,
+    discordName: r.discord_name, sr: r.mu === null ? null : srUnder(rules, r.mu, r.sigma!), games: r.games, createdAt: r.created_at,
     offenses: recentOffenses(db, r.steamid),
   }));
 }

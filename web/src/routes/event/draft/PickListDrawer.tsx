@@ -87,7 +87,7 @@ export function PickListDrawer({ slug, available, onClose }: { slug: string; ava
           Add a player
           <select value="" onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) edit((l) => (l.includes(v) ? l : [...l, v])); }}>
             <option value="">Choose...</option>
-            {rest.map((c) => <option key={c.steamid} value={c.steamid}>{`${c.name} (SR ${c.sr})`}</option>)}
+            {rest.map((c) => <option key={c.steamid} value={c.steamid}>{`${c.name} (${c.placing ? `placing ${c.placing.played}/${c.placing.of}` : `SR ${c.sr}`})`}</option>)}
           </select>
         </label>
       )}

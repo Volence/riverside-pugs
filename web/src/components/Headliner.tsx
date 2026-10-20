@@ -15,7 +15,7 @@ import { TitleTag } from './TitleTag';
 export function Headliner(
   {
     eyebrow, name, rating, delta, stats, avatar, avatarHref,
-    pronouns, countryCode, countryLabel, countryFlag, bio, title, aka, badges,
+    pronouns, countryCode, countryLabel, countryFlag, bio, title, aka, badges, placing, rankSlot,
   }: {
     eyebrow: string;
     name: string;
@@ -40,6 +40,10 @@ export function Headliner(
     /** Under the identity line: the profile passes the player's team chips.
      *  The leaderboard's side card has none. */
     badges?: ComponentChildren;
+    /** Still placing this season: said in place of the SR. */
+    placing?: { played: number; of: number } | null;
+    /** Beside the SR: the season rank badge, Top 10, progress. */
+    rankSlot?: ComponentChildren;
   },
 ) {
   const hasIdentity = Boolean(countryFlag || pronouns);
@@ -84,9 +88,12 @@ export function Headliner(
       {badges && <div class="headliner__badges">{badges}</div>}
       {bio && <p class="headliner__bio">{bio}</p>}
       <div class="headliner__row">
-        {rating === null
-          ? <span class="headliner__unrated">Unrated this season</span>
-          : <span class="headliner__rating num">{rating}</span>}
+        {placing
+          ? <span class="headliner__unrated">{`Placing ${placing.played}/${placing.of}`}</span>
+          : rating === null
+            ? <span class="headliner__unrated">Unrated this season</span>
+            : <span class="headliner__rating num">{rating}</span>}
+        {rankSlot}
         {delta !== undefined && delta !== null && (
           <span class={`${deltaClass(delta)} headliner__delta`}>{fmtDelta(delta)}</span>
         )}

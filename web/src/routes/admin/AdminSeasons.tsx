@@ -3,6 +3,7 @@ import { api, adminApi } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
+import { RankBadge } from '../../components/SeasonRank';
 
 export function AdminSeasons() {
   const { data, reload } = useFetch((s) => api.seasons(s), []);
@@ -29,21 +30,24 @@ export function AdminSeasons() {
       <Panel>
         <h3>Start a new season</h3>
         <p class="muted">
-          Ends {current ? current.name : 'the current season'} now. Everyone starts the new season with a fresh
-          rating and no record. The old season's leaderboard, matches and stats stay viewable. Not possible
-          while a match is being set up or played.
+          Ends {current ? current.name : 'the current season'} now and freezes its final standings. Everyone who
+          played starts the new season from a soft reset (skill pulled 30% toward the middle, uncertainty at least 6)
+          with a 0-0 record, and places again: SR and rank show after 5 games. SR becomes skill minus one uncertainty,
+          with ranks from Bronze to Master. The old season's leaderboard, matches and stats stay viewable. Not
+          possible while a match is being set up or played.
         </p>
         <form class="admin-form" onSubmit={(e) => {
           e.preventDefault();
           void run(
             () => adminApi.newSeason(next),
-            `End ${current?.name ?? 'the current season'} and start "${next}"? Every rating resets for the new season.`,
+            `End ${current?.name ?? 'the current season'} and start "${next}"? Its standings freeze and every rating soft-resets for the new season.`,
           ).then(() => setNext(''));
         }}>
           <input value={next} placeholder="e.g. Season 1" aria-label="New season name" onInput={(e) => setNext((e.target as HTMLInputElement).value)} />
           <button class="btn" type="submit" disabled={busy || !next.trim()}>Start season</button>
         </form>
       </Panel>
+      <ResetPreview />
       <Panel>
         <h3>All seasons</h3>
         <ul class="admin-list">
@@ -55,5 +59,60 @@ export function AdminSeasons() {
         </ul>
       </Panel>
     </div>
+  );
+}
+
+/** Everyone's standing now beside where the soft reset would start them:
+ *  staff look at this before pressing Start season. The start SR and rank
+ *  are hidden from the player until they place. */
+function ResetPreview() {
+  const { data, error } = useFetch((s) => adminApi.seasonPreview(s), []);
+  const [all, setAll] = useState(false);
+  if (error) return <Panel><p class="error">Couldn't load the preview.</p></Panel>;
+  if (!data) return <Panel><p class="muted">Loading preview...</p></Panel>;
+  const rows = all ? data.rows : data.rows.slice(0, 40);
+  const tally = new Map<string, number>();
+  for (const r of data.rows) {
+    if (r.games < 5) continue;
+    const tier = r.startRank.split(' ')[0];
+    tally.set(tier, (tally.get(tier) ?? 0) + 1);
+  }
+  return (
+    <Panel class="panel--table">
+      <h3>New season preview</h3>
+      <p class="muted">
+        {`${data.rows.length} players would carry a soft-reset rating. Day-one ranks for players with 5+ games: `}
+        {['Master', 'Diamond', 'Platinum', 'Gold', 'Silver', 'Bronze'].map((t) => `${t} ${tally.get(t) ?? 0}`).join(' · ')}
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th class="num">Games</th>
+              <th class="num">Final place</th>
+              <th class="num">SR now</th>
+              <th class="num">Start SR</th>
+              <th>Start rank</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.steamid}>
+                <td><a href={`/player/${r.steamid}`}>{r.name}</a></td>
+                <td class="num muted">{r.games}</td>
+                <td class="num">{r.finalRank !== null ? `#${r.finalRank}` : <span class="muted">n/a</span>}</td>
+                <td class="num">{r.oldSr}</td>
+                <td class="num">{r.startSr}</td>
+                <td><RankBadge name={r.startRank} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!all && data.rows.length > rows.length && (
+        <button class="btn btn--ghost" type="button" onClick={() => setAll(true)}>{`Show all ${data.rows.length}`}</button>
+      )}
+    </Panel>
   );
 }

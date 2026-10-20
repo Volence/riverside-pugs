@@ -2871,6 +2871,42 @@ export function openDb(path: string): DB {
     CREATE INDEX IF NOT EXISTS match_abandons_player ON match_abandons (player_id);
   `);
 
+  // Season rules (src/seasonRules.ts, owner rulings 2026-10-19). Each season
+  // carries the rules its ladder is shown under. The defaults are the rules
+  // Season 0 was played under (SR = mu - 2 sigma, no placement, no ranks), so
+  // an existing season keeps its numbers; startNewSeason writes the new ones.
+  ensureColumn(db, 'seasons', 'sr_sigma_k', 'REAL NOT NULL DEFAULT 2');
+  ensureColumn(db, 'seasons', 'placement_games', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'seasons', 'ranks', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'seasons', 'final_min_games', 'INTEGER NOT NULL DEFAULT 20');
+  db.exec(`
+    -- The rating a player STARTED a season with (soft reset). A recompute
+    -- replays the season from these, not from openskill's defaults.
+    CREATE TABLE IF NOT EXISTS season_seeds (
+      season_id INTEGER NOT NULL REFERENCES seasons(id),
+      player_id TEXT    NOT NULL,
+      mu        REAL    NOT NULL,
+      sigma     REAL    NOT NULL,
+      PRIMARY KEY (season_id, player_id)
+    );
+    -- A season's final standings, frozen when it closes, so a later merge,
+    -- void or recompute can never reorder a finished ladder.
+    CREATE TABLE IF NOT EXISTS season_results (
+      season_id  INTEGER NOT NULL REFERENCES seasons(id),
+      player_id  TEXT    NOT NULL,
+      sr         INTEGER NOT NULL,
+      peak_sr    INTEGER NOT NULL,
+      wins       INTEGER NOT NULL,
+      losses     INTEGER NOT NULL,
+      games      INTEGER NOT NULL,
+      final_rank INTEGER,
+      rank_idx   INTEGER,
+      PRIMARY KEY (season_id, player_id)
+    );
+    CREATE INDEX IF NOT EXISTS season_results_player ON season_results (player_id);
+    CREATE INDEX IF NOT EXISTS idx_rating_history_player_season ON rating_history (player_id, season_id);
+  `);
+
   seed(db);
   return db;
 }

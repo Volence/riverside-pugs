@@ -1,7 +1,8 @@
 import type { DB } from '../db.js';
 import { completedPug } from '../matchKinds.js';
 import { currentSeasonId, getPlayer } from '../players.js';
-import { displaySr, seasonSr } from '../rating.js';
+import { seasonSr } from '../rating.js';
+import { playerSeasonState, seasonRules, srUnder } from '../seasonRules.js';
 import { STAT_DEFS } from '../statKeys.js';
 
 /**
@@ -20,6 +21,8 @@ export interface PlayerCard {
   steamid: string; name: string; avatar: string | null;
   /** Current-season display SR, rounded. */
   sr: number;
+  /** Still placing this season: show this instead of `sr`, which is 0. */
+  placing: { played: number; of: number } | null;
   /** SR after each of the last TREND_LEN rated games this season, oldest first. */
   trend: number[];
   /** Completed PUGs played. */
@@ -41,9 +44,13 @@ const SKILLS = STAT_DEFS.filter((d) => d.visibility === 'public' && d.direction 
 export function playerCard(db: DB, steamid: string, season = currentSeasonId(db)): PlayerCard {
   const p = getPlayer(db, steamid);
   const done = `${completedPug('m')} AND m.voided_at IS NULL`;
-  const trend = (db.prepare('SELECT mu_after, sigma_after FROM rating_history WHERE player_id = ? AND season_id = ? ORDER BY id DESC LIMIT ?')
+  // A placing player shows "Placing 2/5", no SR and no trend.
+  const rules = seasonRules(db, season);
+  const state = playerSeasonState(db, season, steamid);
+  const placing = rules.placementGames > 0 && !state?.placed ? { played: state?.games ?? 0, of: rules.placementGames } : null;
+  const trend = placing ? [] : (db.prepare('SELECT mu_after, sigma_after FROM rating_history WHERE player_id = ? AND season_id = ? ORDER BY id DESC LIMIT ?')
     .all(steamid, season, TREND_LEN) as { mu_after: number; sigma_after: number }[])
-    .reverse().map((h) => Math.round(displaySr(h.mu_after, h.sigma_after)));
+    .reverse().map((h) => Math.round(srUnder(rules, h.mu_after, h.sigma_after)));
   const games = db.prepare(
     `SELECT m.winner, mp.team, mp.si_damage, mp.common_kills FROM match_players mp JOIN matches m ON m.id = mp.match_id
      WHERE mp.player_id = ? AND ${done} ORDER BY m.id DESC`,
@@ -61,7 +68,9 @@ export function playerCard(db: DB, steamid: string, season = currentSeasonId(db)
   }
   return {
     steamid, name: p?.name ?? steamid, avatar: p?.avatar ?? null,
-    sr: Math.round(seasonSr(db, steamid, season)), trend, pugs: n,
+    // 0 while placing, so the hidden SR never leaves the server; the pick
+    // list sorts a placing player last and shows "Placing" instead.
+    sr: placing ? 0 : Math.round(seasonSr(db, steamid, season)), placing, trend, pugs: n,
     form: games.slice(0, FORM_LEN).map((g) => (g.winner === 'draw' || g.winner === null ? 'D' : g.winner === g.team ? 'W' : 'L')),
     survivor: { siDamage: per(games.reduce((t, g) => t + g.si_damage, 0)), commonKills: per(games.reduce((t, g) => t + g.common_kills, 0)) },
     infected: { damageAsSi: per(total('damage_as_si')), dpsLanded: per(total('dps_landed')) },

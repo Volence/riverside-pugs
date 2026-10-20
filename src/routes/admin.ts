@@ -20,7 +20,7 @@ import {
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
 import { clearPenalties, clearPenalty } from '../penalties.js';
-import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
+import { listSeasons, renameSeason, seasonResetPreview, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
 import { setReview, unanalysableCounts } from '../integrity/store.js';
@@ -911,6 +911,13 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   app.get('/api/admin/seasons', async (req, reply) => {
     if (!requireAdmin(req, reply)) return reply;
     return { seasons: listSeasons(db) };
+  });
+
+  // What starting a new season would do to everyone (src/seasons.ts
+  // seasonResetPreview): staff check it before pressing the button.
+  app.get('/api/admin/seasons/preview', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return seasonResetPreview(db);
   });
 
   app.post('/api/admin/seasons/:id/rename', async (req, reply) => {

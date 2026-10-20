@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import type { MatchResult } from '../api';
+import type { GamePhase, MatchResult } from '../api';
 import { deltaClass, fmtDelta, RESULT_LABEL, sparklinePoints } from '../format';
 
 /** Steam and Discord names drift apart (a "mira" in game can be a "br1" in
@@ -16,7 +16,14 @@ export function PlayerLink({ steamid, name, discordName }: { steamid: string; na
   );
 }
 
-export function SrDelta({ value }: { value: number }) {
+/** An SR change. A placement game has none to show: it says how far through
+ *  placement the player is, and the game that completed it names the rank. */
+export function SrDelta({ value, placement, placedRank }: {
+  value: number | null; placement?: GamePhase | null; placedRank?: string | null;
+}) {
+  if (placement?.kind === 'placing') return <span class="muted" title="Placement game: SR shows after placement">{`Placing ${placement.played}/${placement.of}`}</span>;
+  if (placement?.kind === 'placed') return <span class="sr-placed">{placedRank ? `Placed ${placedRank}` : 'Placed'}</span>;
+  if (value === null) return <span class="muted">n/a</span>;
   return <span class={deltaClass(value)}>{fmtDelta(value)}</span>;
 }
 

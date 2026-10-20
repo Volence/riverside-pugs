@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import { resolveAlias } from '../aliases.js';
 import { currentSeasonId } from '../players.js';
-import { displaySr } from '../rating.js';
+import { seasonRules, srUnder } from '../seasonRules.js';
 import { RANKED_MIN_GAMES } from '../standings.js';
 import { daysSinceLastBan, getSteamSignals } from '../steamSignals.js';
 
@@ -79,8 +79,9 @@ function topQuartile(db: DB, steamid: string): boolean {
     .filter((r) => r.games >= RANKED_MIN_GAMES);
   const me = ranked.find((r) => r.steamid === steamid);
   if (!me || ranked.length < QUARTILE_MIN_PLAYERS) return false;
-  const mine = displaySr(me.mu, me.sigma);
-  const higher = ranked.filter((r) => displaySr(r.mu, r.sigma) > mine).length;
+  const rules = seasonRules(db, season);
+  const mine = srUnder(rules, me.mu, me.sigma);
+  const higher = ranked.filter((r) => srUnder(rules, r.mu, r.sigma) > mine).length;
   return higher / ranked.length < 0.25;
 }
 
