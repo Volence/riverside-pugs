@@ -11,16 +11,18 @@ export interface SeasonRow {
   endedAt: string | null;
   current: boolean;
   matches: number;
+  /** The season plays by the Season 1 rules (placement, ranks). */
+  ranks: boolean;
 }
 
 /** Newest first. The current season is the one with no end. */
 export function listSeasons(db: DB): SeasonRow[] {
   return (db.prepare(
-    `SELECT s.id, s.name, s.started_at, s.ended_at,
+    `SELECT s.id, s.name, s.started_at, s.ended_at, s.ranks,
             (SELECT COUNT(*) FROM matches m WHERE m.season_id = s.id AND ${completedPug('m')}) AS matches
      FROM seasons s ORDER BY s.id DESC`,
-  ).all() as { id: number; name: string; started_at: string; ended_at: string | null; matches: number }[])
-    .map((s) => ({ id: s.id, name: s.name, startedAt: s.started_at, endedAt: s.ended_at, current: s.ended_at === null, matches: s.matches }));
+  ).all() as { id: number; name: string; started_at: string; ended_at: string | null; ranks: number; matches: number }[])
+    .map((s) => ({ id: s.id, name: s.name, startedAt: s.started_at, endedAt: s.ended_at, current: s.ended_at === null, matches: s.matches, ranks: !!s.ranks }));
 }
 
 export function renameSeason(db: DB, id: number, name: string): boolean {

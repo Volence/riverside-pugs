@@ -46,24 +46,26 @@ const get = (url: string, cookies?: Record<string, string>) => app.inject({ meth
 const row = (rows: { steamid: string }[], id: string) => rows.find((r) => r.steamid === id) as any;
 
 describe('ranks', () => {
-  it('Silver starts at 1400 and each tier is 500 wide, three divisions each', () => {
+  it('Silver starts at 1100, Gold 1600, Plat 2100, Diamond 2700, Master 3300, three divisions each', () => {
     expect(rankView(rankIndexOf(0)).name).toBe('Bronze III');
-    expect(rankView(rankIndexOf(1399)).name).toBe('Bronze I');
-    expect(rankView(rankIndexOf(1400)).name).toBe('Silver III');
-    expect(rankView(rankIndexOf(1900)).name).toBe('Gold III');
-    expect(rankView(rankIndexOf(2400)).name).toBe('Platinum III');
-    expect(rankView(rankIndexOf(2900)).name).toBe('Diamond III');
-    expect(rankView(rankIndexOf(3400)).name).toBe('Master III');
+    expect(rankView(rankIndexOf(1099)).name).toBe('Bronze I');
+    expect(rankView(rankIndexOf(1100)).name).toBe('Silver III');
+    expect(rankView(rankIndexOf(1600)).name).toBe('Gold III');
+    expect(rankView(rankIndexOf(2100)).name).toBe('Platinum III');
+    expect(rankView(rankIndexOf(2700)).name).toBe('Diamond III');
+    expect(rankView(rankIndexOf(3300)).name).toBe('Master III');
     expect(rankView(rankIndexOf(9999))).toMatchObject({ name: 'Master I', next: null });
-    expect(rankFloor(7)).toBe(2067); // Gold II
+    expect(rankFloor(7)).toBe(1767); // Gold II
+    expect(rankFloor(13)).toBe(2900); // Diamond II
+    expect(rankFloor(17)).toBe(3700); // Master I
   });
 
   it('ranks up at once and down only past the buffer', () => {
-    const gold3 = rankIndexOf(1900);
-    expect(rankAfter(null, 1950)).toBe(gold3);
-    expect(rankAfter(gold3 - 1, 1900)).toBe(gold3);
-    expect(rankAfter(gold3, 1900 - DEMOTION_BUFFER)).toBe(gold3);
-    expect(rankAfter(gold3, 1900 - DEMOTION_BUFFER - 1)).toBe(gold3 - 1);
+    const gold3 = rankIndexOf(1600);
+    expect(rankAfter(null, 1650)).toBe(gold3);
+    expect(rankAfter(gold3 - 1, 1600)).toBe(gold3);
+    expect(rankAfter(gold3, 1600 - DEMOTION_BUFFER)).toBe(gold3);
+    expect(rankAfter(gold3, 1600 - DEMOTION_BUFFER - 1)).toBe(gold3 - 1);
   });
 
   it('soft reset pulls mu 30% toward 25 and floors sigma at 6', () => {

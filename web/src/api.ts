@@ -167,6 +167,8 @@ export interface Season {
   endedAt: string | null;
   current: boolean;
   matches: number;
+  /** Plays by the Season 1 rules (placement, ranks). */
+  ranks: boolean;
 }
 
 export interface SiteInfo {

@@ -61,10 +61,13 @@ export const RANK_TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'M
 export type RankTier = typeof RANK_TIERS[number];
 /** Lowest division first: Gold III, then Gold II, then Gold I. */
 export const RANK_DIVISIONS = ['III', 'II', 'I'] as const;
-/** Silver starts at 1400 and every tier is 500 SR wide, so Bronze III starts
- *  (notionally) at 900 and holds everything below it too. */
-const RANK_BASE = 900;
-const TIER_WIDTH = 500;
+/** Where each tier starts. Gold is the middle of the ladder (the median
+ *  player sits around 1800), Bronze and Master are the thin ends: Silver to
+ *  Platinum are 500 SR wide, Diamond 600, and Master is open-ended above
+ *  3300 (its divisions are 200 apart). Bronze starts (notionally) at 600 and
+ *  holds everything below it too. */
+const TIER_FLOORS = [600, 1100, 1600, 2100, 2700, 3300];
+const TIER_WIDTHS = [500, 500, 500, 600, 600, 600];
 export const RANK_COUNT = RANK_TIERS.length * RANK_DIVISIONS.length;
 /** SR below a held division's floor before the badge drops. Ranking up is
  *  instant; ranking down waits for this, so a player on a line does not
@@ -73,7 +76,9 @@ export const DEMOTION_BUFFER = 50;
 
 /** The SR at which rank index `i` starts (0 = Bronze III, 17 = Master I). */
 export function rankFloor(i: number): number {
-  return RANK_BASE + Math.round((i * TIER_WIDTH) / RANK_DIVISIONS.length);
+  const tier = Math.floor(i / RANK_DIVISIONS.length);
+  const division = i % RANK_DIVISIONS.length;
+  return TIER_FLOORS[tier] + Math.round((division * TIER_WIDTHS[tier]) / RANK_DIVISIONS.length);
 }
 
 /** The rank an SR earns, with no buffer. */
