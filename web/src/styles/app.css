@@ -4053,16 +4053,16 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .rankbadge__gem { width: 0.6em; height: 0.6em; transform: rotate(45deg); background: var(--rank-c); flex: none; }
 /* The emblem's pips are too small to read at text size; the name carries the
  * division, so the emblem is cropped to its body. */
-.rankbadge__emblem { width: 1.5em; height: 1.5em; margin: -0.2em 0; object-fit: cover; object-position: 50% 15%; flex: none; }
+.rankbadge__emblem { width: 1.5em; height: 1.5em; margin: -0.2em 0; object-fit: contain; flex: none; }
 .rankcard { display: flex; align-items: center; gap: var(--sp-5); }
-.rankcard__emblem { width: 112px; height: 126px; flex: none; filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--rank-c) 30%, transparent)); }
+.rankcard__emblem { width: 124px; height: 126px; object-fit: contain; flex: none; filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--rank-c) 30%, transparent)); }
 .rankcard__body { display: grid; gap: var(--sp-1); flex: 1; min-width: 0; }
 .rankcard__name { margin: 0; font-family: var(--font-display); font-size: var(--fs-h2); text-transform: uppercase; letter-spacing: 0.04em; color: var(--rank-c); line-height: 1.1; }
 .rankcard__sr { margin: 0; font-family: var(--font-label); font-size: var(--fs-h3); color: var(--rating); font-variant-numeric: tabular-nums; }
 .rankcard__bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; max-width: 22rem; }
 .rankcard__fill { height: 100%; background: var(--rank-c); }
 .rankcard__next { margin: 0; font-size: var(--fs-dense); }
-@media (max-width: 420px) { .rankcard__emblem { width: 80px; height: 90px; } .rankcard { gap: var(--sp-4); } }
+@media (max-width: 420px) { .rankcard__emblem { width: 88px; height: 90px; } .rankcard { gap: var(--sp-4); } }
 .rankbadge--bronze   { --rank-c: #c3804f; }
 .rankbadge--silver   { --rank-c: #b9c1c9; }
 .rankbadge--gold     { --rank-c: #e3b341; }

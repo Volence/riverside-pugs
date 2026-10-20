@@ -1,10 +1,13 @@
 import type { Placing, RankView } from '../api';
 
-/** The emblem for "Gold II" (web/public/ranks, drawn by
- *  scripts/rank-emblems.py), or null for a name that is not a rank. */
-export function emblemUrl(name: string): string | null {
+/** The emblem for "Gold II" (web/public/ranks, built by
+ *  scripts/rank-emblems.py), or null for a name that is not a rank. `badge`
+ *  is the tight, pip-less tier image for inline sizes, where the division is
+ *  written beside it anyway. */
+export function emblemUrl(name: string, badge = false): string | null {
   const m = name.match(/^(Bronze|Silver|Gold|Platinum|Diamond|Master) (III|II|I)$/);
-  return m ? `/ranks/${m[1].toLowerCase()}-${m[2].toLowerCase()}.svg` : null;
+  if (!m) return null;
+  return badge ? `/ranks/${m[1].toLowerCase()}-badge.webp` : `/ranks/${m[1].toLowerCase()}-${m[2].toLowerCase()}.webp`;
 }
 
 /** A Bronze..Master badge: the emblem, then the name ("Gold II") in the
@@ -14,7 +17,7 @@ export function RankBadge({ rank, name, compact = false }: { rank?: RankView | n
   const label = rank?.name ?? name;
   if (!label) return null;
   const tier = (rank?.tier ?? label.split(' ')[0]).toLowerCase();
-  const emblem = emblemUrl(label);
+  const emblem = emblemUrl(label, true);
   return (
     <span class={`rankbadge rankbadge--${tier}`} title={label}>
       {emblem ? <img class="rankbadge__emblem" src={emblem} alt="" aria-hidden="true" /> : <span class="rankbadge__gem" aria-hidden="true" />}

@@ -1,167 +1,158 @@
 #!/usr/bin/env python3
-"""Rank emblems: one SVG per rank (Bronze III .. Master I) into web/public/ranks/.
+"""Rank emblems: one image per rank (Bronze III .. Master I) into web/public/ranks/.
 
-    python3 scripts/rank-emblems.py           # SVGs only
-    python3 scripts/rank-emblems.py --png DIR # also 1024px PNGs into DIR (video, Discord)
+    python3 scripts/rank-emblems.py           # site images only
+    python3 scripts/rank-emblems.py --png DIR # also 1024px transparent PNGs + lineups into DIR (video, Discord)
 
-The art is from game-icons.net (CC BY 3.0); the icons are vendored in
-scripts/rank-icons/ so the build never touches the network, and ICONS below
-names the author of each. This script only composes them, colours them and
-adds the division marks.
+The art is scripts/rank-art/<tier>.png: one emblem per tier, 1024x1024 on flat
+#00FF00, all drawn at the same scale (the shields share one size and one
+baseline, so the wings and crowns of the higher tiers make them bigger). The
+owner had them AI-generated in October 2026 from our concept; no third-party
+licence applies. To replace a tier, generate it the same way (same framing,
+same green, no pips or text) and rerun this.
 
-Each tier adds to the one below it, so the shape alone says how high a rank is:
-every rank is a metal shield with the biohazard cut into it. Silver adds the
-laurel wreath, Gold trades it for wings, Platinum crowns them, Diamond wears a
-jewelled crown with a lit stone and Master puts a glowing star burst behind it
-all. Pips under
-the emblem are the division: III one, II two, I three. Colours match
-.rankbadge--* in web/src/styles/app.css.
+This script keys out the green, nudges two colours (Master toward violet so it
+is not a pink Diamond, Platinum's teal up so it does not read as Silver at
+badge size), crops every tier to one shared frame, and adds the division pips
+under the shield: III one, II two, I three. Requires Pillow with WebP.
 """
 import os
-import re
-import subprocess
 import sys
 
+import numpy as np
+from PIL import Image, ImageDraw
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ART = os.path.join(ROOT, 'scripts', 'rank-art')
 OUT = os.path.join(ROOT, 'web', 'public', 'ranks')
-ICON_DIR = os.path.join(ROOT, 'scripts', 'rank-icons')
 
-# key: (author, icon name, bbox of the drawn shape in the icon's 512 box,
-# measured once by rendering the icon). File is rank-icons/<author>_<name>.svg.
-ICONS = {
-    'shield':    ('sbed',       'shield',           (106.0, 16.0, 406.0, 496.0)),
-    'biohazard': ('lorc',       'biohazard',        (20.5, 41.5, 493.8, 453.8)),
-    'laurels':   ('lorc',       'laurels',          (21.2, 18.0, 490.8, 494.0)),
-    'wing':      ('delapouite', 'liberty-wing',     (25.0, 37.0, 487.0, 475.0)),
-    'crown':     ('lorc',       'queen-crown',      (21.2, 59.2, 489.8, 425.2)),
-    'jewel_crown':    ('delapouite', 'crenel-crown',     (27.8, 68.0, 484.2, 423.2)),
-    'star':      ('delapouite', 'polar-star',       (19.8, 19.8, 492.2, 492.2)),
-}
-
-TIERS = [
-    # name, base colour (= --rank-c), light, dark
-    ('bronze',   '#c3804f', '#f0bb8c', '#5c3218'),
-    ('silver',   '#b9c1c9', '#f2f5f8', '#4a525b'),
-    ('gold',     '#e3b341', '#fff0b0', '#7a5410'),
-    ('platinum', '#5fc9bd', '#d4fff8', '#1b5c55'),
-    ('diamond',  '#6fa8ff', '#e0ecff', '#1f3f80'),
-    ('master',   '#c88cff', '#f3e3ff', '#4f1f80'),
-]
+TIERS = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'master']
 DIVISIONS = ['iii', 'ii', 'i']  # lowest first, as in src/seasonRules.ts
+# Pip colour per tier, close to the art's metal, a little brighter.
+PIP = {
+    'bronze': (200, 122, 72), 'silver': (214, 210, 202), 'gold': (232, 178, 70),
+    'platinum': (112, 196, 176), 'diamond': (140, 186, 236), 'master': (186, 130, 236),
+}
+OUTLINE = (20, 16, 12)
 
-W, H = 160, 180
-CX = 80
-INK = '#14100c'  # the shared outline: near black, a touch warm
-OUTLINE = 2.4    # outline width in emblem units (the viewBox is 160 wide)
+# The shared frame, in source pixels: every emblem's art fits inside it
+# (measured: the union of the six bounding boxes is x 73..953, y 111..894).
+FRAME = (64, 96, 960, 1004)       # left, top, right, bottom: 896 x 908
+PIP_Y = 950 - 96                   # pip centre, in frame pixels
+PIP_R = 34                         # pip half-diagonal
+PIP_GAP = 100                      # centre to centre
+SITE_SIZE = (320, 324)             # web/public/ranks/*.webp
+BADGE_SIZE = 64                    # web/public/ranks/*-badge.webp: tight, square, no pips
 
-_paths = {}
 
-def icon_path(key):
-    if key not in _paths:
-        author, name, _ = ICONS[key]
-        with open(os.path.join(ICON_DIR, f'{author}_{name}.svg')) as fh:
-            svg = fh.read()
-        # every game-icons file is a black 512 square then the white icon path
-        ds = re.findall(r'<path[^>]*\sd="([^"]+)"', svg)
-        _paths[key] = [d for d in ds if d != 'M0 0h512v512H0z']
-    return _paths[key]
+def key(img):
+    """Green to alpha, with the green spill taken out of the edges."""
+    a = np.asarray(img.convert('RGB')).astype(np.float32)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    d = g - np.maximum(r, b)
+    alpha = np.clip(1 - (d - 60) / 120, 0, 1)
+    g2 = np.where(d > 20, np.maximum(r, b), g)
+    return np.dstack([r, g2, b, alpha * 255])
 
-def f(n):
-    return f'{n:.2f}'.rstrip('0').rstrip('.')
 
-def place(key, cx, cy, w=None, h=None, flip=False, rot=0, d=None, **attrs):
-    """The icon `key` fitted to width w (or height h, or both to stretch),
-    centred on (cx, cy). `attrs` become SVG attributes; stroke_width is given
-    in emblem units and scaled back so every outline matches. `d` draws that
-    path instead of the icon, in the icon's own coordinates."""
-    x0, y0, x1, y1 = ICONS[key][2]
-    bw, bh = x1 - x0, y1 - y0
-    sx = w / bw if w else h / bh
-    sy = h / bh if h else sx
-    if w and not h:
-        sy = sx
-    mx, my = (x0 + x1) / 2, (y0 + y1) / 2
-    sw = attrs.pop('stroke_width', None)
-    a = ''.join(f' {k.replace("_", "-")}="{v}"' for k, v in attrs.items())
-    if sw is not None:
-        a += f' stroke-width="{f(sw / min(sx, sy))}" stroke-linejoin="round" paint-order="stroke"'
-    rt = f' rotate({f(rot)})' if rot else ''
-    t = f'translate({f(cx)} {f(cy)}){rt} scale({f(-sx if flip else sx)} {f(sy)}) translate({f(-mx)} {f(-my)})'
-    return ''.join(f'<path transform="{t}" d="{p}"{a}/>' for p in ([d] if d else icon_path(key)))
+def hsv(rgb):
+    mx, mn = rgb.max(-1), rgb.min(-1)
+    c = mx - mn
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    safe = np.where(c == 0, 1, c)
+    h = np.where(mx == r, ((g - b) / safe) % 6, np.where(mx == g, (b - r) / safe + 2, (r - g) / safe + 4)) * 60
+    s = np.where(mx == 0, 0, c / np.where(mx == 0, 1, mx))
+    return np.where(c == 0, 0, h), s, mx
 
-def pips(filled, on, off):
-    """Division mark: three small diamonds, III fills one, I all three."""
-    out = []
-    for k in range(3):
-        x, y = CX + (k - 1) * 20, 166
-        d = f'M{f(x)} {f(y - 7)} L{f(x + 7)} {f(y)} L{f(x)} {f(y + 7)} L{f(x - 7)} {f(y)} Z'
-        if k < filled:
-            out.append(f'<path d="{d}" fill="{on}" stroke="{INK}" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/>')
-        else:
-            out.append(f'<path d="{d}" fill="{INK}" fill-opacity="0.35" stroke="{off}" stroke-opacity="0.6" stroke-width="1.4" stroke-linejoin="round"/>')
+
+def rgb_of(h, s, v):
+    c = v * s
+    x = c * (1 - np.abs((h / 60) % 2 - 1))
+    m = v - c
+    k = (h // 60).astype(int) % 6
+    z = np.zeros_like(h)
+    r = np.choose(k, [c, x, z, z, x, c])
+    g = np.choose(k, [x, c, c, x, z, z])
+    b = np.choose(k, [z, z, x, c, c, x])
+    return np.dstack([r + m, g + m, b + m])
+
+
+def regrade(px, tier):
+    """Hue and saturation nudges on the metal only: the black, the cream
+    border and the blood are left alone."""
+    if tier not in ('master', 'platinum'):
+        return px
+    h, s, v = hsv(px[..., :3] / 255.0)
+    if tier == 'master':
+        sel = (h >= 270) & (h <= 345) & (s > 0.12)
+        h = np.where(sel, h - 22, h)
+        s = np.where(sel, np.minimum(1, s * 1.1), s)
+    else:
+        sel = (h >= 130) & (h <= 210) & (s > 0.06)
+        s = np.where(sel, np.minimum(1, s * 1.55), s)
+    out = px.copy()
+    out[..., :3] = rgb_of(h, s, v) * 255
     return out
 
-# The stone inside crenel-crown's gem setting, traced in its 512 box, so
-# Diamond and Master can light it up.
-CROWN_STONE = 'M256 225 L293.5 290 L281 350 L268.5 359 L243.5 359 L231 347.5 L217.5 290 Z'
 
-MOTIF = 'biohazard'
+def pips(draw, filled, colour, scale):
+    """Three diamonds under the shield; the first `filled` lit."""
+    cx = (FRAME[2] - FRAME[0]) / 2
+    for k in range(3):
+        x, y, r = (cx + (k - 1) * PIP_GAP) * scale, PIP_Y * scale, PIP_R * scale
+        poly = [(x, y - r), (x + r, y), (x, y + r), (x - r, y)]
+        if k < filled:
+            draw.polygon(poly, fill=colour + (255,), outline=OUTLINE + (255,), width=max(2, round(6 * scale)))
+        else:
+            draw.polygon(poly, fill=OUTLINE + (200,), outline=colour + (150,), width=max(2, round(5 * scale)))
 
-def emblem(t, division):
-    name, base, light, dark = TIERS[t]
-    gid = f'{name}{division}'
-    defs = (f'<defs>'
-            f'<linearGradient id="m{gid}" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="{light}"/>'
-            f'<stop offset="0.5" stop-color="{base}"/><stop offset="1" stop-color="{dark}"/></linearGradient>'
-            f'<linearGradient id="w{gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{light}"/>'
-            f'<stop offset="1" stop-color="{base}"/></linearGradient>'
-            f'<radialGradient id="r{gid}" cx="0.5" cy="0.5" r="0.5"><stop offset="0.35" stop-color="{light}"/>'
-            f'<stop offset="1" stop-color="{base}"/></radialGradient>'
-            f'<radialGradient id="h{gid}" cx="0.5" cy="0.5" r="0.5"><stop offset="0.2" stop-color="{base}" stop-opacity="0.6"/>'
-            f'<stop offset="1" stop-color="{base}" stop-opacity="0"/></radialGradient>'
-            f'</defs>')
-    metal, soft, glow = f'url(#m{gid})', f'url(#w{gid})', f'url(#r{gid})'
-    sy = 92  # shield centre; the shield spans y 36..148 on every rank
-    body = []
-    if t == 5:
-        body.append(f'<circle cx="{CX}" cy="{sy - 6}" r="80" fill="url(#h{gid})"/>')
-        body.append(place('star', CX, sy - 8, w=146, rot=45, fill=glow, stroke=INK, stroke_width=OUTLINE))
-    if t == 1:
-        body.append(place('laurels', CX, sy + 12, w=108, h=110, fill=soft, stroke=INK, stroke_width=OUTLINE))
-    if t >= 2:
-        ww = {2: 50, 3: 54, 4: 57, 5: 60}[t]
-        for side in (-1, 1):
-            body.append(place('wing', CX + side * (20 + ww / 2), sy - 12, w=ww,
-                              flip=side < 0, fill=soft, stroke=INK, stroke_width=OUTLINE))
-    body.append(place('shield', CX, sy, w=80, h=112, fill=metal, stroke=INK, stroke_width=OUTLINE))
-    body.append(place('shield', CX, sy - 1, w=68, h=98, fill='none', stroke=light, stroke_opacity='0.55', stroke_width=1.6))
-    # the motif, cut into the metal: a light lip offset below, the dark cut on top
-    body.append(place(MOTIF, CX + 0.6, sy + 4.8, w=56, fill=light, fill_opacity='0.5'))
-    body.append(place(MOTIF, CX, sy + 4, w=56, fill=INK))
-    if t == 3:
-        body.append(place('crown', CX, 26, w=54, fill=metal, stroke=INK, stroke_width=OUTLINE))
-    if t >= 4:
-        body.append(place('jewel_crown', CX, 25, w=60, fill=metal, stroke=INK, stroke_width=OUTLINE))
-        body.append(place('jewel_crown', CX, 25, w=60, d=CROWN_STONE, fill=soft))
-    body += pips(division + 1, light, base)
-    label = f'{name.title()} {DIVISIONS[division].upper()}'
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-label="{label}">'
-            f'<title>{label}</title>{defs}{"".join(body)}</svg>\n')
+
+def emblem(base, tier, division_index, size):
+    """One rank at `size` (w, h): the tier's art in the shared frame, plus pips."""
+    img = base.resize(size, Image.LANCZOS)
+    pips(ImageDraw.Draw(img), division_index + 1, PIP[tier], size[0] / (FRAME[2] - FRAME[0]))
+    return img
+
 
 def main():
     os.makedirs(OUT, exist_ok=True)
     png = sys.argv[sys.argv.index('--png') + 1] if '--png' in sys.argv else None
-    if png:
-        os.makedirs(png, exist_ok=True)
-    for t in range(len(TIERS)):
+    bases = {}
+    for tier in TIERS:
+        px = regrade(key(Image.open(os.path.join(ART, f'{tier}.png'))), tier)
+        full = Image.fromarray(np.clip(px, 0, 255).astype(np.uint8), 'RGBA').crop(FRAME)
+        bases[tier] = full
         for d in range(3):
-            stem = f'{TIERS[t][0]}-{DIVISIONS[d]}'
-            path = os.path.join(OUT, f'{stem}.svg')
-            with open(path, 'w') as fh:
-                fh.write(emblem(t, d))
-            if png:
-                subprocess.run(['rsvg-convert', '-w', '1024', '-o', os.path.join(png, f'{stem}.png'), path], check=True)
-    print(f'wrote {len(TIERS) * 3} emblems to {OUT}' + (f' and PNGs to {png}' if png else ''))
+            emblem(full, tier, d, SITE_SIZE).save(os.path.join(OUT, f'{tier}-{DIVISIONS[d]}.webp'), quality=88, method=6)
+        # Badge size (about 20px in a table row): the tier's own art, cropped
+        # tight and centred in a square, so a wide Master is not a speck.
+        # Divisions are written beside a badge, so it carries no pips.
+        tight = full.crop(full.getbbox())
+        side = max(tight.size)
+        sq = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+        sq.alpha_composite(tight, ((side - tight.width) // 2, (side - tight.height) // 2))
+        sq.resize((BADGE_SIZE, BADGE_SIZE), Image.LANCZOS).save(os.path.join(OUT, f'{tier}-badge.webp'), quality=90, method=6)
+    print(f'wrote {len(TIERS) * 3} emblems and {len(TIERS)} badges to {OUT}')
+    if not png:
+        return
+    os.makedirs(png, exist_ok=True)
+    big = (1010, 1024)
+    tiles = []
+    for tier in TIERS:
+        for d in range(3):
+            im = emblem(bases[tier], tier, d, big)
+            im.save(os.path.join(png, f'{tier}-{DIVISIONS[d]}.png'))
+            if d == 2:
+                tiles.append(im)
+    # Lineups: the six tiers at their I division, side by side.
+    tw, th = 505, 512
+    for name, bg in (('lineup-transparent.png', (0, 0, 0, 0)), ('lineup-dark.png', (11, 13, 16, 255))):
+        sheet = Image.new('RGBA', (tw * 6 + 80, th + 80), bg)
+        for i, t in enumerate(tiles):
+            sheet.alpha_composite(t.resize((tw, th), Image.LANCZOS), (40 + i * tw, 40))
+        sheet.save(os.path.join(png, name))
+    print(f'and 1024px PNGs + lineups to {png}')
+
 
 if __name__ == '__main__':
     main()
