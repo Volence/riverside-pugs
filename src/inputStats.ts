@@ -10,16 +10,80 @@
  * case, and it could never be recovered from storage afterwards.
  */
 
-/** A burst closes after this many ticks of silence, so every interval inside
- *  one is 1..30 by construction. That is what makes the one-character-per-
- *  interval encoding total: there is no value it cannot represent. */
+/**
+ * Tick rate.
+ *
+ * Intervals, holds, ground times and stall gaps are all counted in ticks
+ * (usercmds or server ticks), and every threshold here was calibrated on 100
+ * tick servers. A line from plugin 0.5.0 says what rate it was recorded at
+ * (`rate=`); a line without one, and every row stored before it, is 100.
+ *
+ * Each threshold is one of two kinds, and each says which where it lives:
+ *
+ *   TIME        about how long something takes: a hand, a wheel, a device or
+ *               a window. It scales with the rate (`ticksAtMost`,
+ *               `ticksAtLeast`, `ticksFor`).
+ *   RESOLUTION  about the sampling itself: a press seen on one usercmd, the
+ *               plus or minus one tick a set hold aliases to, a jump on the
+ *               landing usercmd. It stays in ticks at every rate.
+ *
+ * One looked like resolution and measured as time: the steady check's beat
+ * window, which also absorbs a device's few ms of jitter (see BEAT_SLACK).
+ *
+ * What is never done is converting the DATA to 100 tick and rounding: at 128
+ * tick holds of 6 and 7 ticks (47 and 55 ms) both round to 5, which turns a
+ * hand's two different holds into one fixed one, a false fixed-hold. The
+ * thresholds move instead and the samples stay as recorded.
+ */
+export const BASE_TICKRATE = 100;
+/** The rates a line may claim. 128 is the most any L4D1 server runs, and it
+ *  also bounds the encoding alphabet (see burstMaxTicks). */
+export const MIN_TICKRATE = 30;
+export const MAX_TICKRATE = 128;
+
+/** An inclusive upper bound "t <= T ticks", calibrated at 100 tick, at
+ *  `rate`. A reading of k ticks is a true time somewhere in (k-1, k+1), so
+ *  "at most T" separates true times either side of T + 0.5 ticks; that time
+ *  is what moves. The identity at 100. At 128: 2 -> 3, 3 -> 4, 20 -> 26. */
+export function ticksAtMost(t100: number, rate: number = BASE_TICKRATE): number {
+  return rate === BASE_TICKRATE ? t100 : Math.round(((t100 + 0.5) * rate) / BASE_TICKRATE - 0.5);
+}
+
+/** An inclusive lower bound "t >= T ticks", by the same reasoning: the line
+ *  sits at T - 0.5 ticks. The identity at 100. At 128: 8 -> 10. */
+export function ticksAtLeast(t100: number, rate: number = BASE_TICKRATE): number {
+  return rate === BASE_TICKRATE ? t100 : Math.round(((t100 - 0.5) * rate) / BASE_TICKRATE + 0.5);
+}
+
+/** A duration that is not a reading but a window or a cut-off we chose (300
+ *  ms of silence, three seconds of fire, 1.2 s between hops), in ticks. */
+export function ticksFor(t100: number, rate: number = BASE_TICKRATE): number {
+  return rate === BASE_TICKRATE ? t100 : Math.round((t100 * rate) / BASE_TICKRATE);
+}
+
+/** A rate a line or a row carries, or 100 for none. */
+export const rateOf = (r: number | null | undefined): number => r ?? BASE_TICKRATE;
+
+/** TIME. A burst closes after this many ticks of silence (300 ms), so every
+ *  interval inside one is 1..30 by construction at 100 tick. That is what
+ *  makes the one-character-per-interval encoding total: there is no value it
+ *  cannot represent. The 100 tick value; burstMaxTicks gives any rate. */
 export const BURST_MAX_TICKS = 30;
+
+/** BURST_MAX_TICKS at `rate`: 38 at 128. The plugin computes the same number
+ *  with integer arithmetic, (rate * 3 + 5) / 10, so both sides agree. Holds
+ *  share the cap ("30 or more" at 100 is "38 or more" at 128). At
+ *  MAX_TICKRATE the alphabet reaches chr(48 + 37) = 'U', still digits,
+ *  letters and :;<=>?@. */
+export function burstMaxTicks(rate: number = BASE_TICKRATE): number {
+  return rate === BASE_TICKRATE ? BURST_MAX_TICKS : Math.floor((rate * 3 + 5) / 10);
+}
+
+/** The largest value any stored series can hold, whatever its rate. */
+export const ENCODE_MAX_TICKS = burstMaxTicks(MAX_TICKRATE);
 
 /** Matches the plugin's per-burst cap. A longer list did not come from us. */
 export const MAX_INTERVALS = 256;
-
-/** Ticks per second the servers run at; intervals are stored in ticks. */
-export const TICKRATE = 100;
 
 /** Base 48, so the alphabet is '0'..'M': digits and letters only. Base 33 was
  *  the obvious choice and was wrong, because chr(34) is a double quote and
@@ -27,7 +91,7 @@ export const TICKRATE = 100;
  *  chat. It is harmless for admission (our marker is anchored at the start of
  *  the body) but there is no reason to put quote characters inside a log line
  *  when a different offset costs nothing. */
-const ENC_BASE = 48; // chr(48) = '0' = 1 tick, chr(77) = 'M' = 30 ticks
+const ENC_BASE = 48; // chr(48) = '0' = 1 tick, chr(77) = 'M' = 30 ticks, chr(85) = 'U' = 38
 
 export function encodeIntervals(ticks: readonly number[]): string {
   return ticks.map((t) => String.fromCharCode(ENC_BASE + t - 1)).join('');
@@ -36,21 +100,23 @@ export function encodeIntervals(ticks: readonly number[]): string {
 /** Null for anything the plugin could not have produced: an out of range
  *  character, an empty string, or more intervals than the cap. Refusing rather
  *  than clamping keeps a forged or corrupt line out of the statistics instead
- *  of turning it into a plausible looking burst. */
-export function decodeIntervals(s: string, maxLength = MAX_INTERVALS): number[] | null {
+ *  of turning it into a plausible looking burst. `maxTicks` is the cap at the
+ *  line's rate, burstMaxTicks(rate); the default is 100 tick's. */
+export function decodeIntervals(s: string, maxLength = MAX_INTERVALS, maxTicks = BURST_MAX_TICKS): number[] | null {
   if (s.length === 0 || s.length > maxLength) return null;
   const out: number[] = [];
   for (let i = 0; i < s.length; i++) {
     const t = s.charCodeAt(i) - ENC_BASE + 1;
-    if (t < 1 || t > BURST_MAX_TICKS) return null;
+    if (t < 1 || t > maxTicks) return null;
     out.push(t);
   }
   return out;
 }
 
 /** Holds are per PRESS and intervals are between presses, so a full burst has
- *  one more hold than it has intervals. Same alphabet, same 1..30 range: a hold
- *  of 30 means "30 or more", or a press still down when the burst was cut. */
+ *  one more hold than it has intervals. Same alphabet, same 1..30 range (1..38
+ *  at 128 tick): a hold at the cap means "that or more", or a press still down
+ *  when the burst was cut. */
 export const MAX_HOLDS = MAX_INTERVALS + 1;
 
 export interface BurstStats {
@@ -67,11 +133,14 @@ export interface BurstStats {
   ratePerSec: number;
   /** Intervals identical to the one after them. */
   sameAsNext: number;
-  /** Intervals within one tick of the one after them. */
+  /** Intervals within one tick of the one after them. RESOLUTION: the
+   *  aliasing of a flat rate, one tick at any rate. */
   closeToNext: number;
 }
 
-export function burstStats(ticks: readonly number[]): BurstStats {
+/** `rate` is the tick rate the burst was recorded at; only ratePerSec reads
+ *  it, everything else here is in the burst's own ticks. */
+export function burstStats(ticks: readonly number[], rate: number = BASE_TICKRATE): BurstStats {
   const n = ticks.length;
   if (n === 0) {
     return { n: 0, meanTicks: 0, sdTicks: 0, cv: 0, minTicks: 0, maxTicks: 0, ratePerSec: 0, sameAsNext: 0, closeToNext: 0 };
@@ -94,7 +163,7 @@ export function burstStats(ticks: readonly number[]): BurstStats {
     cv: mean > 0 ? sd / mean : 0,
     minTicks: lo,
     maxTicks: hi,
-    ratePerSec: mean > 0 ? TICKRATE / mean : 0,
+    ratePerSec: mean > 0 ? rate / mean : 0,
     sameAsNext: same,
     closeToNext: close,
   };
@@ -107,10 +176,16 @@ export interface HoldStats {
   maxTicks: number;
   /** Spread. A scripted hold has almost none; a hand has a couple of ticks. */
   sdTicks: number;
-  /** Share of presses that were down for a single usercmd. */
+  /** Share of presses that were down for a single usercmd. RESOLUTION: a
+   *  wheel notch has no held state, so it is down for one usercmd at 100 tick
+   *  and at 128 alike. */
   oneTickFrac: number;
   /** Share within one tick of the median: how constant the hold is, without
-   *  letting the last press of a burst (often simply kept down) decide it. */
+   *  letting the last press of a burst (often simply kept down) decide it.
+   *  RESOLUTION: a set hold aliases to plus or minus one tick at any rate (35
+   *  ms reads 3,4 at 100 and 4,5 at 128). Widening it with the rate would
+   *  only let a hand in: the same hand spreads over more ticks at 128, so it
+   *  is LESS likely to look fixed there, never more. */
   nearMedianFrac: number;
 }
 
@@ -144,7 +219,8 @@ export function holdStats(holds: readonly number[] | null | undefined): HoldStat
  *                  has no "held" state. A fast one (Icy Inferno going quickly
  *                  up and down, owner's ground truth 2026-09-24) merges notches
  *                  into 2 to 5 tick holds, so it is known by its gaps instead:
- *                  runs of 2 and 3 ticks no finger reaches. See `burstLabel`.
+ *                  runs of 2 and 3 ticks (20 to 30 ms, up to 4 ticks at
+ *                  128) no finger reaches. See `burstLabel`.
  *                  Wheel binds are legal (owner's ruling, 2026-09-22).
  *   steady-taps    wheel-shaped, but at a flat rate no hand-spun wheel holds: a
  *                  rapid-fire bind or mouse auto-fire. See STEADY_TAPS. It
@@ -155,7 +231,9 @@ export function holdStats(holds: readonly number[] | null | undefined): HoldStat
  *                  read 7,8,7,8. A median of 1 is left out because every 1 and
  *                  2 is within a tick of it: that is a wheel whose notches
  *                  sometimes merge, not a set hold.
- *   variable-hold  what a hand does: measured 5 to 12 ticks, never the same.
+ *   variable-hold  what a hand does: measured 5 to 12 ticks at 100 tick (50 to
+ *                  120 ms, 6 to 15 ticks at 128), never the same. Only ever
+ *                  the fall-through, so the range is no threshold.
  *   no-hold-data   plugin 0.1.0 did not send holds, or there are too few.
  */
 export type HoldAnnotation = 'wheel-like' | 'fixed-hold' | 'variable-hold' | 'no-hold-data';
@@ -182,14 +260,27 @@ export const isWheel = (note: string): boolean => note.startsWith('wheel-like');
  */
 export const STEADY_TAPS = 'steady-taps';
 
-/** Share of a burst's gaps on the beat for it to count as steady. */
+/** Share of a burst's gaps on the beat for it to count as steady. A share
+ *  and a count, so neither depends on the rate. */
 export const STEADY_SHARE = 0.85;
 export const STEADY_MIN_INTERVALS = 6;
 /** A gap on the beat is within this of the median: the aliasing any flat rate
- *  shows. */
+ *  shows, and the device's own jitter. TIME, though it looks like resolution.
+ *  A perfectly flat device only ever aliases by one tick at any rate (77 ms
+ *  reads 7,8 at 100 and 9,10 at 128), but a real one also moves a press a few
+ *  ms, and at 100 tick this window absorbed that. Simulated (a 45 to 75 ms
+ *  clock, 10% skipped beats, 4 ms of press jitter): 92% of bursts steady at
+ *  100 tick, 79% at 128 held to one tick, and a device missed there reads as
+ *  a legal wheel. So it is read as under 15 ms (BEAT_SLACK + 0.5 ticks at
+ *  100): still one whole tick from a whole median at 128, but 1.5 from a half
+ *  one. That brings 128 to 84%; at 3 ms of jitter, nearer the measured
+ *  devices (cv 0.06 to 0.08), 97% at 100, 93% held to a tick, 96% this way.
+ *  Integer ticks cannot close the rest. See isSteadyBurst. */
 export const BEAT_SLACK = 1;
 /** A skipped beat is within this of twice the median. Measured 2026-09-24 on
- *  caramellow's pounce bursts: a flat 6 with skips reading 10 to 14. */
+ *  caramellow's pounce bursts: a flat 6 with skips reading 10 to 14. TIME:
+ *  wider than aliasing alone, because the device's jitter adds up over the
+ *  two beats: under 25 ms, so 3 ticks at 128. */
 export const SKIP_SLACK = 2;
 
 function median(xs: readonly number[]): number {
@@ -204,6 +295,14 @@ function median(xs: readonly number[]): number {
  * that misses a beat (the audit of 2026-09-24 found 11 to 13 tick gaps in flat
  * 6 tick bursts) is still on its clock.
  *
+ * Both windows are times (see BEAT_SLACK), compared exactly: at 100 tick a
+ * gap is a whole tick and a median a whole or half one, so "under 1.5 ticks"
+ * is "at most 1" and "under 2.5" is "at most 2", the rule as calibrated. At
+ * 128 they are under 1.92 and 3.2 ticks. The windows must also stay clear of
+ * each other in time: a median over 4 ticks (40 ms) at 100, over 5.12 at
+ * 128, so the skip window opens from a median of 5.5 there (43 ms) where it
+ * opens from 4.5 (45 ms) at 100.
+ *
  * The skipped-beat window counts only when it is clear of the single one, with
  * at least one tick between them that is neither. That holds from a median of
  * 5 up (4 to 6, then 8 to 12, with 7 between). At 4 the windows would be 3 to
@@ -211,26 +310,37 @@ function median(xs: readonly number[]): number {
  * allowing the skip window at every median turned 68 of Icy Inferno's 229 fast
  * bursts steady, against 13 with it held to this rule.
  */
-export function isSteadyBurst(intervals: readonly number[]): boolean {
+export function isSteadyBurst(intervals: readonly number[], rate: number = BASE_TICKRATE): boolean {
   const n = intervals.length;
   if (n < STEADY_MIN_INTERVALS) return false;
   const m = median(intervals);
-  const skips = (2 * m - SKIP_SLACK) - (m + BEAT_SLACK) > 1;
+  // Both windows as times, compared in hundredths of a tick so the result at
+  // 100 tick is exact: |t - m| is a whole or half tick there, and under
+  // BEAT_SLACK + 0.5 is the same as at most BEAT_SLACK.
+  const within = (d: number, slack: number): boolean => Math.abs(d) * BASE_TICKRATE < (slack + 0.5) * rate;
+  const skips = m * BASE_TICKRATE > (BEAT_SLACK + SKIP_SLACK + 1) * rate;
   let on = 0;
   for (const t of intervals) {
-    if (Math.abs(t - m) <= BEAT_SLACK || (skips && Math.abs(t - 2 * m) <= SKIP_SLACK)) on++;
+    if (within(t - m, BEAT_SLACK) || (skips && within(t - 2 * m, SKIP_SLACK))) on++;
   }
   return on / n >= STEADY_SHARE;
 }
 
-/** A slow wheel: at least this share of presses down for one usercmd. */
+/** A slow wheel: at least this share of presses down for one usercmd (a
+ *  share of a RESOLUTION reading, see oneTickFrac). */
 export const WHEEL_ONE_TICK_SHARE = 0.8;
 /** A fast wheel: at least this share of gaps at or under FAST_GAP_TICKS.
  *  Three ticks is 33 presses/s, three times the measured human finger peak of
- *  10.9/s (77 players over 3 s, 2026-09-24). */
+ *  10.9/s (77 players over 3 s, 2026-09-24). TIME: "2 and 3 tick gaps no
+ *  finger reaches" is 20 to 30 ms, so it is 4 ticks at 128 (ticksAtMost);
+ *  left at 3, a fast wheel's 30 ms gaps that read 4 there would stop
+ *  counting and it would read variable-hold. */
 export const WHEEL_FAST_GAP_SHARE = 0.25;
 export const FAST_GAP_TICKS = 3;
 
+/** RESOLUTION, both halves. Median 2 or more leaves out a wheel, whose
+ *  one-usercmd notches sometimes merge into 2; within one tick of the median
+ *  is aliasing (see nearMedianFrac). */
 function isFixedHold(h: HoldStats): boolean {
   return h.medianTicks >= 2 && h.nearMedianFrac >= 0.9;
 }
@@ -251,6 +361,8 @@ export function holdAnnotation(holds: readonly number[] | null | undefined): Hol
  * outvote another's one-tick ones, and the steady check reads one burst's
  * rhythm anyway.
  *
+ * `rate` is the tick rate the burst was recorded at (100 for none).
+ *
  * Wheel-shaped means one-tick holds (a slow wheel) OR fast gaps (a fast one).
  * Of those, a steady burst is a device and is checked FIRST: a script that
  * taps without holding looks exactly like a wheel by its holds, and a 33/s
@@ -260,15 +372,16 @@ export function holdAnnotation(holds: readonly number[] | null | undefined): Hol
  * with half its holds merged.
  */
 export function burstLabel(
-  intervals: readonly number[], holds: readonly number[] | null | undefined,
+  intervals: readonly number[], holds: readonly number[] | null | undefined, rate: number = BASE_TICKRATE,
 ): BurstLabel {
   const h = holdStats(holds);
   if (!h || h.n < MIN_HOLDS_TO_ANNOTATE) return 'no-hold-data';
+  const fastGap = ticksAtMost(FAST_GAP_TICKS, rate);
   let fast = 0;
-  for (const t of intervals) if (t <= FAST_GAP_TICKS) fast++;
+  for (const t of intervals) if (t <= fastGap) fast++;
   const wheelShaped = h.oneTickFrac >= WHEEL_ONE_TICK_SHARE
     || (intervals.length > 0 && fast / intervals.length >= WHEEL_FAST_GAP_SHARE);
-  if (wheelShaped) return isSteadyBurst(intervals) ? STEADY_TAPS : 'wheel-like';
+  if (wheelShaped) return isSteadyBurst(intervals, rate) ? STEADY_TAPS : 'wheel-like';
   if (isFixedHold(h)) return 'fixed-hold';
   return 'variable-hold';
 }
@@ -309,6 +422,8 @@ export interface SignatureBurst {
    *  signatures read them. */
   groundTicks?: number;
   serverTick?: number;
+  /** The tick rate it was recorded at; absent is 100. */
+  tickrate?: number | null;
 }
 
 /** Rates are presses per second, because that is the unit the measurements
@@ -349,9 +464,12 @@ export const MAX_RATE_CEILING = 30;
 
 /** Whether intervals summing to `sumTicks` over `n` gaps are at or above
  *  `rate` presses/s. Integer arithmetic, so the boundary is exact: 12/s is a
- *  mean of 8.33 ticks and no float decides which side 50/6 falls on. */
-export function atOrAboveRate(sumTicks: number, n: number, rate: number): boolean {
-  return n > 0 && sumTicks * rate <= TICKRATE * n;
+ *  mean of 8.33 ticks and no float decides which side 50/6 falls on. TIME by
+ *  construction: presses per second, at the burst's own `tickrate`. A mean
+ *  over several intervals does not alias the way one interval does, so no
+ *  half-tick allowance is needed. */
+export function atOrAboveRate(sumTicks: number, n: number, rate: number, tickrate: number = BASE_TICKRATE): boolean {
+  return n > 0 && sumTicks * rate <= tickrate * n;
 }
 
 /**
@@ -384,10 +502,11 @@ export function pounceSpam(
   if (burst.intervals.length < minIntervals) return false;
   let sum = 0;
   for (const t of burst.intervals) sum += t;
-  return atOrAboveRate(sum, burst.intervals.length, minRate);
+  return atOrAboveRate(sum, burst.intervals.length, minRate, rateOf(burst.tickrate));
 }
 
-/** Fewer than this and the mean is a handful of samples of noise. Six is the
+/** A count, so the same at every rate. Fewer than this and the mean is a
+ *  handful of samples of noise. Six is the
  *  shortest macro pounce that was measured (7 presses over 0.57 s), so the
  *  short pounce that killed the count threshold still qualifies. */
 export const MIN_POUNCE_INTERVALS = 6;
@@ -428,8 +547,9 @@ export const POUNCE_WEAPONS = new Set(['weapon_hunter_claw']);
 export function pistolRate(
   burst: SignatureBurst,
   minRate: number,
-  sustainTicks = PISTOL_SUSTAIN_TICKS,
+  sustainTicks = ticksFor(PISTOL_SUSTAIN_TICKS, rateOf(burst.tickrate)),
 ): boolean {
+  const tickrate = rateOf(burst.tickrate);
   if (burst.kind !== 'fire' || !PISTOL_WEAPONS.has(burst.weapon)) return false;
   const iv = burst.intervals;
   // Two pointers: for each end j, the SHORTEST window ending there that still
@@ -439,13 +559,16 @@ export function pistolRate(
   for (let j = 0; j < iv.length; j++) {
     sum += iv[j];
     while (sum - iv[i] >= sustainTicks) { sum -= iv[i]; i++; }
-    if (sum >= sustainTicks && atOrAboveRate(sum, j - i + 1, minRate)) return true;
+    if (sum >= sustainTicks && atOrAboveRate(sum, j - i + 1, minRate, tickrate)) return true;
   }
   return false;
 }
 
-/** Three seconds. At the 12/s threshold that is at least 36 presses. */
-export const PISTOL_SUSTAIN_TICKS = 3 * TICKRATE;
+/** Three seconds. At the 12/s threshold that is at least 36 presses. TIME: a
+ *  window we chose, so it is ticksFor(300) = 384 ticks at 128. A sum of many
+ *  intervals is the first press to the last, off by a tick at most, so it
+ *  needs no half-tick rule. The 100 tick value. */
+export const PISTOL_SUSTAIN_TICKS = 3 * BASE_TICKRATE;
 
 /** Three seconds at 12/s is already far outside a hand, so two bursts are
  *  enough to call it a pattern rather than a capture glitch. */
@@ -485,15 +608,21 @@ export const SIGNATURES: readonly Signature[] = [
  *
  * A hop is CHAINED when it comes within AUTOBHOP_CHAIN_TICKS of the previous
  * one, i.e. the player is bunnyhopping rather than jumping once.
+ *
+ * Ground 0 is RESOLUTION: a script presses jump on the usercmd it lands, at
+ * any rate. At 128 tick a hand or a wheel has a narrower window to hit by
+ * chance, so honest shares can only fall there. The chain window is TIME
+ * (1.2 s) and is read at the later hop's rate.
  */
 export function autobhop(bursts: readonly SignatureBurst[]): { qualifying: number[]; completing: number; chained: number; perfect: number; longestRun: number } | null {
-  const hops = bursts.flatMap((b, i) => (b.kind === 'bhop' && b.groundTicks !== undefined && b.serverTick !== undefined ? [{ i, g: b.groundTicks, t: b.serverTick }] : []));
+  const hops = bursts.flatMap((b, i) => (b.kind === 'bhop' && b.groundTicks !== undefined && b.serverTick !== undefined
+    ? [{ i, g: b.groundTicks, t: b.serverTick, rate: rateOf(b.tickrate) }] : []));
   let chained = 0, perfect = 0, run = 0, longestRun = 0, completing = -1;
   const qualifying: number[] = [];
   for (let k = 1; k < hops.length; k++) {
     const dt = hops[k].t - hops[k - 1].t;
     // A server tick that runs backwards is a new map: never the same chain.
-    if (dt <= 0 || dt >= AUTOBHOP_CHAIN_TICKS) { run = 0; continue; }
+    if (dt <= 0 || dt >= ticksFor(AUTOBHOP_CHAIN_TICKS, hops[k].rate)) { run = 0; continue; }
     chained++;
     if (hops[k].g === 0) {
       perfect++;
@@ -513,9 +642,11 @@ export function autobhop(bursts: readonly SignatureBurst[]): { qualifying: numbe
   return { qualifying, completing, chained, perfect, longestRun };
 }
 
-/** 1.2 s at 100 tick. A bunnyhop lands and leaves again well inside it. */
+/** 1.2 s at 100 tick (154 ticks at 128). A bunnyhop lands and leaves again
+ *  well inside it. TIME, a window we chose: see ticksFor. */
 export const AUTOBHOP_CHAIN_TICKS = 120;
-/** Fewer chained hops and the share is a handful of samples. */
+/** Fewer chained hops and the share is a handful of samples. This and the
+ *  share are counts, the same at any rate. */
 export const AUTOBHOP_MIN_CHAINED = 20;
 /** Between the honest maximum (0.54) and the confirmed script (0.72). */
 export const AUTOBHOP_SHARE = 0.65;

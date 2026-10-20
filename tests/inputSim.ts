@@ -12,6 +12,8 @@
  * its false positive and detection rates before it ships, not to prove them.
  */
 
+import { burstMaxTicks } from '../src/inputStats.js';
+
 const TICK_MS = 10;
 
 /** mulberry32: tiny, seedable, and good enough for a Monte Carlo. */
@@ -52,16 +54,19 @@ export function macro(ratePerSec: number, jitterMs = 0): Presser {
 
 /** Tick intervals between presses over `durationMs`, as the plugin records
  *  them: press times floored to ticks, zero-tick intervals impossible because
- *  a press edge needs a released sample in between. */
-export function burst(p: Presser, durationMs: number, r: () => number): number[] {
+ *  a press edge needs a released sample in between. `rate` is the server's
+ *  tick rate; at 100 this is exactly the calibrated simulator. */
+export function burst(p: Presser, durationMs: number, r: () => number, rate = 100): number[] {
+  const tickMs = rate === 100 ? TICK_MS : 1000 / rate;
+  const cap = burstMaxTicks(rate);
   const out: number[] = [];
-  let t = r() * TICK_MS + r() * p.nextMs(r);
+  let t = r() * tickMs + r() * p.nextMs(r);
   let lastTick = -1;
   while (t < durationMs) {
-    const tick = Math.floor(t / TICK_MS);
+    const tick = Math.floor(t / tickMs);
     if (lastTick >= 0) {
       const d = tick - lastTick;
-      if (d >= 1 && d <= 30) out.push(d);
+      if (d >= 1 && d <= cap) out.push(d);
     }
     lastTick = tick;
     t += p.nextMs(r);

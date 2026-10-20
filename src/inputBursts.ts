@@ -3,7 +3,7 @@ import { getSetting } from './settings.js';
 import { rerunStalls } from './inputStalls.js';
 import {
   DEFAULT_THRESHOLDS, MATCH_SIGNATURES, MAX_HOLDS, MAX_RATE_CEILING, MIN_RATE_FLOOR, SIGNATURES, burstStats, decodeIntervals,
-  burstLabel, detectionLabel, encodeIntervals, holdStats, isWheel, matchDetections,
+  MAX_INTERVALS, burstLabel, burstMaxTicks, detectionLabel, encodeIntervals, holdStats, isWheel, matchDetections, rateOf,
   type BurstLabel, type HoldStats, type Thresholds,
 } from './inputStats.js';
 
@@ -65,6 +65,9 @@ export interface InputBurstInput {
   serverSpan?: number | null;
   /** How long each press was held, one per press. Null from plugin 0.1.0. */
   holds?: number[] | null;
+  /** The server's tick rate, from plugin 0.5.0's `rate=`. Absent or null is
+   *  100, which is what every earlier line was recorded at. */
+  tickrate?: number | null;
 }
 
 export interface StoredBurst {
@@ -87,11 +90,11 @@ export function recordInputBurst(
   const encoded = encodeIntervals(b.intervals);
   const info = db.prepare(
     `INSERT INTO input_bursts (match_id, server_id, steamid, kind, weapon, n, ground_ticks,
-       air_presses, server_tick, client_tick, intervals, at, wire, server_span, holds)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       air_presses, server_tick, client_tick, intervals, at, wire, server_span, holds, tickrate)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(b.matchId, b.serverId, b.steamid, b.kind, b.weapon, b.intervals.length,
         b.groundTicks, b.airPresses, b.serverTick, b.clientTick, encoded, iso,
-        b.wire ?? 1, b.serverSpan ?? null, b.holds ? encodeIntervals(b.holds) : null);
+        b.wire ?? 1, b.serverSpan ?? null, b.holds ? encodeIntervals(b.holds) : null, b.tickrate ?? null);
   const id = Number(info.lastInsertRowid);
   // A repeat needs a match to repeat within, and the group query below is only
   // worth running when this burst could have moved a count.
@@ -106,7 +109,12 @@ export function recordInputBurst(
 
 interface GroupRow {
   id: number; kind: string; weapon: string; intervals: string; at: string; wire: number; holds: string | null;
-  groundTicks: number; serverTick: number;
+  groundTicks: number; serverTick: number; tickrate: number | null;
+}
+
+/** A stored series, read at the cap of the rate it was recorded at. */
+function decodeStored(s: string, tickrate: number | null, maxLength = MAX_INTERVALS): number[] | null {
+  return decodeIntervals(s, maxLength, burstMaxTicks(rateOf(tickrate)));
 }
 
 /**
@@ -121,9 +129,11 @@ interface GroupRow {
  * another's one-tick ones, and a fast wheel read as variable-hold.
  */
 function evidenceNote(
-  evidence: readonly { wire: number; holds: string | null; intervals: readonly number[] }[],
+  evidence: readonly { wire: number; holds: string | null; intervals: readonly number[]; tickrate: number | null }[],
 ): string {
-  const labels = evidence.map((e) => burstLabel(e.intervals, e.holds ? decodeIntervals(e.holds, MAX_HOLDS) : null));
+  const labels = evidence.map((e) => burstLabel(
+    e.intervals, e.holds ? decodeStored(e.holds, e.tickrate, MAX_HOLDS) : null, rateOf(e.tickrate),
+  ));
   const note: string = detectionLabel(labels);
   return evidence.some((e) => e.wire === 1) ? `${note}, plugin 0.1.0 capture` : note;
 }
@@ -136,11 +146,11 @@ function evaluateGroup(
   db: DB, matchId: number, steamid: string, thresholds: Thresholds, opts: { matchSignatures?: boolean } = {},
 ): { signature: string; note: string }[] {
   const rows = db.prepare(
-    `SELECT id, kind, weapon, intervals, at, wire, holds, ground_ticks AS groundTicks, server_tick AS serverTick
+    `SELECT id, kind, weapon, intervals, at, wire, holds, ground_ticks AS groundTicks, server_tick AS serverTick, tickrate
      FROM input_bursts WHERE match_id = ? AND steamid = ? ORDER BY id`,
   ).all(matchId, steamid) as GroupRow[];
   const bursts = rows.flatMap((r) => {
-    const intervals = decodeIntervals(String(r.intervals));
+    const intervals = decodeStored(String(r.intervals), r.tickrate);
     return intervals ? [{ ...r, intervals }] : [];
   });
   const created: { signature: string; note: string }[] = [];
@@ -189,6 +199,8 @@ export interface EvidenceBurst {
   wire: number;
   /** Server ticks the burst spanned, to set against presses and rate. */
   serverSpan: number | null;
+  /** The tick rate every tick count here is at: 100 unless the line said. */
+  tickrate: number;
   hold: HoldStats | null;
   /** This burst's own label, from its holds and its gaps. */
   annotation: BurstLabel;
@@ -223,17 +235,21 @@ export function detectionsForPlayer(db: DB, steamid: string, limit = 50): Detect
 function evidenceBursts(db: DB, ids: readonly number[]): EvidenceBurst[] {
   if (ids.length === 0) return [];
   const rows = db.prepare(
-    `SELECT id, at, weapon, intervals, wire, server_span AS serverSpan, holds
+    `SELECT id, at, weapon, intervals, wire, server_span AS serverSpan, holds, tickrate
      FROM input_bursts WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY id`,
-  ).all(...ids) as { id: number; at: string; weapon: string; intervals: string; wire: number; serverSpan: number | null; holds: string | null }[];
+  ).all(...ids) as {
+    id: number; at: string; weapon: string; intervals: string; wire: number; serverSpan: number | null;
+    holds: string | null; tickrate: number | null;
+  }[];
   return rows.map((r) => {
-    const intervals = decodeIntervals(String(r.intervals)) ?? [];
-    const stats = burstStats(intervals);
-    const holds = r.holds ? decodeIntervals(r.holds, MAX_HOLDS) : null;
+    const rate = rateOf(r.tickrate);
+    const intervals = decodeStored(String(r.intervals), r.tickrate) ?? [];
+    const stats = burstStats(intervals, rate);
+    const holds = r.holds ? decodeStored(r.holds, r.tickrate, MAX_HOLDS) : null;
     return {
       id: r.id, at: r.at, weapon: r.weapon, presses: stats.n + 1,
       ratePerSec: stats.ratePerSec, meanTicks: stats.meanTicks,
-      wire: r.wire, serverSpan: r.serverSpan, hold: holdStats(holds), annotation: burstLabel(intervals, holds),
+      wire: r.wire, serverSpan: r.serverSpan, tickrate: rate, hold: holdStats(holds), annotation: burstLabel(intervals, holds, rate),
     };
   });
 }

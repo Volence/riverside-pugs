@@ -1,7 +1,7 @@
 import { GG_EVENTS, type GgEvent, type GgLine } from './ggVotes.js';
 import type { LiveHudLine, TankDone, WitchDone } from './cast/liveHud.js';
 import { steamId64Of } from './steamId.js';
-import { MAX_HOLDS, decodeIntervals } from './inputStats.js';
+import { MAX_HOLDS, MAX_TICKRATE, MIN_TICKRATE, burstMaxTicks, decodeIntervals, rateOf, ticksAtMost } from './inputStats.js';
 import { eventExtrasOf, parseDataFeedLine, type DataFeedEvent } from './dataFeedParse.js';
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
@@ -267,6 +267,8 @@ export type LogEvent =
       wire: 1 | 2; serverSpan: number | null;
       // How long each press was held, one per PRESS; null from plugin 0.1.0.
       holds: number[] | null;
+      // The server's tick rate (plugin 0.5.0 `rate=`). Absent is 100.
+      tickrate?: number;
     }
   // The plugin's budget for one kind of burst ran out for this player this
   // round: everything of that kind after it, until the round ends, is missing.
@@ -277,6 +279,8 @@ export type LogEvent =
   | {
       kind: 'input_stall'; steamid: string; serverTick: number; gap: number; missed: number; cmds: number;
       team: number; cls: number; lunging: number;
+      // As on a burst: plugin 0.5.0's `rate=`, absent is 100.
+      tickrate?: number;
     }
   // l4d_inputstats 0.4.0: a human survivor killed a human SI, for the aim
   // rules (src/aimRules.ts). `pre` is the largest view change, in degrees
@@ -689,6 +693,13 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
   if (body.startsWith('L4DM ')) {
     const f = kv(body.split(/\s+/).slice(1));
     const steamid = steamId64Of(f.id ?? '');
+    // Plugin 0.5.0 says the server's tick rate on burst and stall lines, and
+    // every tick count on the line is at that rate. Absent is 100, which is
+    // what every earlier plugin ran at. Outside the rates a server can run,
+    // the line is refused: the counts would mean nothing we can read.
+    const tickrate = f.rate === undefined ? undefined : intRange(f.rate, MIN_TICKRATE, MAX_TICKRATE);
+    if (tickrate === null) return null;
+    const rated = tickrate === undefined ? {} : { tickrate };
     // A stall (plugin 0.3.0). Every field is a small integer the plugin made;
     // anything else refuses the line.
     if (f.k === 'stall') {
@@ -696,12 +707,14 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
         const v = intOf(f[k]);
         return v !== null && v >= lo && v <= hi ? v : null;
       };
-      const tick = n('st', 0, MAX_TICK_COUNTER), gap = n('gap', 1, 100), missed = n('miss', 0, 10_000);
+      // The plugin's one second ceiling on a stall, at the line's rate.
+      const tick = n('st', 0, MAX_TICK_COUNTER), gap = n('gap', 1, ticksAtMost(100, rateOf(tickrate)));
+      const missed = n('miss', 0, 10_000);
       const cmds = n('cmds', 0, 10_000), team = n('team', 0, 3), cls = n('cls', 0, 8);
       const lunging = f.lunge === '-1' ? -1 : n('lunge', 0, 1);
       if (!steamid || f.v !== '2') return null;
       if (tick === null || gap === null || missed === null || cmds === null || team === null || cls === null || lunging === null) return null;
-      return { kind: 'input_stall', steamid, serverTick: tick, gap, missed, cmds, team, cls, lunging };
+      return { kind: 'input_stall', steamid, serverTick: tick, gap, missed, cmds, team, cls, lunging, ...rated };
     }
     // An SI kill (plugin 0.4.0). Its own wire version, 3: the stall and
     // burst branches still require 2, and this is a new shape. Every field is
@@ -737,7 +750,10 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     const airPresses = intOf(f.a);
     const serverTick = intOf(f.st);
     const clientTick = intOf(f.ct);
-    const intervals = decodeIntervals(f.d ?? '');
+    // A burst closes after 300 ms of silence, so the largest interval or hold
+    // the plugin can send depends on the rate: 30 at 100 tick, 38 at 128.
+    const maxTicks = burstMaxTicks(rateOf(tickrate));
+    const intervals = decodeIntervals(f.d ?? '', undefined, maxTicks);
     if (!steamid || !intervals) return null;
     if (burstKind !== 'fire' && burstKind !== 'pounce' && burstKind !== 'bhop') return null;
     if (n === null || n !== intervals.length) return null;
@@ -756,11 +772,11 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     if (f.sp !== undefined && (serverSpan === null || serverSpan < 0 || serverSpan > MAX_TICK_COUNTER)) return null;
     // One hold per press, so one more than the gaps between them. A bhop line
     // is a single jump whose one interval is a placeholder: one hold.
-    const holds = f.h === undefined ? null : decodeIntervals(f.h, MAX_HOLDS);
+    const holds = f.h === undefined ? null : decodeIntervals(f.h, MAX_HOLDS, maxTicks);
     if (f.h !== undefined && (!holds || holds.length !== (burstKind === 'bhop' ? 1 : n + 1))) return null;
     return {
       kind: 'input_burst', steamid, burstKind, weapon, groundTicks, airPresses, serverTick, clientTick, intervals,
-      wire, serverSpan, holds,
+      wire, serverSpan, holds, ...rated,
     };
   }
 

@@ -1261,7 +1261,10 @@ CREATE TABLE IF NOT EXISTS input_bursts (
   -- tick), a scripted hold (constant) and a hand (5 to 12 ticks, never the
   -- same), and unlike a signature it cannot be backfilled: if it was not
   -- captured, it is gone.
-  holds TEXT
+  holds TEXT,
+  -- The tick rate every tick count on the row is at (l4d_inputstats 0.5.0).
+  -- NULL is 100, what every earlier row was recorded at.
+  tickrate INTEGER
 );
 CREATE INDEX IF NOT EXISTS input_bursts_match ON input_bursts(match_id);
 CREATE INDEX IF NOT EXISTS input_bursts_steamid ON input_bursts(steamid, at);
@@ -1296,7 +1299,9 @@ CREATE TABLE IF NOT EXISTS input_stalls (
   team INTEGER NOT NULL,
   cls INTEGER NOT NULL,
   lunging INTEGER NOT NULL,
-  at TEXT NOT NULL
+  at TEXT NOT NULL,
+  -- The tick rate gap is counted at (l4d_inputstats 0.5.0); NULL is 100.
+  tickrate INTEGER
 );
 CREATE INDEX IF NOT EXISTS input_stalls_match ON input_stalls(match_id, steamid);
 
@@ -1889,6 +1894,11 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'input_bursts', 'wire', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'input_bursts', 'server_span', 'INTEGER');
   ensureColumn(db, 'input_bursts', 'holds', 'TEXT');
+  // The server's tick rate a burst or a stall was recorded at, from
+  // l4d_inputstats 0.5.0's rate=. NULL is 100: every row before it was
+  // recorded at 100 tick, and src/inputStats.ts reads NULL that way.
+  ensureColumn(db, 'input_bursts', 'tickrate', 'INTEGER');
+  ensureColumn(db, 'input_stalls', 'tickrate', 'INTEGER');
   ensureColumn(db, 'input_detections', 'note', "TEXT NOT NULL DEFAULT ''");
   // How many survivors were still standing when the round ended. NULL, not 0,
   // as the default: every round recorded before the plugin emitted this was

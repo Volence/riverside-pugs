@@ -1028,7 +1028,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (matchId === null) return;
             const { created } = recordInputStall(deps.db, {
               matchId, serverId, steamid: ev.steamid, serverTick: ev.serverTick, gap: ev.gap, missed: ev.missed,
-              cmds: ev.cmds, team: ev.team, cls: ev.cls, lunging: ev.lunging,
+              cmds: ev.cmds, team: ev.team, cls: ev.cls, lunging: ev.lunging, tickrate: ev.tickrate ?? null,
             });
             if (created) {
               publishAdminEvent({ kind: 'input_flag', steamid: ev.steamid, matchId, signature: 'fakelag', detail: created });
@@ -1070,7 +1070,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               matchId, serverId, steamid: ev.steamid, kind: ev.burstKind, weapon: ev.weapon,
               airPresses: ev.airPresses, groundTicks: ev.groundTicks,
               serverTick: ev.serverTick, clientTick: ev.clientTick, intervals: ev.intervals,
-              wire: ev.wire, serverSpan: ev.serverSpan, holds: ev.holds,
+              wire: ev.wire, serverSpan: ev.serverSpan, holds: ev.holds, tickrate: ev.tickrate ?? null,
             }, inputThresholds(deps.db));
             // `detections` names a signature only on the burst that completed
             // its repeat count, so this posts once per player, match and
