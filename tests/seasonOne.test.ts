@@ -159,6 +159,34 @@ describe('season 1', () => {
   });
 });
 
+describe('season-end trophies', () => {
+  it('freezes the highest rank held all season, and the profile shows it as the trophy', async () => {
+    startNewSeason(db, 'Season 1');
+    const s1 = currentSeasonId(db);
+    let maxSeen = -1;
+    const results: ('a' | 'b')[] = [...Array(10).fill('a'), ...Array(14).fill('b')];
+    for (const w of results) {
+      play(w);
+      const e = seasonLadder(db, s1).get(IDS[0]);
+      if (e?.rankIdx != null) maxSeen = Math.max(maxSeen, e.rankIdx);
+    }
+    const endIdx = seasonLadder(db, s1).get(IDS[0])!.rankIdx!;
+    expect(maxSeen).toBeGreaterThan(endIdx);
+    startNewSeason(db, 'Season 2');
+    const frozen = db.prepare('SELECT rank_idx, peak_rank_idx FROM season_results WHERE season_id = ? AND player_id = ?').get(s1, IDS[0]) as { rank_idx: number; peak_rank_idx: number };
+    expect(frozen).toEqual({ rank_idx: endIdx, peak_rank_idx: maxSeen });
+    const prof = await get(`/api/players/${IDS[0]}`);
+    expect(prof.pastSeasons.find((p: any) => p.seasonId === s1)).toMatchObject({ peakRank: rankView(maxSeen).name, rank: rankView(endIdx).name });
+  });
+
+  it('a season without ranks has no peak-rank trophy', async () => {
+    play('a');
+    startNewSeason(db, 'Season 1');
+    const prof = await get(`/api/players/${IDS[0]}`);
+    expect(prof.pastSeasons[0]).toMatchObject({ peakRank: null });
+  });
+});
+
 describe('season 1 review fixes', () => {
   it('a frozen season never shows the SR of a player who did not place', async () => {
     startNewSeason(db, 'Season 1');

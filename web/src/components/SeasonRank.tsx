@@ -65,3 +65,23 @@ export function PlacingTag({ placing }: { placing: Placing }) {
 export function Top10Tag() {
   return <span class="top10tag" title="Top 10 this season">Top 10</span>;
 }
+
+/** A season-end trophy: the highest rank someone held in a finished season,
+ *  kept on their profile for good, with a Top 10 ribbon for a final place in
+ *  the Top 10. A season without ranks (Season 0) only has the Top 10 one. */
+export function Trophy({ season, peakRank, place }: { season: string; peakRank: string | null; place: number | null }) {
+  const tier = peakRank ? peakRank.split(' ')[0].toLowerCase() : 'top10';
+  const emblem = peakRank ? emblemUrl(peakRank) : null;
+  return (
+    <figure class={`trophy rankbadge--${tier}`} title={peakRank ? `${season}: peak ${peakRank}` : `${season}: Top 10`}>
+      <div class="trophy__art">
+        {emblem ? <img src={emblem} alt="" aria-hidden="true" /> : <span class="trophy__medal" aria-hidden="true">{`#${place}`}</span>}
+        {emblem && place !== null && place <= 10 && <span class="trophy__ribbon">{`#${place}`}</span>}
+      </div>
+      <figcaption>
+        <span class="trophy__season">{season}</span>
+        <span class="trophy__what">{peakRank ? `Peak ${peakRank}` : 'Top 10'}</span>
+      </figcaption>
+    </figure>
+  );
+}

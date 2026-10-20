@@ -113,7 +113,7 @@ describe('PUGRQ parsing', () => {
 
 describe('end note text', () => {
   const entry = (o: Partial<LadderEntry>): LadderEntry => ({
-    steamid: IDS[0], mu: 25, sigma: 3, wins: 0, losses: 0, games: 10, sr: 1900, placed: true, rankIdx: 6, peakSr: 1900, ...o,
+    steamid: IDS[0], mu: 25, sigma: 3, wins: 0, losses: 0, games: 10, sr: 1900, placed: true, rankIdx: 6, peakSr: 1900, peakRankIdx: 6, ...o,
   });
 
   it('gives the SR change every match, with the rank', () => {

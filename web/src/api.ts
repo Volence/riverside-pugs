@@ -222,6 +222,8 @@ export interface PastSeason {
   /** sr and peakSr are null when they never finished that season's placement. */
   seasonId: number; name: string; sr: number | null; peakSr: number | null; placed: boolean; wins: number; losses: number; games: number;
   finalRank: number | null; of: number; rank: string | null; top10: boolean;
+  /** The highest rank held that season (the season-end trophy). Optional: an older server sends none. */
+  peakRank?: string | null;
 }
 
 export interface LeaderboardRow {

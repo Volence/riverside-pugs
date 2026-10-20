@@ -136,6 +136,9 @@ export interface LadderEntry {
   rankIdx: number | null;
   /** Highest SR since placement, null while placing. */
   peakSr: number | null;
+  /** Highest rank held at any point this season (the season-end trophy),
+   *  null while placing or in a season without ranks. */
+  peakRankIdx: number | null;
 }
 
 /**
@@ -158,7 +161,7 @@ export function seasonLadder(db: DB, seasonId: number, only?: string): Map<strin
     out.set(r.player_id, {
       steamid: r.player_id, mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses,
       games: 0, sr: srUnder(rules, r.mu, r.sigma), placed: rules.placementGames === 0,
-      rankIdx: null, peakSr: null,
+      rankIdx: null, peakSr: null, peakRankIdx: null,
     });
   }
   for (const h of hist) {
@@ -169,7 +172,10 @@ export function seasonLadder(db: DB, seasonId: number, only?: string): Map<strin
     const sr = srUnder(rules, h.mu_after, h.sigma_after);
     e.placed = true;
     e.peakSr = e.peakSr === null ? sr : Math.max(e.peakSr, sr);
-    if (rules.ranks) e.rankIdx = rankAfter(e.rankIdx, sr);
+    if (rules.ranks) {
+      e.rankIdx = rankAfter(e.rankIdx, sr);
+      e.peakRankIdx = e.peakRankIdx === null ? e.rankIdx : Math.max(e.peakRankIdx, e.rankIdx);
+    }
   }
   // A season with no placement shows SR from the start, so a peak exists
   // before any game too; the current SR stands in.
