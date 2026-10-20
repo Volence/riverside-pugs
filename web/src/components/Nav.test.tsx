@@ -20,6 +20,10 @@ describe('NAV_LINKS', () => {
     expect(NAV_LINKS.find(([href]) => href === '/balance')?.[1]).toBe('Patch notes');
   });
 
+  it('offers News, which holds staff announcements and quick patch notes', () => {
+    expect(NAV_LINKS.find(([href]) => href === '/news')?.[1]).toBe('News');
+  });
+
   it('folds the crosshair maker, HUD editor and community into one HUD item', () => {
     // They were three top-level items; the HUD page's own tab strip now
     // reaches all three, so the nav carries only the section.
@@ -205,6 +209,10 @@ describe('Nav current page', () => {
 
   it.each(['/balance', '/balance/values'])('marks Patch notes current on %s', (path) => {
     expect(at(path)).toEqual(['Patch notes']);
+  });
+
+  it.each(['/news', '/news/3'])('marks News current on %s', (path) => {
+    expect(at(path)).toEqual(['News']);
   });
 
   it('marks only the matching item elsewhere', () => {

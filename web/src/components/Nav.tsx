@@ -31,6 +31,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
   ['/balance', 'Patch notes'],
+  ['/news', 'News'],
   ['/maps', 'Campaigns'],
   ['/custom-campaigns', 'Custom'],
   ['/hud', 'HUD'],
@@ -45,6 +46,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
 function isCurrent(href: string, path: string): boolean {
   if (href === '/hud') return hudTabFor(path) !== null;
   if (href === '/balance') return path === href || path.startsWith('/balance/');
+  if (href === '/news') return path === href || path.startsWith('/news/');
   if (href === '/events' || href === '/scrims') return competeTabFor(path) !== null;
   return path === href;
 }
