@@ -106,6 +106,17 @@ describe('news routes: public reads', () => {
     expect(latest.posts[0].title).toBe('Post 12');
   });
 
+  it('narrows the list to one kind for /patch-notes, and ignores an unknown kind', async () => {
+    for (const [kind, title] of [['news', 'Launch'], ['patch', 'Patch notes Oct 21'], ['patch', 'Patch notes Oct 22']] as const) {
+      const id = await draft({ kind, title });
+      db.prepare('UPDATE news_posts SET published_at = ? WHERE id = ?').run('2026-10-21T12:00:00.000Z', id);
+    }
+    const patch = (await call('GET', '/api/news?kind=patch')).json();
+    expect(patch.total).toBe(2);
+    expect(patch.posts.every((p: { kind: string }) => p.kind === 'patch')).toBe(true);
+    expect((await call('GET', '/api/news?kind=bogus')).json().total).toBe(3);
+  });
+
   it('stores the body as written and never turns it into HTML', async () => {
     const body = '<script>alert(1)</script>\n[x](javascript:alert(1))';
     const id = await draft({ body });

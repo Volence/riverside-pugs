@@ -30,7 +30,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/streams', 'Streams'],
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Matches'],
-  ['/balance', 'Patch notes'],
+  ['/patch-notes', 'Patch notes'],
   ['/news', 'News'],
   ['/maps', 'Campaigns'],
   ['/custom-campaigns', 'Custom'],
@@ -45,7 +45,9 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
  *  other) and stands for every competitive page, detail pages included. */
 function isCurrent(href: string, path: string): boolean {
   if (href === '/hud') return hudTabFor(path) !== null;
-  if (href === '/balance') return path === href || path.startsWith('/balance/');
+  // Patch notes stands for the hand-written notes and the full change log
+  // under them (/balance, Game values).
+  if (href === '/patch-notes') return path === href || path === '/balance' || path.startsWith('/balance/');
   if (href === '/news') return path === href || path.startsWith('/news/');
   if (href === '/events' || href === '/scrims') return competeTabFor(path) !== null;
   return path === href;

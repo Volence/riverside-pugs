@@ -3433,9 +3433,9 @@ export interface NewsInput { kind: NewsKind; title: string; body: string }
 export const NEWS_BODY_MAX = 20_000;
 
 export const newsApi = {
-  list: (signal?: AbortSignal, page = 1, limit?: number) =>
+  list: (signal?: AbortSignal, page = 1, limit?: number, kind?: NewsKind) =>
     get<{ posts: NewsPost[]; page: number; pages: number; total: number }>(
-      `/api/news?page=${page}${limit ? `&limit=${limit}` : ''}`, signal,
+      `/api/news?page=${page}${limit ? `&limit=${limit}` : ''}${kind ? `&kind=${kind}` : ''}`, signal,
     ),
   post: (id: number, signal?: AbortSignal) => get<{ post: NewsPost }>(`/api/news/${id}`, signal),
   editor: (signal?: AbortSignal) => get<NewsEditorState>('/api/admin/news', signal),

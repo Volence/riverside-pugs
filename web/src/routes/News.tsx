@@ -23,14 +23,21 @@ function Meta({ post }: { post: Pick<NewsPost, 'kind' | 'publishedAt' | 'author'
   );
 }
 
-/** /news: every published post, newest first, ten to a page (?page=2). */
-export function News() {
+/** /news: every published post, newest first, ten to a page (?page=2).
+ *  With kind="patch" it is /patch-notes: only the hand-written patch notes,
+ *  with a way to the full change log the balance tracker keeps (/balance). */
+export function News({ kind }: { kind?: NewsKind } = {}) {
   const { query } = useLocation();
   const page = Math.max(1, Math.floor(Number(query.page) || 1));
-  const { data, error } = useFetch((s) => newsApi.list(s, page), [page]);
+  const { data, error } = useFetch((s) => newsApi.list(s, page, undefined, kind), [page, kind]);
+  const base = kind === 'patch' ? '/patch-notes' : '/news';
   return (
     <div class="page page--news">
-      <PageHeader eyebrow="Riverside" title="News" />
+      {kind === 'patch' ? (
+        <PageHeader eyebrow="Riverside" title="Patch notes">
+          <p>What changed and why, in plain words. Every exact number the game tracks is in the <a href="/balance">full change log</a>.</p>
+        </PageHeader>
+      ) : <PageHeader eyebrow="Riverside" title="News" />}
       {error && <Panel><p class="error">Could not load the news.</p></Panel>}
       {!error && !data && <Panel><p class="muted">Loading...</p></Panel>}
       {data && data.posts.length === 0 && <Panel><Empty>Nothing posted yet.</Empty></Panel>}
@@ -49,13 +56,18 @@ export function News() {
       )}
       {data && data.pages > 1 && (
         <nav class="news__pager" aria-label="Pages">
-          {page > 1 && <a class="chip" href={page === 2 ? '/news' : `/news?page=${page - 1}`}>Newer</a>}
+          {page > 1 && <a class="chip" href={page === 2 ? base : `${base}?page=${page - 1}`}>Newer</a>}
           <span class="muted">Page {page} of {data.pages}</span>
-          {page < data.pages && <a class="chip" href={`/news?page=${page + 1}`}>Older</a>}
+          {page < data.pages && <a class="chip" href={`${base}?page=${page + 1}`}>Older</a>}
         </nav>
       )}
     </div>
   );
+}
+
+/** /patch-notes: the hand-written patch notes only. */
+export function PatchNotes() {
+  return <News kind="patch" />;
 }
 
 /** /news/:id: one post in full. */

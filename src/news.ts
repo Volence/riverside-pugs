@@ -121,12 +121,15 @@ export function getNewsRow(db: DB, id: number): NewsRow | undefined {
 }
 
 /** Published posts, newest first, one page at a time (pages count from 1). */
-export function listPublished(db: DB, page: number, pageSize = NEWS_PAGE_SIZE): { posts: NewsRow[]; total: number } {
-  const total = (db.prepare('SELECT COUNT(*) AS n FROM news_posts WHERE published_at IS NOT NULL AND deleted_at IS NULL').get() as { n: number }).n;
+export function listPublished(db: DB, page: number, pageSize = NEWS_PAGE_SIZE, kind: NewsKind | null = null): { posts: NewsRow[]; total: number } {
+  // `kind` narrows to one kind: /patch-notes lists only the patch posts.
+  const where = `published_at IS NOT NULL AND deleted_at IS NULL${kind ? ' AND kind = ?' : ''}`;
+  const args = kind ? [kind] : [];
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM news_posts WHERE ${where}`).get(...args) as { n: number }).n;
   const posts = db.prepare(
-    `SELECT * FROM news_posts WHERE published_at IS NOT NULL AND deleted_at IS NULL
+    `SELECT * FROM news_posts WHERE ${where}
      ORDER BY published_at DESC, id DESC LIMIT ? OFFSET ?`,
-  ).all(pageSize, (page - 1) * pageSize) as NewsRow[];
+  ).all(...args, pageSize, (page - 1) * pageSize) as NewsRow[];
   return { posts, total };
 }
 

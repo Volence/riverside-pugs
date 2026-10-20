@@ -13,7 +13,7 @@ export function GameValues() {
       <PageHeader eyebrow="Balance" title="Game values">
         <p>
           Every balance setting as our servers run it, next to the vanilla Left 4 Dead value. Changes
-          from vanilla are listed first in each group and highlighted. <a href="/balance">Patch notes</a> say why each change was made.
+          from vanilla are listed first in each group and highlighted. The <a href="/balance">full change log</a> says when and why each change was made.
         </p>
       </PageHeader>
       {error ? <Empty>Could not load the game values.</Empty>
