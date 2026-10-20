@@ -12,6 +12,7 @@ import { AdminTicket } from './admin/AdminTicket';
 import { AdminSettings } from './admin/AdminSettings';
 import { AdminAudit } from './admin/AdminAudit';
 import { AdminSeasons } from './admin/AdminSeasons';
+import { AdminNews } from './admin/AdminNews';
 import { AdminPatches } from './admin/AdminPatches';
 import { Compare } from './admin/balance/Compare';
 import { AdminFleet } from './admin/AdminFleet';
@@ -144,6 +145,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'setup' && r.section === 'fleet' && <AdminFleet />}
         {r.desk === 'setup' && r.section === 'deploy' && <AdminDeploy />}
         {r.desk === 'setup' && r.section === 'seasons' && <AdminSeasons />}
+        {r.desk === 'setup' && r.section === 'news' && <AdminNews />}
         {r.desk === 'setup' && r.section === 'rulesets' && <AdminRulesets />}
         {r.desk === 'setup' && r.section === 'configs' && <AdminGameConfigs />}
         {r.desk === 'setup' && r.section === 'settings' && <AdminSettings />}

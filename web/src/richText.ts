@@ -127,9 +127,11 @@ const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*\d{1,9}[.)]\s+(.*)$/;
 
 /** The whole text as blocks. Lines are joined into paragraphs, a single line
- *  break kept as a break; a blank line, a heading or a list ends one. */
-export function parseRichText(text: string): Block[] {
-  const lines = text.slice(0, RICH_TEXT_MAX).replace(/\r\n?/g, '\n').split('\n');
+ *  break kept as a break; a blank line, a heading or a list ends one. `max`
+ *  is where the text is cut: an event description's cap by default, a news
+ *  post's (src/news.ts NEWS_BODY_MAX) when one is shown. */
+export function parseRichText(text: string, max = RICH_TEXT_MAX): Block[] {
+  const lines = text.slice(0, max).replace(/\r\n?/g, '\n').split('\n');
   const blocks: Block[] = [];
   let para: string[] = [];
   let list: { ordered: boolean; items: Inline[][] } | null = null;

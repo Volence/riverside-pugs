@@ -1547,6 +1547,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Where the weekly recap and awards are posted. Empty posts nothing; the
   // week is still frozen for the site.
   discord_weekly_channel_id: '',
+  discord_news_channel_id: '',
   admin_feed_reports: '1',
   ticket_mod_ban_max_minutes: '10080',
   appeals_enabled: '0',
@@ -2930,6 +2931,30 @@ export function openDb(path: string): DB {
       at        TEXT    NOT NULL,
       PRIMARY KEY (match_id, player_id)
     );
+  `);
+  db.exec(`
+    -- News and patch notes staff write on the site (src/news.ts), and the
+    -- bot's copy of each in the news channel (src/discord/newsPoster.ts).
+    -- published_at NULL is a draft. body is the safe markdown subset, never
+    -- HTML. discord_state is the poster's queue: NULL (nothing to do),
+    -- 'pending', 'remove' or 'skipped'. A deleted post with a message still
+    -- up keeps its row (deleted_at set) until the message is gone.
+    CREATE TABLE IF NOT EXISTS news_posts (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind               TEXT    NOT NULL CHECK (kind IN ('news','patch')),
+      title              TEXT    NOT NULL,
+      body               TEXT    NOT NULL,
+      author_id          TEXT    NOT NULL,
+      created_at         TEXT    NOT NULL,
+      updated_at         TEXT    NOT NULL,
+      published_at       TEXT,
+      discord_message_id TEXT,
+      discord_channel_id TEXT,
+      discord_state      TEXT    CHECK (discord_state IN ('pending','remove','skipped')),
+      discord_error      TEXT,
+      deleted_at         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS news_posts_published ON news_posts (published_at);
   `);
 
   seed(db);

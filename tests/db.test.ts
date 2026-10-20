@@ -35,6 +35,7 @@ describe('openDb', () => {
       'match_si_lives', 'match_survivor_downs',
       'matches', 'matchmaker_state',
       'mod_calls',
+      'news_posts',
       'notification_prefs',
       'penalties', 'pending_reports', 'player_aliases', 'player_ingame_last', 'player_links', 'player_name_digest', 'player_name_uses', 'player_networks', 'player_notes', 'player_pack_status', 'player_pings', 'player_ratings',
       'player_reviews', 'player_steam_signals', 'players', 'practice_drills', 'practice_leases', 'queue_stints',

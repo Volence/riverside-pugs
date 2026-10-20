@@ -38,6 +38,15 @@ describe('the site route table', () => {
     open('/not-a-page');
     expect(await screen.findByText('Page not found')).toBeTruthy();
   });
+  it('mounts the news list and a news post, not the 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    const first = open('/news');
+    expect(await screen.findByText('Could not load the news.')).toBeTruthy();
+    first.unmount();
+    open('/news/5');
+    expect(await screen.findByText('Post not found')).toBeTruthy();
+  });
+
   it('mounts the community page and an entry page', async () => {
     // Nothing behind them is running here: every fetch is a 404.
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));

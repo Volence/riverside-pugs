@@ -25,6 +25,7 @@ import { HowToPlay } from './routes/HowToPlay';
 import { Appeal } from './routes/Appeal';
 import { HelpConsistency } from './routes/HelpConsistency';
 import { Practice } from './routes/Practice';
+import { News, NewsPostPage } from './routes/News';
 
 // The HUD editor carries ~170 KB of base HUD files, so it stays out of the main bundle.
 const Hud = lazy(() => import('./routes/Hud'));
@@ -103,6 +104,8 @@ export function AppRoutes(
       <Route path="/" component={Play} session={session} state={state} refresh={refresh} />
       <Route path="/leaderboard" component={Leaderboard} me={me} />
       <Route path="/matches" component={Matches} />
+      <Route path="/news" component={News} />
+      <Route path="/news/:id" component={NewsPostPage} />
       <Route path="/balance" component={BalanceNotes} />
       <Route path="/balance/values" component={GameValues} />
       <Route path="/live" component={Live} me={me} />
