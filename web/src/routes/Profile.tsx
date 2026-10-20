@@ -485,8 +485,8 @@ function SeasonHistory({ past }: { past: PastSeason[] }) {
                   {p.top10 && <Top10Tag />}
                 </td>
                 <td>{p.rank ? <SeasonRankBadge name={p.rank} /> : <span class="muted">–</span>}</td>
-                <td class="num">{p.sr}</td>
-                <td class="num">{p.peakSr}</td>
+                <td class="num">{p.sr ?? <span class="muted" title="Never finished placement">n/a</span>}</td>
+                <td class="num">{p.peakSr ?? <span class="muted">n/a</span>}</td>
                 <td class="num muted">{`${p.wins}W ${p.losses}L`}</td>
               </tr>
             ))}

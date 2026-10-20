@@ -26,12 +26,22 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
   const seasonId = requestedSeason ?? currentSeasonId(db);
   const season = db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string } | undefined;
   if (!season) return null;
-  const rows = db.prepare(
-    `SELECT pr.player_id AS steamid, p.name, p.avatar, pr.mu, pr.sigma, pr.wins, pr.losses,
+  // A finished season reads entirely from its frozen results, so a later
+  // ban, merge or recompute cannot reorder it or change a record; a live one
+  // from the ratings, banned players left out.
+  const frozenRows = db.prepare(
+    `SELECT r.player_id AS steamid, COALESCE(p.name, r.player_id) AS name, p.avatar, r.wins, r.losses, r.games,
+            r.sr, r.final_rank, r.rank_idx, r.placed
+     FROM season_results r LEFT JOIN players p ON p.steamid = r.player_id WHERE r.season_id = ?`,
+  ).all(seasonId) as { steamid: string; name: string; avatar: string | null; wins: number; losses: number; games: number; sr: number; final_rank: number | null; rank_idx: number | null; placed: number }[];
+  const frozen = new Map(frozenRows.map((f) => [f.steamid, f]));
+  const ended = frozen.size > 0;
+  const rows = ended ? frozenRows : db.prepare(
+    `SELECT pr.player_id AS steamid, p.name, p.avatar, pr.wins, pr.losses,
             (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = pr.player_id AND rh.season_id = pr.season_id) AS games
      FROM player_ratings pr JOIN players p ON p.steamid = pr.player_id
      WHERE pr.season_id = ? AND ${notBannedSql('pr.player_id')}`,
-  ).all(seasonId, now.toISOString()) as { steamid: string; name: string; avatar: string | null; mu: number; sigma: number; wins: number; losses: number; games: number }[];
+  ).all(seasonId, now.toISOString()) as { steamid: string; name: string; avatar: string | null; wins: number; losses: number; games: number }[];
   // Per-player season totals, so the leaderboard can be sorted by any stat
   // client side without a request per column. Two queries for the whole
   // table rather than one per player.
@@ -83,13 +93,8 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
   // season with frozen results reads its SR, place and rank from those, so a
   // later merge or recompute cannot reorder it.
   const rules = seasonRules(db, seasonId);
-  const ladder = seasonLadder(db, seasonId);
-  const top = topTen(db, seasonId, ladder, now);
-  const frozen = new Map((db.prepare(
-    'SELECT player_id, sr, final_rank, rank_idx FROM season_results WHERE season_id = ?',
-  ).all(seasonId) as { player_id: string; sr: number; final_rank: number | null; rank_idx: number | null }[])
-    .map((f) => [f.player_id, f]));
-  const ended = frozen.size > 0;
+  const ladder = ended ? new Map() : seasonLadder(db, seasonId);
+  const top = ended ? [] : topTen(db, seasonId, ladder, now);
 
   return {
     season: { ...season, placementGames: rules.placementGames, ranks: rules.ranks, finalMinGames: rules.finalMinGames, ended },
@@ -101,14 +106,15 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
       .map((r) => {
         const f = frozen.get(r.steamid);
         const view = publicStanding(rules, ladder.get(r.steamid), top);
-        const sr = f ? f.sr : view.sr;
+        // A frozen row that never placed keeps its SR hidden for good.
+        const sr = f ? (f.placed ? f.sr : null) : view.sr;
         return {
           steamid: r.steamid, name: r.name, avatar: r.avatar,
           sr, wins: r.wins, losses: r.losses, games: r.games,
           // Placement replaces the old three-game provisional list in a season
           // that has it; Season 0 keeps the three games.
           ranked: f ? f.final_rank !== null : rules.placementGames > 0 ? view.placing === null : r.games >= RANKED_MIN_GAMES,
-          placing: f ? null : view.placing,
+          placing: f ? (f.placed ? null : { played: f.games, of: rules.placementGames }) : view.placing,
           rank: f ? (f.rank_idx === null ? null : rankView(f.rank_idx)) : view.rank,
           top10: f ? f.final_rank !== null && f.final_rank <= 10 : view.top10,
           finalRank: f ? f.final_rank : null,

@@ -156,3 +156,41 @@ describe('season 1', () => {
     expect(IDS.slice(0, 4)).toContain(ranks[0].player_id);
   });
 });
+
+describe('season 1 review fixes', () => {
+  it('a frozen season never shows the SR of a player who did not place', async () => {
+    startNewSeason(db, 'Season 1');
+    const s1 = currentSeasonId(db);
+    play('a'); play('a');
+    startNewSeason(db, 'Season 2');
+    const old = await get(`/api/leaderboard?season=${s1}`);
+    expect(row(old.rows, IDS[0])).toMatchObject({ sr: null, placing: { played: 2, of: 5 }, ranked: false });
+    const prof = await get(`/api/players/${IDS[0]}`);
+    expect(prof.pastSeasons.find((p: any) => p.seasonId === s1)).toMatchObject({ sr: null, peakSr: null, placed: false });
+  });
+
+  it('a finished season reads from its freeze: a later ban does not drop anyone', async () => {
+    play('a');
+    startNewSeason(db, 'Season 1');
+    db.prepare("INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', ?, datetime('now'))").run(IDS[1], ADMIN);
+    const old = await get('/api/leaderboard?season=1');
+    expect(old.rows).toHaveLength(8);
+  });
+
+  it('a player who sits a season out keeps a soft-reset seed into the next', () => {
+    play('a');
+    startNewSeason(db, 'Season 1');
+    const s1 = currentSeasonId(db);
+    const seed1 = db.prepare('SELECT mu FROM season_seeds WHERE season_id = ? AND player_id = ?').get(s1, IDS[0]) as { mu: number };
+    startNewSeason(db, 'Season 2');
+    const seed2 = db.prepare('SELECT mu FROM season_seeds WHERE season_id = ? AND player_id = ?').get(currentSeasonId(db), IDS[0]) as { mu: number };
+    expect(seed2.mu).toBeCloseTo(25 + 0.7 * (seed1.mu - 25), 9);
+  });
+
+  it('Season 0 hands out no Top 10 badge', async () => {
+    db.prepare('UPDATE seasons SET final_min_games = 1 WHERE id = 1').run();
+    play('a');
+    const lb = await get('/api/leaderboard');
+    expect(lb.rows.every((r: any) => r.top10 === false)).toBe(true);
+  });
+});

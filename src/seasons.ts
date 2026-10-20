@@ -86,6 +86,9 @@ export interface FinalStanding {
   finalRank: number | null;
   /** The rank badge held at the end, null in a season without ranks. */
   rankIdx: number | null;
+  /** False when they never finished placement: sr and peakSr were never
+   *  shown, and nothing that reads the freeze may show them. */
+  placed: boolean;
 }
 
 /** A season's final standings as they stand right now: the ladder, with a
@@ -104,7 +107,7 @@ export function finalStandings(db: DB, seasonId: number, now = new Date()): Fina
     const eligible = e.placed && e.games >= rules.finalMinGames && !banned.has(e.steamid);
     return {
       steamid: e.steamid, sr: e.sr, peakSr: e.peakSr ?? e.sr, wins: e.wins, losses: e.losses, games: e.games,
-      finalRank: eligible ? ++place : null, rankIdx: e.rankIdx,
+      finalRank: eligible ? ++place : null, rankIdx: e.rankIdx, placed: e.placed,
     };
   });
 }
@@ -116,10 +119,10 @@ export function freezeSeasonResults(db: DB, seasonId: number, now = new Date()):
   db.transaction(() => {
     db.prepare('DELETE FROM season_results WHERE season_id = ?').run(seasonId);
     const ins = db.prepare(
-      `INSERT INTO season_results (season_id, player_id, sr, peak_sr, wins, losses, games, final_rank, rank_idx)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO season_results (season_id, player_id, sr, peak_sr, wins, losses, games, final_rank, rank_idx, placed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const r of rows) ins.run(seasonId, r.steamid, r.sr, r.peakSr, r.wins, r.losses, r.games, r.finalRank, r.rankIdx);
+    for (const r of rows) ins.run(seasonId, r.steamid, r.sr, r.peakSr, r.wins, r.losses, r.games, r.finalRank, r.rankIdx, r.placed ? 1 : 0);
   })();
   return rows.length;
 }
@@ -153,7 +156,11 @@ export function seasonResetPreview(db: DB, now = new Date()): { seasonId: number
     .map((p) => [p.steamid, p.name]));
   const ladder = seasonLadder(db, seasonId);
   const ranks = new Map(finalStandings(db, seasonId, now).map((r) => [r.steamid, r.finalRank]));
-  const rows = [...ladder.values()].filter((e) => e.games > 0).map((e) => {
+  // Someone who sat this season out still has the seed it gave them; they
+  // carry it on (softened once more) rather than drop to the defaults.
+  const seeded = new Set((db.prepare('SELECT player_id FROM season_seeds WHERE season_id = ?').all(seasonId) as { player_id: string }[])
+    .map((r) => r.player_id));
+  const rows = [...ladder.values()].filter((e) => e.games > 0 || seeded.has(e.steamid)).map((e) => {
     const next = softResetRating(e);
     const startSr = srUnder(NEW_SEASON_RULES, next.mu, next.sigma);
     return {
@@ -168,8 +175,10 @@ export function seasonResetPreview(db: DB, now = new Date()): { seasonId: number
 export interface PastSeason {
   seasonId: number;
   name: string;
-  sr: number;
-  peakSr: number;
+  /** Null when they never finished that season's placement. */
+  sr: number | null;
+  peakSr: number | null;
+  placed: boolean;
   wins: number;
   losses: number;
   games: number;
@@ -184,14 +193,16 @@ export interface PastSeason {
 /** A player's frozen results in every finished season, newest first. */
 export function playerPastSeasons(db: DB, steamid: string): PastSeason[] {
   return (db.prepare(
-    `SELECT r.season_id, s.name, r.sr, r.peak_sr, r.wins, r.losses, r.games, r.final_rank, r.rank_idx,
-            (SELECT COUNT(*) FROM season_results x WHERE x.season_id = r.season_id AND x.final_rank IS NOT NULL) AS placed
+    `SELECT r.season_id, s.name, r.sr, r.peak_sr, r.wins, r.losses, r.games, r.final_rank, r.rank_idx, r.placed,
+            (SELECT COUNT(*) FROM season_results x WHERE x.season_id = r.season_id AND x.final_rank IS NOT NULL) AS of
      FROM season_results r JOIN seasons s ON s.id = r.season_id
      WHERE r.player_id = ? ORDER BY r.season_id DESC`,
-  ).all(steamid) as { season_id: number; name: string; sr: number; peak_sr: number; wins: number; losses: number; games: number; final_rank: number | null; rank_idx: number | null; placed: number }[])
+  ).all(steamid) as { season_id: number; name: string; sr: number; peak_sr: number; wins: number; losses: number; games: number; final_rank: number | null; rank_idx: number | null; placed: number; of: number }[])
     .map((r) => ({
-      seasonId: r.season_id, name: r.name, sr: r.sr, peakSr: r.peak_sr, wins: r.wins, losses: r.losses, games: r.games,
-      finalRank: r.final_rank, of: r.placed, rank: r.rank_idx === null ? null : rankView(r.rank_idx).name,
+      seasonId: r.season_id, name: r.name,
+      sr: r.placed ? r.sr : null, peakSr: r.placed ? r.peak_sr : null, placed: r.placed === 1,
+      wins: r.wins, losses: r.losses, games: r.games,
+      finalRank: r.final_rank, of: r.of, rank: r.rank_idx === null ? null : rankView(r.rank_idx).name,
       top10: r.final_rank !== null && r.final_rank <= 10,
     }));
 }

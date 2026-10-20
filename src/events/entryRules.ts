@@ -44,8 +44,10 @@ export function problemText(p: Problem, e: Eligibility, f: PlayerFacts): string 
     case 'closed': return 'Cannot use competitive features yet';
     case 'pugs': return `${f.pugs} of ${e.minPugs} completed PUGs`;
     case 'discord': return 'Discord is not linked';
-    case 'sr_low': return `SR ${f.sr} is below the floor of ${e.srFloor}`;
-    case 'sr_high': return `SR ${f.sr} is above the ceiling of ${e.srCeiling}`;
+    // The player's own SR stays out of the sentence: while they are placing
+    // it is hidden, and once placed they can see it on their profile anyway.
+    case 'sr_low': return `SR is below the floor of ${e.srFloor}`;
+    case 'sr_high': return `SR is above the ceiling of ${e.srCeiling}`;
   }
 }
 
