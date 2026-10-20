@@ -436,7 +436,7 @@ function CardBody({ k, community: c, player: p }: { k: CardKey; community: Wrapp
 
 function StandingCard({ p, c }: { p: WrappedPlayer; c: WrappedCommunity }) {
   const s = p.standing!;
-  const beat = standingBeat(s, c.season.id);
+  const beat = standingBeat(s);
   const topOfAll = c.peakSr?.steamid === p.steamid;
   return (
     <>

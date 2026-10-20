@@ -17,7 +17,7 @@ describe('Wrapped decks', () => {
   });
 
   it('gives a short deck the cards a handful of games carry, and its own closer', () => {
-    expect(playerCards(SHORT)).toEqual(['intro', 'numbers', 'standing', 'bestMap', 'sides', 'when', 'started', 'closer']);
+    expect(playerCards(SHORT)).toEqual(['intro', 'numbers', 'standing', 'people', 'bestMap', 'sides', 'when', 'started', 'closer']);
     // A short deck never has the full-deck-only cards, even with the data.
     const loaded: WrappedPlayer = { ...SHORT, streaks: { win: 5, loss: 1 }, rivals: FULL.rivals, signature: FULL.signature };
     expect(playerCards(loaded)).not.toContain('streak');
@@ -62,12 +62,12 @@ describe('Wrapped decks', () => {
 
 describe('card rules', () => {
   it('gives the peak its own beat only when it is 100 or more above the finish', () => {
-    expect(standingBeat(FULL.standing!, 1)).toEqual({ kind: 'peak' });
-    expect(standingBeat({ ...FULL.standing!, peakSr: FULL.standing!.sr + 99 }, 1).kind).not.toBe('peak');
+    expect(standingBeat(FULL.standing!)).toEqual({ kind: 'peak' });
+    expect(standingBeat({ ...FULL.standing!, peakSr: FULL.standing!.sr + 99 }).kind).not.toBe('peak');
     // Peaked at the last game: the climb is the story, from Season 0's 833 start.
-    expect(standingBeat(SHORT.standing!, 1)).toEqual({ kind: 'climb', from: 833, to: 893 });
-    expect(standingBeat(FULL2.standing!, 1)).toEqual({ kind: 'climb', from: 833, to: 2081 });
-    expect(standingBeat({ ...SHORT.standing!, sr: 700, peakSr: 720 }, 1)).toEqual({ kind: 'flat' });
+    expect(standingBeat(SHORT.standing!)).toEqual({ kind: 'climb', from: 833, to: 893 });
+    expect(standingBeat(FULL2.standing!)).toEqual({ kind: 'climb', from: 833, to: 2081 });
+    expect(standingBeat({ ...SHORT.standing!, sr: 700, peakSr: 720 })).toEqual({ kind: 'flat' });
   });
 
   it('rounds Top X% up', () => {

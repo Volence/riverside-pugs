@@ -45,7 +45,7 @@ export function playerCards(p: WrappedPlayer): CardKey[] {
     ? ['intro', 'numbers', 'standing', 'streak', 'campaign', 'people', 'rivals', 'signature', 'bestMap', 'sides', 'endorsed', 'trophies', 'when', 'started']
     // The short deck: the cards a handful of games can carry. People is the
     // most-played-with line only (a best duo needs more games together).
-    : ['intro', 'numbers', 'standing', 'bestMap', 'sides', 'when', 'started', 'closer'];
+    : ['intro', 'numbers', 'standing', 'people', 'bestMap', 'sides', 'when', 'started', 'closer'];
   const short = p.tier === 'short';
   return order.filter((k) => (k === 'people' && short ? Boolean(p.people.mostWith) : has[k]));
 }
@@ -91,18 +91,14 @@ export function bestMapPick(p: WrappedPlayer): { key: string; label: string; mat
 /** "Top X%": the place within the pool, rounded up so #1 of 103 is Top 1%. */
 export const topPct = (rank: number, of: number): number => Math.max(1, Math.ceil((rank / Math.max(1, of)) * 100));
 
-/** Season 0's every player started at 833 SR (the default rating). Later
- *  seasons start from a soft reset, so the first rated point stands in. */
-export const SEASON0_START_SR = 833;
-
 /** Where the standing card puts its weight. A peak only gets its own beat
  *  when it was at least 100 above where they finished; otherwise SR is
  *  mu - 2 sigma and still climbing as sigma shrinks, so the climb is the story. */
 export function standingBeat(
-  s: NonNullable<WrappedPlayer['standing']>, seasonId: number,
+  s: NonNullable<WrappedPlayer['standing']>,
 ): { kind: 'peak' } | { kind: 'climb'; from: number; to: number } | { kind: 'flat' } {
   if (s.peakSr - s.sr >= 100) return { kind: 'peak' };
-  const from = seasonId === 1 ? SEASON0_START_SR : (s.spark[0] ?? s.sr);
+  const from = s.startSr ?? s.spark[0] ?? s.sr;
   return s.sr > from ? { kind: 'climb', from, to: s.sr } : { kind: 'flat' };
 }
 
