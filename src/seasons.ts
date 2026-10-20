@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
 import { isSeasonTheme, type SeasonTheme } from './seasonThemes.js';
+import { freezeSeasonWrapped } from './seasonWrapped.js';
 import {
   NEW_SEASON_RULES, rankIndexOf, rankView, seasonLadder, seasonRules, softResetRating, srUnder,
 } from './seasonRules.js';
@@ -56,8 +57,8 @@ export function startNewSeason(
 ): NewSeasonResult {
   const open = db.prepare("SELECT COUNT(*) AS n FROM matches WHERE state IN ('configuring', 'live')").get() as { n: number };
   if (open.n > 0) return { ok: false, error: 'a match is being set up or played; start the season once it is over' };
+  const closing = currentSeasonIdOrNull(db);
   const id = db.transaction(() => {
-    const closing = currentSeasonIdOrNull(db);
     const seeds = closing === null ? [] : seasonResetPreview(db, now).rows;
     if (closing !== null) freezeSeasonResults(db, closing, now);
     db.prepare("UPDATE seasons SET ended_at = datetime('now') WHERE ended_at IS NULL").run();
@@ -73,6 +74,12 @@ export function startNewSeason(
     }
     return newId;
   })();
+  // Wrapped reads the freeze above. Outside the transaction on purpose: a
+  // Wrapped bug must never stop a season from starting, and staff can build
+  // it again from Admin > Setup > Seasons.
+  if (closing !== null) {
+    try { freezeSeasonWrapped(db, closing, now); } catch (e) { console.error(`[wrapped] season ${closing} freeze failed`, e); }
+  }
   return { ok: true, id };
 }
 

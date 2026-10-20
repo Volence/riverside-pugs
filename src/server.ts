@@ -152,6 +152,7 @@ import { NoTankWatch, noTankText } from './noTankWatch.js';
 import { castStudioRoutes } from './routes/castStudio.js';
 import { statsRoutes } from './routes/stats.js';
 import { weeklyRoutes } from './routes/weekly.js';
+import { wrappedRoutes } from './routes/wrapped.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
 import { practiceRoutes } from './routes/practice.js';
@@ -2180,6 +2181,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(weeklyRoutes, { db: deps.db });
+  await app.register(wrappedRoutes, { db: deps.db });
   // News and patch notes (src/news.ts). The poster is read per request: the
   // bot logs in some seconds after this runs.
   await app.register(newsRoutes, { db: deps.db, poster: () => newsPoster });
