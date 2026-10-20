@@ -84,7 +84,16 @@ body[data-urgent='true'] .nav { border-bottom: 3px solid var(--accent); }
   padding-bottom: 3px;
   border-bottom: 2px solid transparent;
 }
+.nav__links a { white-space: nowrap; }
 .nav__links a:hover { color: var(--text-bright); text-decoration: none; }
+/* Between the phone layout and a wide window the links no longer fit one
+ * line (13 of them for staff): tighten them, and let them wrap onto a second
+ * row rather than squash each label or push the page sideways. */
+@media (min-width: 641px) and (max-width: 1360px) {
+  .nav { flex-wrap: wrap; height: auto; min-height: 62px; padding-block: var(--sp-2); row-gap: var(--sp-1); }
+  .nav__links { flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); min-width: 0; }
+  .nav__links a { letter-spacing: 0.1em; }
+}
 .nav__links a[aria-current='page'] { color: var(--text-bright); border-bottom-color: var(--accent); }
 
 .nav__live {
@@ -4392,7 +4401,7 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .newsadmin__title { width: 100%; box-sizing: border-box; }
 .newsadmin__write { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); }
 @media (max-width: 860px) { .newsadmin__write { grid-template-columns: minmax(0, 1fr); } }
-.newsadmin__body { width: 100%; box-sizing: border-box; min-height: 18rem; resize: vertical; font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-dense); }
+.newsadmin__body { background-color: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: var(--sp-3); width: 100%; box-sizing: border-box; min-height: 18rem; resize: vertical; font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-dense); }
 .newsadmin__help { margin: var(--sp-1) 0 0; font-size: var(--fs-label); }
 .newsadmin__preview { min-height: 18rem; max-height: 36rem; overflow: auto; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); background: var(--bg); }
 .newsadmin__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
