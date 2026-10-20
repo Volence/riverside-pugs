@@ -34,6 +34,20 @@ describe('the site route table', () => {
     expect(await screen.findByText('Sign in to get the connect line and password for this practice server.')).toBeTruthy();
   });
 
+  it('mounts Wrapped, a shared deck and the staff preview, not the 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/wrapped'
+      ? new Response(JSON.stringify({ seasons: [] }), { status: 200 })
+      : new Response('{}', { status: url.startsWith('/api/admin/') ? 403 : 404 }))));
+    const first = open('/wrapped');
+    expect(await screen.findByText(/Wrapped opens when the season ends/)).toBeTruthy();
+    first.unmount();
+    const second = open('/wrapped/1/76561190000000001');
+    expect(await screen.findByText(/No Wrapped here/)).toBeTruthy();
+    second.unmount();
+    open('/wrapped/preview/1/76561190000000001');
+    expect(await screen.findByText('Staff only.')).toBeTruthy();
+  });
+
   it('still has a 404 for a path that is not a route', async () => {
     open('/not-a-page');
     expect(await screen.findByText('Page not found')).toBeTruthy();

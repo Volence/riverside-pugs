@@ -8,6 +8,7 @@ import { Nav } from './components/Nav';
 import { QueueBar } from './components/QueueBar';
 import { EndorseBar } from './components/EndorseBar';
 import { SeasonBanner } from './components/SeasonBanner';
+import { WrappedStrip } from './components/WrappedStrip';
 import { RankMoment } from './components/RankMoment';
 import { DevPanel } from './components/DevPanel';
 import { ConfirmHost } from './components/Confirm';
@@ -37,6 +38,7 @@ function App() {
       <QueueBar state={state} path={path} />
       <EndorseBar me={me} path={path} />
       <SeasonBanner path={path} />
+      <WrappedStrip path={path} />
       <RankMoment me={me} state={state} />
       <main>
         <AppRoutes session={session} state={state} refresh={refresh} />

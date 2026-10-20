@@ -199,6 +199,89 @@ export type RankMomentData =
   | { kind: 'placed'; matchId: number; to: string; srAfter: number; next: number | null; nextName: string | null }
   | { kind: 'up'; matchId: number; tierUp: boolean; from: string; to: string; srBefore: number; srAfter: number; floor: number; fromFloor: number; next: number | null; nextName: string | null };
 
+/** Season Wrapped (src/seasonWrapped.ts). Mirrors WrappedPlayer and
+ *  WrappedCommunity there; if a shape changes there, it changes here. */
+export type WrappedTier = 'full' | 'short' | 'dropin';
+export interface WrappedPair { steamid: string; name: string; games: number; wins: number }
+export interface WrappedMapLine { map: string; games: number; wins: number; avgMargin: number }
+export interface WrappedCampaignLine { campaign: string; games: number; wins: number }
+export interface WrappedMatchRef { matchId: number; map: string | null; value: number }
+export type WrappedMapKey = 'sidmg' | 'ck' | 'skeets' | 'damage_as_si' | 'tank_damage';
+
+export interface WrappedPlayer {
+  v: 1;
+  steamid: string;
+  name: string;
+  tier: WrappedTier;
+  numbers: {
+    matches: number; wins: number; losses: number; hours: number; maps: number; nights: number;
+    gamesRank: number; ofPlayers: number;
+    longestNight: { date: string; matches: number; hours: number } | null;
+  };
+  standing: {
+    sr: number; peakSr: number; peakAt: string | null; peakMatchId: number | null;
+    finalRank: number | null; ofRanked: number; finalMinGames: number; games: number;
+    spark: number[];
+    rankIdx: number | null; peakRankIdx: number | null;
+  } | null;
+  streaks: { win: number; loss: number };
+  campaigns: { most: WrappedCampaignLine | null; best: WrappedCampaignLine | null };
+  maps: { best: WrappedMapLine | null; worst: WrappedMapLine | null };
+  people: { mostWith: WrappedPair | null; bestDuo: WrappedPair | null; teammates: number };
+  rivals: { nemesis: WrappedPair | null; favourite: WrappedPair | null; mostFaced: WrappedPair | null };
+  signature: { key: string; label: string; perMatch: number; rank: number; of: number }[] | null;
+  bestMap: Partial<Record<WrappedMapKey, WrappedMatchRef>>;
+  bestMatchSkeets: WrappedMatchRef | null;
+  sides: {
+    survivorHalves: number; survivorAvg: number | null; survivedPct: number | null;
+    infectedHalves: number; concededAvg: number | null; wipedPct: number | null;
+    communityAvg: number;
+  };
+  endorsements: { counts: Record<EndorseKind, number>; givers: number; given: number; title: EndorseKind | null; mostEndorsedRank: number | null };
+  trophies: {
+    weekly: { award: string; label: string; week: string }[];
+    skeetTriples: number;
+    totals: { ck: number; skeets: number; crowns: number; rockSkeets: number; quadCaps: number; revives: number; dps: number };
+  };
+  /** Matches per UTC hour of the week: index = day * 24 + hour, day 0 = Sunday. */
+  hours: number[];
+  first: { matchId: number; campaign: string; startedAt: string; won: boolean; firstEver: boolean; firstPartner: WrappedPair | null };
+}
+
+export interface WrappedNamedValue { steamid: string; name: string; value: number; games?: number }
+
+export interface WrappedCommunity {
+  v: 1;
+  season: { id: number; name: string; startedAt: string; endedAt: string | null };
+  overview: { matches: number; matchHours: number; playerHours: number; avgMinutes: number; players: number; maps: number; halves: number; first: string | null; last: string | null };
+  weeks: { week: string; matches: number }[];
+  busiestNight: { date: string; matches: number } | null;
+  hours: number[];
+  campaigns: { campaign: string; matches: number; hours: number }[];
+  deadliestMap: { map: string; halves: number; survivedPct: number } | null;
+  kindestMap: { map: string; halves: number; survivedPct: number } | null;
+  totals: Record<string, number>;
+  survival: { measured: number; survived: number };
+  top10: { rank: number; steamid: string; name: string; sr: number; wins: number; losses: number }[];
+  finalMinGames: number;
+  peakSr: WrappedNamedValue | null;
+  leaders: Record<string, WrappedNamedValue[]>;
+  duos: { best: { a: string; b: string; games: number; wins: number }[]; common: { a: string; b: string; games: number; wins: number }[] };
+  moments: {
+    closest: { matchId: number; campaign: string; a: number; b: number }[];
+    blowout: { matchId: number; campaign: string; a: number; b: number } | null;
+    longest: { matchId: number; campaign: string; minutes: number } | null;
+    bestHalf: { matchId: number; map: string; score: number } | null;
+    bestSingleMap: Partial<Record<string, WrappedMatchRef & { steamid: string; name: string }>>;
+    skeetTriples: number;
+  };
+  endorsements: { given: number; givers: number; receivers: number; startedAt: string | null };
+  buckets: { full: number; short: number; dropin: number };
+}
+
+/** GET /api/wrapped: closed seasons with a frozen Wrapped, newest first. */
+export interface WrappedSeason { id: number; name: string; frozenAt: string }
+
 export interface SiteInfo {
   discordEnabled: boolean;
   discordInviteUrl: string | null;
@@ -3017,6 +3100,10 @@ export const adminApi = {
     post<{ ok: true; id: number }>('/api/admin/seasons/new', { name, ...look }),
   seasonLook: (id: number, look: { theme: SeasonThemeId | null; endsAt: string | null }) => post(`/api/admin/seasons/${id}/look`, look),
   seasonPreview: (signal?: AbortSignal) => get<SeasonResetPreview>('/api/admin/seasons/preview', signal),
+  /** Staff preview of a deck, computed now (works for the open season). */
+  wrappedPreview: (season: number, steamid: string, signal?: AbortSignal) =>
+    get<{ community: WrappedCommunity; player: WrappedPlayer; preview: true }>(`/api/admin/wrapped/${season}/${encodeURIComponent(steamid)}`, signal),
+  wrappedRebuild: (season: number) => post<{ ok: true; players: number }>(`/api/admin/wrapped/${season}/rebuild`),
   integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
     post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),
   integrityJob: (signal?: AbortSignal) =>
@@ -3354,6 +3441,12 @@ export const api = {
   myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
   reportChat: (reportId: number) => post<{ ok: true; url: string }>(`/api/reports/${reportId}/chat`),
   rankMoment: (signal?: AbortSignal) => get<{ moment: RankMomentData | null }>('/api/me/rank-moment', signal),
+  wrappedSeasons: (signal?: AbortSignal) => get<{ seasons: WrappedSeason[] }>('/api/wrapped', signal),
+  /** The community deck plus the viewer's own (null when signed out or absent that season). */
+  wrapped: (season: number, signal?: AbortSignal) =>
+    get<{ community: WrappedCommunity; me: WrappedPlayer | null; loggedIn: boolean }>(`/api/wrapped/${season}`, signal),
+  wrappedPlayer: (season: number, steamid: string, signal?: AbortSignal) =>
+    get<{ community: WrappedCommunity; player: WrappedPlayer }>(`/api/wrapped/${season}/${encodeURIComponent(steamid)}`, signal),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   setRequeue: (matchId: number, on: boolean) => post('/api/queue/requeue', { matchId, on }),

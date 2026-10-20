@@ -2,7 +2,7 @@ import { api, ApiError, modApi, communityApi } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
 import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
 import { TeamChips } from '../components/TeamChips';
@@ -20,7 +20,8 @@ import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
 import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../components/SeasonRank';
-import type { PastSeason } from '../api';
+import type { PastSeason, WrappedSeason } from '../api';
+import { loadWrappedSeasons } from '../wrapped';
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
@@ -171,7 +172,7 @@ export function Profile(
             : <Sparkline values={history.map((h) => h.sr)} />}
         </Panel>
 
-        <SeasonHistory past={data.pastSeasons ?? []} />
+        <SeasonHistory past={data.pastSeasons ?? []} own={session?.kind === 'active' && session.me.steamid === steamid} />
 
         <ProfileFigures
           totals={totals} statTotals={statTotals} rating={rating}
@@ -470,7 +471,8 @@ function Trophies({ past }: { past: PastSeason[] }) {
   );
 }
 
-function SeasonHistory({ past }: { past: PastSeason[] }) {
+function SeasonHistory({ past, own }: { past: PastSeason[]; own: boolean }) {
+  const wrapped = useWrappedFor(own ? past : []);
   if (past.length === 0) return null;
   return (
     <Panel class="panel--table">
@@ -504,6 +506,27 @@ function SeasonHistory({ past }: { past: PastSeason[] }) {
           </tbody>
         </table>
       </div>
+      {wrapped.length > 0 && (
+        <p class="wrapped-links">
+          {wrapped.map((w) => <a key={w.id} class="chip" href={`/wrapped/${w.id}`}>{`${w.name} Wrapped`}</a>)}
+        </p>
+      )}
     </Panel>
   );
+}
+
+/** The viewer's own past seasons that have a frozen Wrapped, for the links
+ *  under Past seasons. Empty for someone else's profile (their deck is shared
+ *  by link, not offered here). */
+function useWrappedFor(past: PastSeason[]): WrappedSeason[] {
+  const [list, setList] = useState<WrappedSeason[]>([]);
+  const ids = past.map((p) => p.seasonId).join(',');
+  useEffect(() => {
+    if (!ids) { setList([]); return; }
+    let live = true;
+    const mine = new Set(ids.split(',').map(Number));
+    void loadWrappedSeasons().then((all) => { if (live) setList(all.filter((w) => mine.has(w.id))); });
+    return () => { live = false; };
+  }, [ids]);
+  return list;
 }

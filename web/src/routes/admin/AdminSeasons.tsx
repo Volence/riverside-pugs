@@ -1,8 +1,8 @@
 import { useState } from 'preact/hooks';
-import { api, adminApi, SEASON_THEMES, type SeasonThemeId } from '../../api';
+import { api, adminApi, peopleApi, ApiError, SEASON_THEMES, type Season, type SeasonThemeId } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Panel } from '../../components/bits';
-import { fmtTime, useAction } from './useAction';
+import { fmtTime, useAction, type Run } from './useAction';
 import { RankBadge } from '../../components/SeasonRank';
 
 export function AdminSeasons() {
@@ -55,6 +55,7 @@ export function AdminSeasons() {
         </form>
       </Panel>
       <ResetPreview />
+      <WrappedDesk seasons={data.seasons} busy={busy} run={run} />
       <Panel>
         <h3>All seasons</h3>
         <ul class="admin-list">
@@ -151,5 +152,68 @@ function SeasonLookForm({ id, theme, endsAt, busy, save }: {
       <button class="btn" type="submit" disabled={busy || !dirty}>Save look</button>
       <span class="muted">Preview any theme first with <code>?theme=wrong-way</code> on a page URL (<code>?theme=off</code> to stop).</span>
     </form>
+  );
+}
+
+/** Season Wrapped (src/seasonWrapped.ts): open any player's deck as it would
+ *  look, computed now, so the open season can be checked before it closes;
+ *  and build a closed season's decks again (the close builds them itself). */
+function WrappedDesk({ seasons, busy, run }: {
+  seasons: Season[]; busy: boolean; run: Run;
+}) {
+  const [season, setSeason] = useState(String((seasons.find((s) => s.current) ?? seasons[0])?.id ?? ''));
+  const [who, setWho] = useState('');
+  const [found, setFound] = useState<{ steamid: string; name: string }[] | null>(null);
+  const [note, setNote] = useState('');
+  const closed = seasons.filter((s) => s.endedAt);
+  const open = (steamid: string) => { location.href = `/wrapped/preview/${season}/${steamid}`; };
+  const find = async () => {
+    const q = who.trim();
+    setNote(''); setFound(null);
+    if (/^\d{17}$/.test(q)) { open(q); return; }
+    try {
+      const { players } = await peopleApi.people(q);
+      if (players.length === 1) open(players[0].steamid);
+      else if (players.length === 0) setNote('No player by that name.');
+      else setFound(players.slice(0, 10));
+    } catch (e) {
+      setNote(e instanceof ApiError ? e.message : 'Search failed.');
+    }
+  };
+  return (
+    <Panel>
+      <h3>Wrapped</h3>
+      <p class="muted">
+        Preview any player's deck, computed now. For the open season it uses today's standings, so it shows what the
+        close would freeze. Players see nothing until the season closes.
+      </p>
+      <form class="admin-form" onSubmit={(e) => { e.preventDefault(); void find(); }}>
+        <select value={season} aria-label="Wrapped season" onChange={(e) => setSeason((e.target as HTMLSelectElement).value)}>
+          {seasons.map((s) => <option key={s.id} value={String(s.id)}>{s.name}{s.current ? ' (open)' : ''}</option>)}
+        </select>
+        <input value={who} placeholder="SteamID64 or name" aria-label="Player for the Wrapped preview" onInput={(e) => setWho((e.target as HTMLInputElement).value)} />
+        <button class="btn" type="submit" disabled={!who.trim() || !season}>Preview Wrapped</button>
+      </form>
+      {note && <p class="muted">{note}</p>}
+      {found && (
+        <ul class="admin-list">
+          {found.map((p) => <li key={p.steamid}><a href={`/wrapped/preview/${season}/${p.steamid}`}>{p.name}</a> <span class="muted">{p.steamid}</span></li>)}
+        </ul>
+      )}
+      {closed.length > 0 && (
+        <ul class="admin-list">
+          {closed.map((s) => (
+            <li key={s.id}>
+              <strong>{s.name}</strong>{' '}
+              <button class="btn btn--sm btn--ghost" type="button" disabled={busy}
+                onClick={() => void run(async () => { const r = await adminApi.wrappedRebuild(s.id); setNote(`${s.name} Wrapped rebuilt: ${r.players} player decks.`); }, `Rebuild ${s.name} Wrapped? Every deck is computed again from today's data and replaces the frozen one.`)}>
+                Rebuild Wrapped
+              </button>{' '}
+              <a href={`/wrapped/${s.id}`}>Open</a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
