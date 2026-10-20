@@ -219,6 +219,8 @@ export interface WrappedPlayer {
     longestNight: { date: string; matches: number; hours: number } | null;
   };
   standing: {
+    /** SR before their first rated game of the season. */
+    startSr: number | null;
     sr: number; peakSr: number; peakAt: string | null; peakMatchId: number | null;
     finalRank: number | null; ofRanked: number; finalMinGames: number; games: number;
     spark: number[];

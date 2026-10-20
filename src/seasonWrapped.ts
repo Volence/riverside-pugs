@@ -72,6 +72,9 @@ export interface WrappedPlayer {
   };
   /** From the frozen final standings. Null when they never played a rated game. */
   standing: {
+    /** SR before their first rated game of the season (833 in Season 0,
+     *  the soft reset after it). */
+    startSr: number | null;
     sr: number; peakSr: number; peakAt: string | null; peakMatchId: number | null;
     finalRank: number | null; ofRanked: number; finalMinGames: number; games: number;
     /** SR after each rated game, thinned to at most SPARK_POINTS. */
@@ -344,9 +347,9 @@ export function computeWrapped(
   const results = new Map(resultRows.map((r) => [r.player_id, r]));
   const ofRanked = [...results.values()].filter((r) => r.final_rank !== null).length;
   const history = db.prepare(
-    `SELECT rh.player_id, rh.mu_after AS mu, rh.sigma_after AS sigma, rh.match_id, m.ended_at
+    `SELECT rh.player_id, rh.mu_before, rh.sigma_before, rh.mu_after AS mu, rh.sigma_after AS sigma, rh.match_id, m.ended_at
      FROM rating_history rh JOIN matches m ON m.id = rh.match_id WHERE rh.season_id = ? ORDER BY rh.id`,
-  ).all(seasonId) as { player_id: string; mu: number; sigma: number; match_id: number; ended_at: string }[];
+  ).all(seasonId) as { player_id: string; mu_before: number; sigma_before: number; mu: number; sigma: number; match_id: number; ended_at: string }[];
   const histBy = new Map<string, typeof history>();
   for (const h of history) (histBy.get(h.player_id) ?? histBy.set(h.player_id, []).get(h.player_id)!).push(h);
 
@@ -404,6 +407,7 @@ export function computeWrapped(
       const srs = hist.map((h) => srUnder(rules, h.mu, h.sigma));
       const peakIdx = srs.findIndex((s) => s === res.peak_sr);
       standing = {
+        startSr: hist.length ? srUnder(rules, hist[0].mu_before, hist[0].sigma_before) : null,
         sr: res.sr, peakSr: res.peak_sr,
         peakAt: peakIdx >= 0 ? hist[peakIdx].ended_at : null, peakMatchId: peakIdx >= 0 ? hist[peakIdx].match_id : null,
         finalRank: res.final_rank, ofRanked, finalMinGames: rules.finalMinGames, games: res.games,
