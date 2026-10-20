@@ -196,3 +196,28 @@ describe('season 1 review fixes', () => {
     expect(lb.rows.every((r: any) => r.top10 === false)).toBe(true);
   });
 });
+
+describe('season look', () => {
+  const post = (url: string, payload: object, cookies = admin) => app.inject({ method: 'POST', url, cookies, payload });
+
+  it('a new season can start with a theme and end date, and /api/site reports them', async () => {
+    expect((await get('/api/site')).season).toMatchObject({ theme: null, endsAt: null });
+    const r = await post('/api/admin/seasons/new', { name: 'Season 1: Wrong Way', theme: 'wrong-way', endsAt: '2026-12-28' });
+    expect(r.statusCode).toBe(200);
+    expect((await get('/api/site')).season).toMatchObject({ name: 'Season 1: Wrong Way', theme: 'wrong-way', endsAt: '2026-12-28' });
+    const seasons = (await get('/api/seasons')).seasons;
+    expect(seasons[0]).toMatchObject({ theme: 'wrong-way', endsAt: '2026-12-28', ranks: true });
+    expect(seasons[1]).toMatchObject({ theme: null, ranks: false });
+  });
+
+  it('staff can change or clear the current look; unknown themes and bad dates are refused', async () => {
+    const id = currentSeasonId(db);
+    expect((await post(`/api/admin/seasons/${id}/look`, { theme: 'wrong-way', endsAt: null })).statusCode).toBe(200);
+    expect((await get('/api/site')).season.theme).toBe('wrong-way');
+    expect((await post(`/api/admin/seasons/${id}/look`, { theme: 'neon', endsAt: null })).statusCode).toBe(400);
+    expect((await post(`/api/admin/seasons/${id}/look`, { theme: null, endsAt: '28/12/2026' })).statusCode).toBe(400);
+    expect((await post(`/api/admin/seasons/${id}/look`, { theme: '', endsAt: '' })).statusCode).toBe(200);
+    expect((await get('/api/site')).season).toMatchObject({ theme: null, endsAt: null });
+    expect((await post(`/api/admin/seasons/${id}/look`, { theme: 'wrong-way' }, authedCookie(app, db, IDS[1]))).statusCode).toBe(403);
+  });
+});

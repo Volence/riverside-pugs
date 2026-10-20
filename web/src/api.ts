@@ -169,12 +169,29 @@ export interface Season {
   matches: number;
   /** Plays by the Season 1 rules (placement, ranks). */
   ranks: boolean;
+  /** src/seasonThemes.ts: the site look this season wears, null = standard. */
+  theme: SeasonThemeId | null;
+  /** Planned last day (YYYY-MM-DD) for the season banner, or null. */
+  endsAt: string | null;
+}
+
+/** Keep in step with SEASON_THEMES in src/seasonThemes.ts. */
+export const SEASON_THEMES = [{ id: 'wrong-way', label: 'Wrong Way (mirrored, cyan)' }] as const;
+export type SeasonThemeId = typeof SEASON_THEMES[number]['id'];
+
+export interface CurrentSeasonLook {
+  id: number;
+  name: string;
+  theme: SeasonThemeId | null;
+  startedAt: string;
+  endsAt: string | null;
 }
 
 export interface SiteInfo {
   discordEnabled: boolean;
   discordInviteUrl: string | null;
   requireDiscord: boolean;
+  season: CurrentSeasonLook | null;
 }
 
 /** A Bronze..Master rank with its division (src/seasonRules.ts rankView). */
@@ -2982,7 +2999,9 @@ export const adminApi = {
   deleteGameConfig: (key: string) => post(`/api/admin/game-configs/${enc(key)}/delete`),
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
-  newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
+  newSeason: (name: string, look: { theme: SeasonThemeId | null; endsAt: string | null } = { theme: null, endsAt: null }) =>
+    post<{ ok: true; id: number }>('/api/admin/seasons/new', { name, ...look }),
+  seasonLook: (id: number, look: { theme: SeasonThemeId | null; endsAt: string | null }) => post(`/api/admin/seasons/${id}/look`, look),
   seasonPreview: (signal?: AbortSignal) => get<SeasonResetPreview>('/api/admin/seasons/preview', signal),
   integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
     post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),

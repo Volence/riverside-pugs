@@ -295,7 +295,7 @@ describe('discord auth, configured', () => {
     const { setSetting } = await import('../src/settings.js');
     setSetting(db, 'discord_invite_url', 'https://discord.gg/abc');
     expect((await app.inject({ method: 'GET', url: '/api/site' })).json())
-      .toEqual({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/abc', requireDiscord: true });
+      .toMatchObject({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/abc', requireDiscord: true });
   });
 
   it('an active player without Discord linked cannot join the queue over HTTP', async () => {

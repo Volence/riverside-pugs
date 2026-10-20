@@ -7,12 +7,15 @@ import { AppRoutes } from './AppRoutes';
 import { Nav } from './components/Nav';
 import { QueueBar } from './components/QueueBar';
 import { EndorseBar } from './components/EndorseBar';
+import { SeasonBanner } from './components/SeasonBanner';
 import { DevPanel } from './components/DevPanel';
 import { ConfirmHost } from './components/Confirm';
 import { installStaleBundleReload } from './staleBundle';
+import { loadSeasonLook, syncSeasonTheme } from './seasonTheme';
 import './styles/app.css';
 
 installStaleBundleReload();
+void loadSeasonLook().then((s) => { if (s !== undefined) syncSeasonTheme(s); });
 
 /** Live state is held at the root rather than inside the Play route, because
  *  the websocket connection and the ready-check countdown must survive
@@ -32,6 +35,7 @@ function App() {
           tab title for the whole app, so nothing else may set them. */}
       <QueueBar state={state} path={path} />
       <EndorseBar me={me} path={path} />
+      <SeasonBanner path={path} />
       <main>
         <AppRoutes session={session} state={state} refresh={refresh} />
       </main>

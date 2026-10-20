@@ -30,6 +30,34 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** `--name: value;` pairs from a season look's block, over the :root ones. */
+function seasonTokens(id: string): Record<string, string> {
+  const start = css.indexOf(`[data-season='${id}'] {`);
+  const block = css.slice(start, css.indexOf('\n}', start));
+  const out = { ...tokens() };
+  for (const m of block.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) out[m[1]] = m[2].trim();
+  return out;
+}
+
+describe('season looks', () => {
+  for (const id of ['wrong-way']) {
+    it(`${id} keeps the same AA floors as the standard look`, () => {
+      const t = seasonTokens(id);
+      for (const bg of ['bg', 'surface', 'surface-2']) {
+        for (const fg of ['text', 'text-bright', 'text-muted']) {
+          expect(contrast(t[fg], t[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+      expect(contrast(t.accent, t.bg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.accent, t.surface)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.rating, t.surface)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.win, t.surface)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.loss, t.surface)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t['accent-ink'], t.accent)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
 describe('tokens.css', () => {
   const t = tokens();
 

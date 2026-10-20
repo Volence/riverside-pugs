@@ -21,6 +21,7 @@ import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
 import { clearPenalties, clearPenalty } from '../penalties.js';
 import { listSeasons, renameSeason, seasonResetPreview, startNewSeason } from '../seasons.js';
+import { isSeasonTheme, parseEndsAt, setSeasonLook } from '../seasonThemes.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
 import { setReview, unanalysableCounts } from '../integrity/store.js';
@@ -932,14 +933,36 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     return { ok: true };
   });
 
+  /** body.theme: a SEASON_THEMES id or null; body.endsAt: YYYY-MM-DD or null. */
+  const seasonLook = (body: { theme?: unknown; endsAt?: unknown } | undefined) => {
+    const theme = body?.theme == null || body.theme === '' ? null : isSeasonTheme(body.theme) ? body.theme : undefined;
+    const endsAt = parseEndsAt(body?.endsAt ?? null);
+    return theme === undefined || endsAt === undefined ? null : { theme, endsAt };
+  };
+
+  app.post('/api/admin/seasons/:id/look', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const id = Number((req.params as { id: string }).id);
+    const look = seasonLook(req.body as { theme?: unknown; endsAt?: unknown } | undefined);
+    if (!look) return reply.code(400).send({ error: 'theme must be a known season theme or empty, and the end date YYYY-MM-DD or empty' });
+    if (!setSeasonLook(db, id, look)) return reply.code(404).send({ error: 'no such season' });
+    logAdmin(db, adminId, 'season_look', id, look);
+    broadcast('refresh');
+    return { ok: true };
+  });
+
   app.post('/api/admin/seasons/new', async (req, reply) => {
     const adminId = requireAdmin(req, reply);
     if (!adminId) return reply;
-    const name = seasonName((req.body as { name?: unknown } | undefined)?.name);
+    const body = req.body as { name?: unknown; theme?: unknown; endsAt?: unknown } | undefined;
+    const name = seasonName(body?.name);
     if (!name) return reply.code(400).send({ error: 'a season name of up to 60 characters is required' });
-    const r = startNewSeason(db, name);
+    const look = seasonLook(body);
+    if (!look) return reply.code(400).send({ error: 'theme must be a known season theme or empty, and the end date YYYY-MM-DD or empty' });
+    const r = startNewSeason(db, name, new Date(), look);
     if (!r.ok) return reply.code(409).send({ error: r.error });
-    logAdmin(db, adminId, 'new_season', r.id, { name });
+    logAdmin(db, adminId, 'new_season', r.id, { name, ...look });
     broadcast('refresh');
     return { ok: true, id: r.id };
   });

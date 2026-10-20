@@ -9,7 +9,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   if (/\/api\/site$/.test(url)) {
-    return Promise.resolve(new Response(JSON.stringify({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false }), {
+    return Promise.resolve(new Response(JSON.stringify({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false, season: null }), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
   }

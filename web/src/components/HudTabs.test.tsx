@@ -4,7 +4,7 @@ import { HudTabs, hudTabFor } from './HudTabs';
 import { api } from '../api';
 
 // The feedback link asks the site for its Discord invite: no network in a test.
-beforeEach(() => { vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false }); });
+beforeEach(() => { vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false, season: null }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('HudTabs', () => {
@@ -26,12 +26,12 @@ describe('HudTabs', () => {
   });
 
   it('offers feedback on the Discord, and nothing while the site has no invite', async () => {
-    vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true });
+    vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true, season: null });
     render(<HudTabs active="hud" />);
     const a = await screen.findByRole('link', { name: /send feedback on Discord/ });
     expect(a.getAttribute('href')).toBe('https://discord.gg/x');
     cleanup();
-    vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false });
+    vi.spyOn(api, 'site').mockResolvedValue({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false, season: null });
     render(<HudTabs active="hud" />);
     await Promise.resolve();
     expect(screen.queryByRole('link', { name: /feedback/ })).toBeNull();

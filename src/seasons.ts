@@ -1,5 +1,6 @@
 import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
+import { isSeasonTheme, type SeasonTheme } from './seasonThemes.js';
 import {
   NEW_SEASON_RULES, rankIndexOf, rankView, seasonLadder, seasonRules, softResetRating, srUnder,
 } from './seasonRules.js';
@@ -7,6 +8,8 @@ import {
 export interface SeasonRow {
   id: number;
   name: string;
+  theme: SeasonTheme | null;
+  endsAt: string | null;
   startedAt: string;
   endedAt: string | null;
   current: boolean;
@@ -18,11 +21,11 @@ export interface SeasonRow {
 /** Newest first. The current season is the one with no end. */
 export function listSeasons(db: DB): SeasonRow[] {
   return (db.prepare(
-    `SELECT s.id, s.name, s.started_at, s.ended_at, s.ranks,
+    `SELECT s.id, s.name, s.started_at, s.ended_at, s.ranks, s.theme, s.ends_at,
             (SELECT COUNT(*) FROM matches m WHERE m.season_id = s.id AND ${completedPug('m')}) AS matches
      FROM seasons s ORDER BY s.id DESC`,
-  ).all() as { id: number; name: string; started_at: string; ended_at: string | null; ranks: number; matches: number }[])
-    .map((s) => ({ id: s.id, name: s.name, startedAt: s.started_at, endedAt: s.ended_at, current: s.ended_at === null, matches: s.matches, ranks: !!s.ranks }));
+  ).all() as { id: number; name: string; started_at: string; ended_at: string | null; ranks: number; theme: string | null; ends_at: string | null; matches: number }[])
+    .map((s) => ({ id: s.id, name: s.name, theme: isSeasonTheme(s.theme) ? s.theme : null, endsAt: s.ends_at, startedAt: s.started_at, endedAt: s.ended_at, current: s.ended_at === null, matches: s.matches, ranks: !!s.ranks }));
 }
 
 export function renameSeason(db: DB, id: number, name: string): boolean {
@@ -48,7 +51,9 @@ export type NewSeasonResult = { ok: true; id: number } | { ok: false; error: str
  * viewable. Refused while a match is being set up or played, so no match
  * straddles the change.
  */
-export function startNewSeason(db: DB, name: string, now = new Date()): NewSeasonResult {
+export function startNewSeason(
+  db: DB, name: string, now = new Date(), look: { theme: SeasonTheme | null; endsAt: string | null } = { theme: null, endsAt: null },
+): NewSeasonResult {
   const open = db.prepare("SELECT COUNT(*) AS n FROM matches WHERE state IN ('configuring', 'live')").get() as { n: number };
   if (open.n > 0) return { ok: false, error: 'a match is being set up or played; start the season once it is over' };
   const id = db.transaction(() => {
@@ -58,8 +63,8 @@ export function startNewSeason(db: DB, name: string, now = new Date()): NewSeaso
     db.prepare("UPDATE seasons SET ended_at = datetime('now') WHERE ended_at IS NULL").run();
     const r = NEW_SEASON_RULES;
     const newId = Number(db.prepare(
-      'INSERT INTO seasons (name, sr_sigma_k, placement_games, ranks, final_min_games) VALUES (?, ?, ?, ?, ?)',
-    ).run(name, r.srSigmaK, r.placementGames, r.ranks ? 1 : 0, r.finalMinGames).lastInsertRowid);
+      'INSERT INTO seasons (name, sr_sigma_k, placement_games, ranks, final_min_games, theme, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(name, r.srSigmaK, r.placementGames, r.ranks ? 1 : 0, r.finalMinGames, look.theme, look.endsAt).lastInsertRowid);
     const seed = db.prepare('INSERT INTO season_seeds (season_id, player_id, mu, sigma) VALUES (?, ?, ?, ?)');
     const rate = db.prepare('INSERT INTO player_ratings (player_id, season_id, mu, sigma) VALUES (?, ?, ?, ?)');
     for (const p of seeds) {

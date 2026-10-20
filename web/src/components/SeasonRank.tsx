@@ -1,18 +1,57 @@
 import type { Placing, RankView } from '../api';
 
-/** A Bronze..Master badge. The tier sets the colour; the division rides
- *  along in the text ("Gold II"). `compact` drops to a single letter + numeral
- *  for a table cell on a phone. */
+/** The emblem for "Gold II" (web/public/ranks, drawn by
+ *  scripts/rank-emblems.py), or null for a name that is not a rank. */
+export function emblemUrl(name: string): string | null {
+  const m = name.match(/^(Bronze|Silver|Gold|Platinum|Diamond|Master) (III|II|I)$/);
+  return m ? `/ranks/${m[1].toLowerCase()}-${m[2].toLowerCase()}.svg` : null;
+}
+
+/** A Bronze..Master badge: the emblem, then the name ("Gold II") in the
+ *  tier's colour. `compact` drops to a single letter + numeral for a table
+ *  cell on a phone. */
 export function RankBadge({ rank, name, compact = false }: { rank?: RankView | null; name?: string | null; compact?: boolean }) {
   const label = rank?.name ?? name;
   if (!label) return null;
   const tier = (rank?.tier ?? label.split(' ')[0]).toLowerCase();
+  const emblem = emblemUrl(label);
   return (
     <span class={`rankbadge rankbadge--${tier}`} title={label}>
-      <span class="rankbadge__gem" aria-hidden="true" />
+      {emblem ? <img class="rankbadge__emblem" src={emblem} alt="" aria-hidden="true" /> : <span class="rankbadge__gem" aria-hidden="true" />}
       {compact ? label.replace(/^(\w)\w*/, '$1') : label}
     </span>
   );
+}
+
+/** The profile's season card: a large emblem beside the rank, SR and the
+ *  way to the next division. */
+export function RankCard({ rank, sr, top10 }: { rank: RankView; sr: number; top10?: boolean }) {
+  const emblem = emblemUrl(rank.name);
+  const span = rank.next === null ? 1 : rank.next - rank.floor;
+  const pct = rank.next === null ? 100 : Math.max(0, Math.min(100, ((sr - rank.floor) / span) * 100));
+  return (
+    <div class={`rankcard rankbadge--${rank.tier.toLowerCase()}`}>
+      {emblem && <img class="rankcard__emblem" src={emblem} alt="" aria-hidden="true" />}
+      <div class="rankcard__body">
+        <p class="rankcard__name">{rank.name}{top10 && <> <Top10Tag /></>}</p>
+        <p class="rankcard__sr">{`${sr} SR`}</p>
+        <div class="rankcard__bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}
+             aria-label={rank.next === null ? 'Top division' : `Progress to the next division`}>
+          <div class="rankcard__fill" style={{ width: `${pct}%` }} />
+        </div>
+        <p class="rankcard__next muted">
+          {rank.next === null ? 'Top division' : `${Math.max(0, rank.next - sr)} SR to ${nextName(rank)}`}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Master'];
+const DIVS = ['III', 'II', 'I'];
+function nextName(rank: RankView): string {
+  const i = rank.index + 1;
+  return `${TIERS[Math.floor(i / 3)]} ${DIVS[i % 3]}`;
 }
 
 /** "Placing 2/5": shown wherever an SR would be while it is still hidden. */
