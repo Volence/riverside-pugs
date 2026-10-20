@@ -456,7 +456,10 @@ export function QueuePanel(
   };
 
   return (
-    <Panel>
+    <Panel class="queue-panel">
+      {/* Wrong Way's easter egg: a road sign that flickers in the corner of an
+       *  empty queue now and then. Hidden outside that look (app.css). */}
+      {count === 0 && <span class="ww-sign" aria-hidden="true">Wrong way</span>}
       <p class="eyebrow">Queue</p>
       <div class="queue-count">
         <span class="hero">{count}</span>

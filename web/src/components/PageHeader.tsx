@@ -22,7 +22,8 @@ export function PageHeader(
       <div class="page-head__row">
         <div>
           {eyebrow && <p class="page-head__eyebrow eyebrow">{eyebrow}</p>}
-          <h2 class="page-head__title">{title}</h2>
+          {/* data-text feeds the Wrong Way season's glitch copies (app.css). */}
+          <h2 class="page-head__title" data-text={typeof title === 'string' ? title : undefined}>{title}</h2>
         </div>
         {aside && <div class="page-head__aside">{aside}</div>}
       </div>

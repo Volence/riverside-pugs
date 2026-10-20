@@ -4127,8 +4127,10 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
   text-shadow: -1px 0 var(--glitch), 1px 0 color-mix(in srgb, var(--accent) 50%, transparent);
 }
 [data-season='wrong-way'] .page-head {
+  /* The rule is drawn by ::after (below) so it can tear; the transparent
+   * border keeps its 2px in the layout. */
+  position: relative;
   border-bottom: 2px solid transparent;
-  border-image: linear-gradient(90deg, var(--rule), var(--accent) 45%, var(--rule) 70%, var(--glitch)) 1;
 }
 [data-season='wrong-way'] .season-banner__title::before {
   /* The arrow points back the way you came. */
@@ -4156,4 +4158,193 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 @media (prefers-reduced-motion: reduce) {
   [data-season='wrong-way'] .nav__brand,
   [data-season='wrong-way'] .season-banner__number::after { animation: none; }
+}
+
+/* ---- Wrong Way glitch ----------------------------------------------------
+ * Two kinds. Static touches are fixed artifacts that never move (a print
+ * plate slightly off register, a rule with a slipped slice), so they stay
+ * under reduced motion. Bursts play once at a moment (a page or the banner
+ * appearing, the queue popping) and settle back to the static look; they
+ * live only inside prefers-reduced-motion: no-preference. Text copies come
+ * from data-text (PageHeader, SeasonBanner), are aria-hidden pseudo content
+ * and absolutely placed, so nothing shifts layout. */
+
+/* Static: the big SR is printed with its red and cyan plates off register. */
+[data-season='wrong-way'] .headliner__rating {
+  text-shadow:
+    -3px 0 rgba(222, 78, 64, 0.5),
+    3px 1px rgba(70, 200, 238, 0.42),
+    0 4px 0 #04070a;
+}
+
+/* Static: the page rule, red into cyan, with one slice torn out of it and
+ * dropped a few pixels lower and to the right. */
+[data-season='wrong-way'] .page-head::after,
+[data-season='wrong-way'] .page-head::before {
+  content: ''; position: absolute; height: 2px; pointer-events: none;
+}
+[data-season='wrong-way'] .page-head::after {
+  left: 0; right: 0; bottom: -2px;
+  background: linear-gradient(90deg, var(--rule), var(--accent) 45%, var(--rule) 70%, var(--glitch));
+  -webkit-mask: linear-gradient(90deg, #000 58%, transparent 58% 64%, #000 64%);
+  mask: linear-gradient(90deg, #000 58%, transparent 58% 64%, #000 64%);
+}
+[data-season='wrong-way'] .page-head::before {
+  left: calc(58% + 7px); width: 6%; bottom: -6px;
+  background: color-mix(in srgb, var(--accent) 70%, var(--rule));
+  box-shadow: -3px -1px 0 rgba(222, 78, 64, 0.45);
+}
+
+/* Static: a panel heading's rule stops short and its last stub has slipped
+ * off the corner. */
+[data-season='wrong-way'] .panel__head,
+[data-season='wrong-way'] .panel > h3:first-child {
+  position: relative;
+  border-image: linear-gradient(90deg, var(--rule) calc(100% - 22px), transparent 0) 1;
+}
+[data-season='wrong-way'] .panel__head::after,
+[data-season='wrong-way'] .panel > h3:first-child::after {
+  content: ''; position: absolute; right: -5px; bottom: -6px; width: 16px; height: 2px;
+  background: var(--rule); box-shadow: -2px 0 0 rgba(222, 78, 64, 0.4); pointer-events: none;
+}
+
+/* Static: faint scanlines across the season banner. */
+[data-season='wrong-way'] .season-banner {
+  position: relative; overflow: clip;
+  background:
+    repeating-linear-gradient(180deg, rgba(194, 208, 222, 0.04) 0 1px, transparent 1px 3px),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, var(--surface)), var(--surface) 70%);
+}
+[data-season='wrong-way'] .season-banner__title-text { position: relative; display: inline-block; }
+
+/* The empty-queue road sign exists only as a burst (below). */
+.ww-sign { display: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Burst: the season banner tears on first show and on hover. Its two text
+   * runs go transparent and are redrawn by two copies, a top band and a
+   * bottom band, that slide apart and split red/cyan, then meet again
+   * exactly where the real text sits. The banner's own animation is the
+   * clock SeasonBanner listens to. */
+  [data-season='wrong-way'] .season-banner.is-tearing { animation: ww-banner-roll 480ms steps(1) 1; }
+  [data-season='wrong-way'] .season-banner.is-tearing :is(.season-banner__number, .season-banner__title-text) {
+    color: transparent; text-shadow: none;
+  }
+  [data-season='wrong-way'] .season-banner.is-tearing :is(.season-banner__number, .season-banner__title-text)::before,
+  [data-season='wrong-way'] .season-banner.is-tearing :is(.season-banner__number, .season-banner__title-text)::after {
+    content: attr(data-text); position: absolute; inset: 0; white-space: nowrap; pointer-events: none;
+    opacity: 1; transform: none;
+  }
+  [data-season='wrong-way'] .season-banner.is-tearing .season-banner__number::before,
+  [data-season='wrong-way'] .season-banner.is-tearing .season-banner__number::after { color: var(--text-bright); }
+  [data-season='wrong-way'] .season-banner.is-tearing .season-banner__title-text::before,
+  [data-season='wrong-way'] .season-banner.is-tearing .season-banner__title-text::after { color: var(--accent); }
+  [data-season='wrong-way'] .season-banner.is-tearing :is(.season-banner__number, .season-banner__title-text)::before {
+    animation: ww-tear-top 480ms steps(1) 1 both;
+  }
+  [data-season='wrong-way'] .season-banner.is-tearing :is(.season-banner__number, .season-banner__title-text)::after {
+    animation: ww-tear-bottom 480ms steps(1) 1 both;
+  }
+  [data-season='wrong-way'] .season-banner.is-tearing .season-banner__title-text::before { animation-delay: 40ms; }
+  [data-season='wrong-way'] .season-banner.is-tearing .season-banner__title-text::after { animation-delay: 40ms; }
+
+  /* Burst: a page title arrives with its colour plates apart and two
+   * slices out of line, and settles within half a second. */
+  [data-season='wrong-way'] .page-head__title { position: relative; animation: ww-title-jitter 520ms steps(1) 1; }
+  [data-season='wrong-way'] .page-head__title[data-text]::before,
+  [data-season='wrong-way'] .page-head__title[data-text]::after {
+    content: attr(data-text); position: absolute; inset: 0; pointer-events: none;
+    opacity: 0; text-shadow: none;
+  }
+  [data-season='wrong-way'] .page-head__title[data-text]::before { color: rgba(222, 78, 64, 0.85); animation: ww-title-slice-a 520ms steps(1) 1; }
+  [data-season='wrong-way'] .page-head__title[data-text]::after { color: var(--accent); animation: ww-title-slice-b 520ms steps(1) 1; }
+
+  /* Burst: the ready check (a popped queue) comes in like a bad signal:
+   * slices of the panel, its edges split red and cyan, the clock shaking.
+   * Once, when the panel mounts; the countdown's re-renders do not replay it. */
+  [data-season='wrong-way'] .urgent-panel { animation: ww-pop 760ms steps(1) 1; }
+  [data-season='wrong-way'] .urgent-panel :is(.eyebrow, .countdown__digits) { animation: ww-pop-text 760ms steps(1) 1; }
+
+  /* Burst, rare: on an empty queue a small WRONG WAY sign flickers in the
+   * panel's corner, mirrored on some frames, about once every 40 seconds. */
+  [data-season='wrong-way'] .queue-panel { position: relative; }
+  [data-season='wrong-way'] .ww-sign {
+    display: block; position: absolute; top: var(--sp-4); right: var(--sp-4);
+    padding: 3px 7px; border: 1px solid rgba(255, 255, 255, 0.85); outline: 2px solid #a51f1a;
+    background: #a51f1a; color: #fff; font-family: var(--font-display); font-size: 0.8125rem;
+    letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.1;
+    opacity: 0; pointer-events: none; user-select: none;
+    animation: ww-sign 41s steps(1) 7s infinite;
+  }
+}
+
+@keyframes ww-banner-roll {
+  0% { background-position: 0 1px, 0 0; filter: brightness(1.18); }
+  20% { background-position: 0 2px, 0 0; filter: none; }
+  45% { background-position: 0 0, 0 0; filter: brightness(1.08); }
+  60%, 100% { background-position: 0 0, 0 0; filter: none; }
+}
+@keyframes ww-tear-top {
+  0% { clip-path: inset(0 0 58% 0); transform: translateX(-8px); text-shadow: 3px 0 var(--glitch), -3px 0 var(--accent); }
+  14% { clip-path: inset(0 0 32% 0); transform: translateX(6px); text-shadow: -3px 0 var(--glitch), 3px 0 var(--accent); }
+  30% { clip-path: inset(0 0 70% 0); transform: translateX(-3px); text-shadow: 2px 0 var(--glitch), -2px 0 var(--accent); }
+  46% { clip-path: inset(0 0 46% 0); transform: translateX(8px); text-shadow: -2px 0 var(--glitch), 2px 0 var(--accent); }
+  62% { clip-path: inset(0 0 50% 0); transform: translateX(-2px); text-shadow: -1px 0 var(--glitch), 1px 0 var(--accent); }
+  78%, 100% { clip-path: inset(0 0 50% 0); transform: none; text-shadow: -1px 0 var(--glitch), 1px 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+}
+@keyframes ww-tear-bottom {
+  0% { clip-path: inset(42% 0 0 0); transform: translateX(5px); text-shadow: -3px 0 var(--glitch), 3px 0 var(--accent); }
+  14% { clip-path: inset(68% 0 0 0); transform: translateX(-9px); text-shadow: 3px 0 var(--glitch), -3px 0 var(--accent); }
+  30% { clip-path: inset(30% 0 0 0); transform: translateX(4px); text-shadow: -2px 0 var(--glitch), 2px 0 var(--accent); }
+  46% { clip-path: inset(54% 0 0 0); transform: translateX(-5px); text-shadow: 2px 0 var(--glitch), -2px 0 var(--accent); }
+  62% { clip-path: inset(50% 0 0 0); transform: translateX(1px); text-shadow: -1px 0 var(--glitch), 1px 0 var(--accent); }
+  78%, 100% { clip-path: inset(50% 0 0 0); transform: none; text-shadow: -1px 0 var(--glitch), 1px 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+}
+@keyframes ww-title-jitter {
+  0% { transform: translateX(-4px); text-shadow: -4px 0 var(--glitch), 4px 0 var(--accent); }
+  16% { transform: translateX(3px); text-shadow: 4px 0 var(--glitch), -4px 0 var(--accent); }
+  32% { transform: none; text-shadow: -3px 0 var(--glitch), 3px 0 var(--accent); }
+  52% { transform: translateX(-1px); text-shadow: -2px 0 var(--glitch), 2px 0 var(--accent); }
+  72%, 100% { transform: none; text-shadow: -1px 0 var(--glitch), 1px 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+}
+@keyframes ww-title-slice-a {
+  0% { opacity: 1; clip-path: inset(18% 0 62% 0); transform: translateX(10px); }
+  16% { opacity: 1; clip-path: inset(58% 0 26% 0); transform: translateX(-9px); }
+  32% { opacity: 1; clip-path: inset(34% 0 52% 0); transform: translateX(6px); }
+  52% { opacity: 0.8; clip-path: inset(70% 0 18% 0); transform: translateX(-3px); }
+  72%, 100% { opacity: 0; }
+}
+@keyframes ww-title-slice-b {
+  0% { opacity: 1; clip-path: inset(64% 0 14% 0); transform: translateX(-10px); }
+  16% { opacity: 1; clip-path: inset(8% 0 76% 0); transform: translateX(8px); }
+  32% { opacity: 0; }
+  42% { opacity: 1; clip-path: inset(46% 0 40% 0); transform: translateX(-5px); }
+  60%, 100% { opacity: 0; }
+}
+@keyframes ww-pop {
+  0% { clip-path: inset(34% 0 48% 0); transform: translateX(-10px); filter: drop-shadow(-6px 0 rgba(222, 78, 64, 0.8)) drop-shadow(6px 0 rgba(70, 200, 238, 0.8)); }
+  7% { clip-path: inset(0 0 62% 0); transform: translateX(8px); }
+  14% { clip-path: inset(48% 0 6% 0); transform: translateX(-6px); }
+  22% { clip-path: inset(12% 0 30% 0); transform: translateX(9px); }
+  30% { clip-path: none; transform: translateX(-5px); filter: drop-shadow(-4px 0 rgba(222, 78, 64, 0.7)) drop-shadow(4px 0 rgba(70, 200, 238, 0.7)); }
+  42% { clip-path: inset(0 0 0 0); transform: translateX(4px); filter: drop-shadow(3px 0 rgba(222, 78, 64, 0.6)) drop-shadow(-3px 0 rgba(70, 200, 238, 0.6)); }
+  52% { transform: none; filter: brightness(1.25) drop-shadow(-2px 0 rgba(222, 78, 64, 0.5)) drop-shadow(2px 0 rgba(70, 200, 238, 0.5)); }
+  62% { transform: translateX(-2px); filter: drop-shadow(-1px 0 rgba(222, 78, 64, 0.4)) drop-shadow(1px 0 rgba(70, 200, 238, 0.4)); }
+  76%, 100% { clip-path: none; transform: none; filter: none; }
+}
+@keyframes ww-pop-text {
+  0%, 30% { text-shadow: -6px 0 var(--glitch), 6px 0 var(--accent); }
+  42% { text-shadow: 4px 0 var(--glitch), -4px 0 var(--accent); }
+  52% { text-shadow: -3px 0 var(--glitch), 3px 0 var(--accent); }
+  62% { text-shadow: -1px 0 var(--glitch), 1px 0 var(--accent); }
+  76%, 100% { text-shadow: none; }
+}
+@keyframes ww-sign {
+  0%, 100% { opacity: 0; transform: none; }
+  90% { opacity: 0.9; transform: scaleX(-1); }
+  90.25% { opacity: 0; }
+  90.6% { opacity: 0.85; transform: none; }
+  91.6% { opacity: 0; }
+  91.9% { opacity: 0.6; transform: scaleX(-1) translateX(2px); }
+  92.2% { opacity: 0; transform: none; }
 }
