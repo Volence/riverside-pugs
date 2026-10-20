@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { rankMoment } from '../rankMoment.js';
 import type { Config } from '../config.js';
 import type { DB } from '../db.js';
 import type { verifyLogin as VerifyFn, fetchPersona as PersonaFn } from '../steamAuth.js';
@@ -106,6 +107,14 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
   app.post('/auth/logout', async (_req, reply) => {
     clearSession(reply);
     return { ok: true };
+  });
+
+  /** The rank-up moment for the signed-in player's latest match, or null
+   *  (src/rankMoment.ts). The site plays it once per match. */
+  app.get('/api/me/rank-moment', async (req, reply) => {
+    const steamid = getSession(req, db);
+    if (!steamid) return reply.code(401).send({ error: 'not logged in' });
+    return { moment: rankMoment(db, steamid) };
   });
 
   app.get('/api/me', async (req, reply) => {
