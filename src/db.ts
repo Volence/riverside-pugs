@@ -2923,6 +2923,18 @@ export function openDb(path: string): DB {
   // the rank held at the end.
   ensureColumn(db, 'season_results', 'peak_rank_idx', 'INTEGER');
   db.exec(`
+    -- A closed season's Wrapped (src/seasonWrapped.ts), frozen at the close
+    -- like season_results so shared cards never change. One row per player
+    -- deck, plus the community deck under player_id ''.
+    CREATE TABLE IF NOT EXISTS season_wrapped (
+      season_id INTEGER NOT NULL REFERENCES seasons(id),
+      player_id TEXT    NOT NULL,
+      data      TEXT    NOT NULL,
+      frozen_at TEXT    NOT NULL,
+      PRIMARY KEY (season_id, player_id)
+    );
+  `);
+  db.exec(`
     -- Players who asked to go back in the queue when their match ends (!rq in
     -- game, or the toggle on the site). src/matchRequeue.ts.
     CREATE TABLE IF NOT EXISTS match_requeue (
