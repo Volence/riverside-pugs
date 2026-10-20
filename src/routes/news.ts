@@ -3,8 +3,8 @@ import type { DB } from '../db.js';
 import { logAdmin } from '../admin/audit.js';
 import { getSetting } from '../settings.js';
 import {
-  NEWS_CHANNEL_SETTING, NEWS_PAGE_SIZE, createNews, deleteNews, getNewsRow, listAll, listPublished, publishNews,
-  toAdmin, toPublic, unpublishNews, updateNews, validateNews, type NewsRow,
+  NEWS_CHANNEL_SETTING, NEWS_KINDS, NEWS_PAGE_SIZE, createNews, deleteNews, getNewsRow, listAll, listPublished, publishNews,
+  toAdmin, toPublic, unpublishNews, updateNews, validateNews, type NewsKind, type NewsRow,
 } from '../news.js';
 import type { NewsPoster } from '../discord/newsPoster.js';
 import { makeRequireAdmin } from './guards.js';
@@ -37,10 +37,11 @@ export async function newsRoutes(app: FastifyInstance, opts: NewsRouteOpts): Pro
   };
 
   app.get('/api/news', async (req) => {
-    const q = req.query as { page?: string; limit?: string };
+    const q = req.query as { page?: string; limit?: string; kind?: string };
     const page = Math.max(1, Math.min(10_000, Math.floor(Number(q.page) || 1)));
     const size = Math.max(1, Math.min(NEWS_PAGE_SIZE, Math.floor(Number(q.limit) || NEWS_PAGE_SIZE)));
-    const { posts, total } = listPublished(db, page, size);
+    const kind = (NEWS_KINDS as readonly string[]).includes(q.kind ?? '') ? q.kind as NewsKind : null;
+    const { posts, total } = listPublished(db, page, size, kind);
     return { posts: posts.map((p) => toPublic(db, p)), page, pages: Math.max(1, Math.ceil(total / size)), total };
   });
 

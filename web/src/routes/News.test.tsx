@@ -14,7 +14,7 @@ vi.mock('preact-iso', async (importOriginal) => {
   const actual = await importOriginal<typeof import('preact-iso')>();
   return { ...actual, useLocation: () => ({ path: '/news', url: '/news', query: loc.query, route: () => {} }) };
 });
-const { News, NewsPostPage } = await import('./News');
+const { News, NewsPostPage, PatchNotes } = await import('./News');
 
 const post = (over: Partial<NewsPost> = {}): NewsPost => ({
   id: 3, kind: 'news', title: 'Season 1 starts Nov 3', body: 'Hello', excerpt: 'Hello',
@@ -44,9 +44,19 @@ describe('the news list', () => {
     mockNews.list.mockResolvedValue({ posts: [post()], page: 2, pages: 3, total: 21 });
     render(<News />);
     await screen.findByText('Page 2 of 3');
-    expect(mockNews.list).toHaveBeenCalledWith(expect.anything(), 2);
+    expect(mockNews.list).toHaveBeenCalledWith(expect.anything(), 2, undefined, undefined);
     expect(screen.getByRole('link', { name: 'Newer' }).getAttribute('href')).toBe('/news');
     expect(screen.getByRole('link', { name: 'Older' }).getAttribute('href')).toBe('/news?page=3');
+  });
+
+  it('/patch-notes lists only patch notes, pages under its own path, and links the full change log', async () => {
+    loc.query = { page: '2' };
+    mockNews.list.mockResolvedValue({ posts: [post()], page: 2, pages: 3, total: 21 });
+    render(<PatchNotes />);
+    await screen.findByText('Page 2 of 3');
+    expect(mockNews.list).toHaveBeenCalledWith(expect.anything(), 2, undefined, 'patch');
+    expect(screen.getByRole('link', { name: 'Older' }).getAttribute('href')).toBe('/patch-notes?page=3');
+    expect(screen.getByRole('link', { name: 'full change log' }).getAttribute('href')).toBe('/balance');
   });
 
   it('says so when nothing is posted', async () => {

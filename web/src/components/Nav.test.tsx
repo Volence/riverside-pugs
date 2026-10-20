@@ -13,11 +13,12 @@ describe('NAV_LINKS', () => {
     }
   });
 
-  it('offers the balance patch notes page right after Matches', () => {
+  it('offers the hand-written patch notes right after Matches; the change log is under them, not in the nav', () => {
     const paths = NAV_LINKS.map(([href]) => href);
     const i = paths.indexOf('/matches');
-    expect(paths[i + 1]).toBe('/balance');
-    expect(NAV_LINKS.find(([href]) => href === '/balance')?.[1]).toBe('Patch notes');
+    expect(paths[i + 1]).toBe('/patch-notes');
+    expect(NAV_LINKS.find(([href]) => href === '/patch-notes')?.[1]).toBe('Patch notes');
+    expect(paths).not.toContain('/balance');
   });
 
   it('offers News, which holds staff announcements and quick patch notes', () => {

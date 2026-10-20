@@ -36,7 +36,11 @@ export function BalanceNotes() {
 
   return (
     <div class="page page--list">
-      <PageHeader eyebrow="Balance" title="Patch notes">
+      <PageHeader eyebrow="Patch notes" title="Full change log">
+        <p>
+          Every tracked change to the game's settings, kept automatically. The <a href="/patch-notes">patch notes</a> say
+          what changed in plain words; this is the exact record.
+        </p>
         <p>
           Each balance patch, why it was made, and what the numbers measured afterwards. A change
           is only called a measured change when it is larger than normal game-to-game variation.
