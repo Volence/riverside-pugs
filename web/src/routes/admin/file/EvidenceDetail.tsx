@@ -222,13 +222,14 @@ export function EvidenceDetail(
                         {b.hold
                           ? <> · held {b.hold.medianTicks} ticks median ({b.hold.minTicks} to {b.hold.maxTicks}, sd {b.hold.sdTicks.toFixed(1)}), {Math.round(b.hold.oneTickFrac * 100)}% one-tick · <strong>{b.annotation}</strong></>
                           : <span class="muted"> · no hold data</span>}
+                        {b.tickrate !== undefined && b.tickrate !== 100 && <span class="muted"> · recorded at {b.tickrate} tick</span>}
                         {b.wire === 1 && <span class="muted"> · plugin 0.1.0: server tick timing, ghosts not excluded</span>}
                       </li>
                     ))}
                   </ul>
                   <p class="muted">
-                    wheel-like: a mouse wheel bind, from one-tick presses or runs of 2 and 3 tick gaps no
-                    finger reaches. steady-taps: the same shape at a flat rate no spun wheel holds, a
+                    wheel-like: a mouse wheel bind, from one-tick presses or runs of 2 and 3 tick gaps
+                    (20 to 30 ms; up to 4 ticks at 128 tick) no finger reaches. steady-taps: the same shape at a flat rate no spun wheel holds, a
                     rapid-fire bind or auto-fire. fixed-hold: a constant hold time, as a scripted macro has.
                     variable-hold: what a hand does. Each burst is labelled on its own; the flag takes the
                     most common label. This describes the evidence; it does not change the flag.

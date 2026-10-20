@@ -863,6 +863,8 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
     bursts: {
       id: number; at: string; weapon: string; presses: number; ratePerSec: number; meanTicks: number;
       wire: number; serverSpan: number | null; annotation: string;
+      /** Tick rate the tick counts are at; 100 when absent. */
+      tickrate?: number;
       hold: { n: number; medianTicks: number; minTicks: number; maxTicks: number; sdTicks: number; oneTickFrac: number; nearMedianFrac: number } | null;
     }[];
   }[];
