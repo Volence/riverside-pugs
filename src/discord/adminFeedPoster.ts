@@ -493,6 +493,18 @@ export class AdminFeedPoster {
       case 'restore_abandon_rating': return `${who} restored ${target}'s rating loss from abandoning match [#${String(d.matchId)}](${this.deps.publicUrl}/match/${String(d.matchId)}): ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
       case 'void_match': return `${who} voided match ${match}: ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
       case 'new_season': return `${who} started a new season: **${escapeName(String(d.name ?? ''))}**. Everyone's rating starts fresh.`;
+      case 'news_create': case 'news_update': case 'news_publish': case 'news_unpublish': case 'news_delete': {
+        const what = d.kind === 'patch' ? 'patch notes' : 'news post';
+        const title = `**${escapeName(String(d.title ?? ''))}**`;
+        const linked = `[${title}](${this.deps.publicUrl}/news/${e.target})`;
+        switch (e.action) {
+          case 'news_create': return `${who} started a ${what} draft: ${title}`;
+          case 'news_update': return `${who} edited the ${what} ${d.published ? linked : title}`;
+          case 'news_publish': return `${who} published the ${what} ${linked}`;
+          case 'news_unpublish': return `${who} unpublished the ${what} ${title}`;
+          default: return `${who} deleted the ${what} ${title}`;
+        }
+      }
       case 'rename_season': return `${who} renamed season ${e.target} to **${escapeName(String(d.name ?? ''))}**`;
       case 'server_idle': return `${who} set server ${e.target} idle`;
       case 'server_move': return `${who} moved server ${e.target} ${d.dir === 'up' ? 'up' : 'down'} the pick order`;

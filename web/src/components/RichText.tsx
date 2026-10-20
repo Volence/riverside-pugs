@@ -29,7 +29,7 @@ function block(b: Block, i: number) {
 
 /** Text in the safe markdown subset (web/src/richText.ts), as elements.
  *  Never sets HTML: every string goes in as a text child. */
-export function RichText({ text, class: cls }: { text: string; class?: string }) {
-  const blocks = useMemo(() => parseRichText(text), [text]);
+export function RichText({ text, class: cls, max }: { text: string; class?: string; max?: number }) {
+  const blocks = useMemo(() => parseRichText(text, max), [text, max]);
   return <div class={cls ? `richtext ${cls}` : 'richtext'}>{blocks.map(block)}</div>;
 }

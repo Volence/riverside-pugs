@@ -45,7 +45,7 @@ import { createDjsTransport } from './discord/djsTransport.js';
 import { VoiceChannels } from './discord/voice.js';
 import { COMMAND_DEFS, handleCommand } from './discord/commands.js';
 import { fetchDiscordApi, type DiscordApi } from './discord/api.js';
-import type { MessagePayload, ModerationOps } from './discord/transport.js';
+import type { BotTransport, MessagePayload, ModerationOps } from './discord/transport.js';
 import { discordAuthRoutes } from './routes/discordAuth.js';
 import { twitchAuthRoutes } from './routes/twitchAuth.js';
 import { makeTwitchApi, type TwitchApi } from './twitch/api.js';
@@ -77,6 +77,8 @@ import { handleModCall } from './modCalls.js';
 import { ModCallPoster } from './discord/modCallPoster.js';
 import { WeeklyPoster } from './discord/weeklyPoster.js';
 import { SkeetStreakPoster } from './discord/skeetStreakPoster.js';
+import { NewsPoster } from './discord/newsPoster.js';
+import { newsRoutes } from './routes/news.js';
 import { MOD_CALL_PREFIX } from './discord/modCallCard.js';
 import { refreshSteamSignals, startSteamSignalRefresh, type SignalDeps } from './steamSignals.js';
 import { authRoutes } from './routes/auth.js';
@@ -266,6 +268,10 @@ export interface ServerDeps {
   reporterChats?: ReporterChats;
   /** Tests: what the routes use to DM a Discord member. Production uses the bot. */
   discordDm?: (userId: string, payload: MessagePayload) => Promise<void>;
+  /** Tests: a transport the news poster runs on from the start, so the news
+   *  routes' Discord side can be tested without a bot. Production builds the
+   *  poster on the bot's own transport once it has connected. */
+  newsTransport?: BotTransport;
   /** Overrides where balance knobs are read from. Injected in tests to
    *  exercise a missing or invalid balance/knobs.json without touching the
    *  checked-in file; production reads BALANCE_KNOBS_PATH otherwise. */
@@ -1905,6 +1911,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   let modCalls: ModCallPoster | null = null;
   let weekly: WeeklyPoster | null = null;
   let skeetStreaks: SkeetStreakPoster | null = null;
+  let newsPoster: NewsPoster | null = deps.newsTransport
+    ? new NewsPoster({ db: deps.db, transport: deps.newsTransport, publicUrl: deps.config.publicUrl, tickMs: 0 })
+    : null;
   let ticketSync: TicketSync | null = null;
   let ticketMirror: TicketMirror | null = null;
   let reportButton: ReportButton | null = null;
@@ -1971,6 +1980,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         weekly.start();
         skeetStreaks = new SkeetStreakPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         skeetStreaks.start();
+        newsPoster = new NewsPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        newsPoster.start();
         scrimPoster = new ScrimPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         scrimPoster.start();
         for (const text of bootProblems.splice(0)) publishAdminEvent({ kind: 'problem', text });
@@ -2071,6 +2082,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     modCalls?.stop();
     weekly?.stop();
     skeetStreaks?.stop();
+    newsPoster?.stop();
     scrimPoster?.stop();
     await bot?.stop();
     clearInterval(reaper);
@@ -2166,6 +2178,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
   await app.register(weeklyRoutes, { db: deps.db });
+  // News and patch notes (src/news.ts). The poster is read per request: the
+  // bot logs in some seconds after this runs.
+  await app.register(newsRoutes, { db: deps.db, poster: () => newsPoster });
   await app.register(balancePublicRoutes, { db: deps.db, knobsPath: deps.balanceKnobsPath });
   // The balance suggestion reads the whole watch list (knobs.json plus the
   // catalogue), so a change to a catalogue-only value is never suggested as

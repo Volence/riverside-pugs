@@ -14,6 +14,7 @@ import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
 import { SetupChecklist } from '../components/SetupChecklist';
 import { PracticeCard } from '../components/PracticeCard';
+import { NewsStrip } from '../components/NewsStrip';
 import type { Session } from '../hooks/useLiveState';
 
 /** Display only: the server's `sidegames_min_players` setting still decides
@@ -59,6 +60,7 @@ export function Play(
   return (
     <div class={`page ${wide ? 'page--play-teams' : 'page--play'}`}>
       <PageHeader eyebrow="Riverside" title="Ranked 4v4" />
+      <NewsStrip />
       <Live state={state} me={session.me.steamid} sessionMe={session.me} refresh={refresh} />
       {/* Below the queue, never above it: ranked is what this page is for.
           And not at all while this player is in a pop or a match. */}
@@ -82,6 +84,7 @@ function SignIn() {
 
   return (
     <div class="page page--play">
+      <NewsStrip />
       <Panel class="hero-panel">
         <p class="eyebrow">Riverside</p>
         <h1>Ranked 4v4 pick-up games</h1>
