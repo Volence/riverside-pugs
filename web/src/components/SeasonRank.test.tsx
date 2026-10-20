@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/preact';
-import { PlacingTag, RankBadge } from './SeasonRank';
+import { PlacingTag, RankBadge, Trophy } from './SeasonRank';
 import { SrDelta } from './bits';
 
 afterEach(cleanup);
@@ -31,5 +31,19 @@ describe('season rank bits', () => {
     cleanup();
     render(<SrDelta value={42} />);
     expect(screen.getByText('+42')).toBeTruthy();
+  });
+
+  it('a trophy shows the peak rank emblem, with a Top 10 ribbon when earned', () => {
+    const { container } = render(<Trophy season="Season 1: Wrong Way" peakRank="Diamond II" place={3} />);
+    expect(screen.getByText('Peak Diamond II')).toBeTruthy();
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/ranks/diamond-ii.webp');
+    expect(screen.getByText('#3')).toBeTruthy();
+    expect(container.querySelector('.rankbadge--diamond')).toBeTruthy();
+  });
+
+  it('a season without ranks gives a Top 10 medal instead', () => {
+    const { container } = render(<Trophy season="Season 0" peakRank={null} place={7} />);
+    expect(screen.getByText('Top 10')).toBeTruthy();
+    expect(container.querySelector('.trophy__medal')?.textContent).toBe('#7');
   });
 });

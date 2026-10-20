@@ -93,6 +93,8 @@ export interface FinalStanding {
   finalRank: number | null;
   /** The rank badge held at the end, null in a season without ranks. */
   rankIdx: number | null;
+  /** The highest rank held during the season: the season-end trophy. */
+  peakRankIdx: number | null;
   /** False when they never finished placement: sr and peakSr were never
    *  shown, and nothing that reads the freeze may show them. */
   placed: boolean;
@@ -114,7 +116,7 @@ export function finalStandings(db: DB, seasonId: number, now = new Date()): Fina
     const eligible = e.placed && e.games >= rules.finalMinGames && !banned.has(e.steamid);
     return {
       steamid: e.steamid, sr: e.sr, peakSr: e.peakSr ?? e.sr, wins: e.wins, losses: e.losses, games: e.games,
-      finalRank: eligible ? ++place : null, rankIdx: e.rankIdx, placed: e.placed,
+      finalRank: eligible ? ++place : null, rankIdx: e.rankIdx, peakRankIdx: e.peakRankIdx, placed: e.placed,
     };
   });
 }
@@ -126,10 +128,10 @@ export function freezeSeasonResults(db: DB, seasonId: number, now = new Date()):
   db.transaction(() => {
     db.prepare('DELETE FROM season_results WHERE season_id = ?').run(seasonId);
     const ins = db.prepare(
-      `INSERT INTO season_results (season_id, player_id, sr, peak_sr, wins, losses, games, final_rank, rank_idx, placed)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO season_results (season_id, player_id, sr, peak_sr, wins, losses, games, final_rank, rank_idx, peak_rank_idx, placed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const r of rows) ins.run(seasonId, r.steamid, r.sr, r.peakSr, r.wins, r.losses, r.games, r.finalRank, r.rankIdx, r.placed ? 1 : 0);
+    for (const r of rows) ins.run(seasonId, r.steamid, r.sr, r.peakSr, r.wins, r.losses, r.games, r.finalRank, r.rankIdx, r.peakRankIdx, r.placed ? 1 : 0);
   })();
   return rows.length;
 }
@@ -193,6 +195,9 @@ export interface PastSeason {
   /** How many players held a final place, for "#3 of 61". */
   of: number;
   rank: string | null;
+  /** The highest rank held during the season, for the trophy. Null in a
+   *  season without ranks or when they never placed. */
+  peakRank: string | null;
   /** In the Top 10 of the final standings. */
   top10: boolean;
 }
@@ -200,16 +205,17 @@ export interface PastSeason {
 /** A player's frozen results in every finished season, newest first. */
 export function playerPastSeasons(db: DB, steamid: string): PastSeason[] {
   return (db.prepare(
-    `SELECT r.season_id, s.name, r.sr, r.peak_sr, r.wins, r.losses, r.games, r.final_rank, r.rank_idx, r.placed,
+    `SELECT r.season_id, s.name, r.sr, r.peak_sr, r.wins, r.losses, r.games, r.final_rank, r.rank_idx, r.peak_rank_idx, r.placed,
             (SELECT COUNT(*) FROM season_results x WHERE x.season_id = r.season_id AND x.final_rank IS NOT NULL) AS of
      FROM season_results r JOIN seasons s ON s.id = r.season_id
      WHERE r.player_id = ? ORDER BY r.season_id DESC`,
-  ).all(steamid) as { season_id: number; name: string; sr: number; peak_sr: number; wins: number; losses: number; games: number; final_rank: number | null; rank_idx: number | null; placed: number; of: number }[])
+  ).all(steamid) as { season_id: number; name: string; sr: number; peak_sr: number; wins: number; losses: number; games: number; final_rank: number | null; rank_idx: number | null; peak_rank_idx: number | null; placed: number; of: number }[])
     .map((r) => ({
       seasonId: r.season_id, name: r.name,
       sr: r.placed ? r.sr : null, peakSr: r.placed ? r.peak_sr : null, placed: r.placed === 1,
       wins: r.wins, losses: r.losses, games: r.games,
       finalRank: r.final_rank, of: r.of, rank: r.rank_idx === null ? null : rankView(r.rank_idx).name,
+      peakRank: !r.placed ? null : r.peak_rank_idx !== null ? rankView(r.peak_rank_idx).name : r.rank_idx !== null ? rankView(r.rank_idx).name : null,
       top10: r.final_rank !== null && r.final_rank <= 10,
     }));
 }

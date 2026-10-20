@@ -2917,6 +2917,10 @@ export function openDb(path: string): DB {
   `);
   // Added after the table first shipped to test copies of the branch.
   ensureColumn(db, 'season_results', 'placed', 'INTEGER NOT NULL DEFAULT 1');
+  // The highest rank held during the season (the season-end trophy). Null in
+  // a season without ranks; a freeze from before this column falls back to
+  // the rank held at the end.
+  ensureColumn(db, 'season_results', 'peak_rank_idx', 'INTEGER');
   db.exec(`
     -- Players who asked to go back in the queue when their match ends (!rq in
     -- game, or the toggle on the site). src/matchRequeue.ts.

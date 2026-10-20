@@ -19,7 +19,7 @@ import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
-import { RankBadge as SeasonRankBadge, RankCard, Top10Tag } from '../components/SeasonRank';
+import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../components/SeasonRank';
 import type { PastSeason } from '../api';
 
 export function Profile(
@@ -161,6 +161,8 @@ export function Profile(
             <RankCard rank={season.rank} sr={season.sr} top10={season.top10} />
           </Panel>
         )}
+
+        <Trophies past={data.pastSeasons ?? []} />
 
         <Panel>
           <h3>Rating over time</h3>
@@ -453,6 +455,21 @@ function SharedPanel({ steamid, session }: { steamid: string; session: Session }
 
 /** "120 SR to Gold I", with a bar across the current division. */
 /** Every finished season, frozen as it ended: place, rank, SR, peak, record. */
+/** Season-end trophies, newest first: the peak rank of every finished ranked
+ *  season, and a Top 10 finish in any season. */
+function Trophies({ past }: { past: PastSeason[] }) {
+  const won = past.filter((p) => p.peakRank || p.top10);
+  if (won.length === 0) return null;
+  return (
+    <Panel>
+      <h3>Trophies</h3>
+      <div class="trophies">
+        {won.map((p) => <Trophy key={p.seasonId} season={p.name} peakRank={p.peakRank ?? null} place={p.top10 ? p.finalRank : null} />)}
+      </div>
+    </Panel>
+  );
+}
+
 function SeasonHistory({ past }: { past: PastSeason[] }) {
   if (past.length === 0) return null;
   return (
