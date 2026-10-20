@@ -3388,3 +3388,58 @@ export interface AbortParty {
   role: 'no_show' | 'file_check' | 'abandon'; what: string; outcome: string;
 }
 export interface AbortWho { reason: string | null; parties: AbortParty[] }
+
+// ---------- news ----------
+
+export type NewsKind = 'news' | 'patch';
+
+/** Mirrors src/news.ts NewsPublic. `body` is the safe markdown subset
+ *  (web/src/richText.ts); `excerpt` is plain text. */
+export interface NewsPost {
+  id: number;
+  kind: NewsKind;
+  title: string;
+  body: string;
+  excerpt: string;
+  publishedAt: string;
+  updatedAt: string;
+  author: { steamid: string; name: string } | null;
+}
+
+/** Mirrors src/news.ts NewsAdmin. */
+export interface NewsAdminPost extends Omit<NewsPost, 'publishedAt'> {
+  publishedAt: string | null;
+  createdAt: string;
+  discord: 'none' | 'posted' | 'pending' | 'removing' | 'skipped';
+  discordError: string | null;
+}
+
+/** GET /api/admin/news, and what every editor action answers with. */
+export interface NewsEditorState {
+  posts: NewsAdminPost[];
+  /** A news channel is set (Setup > Settings > Discord). */
+  channelSet: boolean;
+  /** The bot is connected, so a publish reaches Discord now. */
+  botConnected: boolean;
+  /** The post the action was about; absent on the list read. */
+  post?: NewsAdminPost | null;
+}
+
+export interface NewsInput { kind: NewsKind; title: string; body: string }
+
+/** src/news.ts NEWS_BODY_MAX: the site shows a post's whole body. */
+export const NEWS_BODY_MAX = 20_000;
+
+export const newsApi = {
+  list: (signal?: AbortSignal, page = 1, limit?: number) =>
+    get<{ posts: NewsPost[]; page: number; pages: number; total: number }>(
+      `/api/news?page=${page}${limit ? `&limit=${limit}` : ''}`, signal,
+    ),
+  post: (id: number, signal?: AbortSignal) => get<{ post: NewsPost }>(`/api/news/${id}`, signal),
+  editor: (signal?: AbortSignal) => get<NewsEditorState>('/api/admin/news', signal),
+  create: (input: NewsInput) => post<NewsEditorState>('/api/admin/news', input),
+  update: (id: number, input: NewsInput) => post<NewsEditorState>(`/api/admin/news/${id}`, input),
+  publish: (id: number) => post<NewsEditorState>(`/api/admin/news/${id}/publish`),
+  unpublish: (id: number) => post<NewsEditorState>(`/api/admin/news/${id}/unpublish`),
+  remove: (id: number) => post<NewsEditorState>(`/api/admin/news/${id}/delete`),
+};
