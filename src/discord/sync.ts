@@ -70,6 +70,8 @@ interface MatchRow {
   abort_cause: AbortCause | null;
   campaign: string;
   server_id: number | null;
+  kind: string;
+  booking_id: number | null;
   winner: 'a' | 'b' | 'draw' | null;
   forfeit_team: 'a' | 'b' | null;
   team_a_score: number;
@@ -226,7 +228,7 @@ export class DiscordSync {
       if (m.ref.startsWith('lob_')) continue;
       const matchId = Number(m.ref);
       const row = db.prepare(
-        'SELECT id, state, abort_cause, campaign, server_id, winner, forfeit_team, team_a_score, team_b_score FROM matches WHERE id = ?',
+        'SELECT id, state, abort_cause, campaign, server_id, kind, booking_id, winner, forfeit_team, team_a_score, team_b_score FROM matches WHERE id = ?',
       ).get(matchId) as MatchRow | undefined;
       if (!row) {
         setMessageState(db, 'match', m.ref, 'done');
@@ -250,6 +252,7 @@ export class DiscordSync {
         voice: this.deps.voice?.channelsFor(matchId) ?? null,
         unlinked: [...teamA, ...teamB].map((p) => this.player(p)).filter((p) => !p.discordId).map((p) => p.name),
         canSpectate: spectateFor(db, row.server_id) !== null,
+        canRequeue: row.kind === 'pug' && row.booking_id === null,
       };
       const payload = renderMatch(view);
       // Skipped for 'aborted': closeMatchCard below moves the card to the

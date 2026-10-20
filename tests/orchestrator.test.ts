@@ -351,6 +351,39 @@ describe('RealOrchestrator', () => {
     expect(JSON.parse(mp.stats_json).sidmg).toBe('100');
   });
 
+  it('finishMatch requeues who asked and sends each player their end note before sm_pug_abort', async () => {
+    const mid = 1;
+    const dump = [
+      `DUMP match=${mid}`,
+      'MAP map=l4d_hospital01 a=245 b=310',
+      ...IDS.map((id, i) => `STAT steamid=${id} team=${i < 4 ? 'a' : 'b'} sidmg=1 sikill=0 ck=0 ff=0 rev=0`),
+      'END winner=b a=245 b=310',
+    ].join('\n');
+    const srv = await fakeServer(dump);
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const asked: number[] = [];
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+      requeueAfterMatch: (id) => { asked.push(id); return new Map([[IDS[0], { ok: true as const }]]); },
+    });
+
+    const realMid = seedMatch(db);
+    await orch.setupMatch(realMid);
+    await orch.finishMatch(realMid);
+
+    expect(asked).toEqual([realMid]);
+    const notes = srv.cmds.filter((c) => c.startsWith('sm_pug_endnote'));
+    expect(notes).toHaveLength(8);
+    const mine = notes.find((c) => c.includes(IDS[0]))!;
+    expect(mine).toMatch(/^sm_pug_endnote [0-9a-f]+ \d+ ".*You are back in the queue\."$/);
+    const abort = srv.cmds.findIndex((c) => c.startsWith('sm_pug_abort'));
+    expect(srv.cmds.lastIndexOf(mine)).toBeLessThan(abort);
+  });
+
   it('finishMatch still releases the server and completes the match when sm_pug_abort fails', async () => {
     const mid = 1;
     const dump = [

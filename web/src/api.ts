@@ -114,6 +114,9 @@ export interface StateSnapshot {
      *  yet, so it is queued behind another match. Never true once the match
      *  is live. */
     waitingForServer: boolean;
+    /** Queue again when this match ends (!rq in game); null where not on
+     *  offer. Optional: an older server sends none. */
+    requeue?: boolean | null;
   } | null;
   /** A queue timeout the viewer is serving (missed ready checks, no-shows). */
   timeout?: QueueTimeout | null;
@@ -3341,6 +3344,7 @@ export const api = {
   reportChat: (reportId: number) => post<{ ok: true; url: string }>(`/api/reports/${reportId}/chat`),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
+  setRequeue: (matchId: number, on: boolean) => post('/api/queue/requeue', { matchId, on }),
   setSideOptIn: (on: boolean) => post('/api/queue/side', { on }),
   ready: () => post('/api/lobby/ready'),
   dismissNotice: () => post('/api/lobby/dismiss-notice'),

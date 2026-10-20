@@ -287,6 +287,7 @@ function LiveBody(
           })}
         </div>
         {match.connect && <ConnectPanel connect={match.connect} />}
+        {match.requeue != null && <RequeueToggle matchId={match.id} on={match.requeue} refresh={refresh} />}
         {match.spectate && <SpectatePanel spectate={match.spectate} />}
         {match.waitingForServer && (
           <Empty>Waiting for a free server. The match starts as soon as one opens up.</Empty>
@@ -503,6 +504,31 @@ export function QueuePanel(
       ))}
       {error && <p class="error">{error}</p>}
     </Panel>
+  );
+}
+
+/** "Queue again when this match ends": the site's twin of typing !rq in
+ *  game. You go to the back of the queue the moment the match is rated. */
+function RequeueToggle({ matchId, on, refresh }: { matchId: number; on: boolean; refresh: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const flip = async (next: boolean) => {
+    setError(null);
+    try {
+      await api.setRequeue(matchId, next);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  return (
+    <div class="requeue">
+      <label class="side-toggle">
+        <input type="checkbox" checked={on} onChange={(e) => void flip((e.target as HTMLInputElement).checked)} />
+        Queue again when this match ends
+      </label>
+      <p class="muted requeue__hint">Or type <code>!rq</code> in game chat (<code>!rq off</code> to cancel).</p>
+      {error && <p class="error">{error}</p>}
+    </div>
   );
 }
 

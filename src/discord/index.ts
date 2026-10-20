@@ -17,7 +17,7 @@ export interface BotDeps {
   /** Builds the gateway connection. Injected in tests. */
   connect: () => Promise<BotTransport & { destroy?(): Promise<void> }>;
   /** Extra controller hooks (bans, timeouts, side games) supplied by later features. */
-  controller?: Partial<Pick<ControllerDeps, 'queueBlock' | 'banMessage' | 'sideGameView'>>;
+  controller?: Partial<Pick<ControllerDeps, 'queueBlock' | 'banMessage' | 'sideGameView' | 'requeue'>>;
   voice?: (transport: BotTransport) => VoiceHook;
   /** A side game currently running, or null. Absent when side games are not wired up. */
   sideGame?: () => SidePublicView | null;
