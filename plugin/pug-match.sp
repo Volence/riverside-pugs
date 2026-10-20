@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.37"
+#define PLUGIN_VERSION "0.3.38"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -556,6 +556,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	Tourney_Init();
 	Book_Init();
 	DataFeeds_Init();
+	EndNote_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
@@ -2539,6 +2540,7 @@ void CancelEndKick()
 	}
 	g_sEndKickReason[0] = '\0';
 	g_iEndKickTries = 0;
+	EndNote_Clear();
 }
 
 /** A bare map name: letters, digits, underscore. Anything else is refused. */
@@ -2711,6 +2713,7 @@ public Action Timer_EndKick(Handle timer)
 	{
 		g_hEndKick = null;
 		g_sEndKickReason[0] = '\0';
+		EndNote_Clear();
 		return Plugin_Stop;
 	}
 
@@ -2719,7 +2722,8 @@ public Action Timer_EndKick(Handle timer)
 	// kicking a client who has not finished loading is not safe. They are
 	// caught by a later pass instead, which is the whole reason this timer
 	// repeats.
-	KickHumans(g_sEndKickReason);
+	// Each player's own note (pug-endnote.inc) rides after the shared result.
+	EndNote_KickHumans(g_sEndKickReason);
 	return Plugin_Continue;
 }
 
@@ -5462,6 +5466,8 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-booking.inc"
 // Flow, cause, SI lives and the connection funnel (docs/data-feeds-2026-10-10.md).
 #include "pug-datafeeds.inc"
+// Per-player end-of-match notes and !rq (reads the roster and the end kick).
+#include "pug-endnote.inc"
 
 /** pain_pills_decay_rate (temp health lost per second), looked up once. */
 float PillsDecayRate()

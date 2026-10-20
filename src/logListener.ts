@@ -79,7 +79,7 @@ export class LogListener {
             || ev.kind === 'input_burst' || ev.kind === 'input_cap' || ev.kind === 'input_stall' || ev.kind === 'si_kill' || ev.kind === 'lilac_flag'
             || ev.kind === 'cvar_flag' || ev.kind === 'spray_exploit' || ev.kind === 'say' || ev.kind === 'name' || ev.kind === 'sourcetv'
             || ev.kind === 'call' || ev.kind === 'staff_in' || ev.kind === 'staff_sent' || ev.kind === 'side'
-            || ev.kind === 'booking_cmd' || ev.kind === 'look') {
+            || ev.kind === 'booking_cmd' || ev.kind === 'look' || ev.kind === 'requeue') {
           if (fromGameServer()) this.onEvent(ev, rinfo.address, meta);
           return;
         }

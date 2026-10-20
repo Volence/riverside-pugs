@@ -279,6 +279,8 @@ export interface MatchView {
   unlinked: string[];
   /** True when the match's server has SourceTV, so anyone can watch it. */
   canSpectate?: boolean;
+  /** A queue PUG, so the card offers "Queue again after" (src/matchRequeue.ts). */
+  canRequeue?: boolean;
   /** For the admin channel's copy of an aborted card only: why, and who
    *  never got in or walked, with what it cost them. */
   abort?: { reason: string | null; parties: { name: string; team: 'a' | 'b' | null; what: string; outcome: string }[] };
@@ -311,6 +313,7 @@ export function renderMatch(v: MatchView): MessagePayload {
   const open = v.state === 'configuring' || v.state === 'waiting' || v.state === 'live';
   const row: Button[] = [];
   if (v.state === 'live') row.push({ kind: 'button', customId: `m:${v.matchId}:connect`, label: 'Connect', style: 'success' });
+  if (v.state === 'live' && v.canRequeue) row.push({ kind: 'button', customId: `m:${v.matchId}:requeue`, label: 'Queue again after', style: 'secondary' });
   if (v.state === 'live' && v.canSpectate) {
     row.push({ kind: 'button', customId: `m:${v.matchId}:spectate`, label: 'Watch', style: 'secondary' });
   }

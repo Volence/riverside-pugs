@@ -16,6 +16,7 @@ import type { Orchestrator } from './orchestrator.js';
 import { inGoodStanding } from './standing.js';
 import { abortNoticeFor, type AbortNotice } from './matchAborts.js';
 import { recordQueueStint } from './queueActivity.js';
+import { requeueOptIns, wantsRequeue, type RequeueResult } from './matchRequeue.js';
 
 export interface MatchmakerDeps {
   broadcast: (event: string) => void;
@@ -72,6 +73,10 @@ export interface StateSnapshot {
      *  yet, so it is queued behind another match. Never true once the match
      *  is live. */
     waitingForServer: boolean;
+    /** Whether the viewer has asked to queue again when this match ends
+     *  (src/matchRequeue.ts); null where that is not on offer (not live yet,
+     *  or not a queue PUG). */
+    requeue: boolean | null;
   } | null;
   /** A queue timeout the viewer is serving, as an ISO time. */
   timeout: { until: string; offenses: number; kind: PenaltyKind } | null;
@@ -379,6 +384,26 @@ export class Matchmaker {
     return back;
   }
 
+  /**
+   * Queue again everyone who asked for it on this just-completed match (!rq
+   * or the site toggle, src/matchRequeue.ts). An ordinary join, at the back,
+   * through every rule join() checks; what each one came to goes into their
+   * end-of-match note.
+   */
+  requeueAfterMatch(matchId: number): Map<string, RequeueResult> {
+    const out = new Map<string, RequeueResult>();
+    for (const id of requeueOptIns(this.db, matchId)) out.set(id, this.requeueOne(id));
+    return out;
+  }
+
+  /** One player's requeue, for the match end and for a !rq that arrives
+   *  just after it. Already queued (or in a pop) counts as done. */
+  requeueOne(steamid: string): RequeueResult {
+    if (this.queue.has(steamid) || this.playerLobby.has(steamid)) return { ok: true };
+    const r = this.join(steamid);
+    return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'could not join the queue' };
+  }
+
   ready(steamid: string): { ok: boolean; error?: string } {
     const lobby = this.lobbyFor(steamid);
     if (!lobby) return { ok: false, error: 'no ready check active' };
@@ -554,7 +579,7 @@ export class Matchmaker {
          ORDER BY m.id DESC LIMIT 1`,
       )
       .get(steamid) as
-      | { id: number; state: string; campaign: string; server_id: number | null; token: string | null }
+      | { id: number; state: string; campaign: string; server_id: number | null; token: string | null; kind: string; booking_id: number | null }
       | undefined;
 
     let match: StateSnapshot['match'] = null;
@@ -586,6 +611,8 @@ export class Matchmaker {
         connect,
         spectate: spectateFor(this.db, matchRow.server_id),
         waitingForServer: matchRow.state === 'configuring' && matchRow.server_id === null,
+        requeue: matchRow.state === 'live' && matchRow.kind === 'pug' && matchRow.booking_id === null
+          ? wantsRequeue(this.db, matchRow.id, steamid) : null,
       };
     }
 

@@ -24,6 +24,8 @@ import { stopAfterMap } from './stopPoint.js';
 import { isUnknownCvar } from './leaveControl.js';
 import { pushLogSecret } from './logAuth.js';
 import { holdMaxSeconds } from './presence.js';
+import { endNotes, standingSnapshot, type StandingSnapshot } from './endNotes.js';
+import type { RequeueResult } from './matchRequeue.js';
 
 /** What one attempt to collect a match came to.
  *   completed  persisted, rated and released.
@@ -86,6 +88,10 @@ export interface RealOrchestratorDeps {
   /** A game inside a booking finished (src/bookings/games.ts). finishMatch
    *  calls this instead of releasing the box, which stays with the booking. */
   onBookingGameEnded?: (matchId: number) => void;
+  /** A match was just completed and rated: put the players who asked (!rq,
+   *  src/matchRequeue.ts) back in the queue. Answers what each attempt came
+   *  to, for their end-of-match note. */
+  requeueAfterMatch?: (matchId: number) => Map<string, RequeueResult>;
 }
 
 /** Whether this box can run the campaign: a custom one must be installed on
@@ -124,6 +130,7 @@ export class RealOrchestrator implements Orchestrator {
   private beforeLive?: (rcon: RconClient) => Promise<void>;
   private takeHeld?: RealOrchestratorDeps['takeHeld'];
   private onBookingGameEnded?: (matchId: number) => void;
+  requeueAfterMatch?: RealOrchestratorDeps['requeueAfterMatch'];
 
   constructor(deps: RealOrchestratorDeps) {
     this.db = deps.db;
@@ -138,6 +145,7 @@ export class RealOrchestrator implements Orchestrator {
     this.beforeLive = deps.beforeLive;
     this.takeHeld = deps.takeHeld;
     this.onBookingGameEnded = deps.onBookingGameEnded;
+    this.requeueAfterMatch = deps.requeueAfterMatch;
   }
 
   /** Give the box its log secret, when it has one. Never fatal: a match is
@@ -419,6 +427,25 @@ export class RealOrchestrator implements Orchestrator {
     }
   }
 
+  /** Requeue whoever asked, then push each player's end note
+   *  (sm_pug_endnote, pug-match 0.3.38; an older plugin answers unknown
+   *  command and the notes are simply not shown). Never throws. */
+  private async sendEndNotes(rcon: RconClient, matchId: number, token: string, before: StandingSnapshot): Promise<void> {
+    let requeued = new Map<string, RequeueResult>();
+    try {
+      requeued = this.requeueAfterMatch?.(matchId) ?? requeued;
+    } catch (err) {
+      console.error(`[orchestrator] requeue after match ${matchId} failed (non-fatal):`, err);
+    }
+    try {
+      for (const n of endNotes(this.db, matchId, before, requeued)) {
+        await rcon.exec(`sm_pug_endnote ${token} ${n.steamid} "${n.text}"`);
+      }
+    } catch (err) {
+      console.error(`[orchestrator] end notes for match ${matchId} failed (non-fatal):`, err);
+    }
+  }
+
   async pullDump(serverId: number, token: string): Promise<string> {
     const server = getServer(this.db, serverId);
     if (!server) throw new Error(`pullDump: no server row ${serverId}`);
@@ -476,11 +503,19 @@ export class RealOrchestrator implements Orchestrator {
         });
         return 'not_ended';
       }
+      // Each player's standing before the match is rated, for the end note.
+      let before: StandingSnapshot = new Map();
+      try { before = standingSnapshot(this.db, matchId); } catch (err) { console.error(`[orchestrator] standing snapshot failed for match ${matchId} (non-fatal):`, err); }
       persisted = completeMatch(this.db, matchId, dump);
       if (!persisted) {
         console.error(`[orchestrator] match ${matchId} was not completable (state changed?); skipping`);
         return 'skipped';
       }
+      // Before sm_pug_abort, which forgets the token, and inside the plugin's
+      // eight seconds before it kicks everyone: !rq requeues, then each
+      // player's own note (SR change, rank, requeue) goes to their chat and
+      // their disconnect dialog. Neither may cost the match its result.
+      await this.sendEndNotes(rcon, matchId, match.token, before);
       try {
         await rcon.exec(`sm_pug_abort ${match.token}`);
       } catch (abortErr) {

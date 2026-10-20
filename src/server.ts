@@ -86,6 +86,7 @@ import { wsRoutes } from './routes/ws.js';
 import { ticketNudger } from './tickets/nudge.js';
 import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
+import { requeueMatchFor, setRequeue, type RequeueResult } from './matchRequeue.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { lilacSeverity, recordSiKill, scanAimMatches } from './aimRules.js';
@@ -831,6 +832,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // and it is read again once the actual SideGames is built after the
   // matchmaker (or left null in dev mode).
   let sideGamesRef: SideGames | null = null;
+  // Set once the matchmaker exists, below; the log listener and the
+  // orchestrator are built before it.
+  let matchmakerRef: Matchmaker | null = null;
+  /** !rq in game or the site's toggle: remember it for the match end, or,
+   *  when the match has only just ended, requeue at once. `serverId` pins an
+   *  in-game request to the box the match is on; null for the site, which
+   *  has already checked who is asking. */
+  const onRequeueRequest = (matchId: number, steamid: string, on: boolean, serverId: number | null): RequeueResult => {
+    const m = requeueMatchFor(deps.db, matchId, steamid, serverId);
+    if (!m) return { ok: false, error: 'not on a live queue match' };
+    setRequeue(deps.db, matchId, steamid, on);
+    let r: RequeueResult = { ok: true };
+    if (on && m.state === 'completed' && matchmakerRef) r = matchmakerRef.requeueOne(steamid);
+    hub.broadcast('refresh');
+    return r;
+  };
   // Forward reference, same shape again: the booking runner is built near the
   // end of buildServer, and the orchestrator hands it each finished booking
   // game. Null until then, so an early call no-ops.
@@ -1131,6 +1148,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             handleModCall(deps.db, ev, sid, { adminSteamIds: deps.config.adminSteamIds, map: ev.map ?? currentMapOf(sid) });
           } catch (err) {
             console.error('[modcall] failed to handle a call:', err);
+          }
+          return;
+        }
+        if (ev.kind === 'requeue') {
+          // !rq in game (src/matchRequeue.ts). Same guard as the lines
+          // around it.
+          try {
+            const sid = serverOf(source, meta);
+            if (sid !== null) onRequeueRequest(ev.matchId, ev.steamid, ev.on, sid);
+          } catch (err) {
+            console.error('[requeue] failed to handle !rq:', err);
           }
           return;
         }
@@ -1498,6 +1526,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         takeHeld: (id, c, runsOn) => sideGamesRef?.takeForMatch(id, c, runsOn) ?? null,
         // A game inside a booking keeps its box; the runner moves the block on.
         onBookingGameEnded: (id) => bookingRunnerRef?.onGameEnded(id),
+        requeueAfterMatch: (id) => {
+          const r = matchmakerRef?.requeueAfterMatch(id) ?? new Map();
+          if (r.size > 0) hub.broadcast('refresh');
+          return r;
+        },
       });
 
       // Re-arm the listener for matches that were already running when this
@@ -1607,6 +1640,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     hub.broadcast('refresh');
     return back;
   });
+  matchmakerRef = matchmaker;
   app.decorate('matchmaker', matchmaker);
   // Side games need a real box to hold (rcon, a forced-restart release), so
   // there is none in dev mode: the route layer already treats a null
@@ -1922,6 +1956,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             : null;
         },
         sideGameView: (s) => sideGamesRef?.view(s) ?? null,
+        requeue: (matchId, steamid, on) => onRequeueRequest(matchId, steamid, on, null),
       },
       sideGame: () => sideGamesRef?.publicView() ?? null,
       voice: (t) => new VoiceChannels({ db: deps.db, voice: t.voice }),
@@ -2065,6 +2100,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   await app.register(apiRoutes, {
     db: deps.db, matchmaker, adminSteamIds: deps.config.adminSteamIds, broadcast: (e) => hub.broadcast(e),
+    requeue: (matchId, steamid, on) => onRequeueRequest(matchId, steamid, on, null),
   });
   await app.register(ticketRoutes, {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,

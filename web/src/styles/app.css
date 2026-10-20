@@ -2455,6 +2455,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .queue-block { margin-top: var(--sp-3); }
 
 .side-toggle { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); }
+.requeue__hint { margin: var(--sp-1) 0 0; font-size: 0.85em; }
 .side-game { margin-top: var(--sp-3); }
 .side-game p { margin: 0 0 var(--sp-2); }
 .side-game--muted { color: var(--text-muted); }

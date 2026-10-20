@@ -13,6 +13,8 @@ export interface ApiRouteOpts {
   matchmaker: Matchmaker;
   adminSteamIds: string[];
   broadcast: (event: string) => void;
+  /** Queue again when this match ends (src/matchRequeue.ts). */
+  requeue?: (matchId: number, steamid: string, on: boolean) => { ok: true } | { ok: false; error: string };
 }
 
 export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promise<void> {
@@ -33,6 +35,19 @@ export async function apiRoutes(app: FastifyInstance, opts: ApiRouteOpts): Promi
     if (!steamid) return;
     const result = matchmaker.join(steamid);
     if (!result.ok) return reply.code(409).send({ error: result.error });
+    return { ok: true };
+  });
+
+  /** The "Queue again when this match ends" toggle, the site's twin of !rq. */
+  app.post('/api/queue/requeue', async (req, reply) => {
+    const steamid = requireActive(req, reply);
+    if (!steamid) return;
+    const body = (req.body ?? {}) as { matchId?: unknown; on?: unknown };
+    if (typeof body.matchId !== 'number' || !Number.isInteger(body.matchId) || typeof body.on !== 'boolean') {
+      return reply.code(400).send({ error: 'matchId and on are required' });
+    }
+    const r = opts.requeue?.(body.matchId, steamid, body.on) ?? { ok: false as const, error: 'not available' };
+    if (!r.ok) return reply.code(409).send({ error: r.error });
     return { ok: true };
   });
 

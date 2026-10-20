@@ -350,6 +350,10 @@ export type LogEvent =
   // 64 characters, trimmed; empty when the plugin sent `arg=` with nothing
   // after it.
   | { kind: 'booking_cmd'; steamid: string; cmd: BookingCmd; arg: string }
+  // !rq in game: queue again when this match ends (src/matchRequeue.ts). No
+  // token, so address-gated like PUGCALL; the site re-checks that the player
+  // is rostered on that match and that the match is on the sending box.
+  | { kind: 'requeue'; steamid: string; matchId: number; on: boolean }
   // The funnel, survivor downs, round-end flow and SI lives (src/dataFeedParse.ts).
   | DataFeedEvent;
 
@@ -856,6 +860,15 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
       half: half === 1 || half === 2 ? half : null,
       tMs: tms !== null && tms >= 0 ? tms : null,
     };
+  }
+
+  // !rq / !rq off (pug-match 0.3.38). Nothing player-typed on the line.
+  if (body.startsWith('PUGRQ ')) {
+    const f = kv(body.slice('PUGRQ '.length).split(/\s+/));
+    const steamid = steamId64Of(f.steamid ?? '');
+    const matchId = intOf(f.match);
+    if (!steamid || matchId === null || matchId < 1 || (f.on !== '0' && f.on !== '1')) return null;
+    return { kind: 'requeue', steamid, matchId, on: f.on === '1' };
   }
 
   // A captain's in-game command (plugin/l4d_booking.sp 1.1.0). Same treatment

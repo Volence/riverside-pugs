@@ -25,6 +25,9 @@ export interface ControllerDeps {
   /** A player's side game state, for the connect details after opting in.
    *  Absent in tests that do not exercise side games. */
   sideGameView?: (steamid: string) => SideGameView | null;
+  /** Queue again when the match ends (src/matchRequeue.ts), the card's twin
+   *  of !rq. Absent in tests that do not exercise it. */
+  requeue?: (matchId: number, steamid: string, on: boolean) => { ok: true } | { ok: false; error: string };
 }
 
 const say = (content: string, extra: Partial<MessagePayload> = {}): InteractionReply => ({
@@ -72,7 +75,7 @@ export function resolve(
  * calls, so the two surfaces cannot disagree about who may do what.
  *
  * custom_id scheme: q:join, q:leave, q:side, l:<lobbyId>:ready,
- * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect, m:<matchId>:endorse,
+ * l:<lobbyId>:vote:<campaign>, m:<matchId>:connect, m:<matchId>:requeue, m:<matchId>:endorse,
  * e:<matchId>:p:<steamid>, e:<matchId>:k:<steamid>:<kind>.
  *
  * Ticket buttons (t:<ticketId>:...) are routed to ticketButtons.ts before
@@ -84,7 +87,7 @@ export async function handleButton(
   const parts = i.customId.split(':');
   const known = (parts[0] === 'q' && (parts[1] === 'join' || parts[1] === 'leave' || parts[1] === 'notify' || parts[1] === 'side'))
     || (parts[0] === 'l' && parts.length >= 3)
-    || (parts[0] === 'm' && (parts[2] === 'connect' || parts[2] === 'spectate' || parts[2] === 'endorse'))
+    || (parts[0] === 'm' && (parts[2] === 'connect' || parts[2] === 'spectate' || parts[2] === 'endorse' || parts[2] === 'requeue'))
     || (parts[0] === 'e' && parts.length >= 4 && (parts[2] === 'p' || parts[2] === 'k'));
   if (!known) return say('That button no longer does anything.');
 
@@ -190,9 +193,18 @@ export async function handleButton(
     );
   }
 
-  // m:<matchId>:connect
+  // m:<matchId>:connect and m:<matchId>:requeue
   const match = mm.stateFor(steamid).match;
   if (!match || match.id !== matchId) return say('You are not on this match.');
+  if (parts[2] === 'requeue') {
+    if (match.requeue == null || !deps.requeue) return say('Queue again is not on offer for this match.');
+    const on = !match.requeue;
+    const r = deps.requeue(matchId, steamid, on);
+    if (!r.ok) return say(`Could not change that: ${r.error}.`);
+    return say(on
+      ? 'You will be put back in the queue when this match ends. Press again to cancel, or type !rq off in game.'
+      : 'Cancelled: you will not be requeued when this match ends.');
+  }
   if (!match.connect) return say('The server is not ready yet. Try again in a moment.');
   const c = match.connect;
   return say(
