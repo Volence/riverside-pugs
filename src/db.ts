@@ -2879,6 +2879,11 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'seasons', 'placement_games', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'seasons', 'ranks', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'seasons', 'final_min_games', 'INTEGER NOT NULL DEFAULT 20');
+  // The season's look on the site (src/seasonThemes.ts; NULL = the standard
+  // look) and its planned end, which only feeds the season banner: a season
+  // still ends when staff start the next one.
+  ensureColumn(db, 'seasons', 'theme', 'TEXT');
+  ensureColumn(db, 'seasons', 'ends_at', 'TEXT');
   db.exec(`
     -- The rating a player STARTED a season with (soft reset). A recompute
     -- replays the season from these, not from openskill's defaults.
@@ -2910,6 +2915,8 @@ export function openDb(path: string): DB {
     CREATE INDEX IF NOT EXISTS idx_rating_history_player_season ON rating_history (player_id, season_id);
     CREATE INDEX IF NOT EXISTS idx_rating_history_season ON rating_history (season_id, id);
   `);
+  // Added after the table first shipped to test copies of the branch.
+  ensureColumn(db, 'season_results', 'placed', 'INTEGER NOT NULL DEFAULT 1');
 
   seed(db);
   return db;

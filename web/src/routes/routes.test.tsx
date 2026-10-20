@@ -761,7 +761,7 @@ describe('Play', () => {
   });
 
   it('shows the Discord checklist and no invite code when Discord is configured', async () => {
-    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true });
+    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true, season: null });
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null, discordMember: null };
     render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
     const join = await waitFor(() => screen.getByText('Join the Discord') as HTMLAnchorElement);
@@ -773,7 +773,7 @@ describe('Play', () => {
   });
 
   it('puts linking before joining the server, and will not claim you are missing from a server it cannot check', async () => {
-    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true });
+    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: 'https://discord.gg/x', requireDiscord: true, season: null });
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'invited', isAdmin: false, discordEnabled: true, discord: null, discordMember: null };
     const { container } = render(<Play session={{ kind: 'pending', me }} state={null} refresh={noop} />);
     await waitFor(() => screen.getByText('Connect Discord'));
@@ -785,7 +785,7 @@ describe('Play', () => {
   });
 
   it('an active player missing a Discord step sees the checklist instead of Join queue', async () => {
-    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: null, requireDiscord: true });
+    mockApi.site.mockResolvedValue({ discordEnabled: true, discordInviteUrl: null, requireDiscord: true, season: null });
     render(<QueuePanel count={1} joined={false} players={[]} refresh={noop} queueBlock="link_discord"
       me={{ steamid: '1', name: 'a', avatar: null, status: 'active', isAdmin: false, discordEnabled: true, discord: null }} />);
     expect(screen.queryByRole('button', { name: 'Join queue' })).toBeNull();

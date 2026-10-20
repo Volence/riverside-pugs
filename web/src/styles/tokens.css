@@ -89,6 +89,40 @@
   --accent: #f0655a;
 }
 
+/* Season looks (src/seasonThemes.ts). <html data-season="..."> is set from
+ * /api/site (web/src/seasonTheme.ts) and only ever swaps tokens here, plus the
+ * few flourishes in app.css under the same selector, so turning a theme off is
+ * removing the attribute.
+ *
+ * Season 1, "Wrong Way": the trailer's inverse world. The colour grade there
+ * rotates hue and keeps luma, so blood turns cyan and the warm near-blacks go
+ * cool; the same move is made here. Losses and the infected team stay red:
+ * results keep their meaning whatever the season. Contrast is asserted by
+ * tokens.test.ts against the same AA floors as the standard look. */
+[data-season='wrong-way'] {
+  --bg: #07090c;
+  --surface: #0d1116;
+  --surface-2: #12181f;
+  --border: rgba(176, 200, 222, 0.14);
+  --border-strong: rgba(176, 200, 222, 0.28);
+  --text: #c2d0de;
+  --text-bright: #e2ecf7;
+  --text-muted: #7f90a6;
+  --accent: #46c8ee;
+  --accent-ink: #07090c;
+  --rule: #1d7f99;
+  /* The other half of the split: a thin red ghost beside cyan headings. */
+  --glitch: rgba(222, 78, 64, 0.55);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.3  0 0 0 0 0.45  0 0 0 0 0.6  0 0 0 0.14 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --vignette:
+    radial-gradient(ellipse at 50% 0%, rgba(30, 120, 150, 0.30), transparent 50%),
+    radial-gradient(ellipse at 50% 60%, transparent 45%, rgba(0, 0, 0, 0.80) 100%);
+}
+/* Urgency brightens the accent in either look (see [data-urgent] above). */
+[data-season='wrong-way'] [data-urgent='true'] {
+  --accent: #7fdcf7;
+}
+
 @media (max-width: 640px) {
   :root { --fs-hero: 3.25rem; --fs-h1: 2rem; --fs-title: 1.75rem; }
 }

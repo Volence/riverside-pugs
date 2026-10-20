@@ -4050,6 +4050,18 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
   border-radius: 2px; padding: 0 var(--sp-1);
 }
 .rankbadge__gem { width: 0.6em; height: 0.6em; transform: rotate(45deg); background: var(--rank-c); flex: none; }
+/* The emblem's pips are too small to read at text size; the name carries the
+ * division, so the emblem is cropped to its body. */
+.rankbadge__emblem { width: 1.5em; height: 1.5em; margin: -0.2em 0; object-fit: cover; object-position: 50% 15%; flex: none; }
+.rankcard { display: flex; align-items: center; gap: var(--sp-5); }
+.rankcard__emblem { width: 112px; height: 126px; flex: none; filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--rank-c) 30%, transparent)); }
+.rankcard__body { display: grid; gap: var(--sp-1); flex: 1; min-width: 0; }
+.rankcard__name { margin: 0; font-family: var(--font-display); font-size: var(--fs-h2); text-transform: uppercase; letter-spacing: 0.04em; color: var(--rank-c); line-height: 1.1; }
+.rankcard__sr { margin: 0; font-family: var(--font-label); font-size: var(--fs-h3); color: var(--rating); font-variant-numeric: tabular-nums; }
+.rankcard__bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; max-width: 22rem; }
+.rankcard__fill { height: 100%; background: var(--rank-c); }
+.rankcard__next { margin: 0; font-size: var(--fs-dense); }
+@media (max-width: 420px) { .rankcard__emblem { width: 80px; height: 90px; } .rankcard { gap: var(--sp-4); } }
 .rankbadge--bronze   { --rank-c: #c3804f; }
 .rankbadge--silver   { --rank-c: #b9c1c9; }
 .rankbadge--gold     { --rank-c: #e3b341; }
@@ -4069,6 +4081,65 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .lb__rankcol { white-space: nowrap; }
 .season-history { width: 100%; }
 .season-history td, .season-history th { padding: var(--sp-1) var(--sp-2); }
-.rank-progress { display: grid; gap: var(--sp-1); margin-top: var(--sp-2); }
-.rank-progress__bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
-.rank-progress__fill { height: 100%; background: var(--accent); }
+
+/* ---- Season looks (tokens.css [data-season]) ---------------------------- */
+.season-banner {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, var(--surface)), var(--surface) 70%);
+  border-bottom: 1px solid var(--border);
+}
+.season-banner__number {
+  position: relative; font-family: var(--font-display); font-size: 1.375rem;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-bright);
+}
+.season-banner__title {
+  font-family: var(--font-display); font-size: 1.375rem; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--accent);
+}
+.season-banner__when {
+  margin-left: auto; font-family: var(--font-label); font-size: var(--fs-label);
+  text-transform: uppercase; letter-spacing: 0.16em; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 560px) { .season-banner__when { margin-left: 0; flex-basis: 100%; } }
+
+/* Wrong Way: a mirrored world. Headings carry a faint red/cyan split, the
+ * page rule runs from the old red into the new cyan, and the brand flips to
+ * its mirror image for a beat every few seconds (and on hover). Everything
+ * moving stops under prefers-reduced-motion. */
+[data-season='wrong-way'] .page-head__title,
+[data-season='wrong-way'] .season-banner__number {
+  text-shadow: -1px 0 var(--glitch), 1px 0 color-mix(in srgb, var(--accent) 50%, transparent);
+}
+[data-season='wrong-way'] .page-head {
+  border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg, var(--rule), var(--accent) 45%, var(--rule) 70%, var(--glitch)) 1;
+}
+[data-season='wrong-way'] .season-banner__title::before {
+  /* The arrow points back the way you came. */
+  content: '\2190'; display: inline-block; margin-right: 0.35em; font-family: var(--font-body);
+}
+[data-season='wrong-way'] .nav__brand { display: inline-block; animation: ww-mirror 9s steps(1) infinite; }
+[data-season='wrong-way'] .nav__brand:hover { transform: scaleX(-1); animation: none; }
+@keyframes ww-mirror {
+  0%, 91%, 100% { transform: none; text-shadow: none; }
+  92% { transform: scaleX(-1) translateX(2px); text-shadow: -2px 0 var(--glitch), 2px 0 var(--accent); }
+  93.5% { transform: scaleX(-1); text-shadow: 2px 0 var(--glitch), -2px 0 var(--accent); }
+  95% { transform: translateX(-2px); text-shadow: -1px 0 var(--glitch), 1px 0 var(--accent); }
+}
+[data-season='wrong-way'] .season-banner__number::after {
+  /* A mirrored ghost of the season number that tears in with the brand. */
+  content: attr(data-text); position: absolute; inset: 0; transform: scaleX(-1);
+  color: var(--accent); opacity: 0; pointer-events: none;
+  clip-path: inset(40% 0 35% 0); animation: ww-ghost 9s steps(1) infinite;
+}
+@keyframes ww-ghost {
+  0%, 91%, 96%, 100% { opacity: 0; }
+  92% { opacity: 0.7; clip-path: inset(10% 0 60% 0); }
+  93.5% { opacity: 0.5; clip-path: inset(55% 0 20% 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-season='wrong-way'] .nav__brand,
+  [data-season='wrong-way'] .season-banner__number::after { animation: none; }
+}

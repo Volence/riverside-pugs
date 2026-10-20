@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Riverside</title>
+  <!-- The season's look before the first paint (web/src/seasonTheme.ts keeps
+       these two keys); the app corrects it once /api/site answers. -->
+  <script>try{var t=localStorage.getItem('season-theme-preview')||localStorage.getItem('season-theme');if(t&&t!=='standard')document.documentElement.dataset.season=t;}catch(e){}</script>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

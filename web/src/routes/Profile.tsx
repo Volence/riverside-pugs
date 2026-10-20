@@ -19,8 +19,8 @@ import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
-import { RankBadge as SeasonRankBadge, Top10Tag } from '../components/SeasonRank';
-import type { PastSeason, RankView } from '../api';
+import { RankBadge as SeasonRankBadge, RankCard, Top10Tag } from '../components/SeasonRank';
+import type { PastSeason } from '../api';
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
@@ -155,12 +155,18 @@ export function Profile(
         )}
         {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}
 
+        {season?.rank && season.sr !== null && !season.placing && (
+          <Panel>
+            <h3>Season rank</h3>
+            <RankCard rank={season.rank} sr={season.sr} top10={season.top10} />
+          </Panel>
+        )}
+
         <Panel>
           <h3>Rating over time</h3>
           {season?.placing
             ? <p class="muted">{`Placement: ${season.placing.played} of ${season.placing.of} games played. SR and rank show after the last one.`}</p>
             : <Sparkline values={history.map((h) => h.sr)} />}
-          {season?.rank && season.sr !== null && <RankProgress rank={season.rank} sr={season.sr} />}
         </Panel>
 
         <SeasonHistory past={data.pastSeasons ?? []} />
@@ -446,18 +452,6 @@ function SharedPanel({ steamid, session }: { steamid: string; session: Session }
 }
 
 /** "120 SR to Gold I", with a bar across the current division. */
-function RankProgress({ rank, sr }: { rank: RankView; sr: number }) {
-  if (rank.next === null) return <div class="rank-progress"><span class="muted">Top division: Master I</span></div>;
-  const span = rank.next - rank.floor;
-  const pct = Math.max(0, Math.min(100, ((sr - rank.floor) / span) * 100));
-  return (
-    <div class="rank-progress">
-      <span class="muted">{`${Math.max(0, rank.next - sr)} SR to the next division`}</span>
-      <div class="rank-progress__bar"><div class="rank-progress__fill" style={{ width: `${pct}%` }} /></div>
-    </div>
-  );
-}
-
 /** Every finished season, frozen as it ended: place, rank, SR, peak, record. */
 function SeasonHistory({ past }: { past: PastSeason[] }) {
   if (past.length === 0) return null;
