@@ -25,6 +25,7 @@ import { isUnknownCvar } from './leaveControl.js';
 import { pushLogSecret } from './logAuth.js';
 import { holdMaxSeconds } from './presence.js';
 import { endNotes, standingSnapshot, type StandingSnapshot } from './endNotes.js';
+import { seasonOneLive } from './seasonThemes.js';
 import type { RequeueResult } from './matchRequeue.js';
 
 /** What one attempt to collect a match came to.
@@ -253,6 +254,9 @@ export class RealOrchestrator implements Orchestrator {
       // The leaver rules for this match, from the admin settings.
       await rcon.exec(`sm_pug_leave_budget ${settingNumber(this.db, 'leave_budget_seconds', 300, { integer: true, min: 0 })}`);
       await rcon.exec(`sm_pug_leave_autounpause ${getSetting(this.db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
+      // !rq in game (pug-match 0.3.38) answers only once Season 1 is live; an
+      // older plugin does not know the cvar, which is harmless.
+      await rcon.exec(`sm_pug_requeue ${seasonOneLive(this.db) ? 1 : 0}`);
       // The ceiling on an admin hold of one player's reconnect clock. The
       // plugin enforces it itself, so a release that never arrives cannot pin
       // a box paused. The reply doubles as a free capability probe: a
@@ -431,6 +435,8 @@ export class RealOrchestrator implements Orchestrator {
    *  (sm_pug_endnote, pug-match 0.3.38; an older plugin answers unknown
    *  command and the notes are simply not shown). Never throws. */
   private async sendEndNotes(rcon: RconClient, matchId: number, token: string, before: StandingSnapshot): Promise<void> {
+    // Launches with Season 1 (seasonOneLive): before then no requeue, no note.
+    if (!seasonOneLive(this.db)) return;
     let requeued = new Map<string, RequeueResult>();
     try {
       requeued = this.requeueAfterMatch?.(matchId) ?? requeued;

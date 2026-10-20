@@ -5,6 +5,7 @@ import { campaignName } from '../format';
 import type { Session } from '../hooks/useLiveState';
 import { competeTabFor } from './CompeteTabs';
 import { hudTabFor } from './HudTabs';
+import { useSeasonLook } from '../seasonTheme';
 
 /** [href, label, target?].
  *
@@ -38,6 +39,15 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/how-to-play', 'How to play'],
 ];
 
+/** The nav before Season 1 starts (owner ruling 2026-10-20: nothing that
+ *  launches with Season 1 shows early): Patch notes is still the balance
+ *  tracker's page and there is no News. */
+export function navLinksFor(seasonOne: boolean): readonly (readonly [string, string, string?])[] {
+  if (seasonOne) return NAV_LINKS;
+  return NAV_LINKS.filter(([href]) => href !== '/news')
+    .map((l) => (l[0] === '/patch-notes' ? (['/balance', 'Patch notes'] as const) : l));
+}
+
 /** Whether a nav item is the page being shown. The HUD item stands for its
  *  whole section, so it is current on the crosshair and community pages too,
  *  and Patch notes for the balance pages under it (Game values). Compete is
@@ -48,6 +58,7 @@ function isCurrent(href: string, path: string): boolean {
   // Patch notes stands for the hand-written notes and the full change log
   // under them (/balance, Game values).
   if (href === '/patch-notes') return path === href || path === '/balance' || path.startsWith('/balance/');
+  if (href === '/balance') return path === href || path.startsWith('/balance/');
   if (href === '/news') return path === href || path.startsWith('/news/');
   if (href === '/events' || href === '/scrims') return competeTabFor(path) !== null;
   return path === href;
@@ -79,9 +90,10 @@ export function Nav(
   const live = state?.match && state.match.state === 'live' ? state.match : null;
   // Compete only for viewers the competitive switch lets in (/api/me teams).
   // It lands on Events while a tournament is open or about to start.
+  const base = navLinksFor(useSeasonLook()?.ranks === true);
   const links = me?.teams
-    ? [...NAV_LINKS.slice(0, 5), [me.competeHome === 'events' ? '/events' : '/scrims', 'Compete'] as const, ...NAV_LINKS.slice(5)]
-    : NAV_LINKS;
+    ? [...base.slice(0, 5), [me.competeHome === 'events' ? '/events' : '/scrims', 'Compete'] as const, ...base.slice(5)]
+    : base;
   const myTeams = me?.teams ? me.myTeams ?? [] : [];
 
   return (

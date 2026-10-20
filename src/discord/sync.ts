@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { seasonOneLive } from '../seasonThemes.js';
 import type { Matchmaker } from '../matchmaker.js';
 import type { Hub } from '../ws.js';
 import { QUEUE_SIZE } from '../queue.js';
@@ -252,7 +253,7 @@ export class DiscordSync {
         voice: this.deps.voice?.channelsFor(matchId) ?? null,
         unlinked: [...teamA, ...teamB].map((p) => this.player(p)).filter((p) => !p.discordId).map((p) => p.name),
         canSpectate: spectateFor(db, row.server_id) !== null,
-        canRequeue: row.kind === 'pug' && row.booking_id === null,
+        canRequeue: row.kind === 'pug' && row.booking_id === null && seasonOneLive(db),
       };
       const payload = renderMatch(view);
       // Skipped for 'aborted': closeMatchCard below moves the card to the

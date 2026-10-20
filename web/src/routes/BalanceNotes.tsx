@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { useSeasonLook } from '../seasonTheme';
 import { PatchEntryView } from './balance/PatchEntryView';
 
 /** Fetches and renders one patch's full entry, independently of its
@@ -33,14 +34,19 @@ function PatchPanel({ id }: { id: number }) {
  *  measured afterwards. */
 export function BalanceNotes() {
   const { data, error } = useFetch((s) => api.balancePatches(s), []);
+  const seasonOne = useSeasonLook()?.ranks === true;
 
   return (
     <div class="page page--list">
-      <PageHeader eyebrow="Patch notes" title="Full change log">
-        <p>
-          Every tracked change to the game's settings, kept automatically. The <a href="/patch-notes">patch notes</a> say
-          what changed in plain words; this is the exact record.
-        </p>
+      {/* Before Season 1 this is still the Patch notes page; from Season 1 the
+          hand-written notes take that name and this becomes the change log. */}
+      <PageHeader eyebrow={seasonOne ? 'Patch notes' : 'Balance'} title={seasonOne ? 'Full change log' : 'Patch notes'}>
+        {seasonOne && (
+          <p>
+            Every tracked change to the game's settings, kept automatically. The <a href="/patch-notes">patch notes</a> say
+            what changed in plain words; this is the exact record.
+          </p>
+        )}
         <p>
           Each balance patch, why it was made, and what the numbers measured afterwards. A change
           is only called a measured change when it is larger than normal game-to-game variation.

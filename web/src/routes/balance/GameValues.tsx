@@ -1,4 +1,5 @@
 import { api } from '../../api';
+import { useSeasonLook } from '../../seasonTheme';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty } from '../../components/bits';
 import { PageHeader } from '../../components/PageHeader';
@@ -8,12 +9,15 @@ import { GameValuesView } from './GameValuesView';
  *  vanilla L4D1 value beside it, and the rules our plugins add. */
 export function GameValues() {
   const { data, error } = useFetch((s) => api.gameValues(s), []);
+  const seasonOne = useSeasonLook()?.ranks === true;
   return (
     <div class="page page--list">
       <PageHeader eyebrow="Balance" title="Game values">
         <p>
           Every balance setting as our servers run it, next to the vanilla Left 4 Dead value. Changes
-          from vanilla are listed first in each group and highlighted. The <a href="/balance">full change log</a> says when and why each change was made.
+          from vanilla are listed first in each group and highlighted. {seasonOne
+            ? <>The <a href="/balance">full change log</a> says when and why each change was made.</>
+            : <><a href="/balance">Patch notes</a> say why each change was made.</>}
         </p>
       </PageHeader>
       {error ? <Empty>Could not load the game values.</Empty>

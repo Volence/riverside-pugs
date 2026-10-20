@@ -8,6 +8,7 @@ import {
 } from '../news.js';
 import type { NewsPoster } from '../discord/newsPoster.js';
 import { makeRequireAdmin } from './guards.js';
+import { seasonOneLive } from '../seasonThemes.js';
 
 /** How long a staff request waits on Discord before answering anyway. The
  *  poster carries on in the background and the editor reloads the state. */
@@ -41,6 +42,9 @@ export async function newsRoutes(app: FastifyInstance, opts: NewsRouteOpts): Pro
     const page = Math.max(1, Math.min(10_000, Math.floor(Number(q.page) || 1)));
     const size = Math.max(1, Math.min(NEWS_PAGE_SIZE, Math.floor(Number(q.limit) || NEWS_PAGE_SIZE)));
     const kind = (NEWS_KINDS as readonly string[]).includes(q.kind ?? '') ? q.kind as NewsKind : null;
+    // News launches with Season 1 (seasonOneLive): until then the public
+    // side is empty, while staff can already write drafts.
+    if (!seasonOneLive(db)) return { posts: [], page, pages: 1, total: 0 };
     const { posts, total } = listPublished(db, page, size, kind);
     return { posts: posts.map((p) => toPublic(db, p)), page, pages: Math.max(1, Math.ceil(total / size)), total };
   });
@@ -49,13 +53,14 @@ export async function newsRoutes(app: FastifyInstance, opts: NewsRouteOpts): Pro
     const id = idOf(req);
     const row = id === null ? undefined : getNewsRow(db, id);
     // A draft is a 404 like a post that does not exist: nothing says it is there.
-    if (!row || row.published_at === null) return reply.code(404).send({ error: 'no such post' });
+    if (!row || row.published_at === null || !seasonOneLive(db)) return reply.code(404).send({ error: 'no such post' });
     return { post: toPublic(db, row) };
   });
 
   const editorState = () => ({
     posts: listAll(db).map((p) => toAdmin(db, p)),
     channelSet: (getSetting(db, NEWS_CHANNEL_SETTING) ?? '').trim() !== '',
+    live: seasonOneLive(db),
     botConnected: poster() !== null,
   });
 
@@ -120,6 +125,7 @@ export async function newsRoutes(app: FastifyInstance, opts: NewsRouteOpts): Pro
     if (!t) return reply;
     if (t.row.published_at !== null) return reply.code(409).send({ error: 'already published' });
     if (!t.row.body.trim()) return reply.code(400).send({ error: 'write something before publishing' });
+    if (!seasonOneLive(db)) return reply.code(409).send({ error: 'News goes live with Season 1. Save it as a draft until then.' });
     const row = publishNews(db, t.row.id);
     logAdmin(db, t.adminId, 'news_publish', row.id, { kind: row.kind, title: row.title });
     await pushToDiscord(row.id);
