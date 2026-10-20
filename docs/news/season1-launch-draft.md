@@ -17,14 +17,14 @@ Season 1, **Wrong Way**, starts **Tuesday, November 3** and runs through Monday,
 - **Ranks:** Bronze, Silver (1100), Gold (1600), Platinum (2100), Diamond (2700) and Master (3300), each with divisions III, II and I.
 - You rank up the moment you cross a line. You only drop once you are 50 SR below it, so one bad match will not bounce you.
 - The Top 10 badge and a final standing on the season ladder need 20 matches.
-- At the end of the season you get a trophy for the highest rank you reached. It is being built now.
+- At the end of the season you keep a trophy on your profile for the highest rank you reached. Top 10 finishers get their place on it too, and Season 0's top 10 get theirs on launch day.
 
 ## Also new
 
 - The site has a new Wrong Way look for the season.
 - After every match you get your own SR change in chat and in the disconnect box.
 - Type **!rq** in game, tick the box on the site, or press the button in Discord, and you go straight back in the queue when your match ends.
-- **Mirrored maps.** The flipped maps from the trailer are where the Wrong Way name comes from.
+- **Mirrored maps.** The flipped world from the trailer is real: mirrored versions of the maps are in the rotation.
 - **Season 0 Wrapped**, a recap of the first season, is out on launch day.
 
 See you in the queue on the 3rd.
