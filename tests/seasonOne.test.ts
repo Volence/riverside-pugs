@@ -159,6 +159,31 @@ describe('season 1', () => {
   });
 });
 
+describe('rank-up moment', () => {
+  it('celebrates finishing placement, then each move up, and stays quiet otherwise', async () => {
+    const moment = async () => (await get('/api/me/rank-moment', admin)).moment;
+    expect(await moment()).toBeNull(); // Season 0: nothing launches before Season 1
+    startNewSeason(db, 'Season 1');
+    for (let i = 0; i < 4; i++) play('a');
+    expect(await moment()).toBeNull(); // still placing
+    const fifth = play('a');
+    expect(await moment()).toMatchObject({ kind: 'placed', matchId: fifth });
+    const s1 = currentSeasonId(db);
+    let up: any = null;
+    for (let i = 0; i < 30 && !up; i++) {
+      const before = seasonLadder(db, s1).get(ADMIN)!.rankIdx!;
+      const m = play('a');
+      const after = seasonLadder(db, s1).get(ADMIN)!.rankIdx!;
+      const got = await moment();
+      if (after > before) up = { got, m, before, after };
+      else expect(got).toBeNull();
+    }
+    expect(up).not.toBeNull();
+    expect(up.got).toMatchObject({ kind: 'up', matchId: up.m, from: rankView(up.before).name, to: rankView(up.after).name });
+    expect(up.got.srAfter).toBeGreaterThanOrEqual(up.got.floor);
+  });
+});
+
 describe('season-end trophies', () => {
   it('freezes the highest rank held all season, and the profile shows it as the trophy', async () => {
     startNewSeason(db, 'Season 1');

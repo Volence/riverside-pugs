@@ -194,6 +194,11 @@ export interface CurrentSeasonLook {
   ranks?: boolean;
 }
 
+/** GET /api/me/rank-moment (src/rankMoment.ts). */
+export type RankMomentData =
+  | { kind: 'placed'; matchId: number; to: string; srAfter: number; next: number | null; nextName: string | null }
+  | { kind: 'up'; matchId: number; tierUp: boolean; from: string; to: string; srBefore: number; srAfter: number; floor: number; fromFloor: number; next: number | null; nextName: string | null };
+
 export interface SiteInfo {
   discordEnabled: boolean;
   discordInviteUrl: string | null;
@@ -3348,6 +3353,7 @@ export const api = {
     post('/api/reports', body),
   myReports: (signal?: AbortSignal) => get<{ reports: MyReport[] }>('/api/reports/mine', signal),
   reportChat: (reportId: number) => post<{ ok: true; url: string }>(`/api/reports/${reportId}/chat`),
+  rankMoment: (signal?: AbortSignal) => get<{ moment: RankMomentData | null }>('/api/me/rank-moment', signal),
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   setRequeue: (matchId: number, on: boolean) => post('/api/queue/requeue', { matchId, on }),

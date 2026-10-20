@@ -4407,3 +4407,41 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .newsadmin__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
 .newsadmin__delete { margin-left: auto; }
 tr.is-selected td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+/* ---------- Rank-up moment (components/RankMoment.tsx, rankMomentFx.ts) ----------
+   A dialog over the page. The stage's colour is --c, which the animation
+   moves from the old tier's colour to the new one. */
+.rankmoment { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: var(--sp-4);
+  background: rgba(3, 5, 8, 0.78); backdrop-filter: blur(3px); }
+.rankmoment__box { width: min(380px, 100%); display: grid; gap: var(--sp-3); background: var(--surface); border: 1px solid var(--border);
+  padding: var(--sp-3); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6); }
+.ru { --c: #e3b341; position: relative; height: 380px; overflow: hidden; isolation: isolate; background: #05070a;
+  display: grid; grid-template-rows: 1fr auto; justify-items: center; padding: var(--sp-4) var(--sp-3) var(--sp-5); text-align: center; }
+.ru__wash { position: absolute; inset: 0; z-index: -2; opacity: 0.35;
+  background: radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--c) 34%, transparent), transparent 62%); }
+.ru__fx { position: relative; width: 176px; height: 178px; align-self: center; }
+.ru__rays { position: absolute; left: 50%; top: 50%; width: 480px; height: 480px; margin: -240px 0 0 -240px; z-index: -1; opacity: 0;
+  -webkit-mask: radial-gradient(circle, #000 12%, transparent 62%); mask: radial-gradient(circle, #000 12%, transparent 62%); }
+.ru__glow { position: absolute; left: 50%; top: 50%; width: 230px; height: 230px; margin: -115px 0 0 -115px; z-index: -1; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--c) 70%, transparent), transparent 65%); opacity: 0; }
+.ru__ring { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%;
+  border: 3px solid var(--c); opacity: 0; pointer-events: none; }
+.ru__em { position: absolute; inset: 0; }
+.ru__em img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.ru__new { opacity: 0; }
+.ru__spark { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; transform: rotate(45deg); opacity: 0; pointer-events: none; }
+.ru__flash { position: absolute; inset: 0; z-index: 3; opacity: 0; pointer-events: none;
+  background: radial-gradient(circle at 50% 38%, #fff, color-mix(in srgb, var(--c) 60%, transparent) 40%, transparent 75%); }
+.ru__text { display: grid; gap: 6px; justify-items: center; }
+.ru__kicker { margin: 0; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.3em; text-transform: uppercase; color: var(--text-muted); min-height: 1.2em; }
+.ru__name { margin: 0; font-family: var(--font-display); font-size: 2.3rem; line-height: 1; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-bright); min-height: 1.05em; white-space: nowrap; }
+.ru__name span { display: inline-block; }
+.ru__sr { margin: 0; font-family: var(--font-label); color: var(--rating); font-size: 1.1rem; font-variant-numeric: tabular-nums; display: flex; gap: 8px; align-items: baseline; }
+.ru__delta { color: var(--win, #45b39c); display: inline-block; opacity: 0; }
+.ru__bar { width: 220px; max-width: 100%; height: 7px; background: rgba(176, 200, 222, 0.14); overflow: hidden; position: relative; }
+.ru__bar i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--c); box-shadow: 0 0 10px var(--c); display: block; }
+.ru__next { margin: 0; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); min-height: 1.2em; }
+.ru__pips { display: flex; gap: 8px; min-height: 12px; }
+.ru__pips i { width: 11px; height: 11px; transform: rotate(45deg); border: 1.5px solid var(--text-muted); display: block; }
+.ru__pips i.on { background: var(--c); border-color: var(--c); box-shadow: 0 0 8px var(--c); }
