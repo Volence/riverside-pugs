@@ -25,7 +25,7 @@ Seasons turns all of it on at once.
 
 ## Still to do before launch
 
-- [ ] **Season 0 Wrapped.** Only a mockup so far (review page). Backend BUILT (src/seasonWrapped.ts, freezes at the close; staff preview /wrapped/preview/1/<steamid>). Spec and data notes:
+- [x] **Season 0 Wrapped.** BUILT (backend c56db376, site b6bdf232 + 4553b529; owner to look over decks via the staff preview before launch). Backend (src/seasonWrapped.ts, freezes at the close; staff preview /wrapped/preview/1/<steamid>). Spec and data notes:
       `docs/season-wrapped.md` (13 player cards; 10+ matches full deck, 3 to 9 short deck,
       1 to 2 one card; banned players left off named boards; nemesis = worst record vs someone with
       5+ games; best single map, not best match; deadstops/tongue cuts never recorded; endorsements
