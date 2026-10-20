@@ -4445,3 +4445,78 @@ tr.is-selected td { background: color-mix(in srgb, var(--accent) 8%, transparent
 .ru__pips { display: flex; gap: 8px; min-height: 12px; }
 .ru__pips i { width: 11px; height: 11px; transform: rotate(45deg); border: 1.5px solid var(--text-muted); display: block; }
 .ru__pips i.on { background: var(--c); border-color: var(--c); box-shadow: 0 0 8px var(--c); }
+
+/* ---------- Season Wrapped (routes/Wrapped.tsx) ----------
+ * A phone-shaped story card. It keeps Season 0's red and bone whatever the
+ * site theme is, so its colours are its own here rather than the theme
+ * tokens; only the last card ("Next: Season 1") turns Season 1's cyan, with
+ * a one-off tear that plays only when motion is welcome. */
+.wrapped-page .page-head__aside .wrapped-preview-chip { color: var(--rating); border-color: var(--rating); }
+.wrapped { display: grid; justify-items: center; gap: var(--sp-3); padding-block: var(--sp-2) var(--sp-6); }
+.wrapped-phone {
+  --w-bg: #0b0908; --w-edge: #2a221d; --w-bone: #d9cbb0; --w-bright: #efe2c4; --w-muted: #958770;
+  --w-red: #de4e40; --w-gold: #c9a45c; --w-rule: rgba(217, 203, 176, 0.14);
+  width: 100%; max-width: 380px; aspect-ratio: 9 / 17; min-height: 560px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(120, 40, 30, 0.35), transparent 60%), var(--w-bg);
+  border: 1px solid var(--w-edge); border-radius: 22px; padding: 14px;
+  display: grid; grid-template-rows: auto 1fr auto; gap: 10px; overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); color: var(--w-bone); font-family: var(--font-body);
+}
+.wrapped-phone.is-cyan {
+  --w-bg: #07090c; --w-edge: #1a2733; --w-bone: #c2d0de; --w-bright: #e2ecf7; --w-muted: #7f90a6;
+  --w-red: #46c8ee; --w-gold: #46c8ee; --w-rule: rgba(176, 200, 222, 0.14);
+  background: radial-gradient(ellipse at 50% 0%, rgba(30, 120, 150, 0.32), transparent 60%), var(--w-bg);
+}
+.wrapped-phone__bars { display: flex; gap: 3px; }
+.wrapped-phone__bars i { flex: 1; height: 3px; background: rgba(217, 203, 176, 0.2); border-radius: 2px; display: block; }
+.wrapped-phone__bars i.on { background: var(--w-bone); }
+.wrapped-phone.is-cyan .wrapped-phone__bars i.on { background: var(--w-red); }
+.wrapped-card {
+  display: grid; align-content: center; gap: 12px; padding: 8px 6px; text-align: left;
+  overflow-y: auto; min-height: 0; cursor: pointer; user-select: none; overflow-wrap: anywhere;
+}
+.wrapped-card p { margin: 0; }
+.wrapped-card a { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 3px; }
+.wrapped-card a.btn { color: var(--accent-ink); text-decoration: none; justify-self: start; }
+.wrapped-card .k { font-family: var(--font-label); font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--w-muted); }
+.wrapped-card .big { font-family: var(--font-display); font-size: 3.6rem; line-height: 0.95; color: var(--w-bright); text-transform: uppercase; }
+.wrapped-card .mid { font-family: var(--font-display); font-size: 1.8rem; line-height: 1.05; color: var(--w-bright); text-transform: uppercase; }
+.wrapped-card .gold { color: var(--w-gold); }
+.wrapped-card .big.red { color: var(--w-red); }
+.wrapped-card .line { font-size: 0.95rem; color: var(--w-bone); }
+.wrapped-card .line b { color: var(--w-bright); font-weight: 600; }
+.wrapped-card .small { font-size: 0.82rem; color: var(--w-muted); }
+.wrapped-card .rows { display: grid; gap: 6px; font-size: 0.92rem; }
+.wrapped-card .rows > div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--w-rule); padding-bottom: 4px; font-variant-numeric: tabular-nums; }
+.wrapped-card .rows b { font-weight: 500; color: var(--w-bright); text-align: right; }
+.wrapped-card .rows--stacked b small { display: block; font-size: 0.78rem; color: var(--w-muted); font-weight: 400; }
+.wrapped-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.wrapped-chips li { border: 1px solid var(--w-gold); color: var(--w-gold); font-family: var(--font-label); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 8px; }
+.wrapped-chips--quiet li { border-color: var(--w-rule); color: var(--w-muted); }
+.wrapped-spark { width: 100%; height: 60px; }
+.wrapped-spark polyline { fill: none; stroke: var(--w-gold); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.wrapped-phone.is-cyan .wrapped-card .big.red { text-shadow: -2px 0 rgba(222, 78, 64, 0.6), 2px 0 rgba(70, 200, 238, 0.4); }
+.wrapped-phone__nav { display: flex; justify-content: space-between; align-items: center; }
+.wrapped-phone__nav button {
+  background: transparent; color: inherit; border: 1px solid rgba(217, 203, 176, 0.25); min-height: 36px;
+  font-family: var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; font-size: 0.72rem; padding: 6px 14px; cursor: pointer;
+}
+.wrapped-phone__nav button:disabled { opacity: 0.35; cursor: default; }
+.wrapped-phone :is(a, button):focus-visible { outline: 2px solid var(--w-bright); outline-offset: 2px; }
+.wrapped-phone__nav span { font-family: var(--font-label); font-size: 0.72rem; letter-spacing: 0.14em; color: var(--w-muted); font-variant-numeric: tabular-nums; }
+.wrapped-share { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; justify-content: center; max-width: 380px; }
+.wrapped-share__note { overflow-wrap: anywhere; font-size: var(--fs-dense); }
+@media (max-width: 420px) {
+  .wrapped-phone { min-height: 0; aspect-ratio: auto; height: calc(100svh - 160px); min-height: 520px; }
+  .wrapped-card .big { font-size: 3rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wrapped-phone.is-tearing { animation: wrapped-tear 0.6s steps(3) 1; }
+}
+@keyframes wrapped-tear {
+  33% { transform: translateX(-4px) skewX(-2deg); filter: hue-rotate(180deg); }
+  66% { transform: translateX(3px) scaleX(-1); }
+}
+.wrapped-strip { display: flex; justify-content: center; padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--border); background: var(--surface); }
+.wrapped-strip a { font-family: var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; font-size: var(--fs-dense); color: var(--rating); }
+.wrapped-links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-3) 0 0; }

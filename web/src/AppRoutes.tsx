@@ -51,6 +51,8 @@ const EventPage = lazy(() => import('./routes/Event'));
 const EventMatchPage = lazy(() => import('./routes/EventMatch'));
 // The live draft room (drafts plan D2b1): its own chunk, like the match room.
 const EventDraftPage = lazy(() => import('./routes/EventDraft'));
+// Season Wrapped: a once-a-season page, its own chunk.
+const Wrapped = lazy(() => import('./routes/Wrapped'));
 
 /** The 404.
  *
@@ -77,6 +79,10 @@ function NotFound() {
     </div>
   );
 }
+
+/** The staff preview is the Wrapped page reading the admin route. Declared
+ *  once, like the redirects below, so the router keeps one component type. */
+const WrappedPreview = (p: { season?: string; steamid?: string }) => <Wrapped {...p} preview />;
 
 /** The ban list lives on the People desk now. Declared once rather than
  *  inline, so the router is not handed a new component type every render. */
@@ -125,6 +131,10 @@ export function AppRoutes(
       <Route path="/practice/:id" component={Practice} session={session} />
       <Route path="/map/:map" component={MapDetail} />
       <Route path="/player/:steamid" component={Profile} session={session} refresh={refresh} />
+      <Route path="/wrapped" component={Wrapped} session={session} />
+      <Route path="/wrapped/preview/:season/:steamid" component={WrappedPreview} />
+      <Route path="/wrapped/:season" component={Wrapped} session={session} />
+      <Route path="/wrapped/:season/:steamid" component={Wrapped} session={session} />
       {/* Every screen in the panel is a path now, so the shell needs the
           whole subtree rather than one route. */}
       {ADMIN_ROUTE_PATHS.map((p) => <Route key={p} path={p} component={Admin} session={session} />)}
