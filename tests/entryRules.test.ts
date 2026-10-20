@@ -22,8 +22,8 @@ describe('problemsOf', () => {
   });
   it('says each problem as a sentence with the numbers', () => {
     expect(R.problemText('pugs', e, facts({ pugs: 2 }))).toBe('2 of 5 completed PUGs');
-    expect(R.problemText('sr_low', e, facts({ sr: 900 }))).toBe('SR 900 is below the floor of 1000');
-    expect(R.problemText('sr_high', e, facts({ sr: 2100 }))).toBe('SR 2100 is above the ceiling of 2000');
+    expect(R.problemText('sr_low', e, facts({ sr: 900 }))).toBe('SR is below the floor of 1000');
+    expect(R.problemText('sr_high', e, facts({ sr: 2100 }))).toBe('SR is above the ceiling of 2000');
   });
 });
 

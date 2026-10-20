@@ -181,17 +181,36 @@ export function playerSeasonState(db: DB, seasonId: number, steamid: string): La
  * minimum of games, not banned, by SR. Ties keep the more games first, then
  * the steamid, so the order is stable.
  */
-export function topTen(db: DB, seasonId: number, ladder = seasonLadder(db, seasonId), now = new Date()): string[] {
+export function topTen(db: DB, seasonId: number, ladder?: Map<string, LadderEntry>, now = new Date()): string[] {
   const rules = seasonRules(db, seasonId);
+  // Season 0 has no ranks, and so no Top 10 badge either.
+  if (!rules.ranks) return [];
+  // Memoised per season on everything the answer depends on, so a profile
+  // view does not fold the whole season's history each time: a new rating
+  // row, a recompute (ids change), and a ban or lift all change the key.
+  const key = JSON.stringify(db.prepare(
+    `SELECT (SELECT COUNT(*) FROM rating_history WHERE season_id = ?) AS n,
+            (SELECT MAX(id) FROM rating_history WHERE season_id = ?) AS last,
+            (SELECT COUNT(*) || ':' || IFNULL(MAX(rowid), 0) FROM bans WHERE lifted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)) AS bans,
+            (SELECT final_min_games FROM seasons WHERE id = ?) AS min`,
+  ).get(seasonId, seasonId, now.toISOString(), seasonId));
+  const memo = topTenMemo.get(db)?.get(seasonId);
+  if (memo && memo.key === key) return memo.ids;
+  ladder ??= seasonLadder(db, seasonId);
   const banned = new Set((db.prepare(
     'SELECT DISTINCT player_id FROM bans WHERE lifted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)',
   ).all(now.toISOString()) as { player_id: string }[]).map((r) => r.player_id));
-  return [...ladder.values()]
+  const ids = [...ladder.values()]
     .filter((e) => e.placed && e.games >= rules.finalMinGames && !banned.has(e.steamid))
     .sort((a, b) => b.sr - a.sr || b.games - a.games || a.steamid.localeCompare(b.steamid))
     .slice(0, 10)
     .map((e) => e.steamid);
+  if (!topTenMemo.has(db)) topTenMemo.set(db, new Map());
+  topTenMemo.get(db)!.set(seasonId, { key, ids });
+  return ids;
 }
+
+const topTenMemo = new WeakMap<DB, Map<number, { key: string; ids: string[] }>>();
 
 /**
  * Where one rated game sits in a player's season: still placing, the game

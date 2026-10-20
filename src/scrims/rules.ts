@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { seasonSr, unratedSr } from '../rating.js';
+import { playerSeasonState } from '../seasonRules.js';
 import { currentSeasonId } from '../players.js';
 import { getSetting } from '../settings.js';
 import { activeMembers } from '../teams/teams.js';
@@ -27,13 +28,20 @@ export type ScrimSide = { teamId: number } | { captain: string };
  */
 export function sideSr(db: DB, side: ScrimSide): number {
   const season = currentSeasonId(db);
+  // A player still placing counts as the season's starting SR, like an
+  // unrated one: a side SR is shown on the board, the card and in DMs, and a
+  // pickup captain's would otherwise be their hidden SR exactly.
+  const srOf = (steamid: string): number => {
+    const state = playerSeasonState(db, season, steamid);
+    return state && !state.placed ? unratedSr(db, season) : seasonSr(db, steamid, season);
+  };
   if ('teamId' in side) {
     const members = activeMembers(db, side.teamId);
     if (members.length === 0) return unratedSr(db, season);
-    const total = members.reduce((sum, m) => sum + seasonSr(db, m.steamid, season), 0);
+    const total = members.reduce((sum, m) => sum + srOf(m.steamid), 0);
     return Math.round(total / members.length);
   }
-  return seasonSr(db, side.captain, season);
+  return srOf(side.captain);
 }
 
 /** Whether scrims show SR at all (scrim_show_sr). Off, SR is left out of

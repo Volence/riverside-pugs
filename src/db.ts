@@ -2901,10 +2901,14 @@ export function openDb(path: string): DB {
       games      INTEGER NOT NULL,
       final_rank INTEGER,
       rank_idx   INTEGER,
+      -- 0 when they never finished placement: sr and peak_sr were never
+      -- shown and stay hidden.
+      placed     INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY (season_id, player_id)
     );
     CREATE INDEX IF NOT EXISTS season_results_player ON season_results (player_id);
     CREATE INDEX IF NOT EXISTS idx_rating_history_player_season ON rating_history (player_id, season_id);
+    CREATE INDEX IF NOT EXISTS idx_rating_history_season ON rating_history (season_id, id);
   `);
 
   seed(db);
