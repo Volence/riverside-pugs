@@ -2,6 +2,7 @@ import type { DB } from '../src/db.js';
 import { encodeIntervals } from '../src/inputStats.js';
 import { addHolds, type Fingerprint } from '../src/fingerprint.js';
 import { upsertPlayer } from '../src/players.js';
+import { rng } from './inputSim.js';
 
 /** Synthetic hold data for the fingerprint tests. Nothing here is a real
  *  player's numbers: the real ones live only in the production database. */
@@ -15,6 +16,24 @@ export const SMOKER = 'fire:weapon_smoker_claw';
 export function spread(peak: number, n: number): number[] {
   const pattern = [peak - 1, peak, peak, peak + 1];
   return Array.from({ length: n }, (_, i) => pattern[i % 4]);
+}
+
+/**
+ * A hand, read by a server at `rate`: n holds whose true lengths are
+ * log-normal around `medianMs` (a spread of 0.3 is about 30%, what a finger
+ * does), each pressed at a random point in a tick and read as the usercmds
+ * that saw it down. Deterministic for a seed. The same hand at 100 and 128
+ * tick is the same medianMs and spread with a different seed.
+ */
+export function handHolds(seed: number, rate: number, n: number, medianMs: number, spreadLog = 0.3): number[] {
+  const r = rng(seed);
+  const tickMs = 1000 / rate;
+  const gauss = (): number => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
+  return Array.from({ length: n }, () => {
+    const ms = medianMs * Math.exp(spreadLog * gauss());
+    const press = r() * tickMs;
+    return Math.max(1, Math.ceil((press + ms) / tickMs) - Math.ceil(press / tickMs));
+  });
 }
 
 export function fpOf(classes: Record<string, number[]>): Fingerprint {

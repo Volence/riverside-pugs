@@ -185,7 +185,7 @@ export function replayHistory(db: DB, opts: ReplayOptions): ReplayReport {
     `SELECT id, COALESCE(ended_at, created_at) AS endedAt FROM matches
       WHERE state IN ('completed', 'aborted') ORDER BY COALESCE(ended_at, created_at), id`,
   ).all() as { id: number; endedAt: string }[];
-  const burstsOf = db.prepare(`SELECT steamid, kind, weapon, holds FROM input_bursts WHERE match_id = ? AND ${BASE_BURST_SQL}`);
+  const burstsOf = db.prepare(`SELECT steamid, kind, weapon, holds, tickrate FROM input_bursts WHERE match_id = ? AND ${BASE_BURST_SQL}`);
   const whole = new Map<string, Fingerprint>();
   const perMatch = new Map<string, Fingerprint[]>();
   const modelled = replayPeople(db, opts.people);
