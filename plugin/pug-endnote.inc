@@ -26,9 +26,15 @@
 /** SteamID64 -> this player's note, for the match that just ended. */
 StringMap g_smEndNote;
 
+/** The site turns !rq on per match (orchestrator setupMatch). Off by
+ *  default: the feature launches with Season 1, and until the site says so
+ *  !rq does nothing at all, not even a reply. */
+ConVar g_cvRequeue;
+
 void EndNote_Init()
 {
 	g_smEndNote = new StringMap();
+	g_cvRequeue = CreateConVar("sm_pug_requeue", "0", "1 = !rq works (the site sets this per match once Season 1 is live).", FCVAR_DONTRECORD, true, 0.0, true, 1.0);
 	RegServerCmd("sm_pug_endnote", Cmd_EndNote, "sm_pug_endnote <token> <steamid64> <text> - one player's own end-of-match line");
 	RegConsoleCmd("sm_rq", Cmd_Requeue, "Queue again when this match ends. !rq off cancels.");
 	RegConsoleCmd("sm_requeue", Cmd_Requeue, "Queue again when this match ends. !rq off cancels.");
@@ -102,6 +108,7 @@ public Action Cmd_Requeue(int client, int args)
 		ReplyToCommand(client, "[PUG] !rq is for players in game.");
 		return Plugin_Handled;
 	}
+	if (!g_cvRequeue.BoolValue) return Plugin_Handled;
 	if ((g_State != MS_Live && g_State != MS_Ended) || g_iMatchId <= 0 || g_bSelfStarted || !g_cvEndKick.BoolValue)
 	{
 		PrintToChat(client, "\x04[PUG]\x01 !rq works during a queue match: it puts you back in the queue when the match ends.");

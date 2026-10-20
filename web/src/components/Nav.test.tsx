@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_LINKS } from './Nav';
+import { NAV_LINKS, navLinksFor } from './Nav';
+
+describe('navLinksFor', () => {
+  it('before Season 1: Patch notes is the tracker page and there is no News', () => {
+    const early = navLinksFor(false);
+    expect(early.map(([h]) => h)).not.toContain('/news');
+    expect(early.find(([, l]) => l === 'Patch notes')?.[0]).toBe('/balance');
+    expect(navLinksFor(true)).toBe(NAV_LINKS);
+  });
+});
 
 describe('NAV_LINKS', () => {
   it('gives every static page a target so the SPA router does not swallow it', () => {
@@ -212,8 +221,8 @@ describe('Nav current page', () => {
     expect(at(path)).toEqual(['Patch notes']);
   });
 
-  it.each(['/news', '/news/3'])('marks News current on %s', (path) => {
-    expect(at(path)).toEqual(['News']);
+  it.each(['/news', '/news/3'])('has no News before Season 1, so nothing is current on %s', (path) => {
+    expect(at(path)).toEqual([]);
   });
 
   it('marks only the matching item elsewhere', () => {

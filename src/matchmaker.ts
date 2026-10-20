@@ -17,6 +17,7 @@ import { inGoodStanding } from './standing.js';
 import { abortNoticeFor, type AbortNotice } from './matchAborts.js';
 import { recordQueueStint } from './queueActivity.js';
 import { requeueOptIns, wantsRequeue, type RequeueResult } from './matchRequeue.js';
+import { seasonOneLive } from './seasonThemes.js';
 
 export interface MatchmakerDeps {
   broadcast: (event: string) => void;
@@ -611,7 +612,7 @@ export class Matchmaker {
         connect,
         spectate: spectateFor(this.db, matchRow.server_id),
         waitingForServer: matchRow.state === 'configuring' && matchRow.server_id === null,
-        requeue: matchRow.state === 'live' && matchRow.kind === 'pug' && matchRow.booking_id === null
+        requeue: matchRow.state === 'live' && matchRow.kind === 'pug' && matchRow.booking_id === null && seasonOneLive(this.db)
           ? wantsRequeue(this.db, matchRow.id, steamid) : null,
       };
     }

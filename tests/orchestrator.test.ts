@@ -351,6 +351,31 @@ describe('RealOrchestrator', () => {
     expect(JSON.parse(mp.stats_json).sidmg).toBe('100');
   });
 
+  it('before Season 1: !rq stays off in game, nobody is requeued and no end notes are sent', async () => {
+    const dump = [
+      'DUMP match=1', 'MAP map=l4d_hospital01 a=245 b=310',
+      ...IDS.map((id, i) => `STAT steamid=${id} team=${i < 4 ? 'a' : 'b'} sidmg=1 sikill=0 ck=0 ff=0 rev=0`),
+      'END winner=b a=245 b=310',
+    ].join('\n');
+    const srv = await fakeServer(dump);
+    cleanup.push(srv.close);
+    addServer(db, { name: 's', host: '127.0.0.1', port: 27015, rconPort: srv.port, rconPassword: 'secret' });
+    const listener = new LogListener(() => {});
+    await listener.listen(0);
+    cleanup.push(() => listener.close());
+    const asked: number[] = [];
+    const orch = new RealOrchestrator({
+      db, listener, logPublicAddress: '127.0.0.1:27500', releaser: new ServerReleaser(db, async () => {}), makeRcon: (o) => o,
+      requeueAfterMatch: (id) => { asked.push(id); return new Map(); },
+    });
+    const mid = seedMatch(db);
+    await orch.setupMatch(mid);
+    await orch.finishMatch(mid);
+    expect(srv.cmds).toContain('sm_pug_requeue 0');
+    expect(asked).toEqual([]);
+    expect(srv.cmds.some((c) => c.startsWith('sm_pug_endnote'))).toBe(false);
+  });
+
   it('finishMatch requeues who asked and sends each player their end note before sm_pug_abort', async () => {
     const mid = 1;
     const dump = [
@@ -371,8 +396,10 @@ describe('RealOrchestrator', () => {
       requeueAfterMatch: (id) => { asked.push(id); return new Map([[IDS[0], { ok: true as const }]]); },
     });
 
+    db.prepare('UPDATE seasons SET ranks = 1').run();
     const realMid = seedMatch(db);
     await orch.setupMatch(realMid);
+    expect(srv.cmds).toContain('sm_pug_requeue 1');
     await orch.finishMatch(realMid);
 
     expect(asked).toEqual([realMid]);

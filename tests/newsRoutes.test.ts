@@ -32,6 +32,8 @@ async function boot(withTransport = true) {
   for (const id of [ADMIN, MOD, PLAYER]) cookies[id] = authedCookie(app, db, id);
   db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+  // News launches with Season 1 (seasonOneLive); these tests are about it live.
+  db.prepare('UPDATE seasons SET ranks = 1').run();
 }
 
 beforeEach(async () => { await boot(); });
@@ -216,5 +218,20 @@ describe('news routes without a bot', () => {
     expect(pub.botConnected).toBe(false);
     expect(pub.post.discord).toBe('pending');
     expect((await call('GET', `/api/news/${id}`)).statusCode).toBe(200);
+  });
+});
+
+describe('news before Season 1', () => {
+  it('shows nothing publicly and refuses to publish, but drafts work', async () => {
+    db.prepare('UPDATE seasons SET ranks = 0').run();
+    const id = await draft();
+    expect((await call('GET', '/api/admin/news', ADMIN)).json().live).toBe(false);
+    const pub = await call('POST', `/api/admin/news/${id}/publish`, ADMIN);
+    expect(pub.statusCode).toBe(409);
+    expect(pub.json().error).toMatch(/Season 1/);
+    db.prepare("UPDATE news_posts SET published_at = '2026-10-21T12:00:00.000Z' WHERE id = ?").run(id);
+    expect((await call('GET', '/api/news')).json()).toMatchObject({ posts: [], total: 0 });
+    expect((await call('GET', `/api/news/${id}`)).statusCode).toBe(404);
+    expect(t.sends).toBe(0);
   });
 });

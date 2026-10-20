@@ -88,8 +88,10 @@ describe('requeue after the match', () => {
     expect(mm.stateFor(OTHER).queue.players.map((p) => p.steamid)).toEqual([OTHER, IDS[0]]);
   });
 
-  it('shows the viewer their own toggle on a live queue match only', () => {
+  it('shows the viewer their own toggle on a live queue match only, and only from Season 1', () => {
     const id = match('live');
+    expect(mm.stateFor(IDS[2]).match?.requeue).toBeNull();
+    db.prepare('UPDATE seasons SET ranks = 1').run();
     expect(mm.stateFor(IDS[2]).match?.requeue).toBe(false);
     setRequeue(db, id, IDS[2], true);
     expect(mm.stateFor(IDS[2]).match?.requeue).toBe(true);

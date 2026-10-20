@@ -188,6 +188,10 @@ export interface CurrentSeasonLook {
   theme: SeasonThemeId | null;
   startedAt: string;
   endsAt: string | null;
+  /** Plays by the Season 1 rules: the switch for everything that launches
+   *  with Season 1 (News, hand-written patch notes, !rq, the rank-up moment).
+   *  Optional: an older server sends none. */
+  ranks?: boolean;
 }
 
 export interface SiteInfo {
@@ -3423,6 +3427,9 @@ export interface NewsEditorState {
   channelSet: boolean;
   /** The bot is connected, so a publish reaches Discord now. */
   botConnected: boolean;
+  /** Season 1 has started, so posts can be published (drafts any time).
+   *  Optional: an older server sends none. */
+  live?: boolean;
   /** The post the action was about; absent on the list read. */
   post?: NewsAdminPost | null;
 }

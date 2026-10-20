@@ -89,6 +89,7 @@ import { ticketNudger } from './tickets/nudge.js';
 import { subscribeTicketSignals } from './tickets/signals.js';
 import { Matchmaker } from './matchmaker.js';
 import { requeueMatchFor, setRequeue, type RequeueResult } from './matchRequeue.js';
+import { seasonOneLive } from './seasonThemes.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
 import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
 import { lilacSeverity, recordSiKill, scanAimMatches } from './aimRules.js';
@@ -846,6 +847,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
    *  in-game request to the box the match is on; null for the site, which
    *  has already checked who is asking. */
   const onRequeueRequest = (matchId: number, steamid: string, on: boolean, serverId: number | null): RequeueResult => {
+    if (!seasonOneLive(deps.db)) return { ok: false, error: 'requeue starts with Season 1' };
     const m = requeueMatchFor(deps.db, matchId, steamid, serverId);
     if (!m) return { ok: false, error: 'not on a live queue match' };
     setRequeue(deps.db, matchId, steamid, on);

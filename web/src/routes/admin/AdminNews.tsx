@@ -127,10 +127,17 @@ export function AdminNews() {
 
   const published = current?.publishedAt != null;
   const canSave = !busy && form.title.trim() !== '' && dirty;
-  const canPublish = !busy && form.title.trim() !== '' && form.body.trim() !== '' && !published;
+  const live = data.live !== false;
+  const canPublish = live && !busy && form.title.trim() !== '' && form.body.trim() !== '' && !published;
 
   return (
     <div class="stack">
+      {!live && (
+        <p class="newsadmin__notice">
+          News goes live with Season 1. Until it starts, write and save drafts here; nobody else sees them, and
+          Publish unlocks the moment the season begins.
+        </p>
+      )}
       {!data.channelSet && (
         <p class="newsadmin__notice">
           No news channel is set, so publishing puts a post on the site only and Discord is skipped. Set one under
