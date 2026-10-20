@@ -2,10 +2,13 @@ import { rating, rate, predictWin } from 'openskill';
 import type { DB } from './db.js';
 import { ensureRating } from './players.js';
 import { completedPug } from './matchKinds.js';
+import { LEGACY_RULES, seasonRules, srUnder } from './seasonRules.js';
 
-/** Cosmetic SR shown on site. Stored mu/sigma remain canonical. */
+/** Cosmetic SR under Season 0's rules (mu - 2 sigma). Stored mu/sigma remain
+ *  canonical. A season's own rules can differ (src/seasonRules.ts): read SR
+ *  for a season through seasonSr or srUnder(seasonRules(...)). */
 export function displaySr(mu: number, sigma: number): number {
-  return Math.max(0, Math.round((mu - 2 * sigma) * 100));
+  return srUnder(LEGACY_RULES, mu, sigma);
 }
 
 /** The SR a player with no rating row yet shows: openskill's own defaults,
@@ -16,15 +19,25 @@ export const UNRATED_SR = displaySr(rating().mu, rating().sigma);
  *  Scrim sides and event seeding both use it. */
 export function seasonSr(db: DB, steamid: string, seasonId: number): number {
   const r = seasonRating(db, steamid, seasonId);
-  return displaySr(r.mu, r.sigma);
+  return srUnder(seasonRules(db, seasonId), r.mu, r.sigma);
+}
+
+/** The SR a player with no rating row shows in a season. */
+export function unratedSr(db: DB, seasonId: number): number {
+  const fresh = rating();
+  return srUnder(seasonRules(db, seasonId), fresh.mu, fresh.sigma);
 }
 
 /** A player's { mu, sigma } in a season, read without writing a rating row:
- *  openskill's defaults (what ensureRating would write) when unrated. */
+ *  their soft-reset seed, else openskill's defaults (what ensureRating would
+ *  write) when unrated. */
 export function seasonRating(db: DB, steamid: string, seasonId: number): { mu: number; sigma: number } {
   const row = db.prepare('SELECT mu, sigma FROM player_ratings WHERE player_id = ? AND season_id = ?')
     .get(steamid, seasonId) as { mu: number; sigma: number } | undefined;
   if (row) return { mu: row.mu, sigma: row.sigma };
+  const seed = db.prepare('SELECT mu, sigma FROM season_seeds WHERE season_id = ? AND player_id = ?')
+    .get(seasonId, steamid) as { mu: number; sigma: number } | undefined;
+  if (seed) return seed;
   const fresh = rating();
   return { mu: fresh.mu, sigma: fresh.sigma };
 }
@@ -130,8 +143,9 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
   const b = rows.filter((r) => r.team === 'b');
   if (a.length === 0 || b.length === 0) return null;
 
+  const rules = seasonRules(db, match.season_id);
   const meanSr = (side: typeof a): number =>
-    Math.round(side.reduce((n, r) => n + displaySr(r.mu, r.sigma), 0) / side.length);
+    Math.round(side.reduce((n, r) => n + srUnder(rules, r.mu, r.sigma), 0) / side.length);
   const meanMu = (side: typeof a): number =>
     side.reduce((n, r) => n + r.mu, 0) / side.length;
   const meanSigma = (side: typeof a): number =>
@@ -382,6 +396,13 @@ export function recomputeSeasonRatings(db: DB, seasonId: number): void {
     const fresh = rating();
     db.prepare('UPDATE player_ratings SET mu = ?, sigma = ?, wins = 0, losses = 0 WHERE season_id = ?')
       .run(fresh.mu, fresh.sigma, seasonId);
+    // A soft-reset season starts each returning player from their seed, not
+    // the defaults (src/seasons.ts startNewSeason).
+    db.prepare(
+      `UPDATE player_ratings SET mu = s.mu, sigma = s.sigma
+       FROM season_seeds s WHERE s.season_id = player_ratings.season_id AND s.player_id = player_ratings.player_id
+         AND player_ratings.season_id = ?`,
+    ).run(seasonId);
     // Completed PUGs, and every PUG whose quitter still owes an abandon loss
     // that no completed result carries: an undecided abandon (aborted), or a
     // decided one staff later voided. Voiding drops the result, not the

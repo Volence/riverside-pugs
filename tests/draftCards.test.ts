@@ -80,7 +80,7 @@ describe('a player card', () => {
   it('is empty, not broken, for a player with no PUGs', () => {
     const c = playerCard(setup(), Y);
     expect(c).toEqual({
-      steamid: Y, name: 'Yul', avatar: null, sr: Math.round(UNRATED_SR), trend: [], pugs: 0, form: [],
+      steamid: Y, name: 'Yul', avatar: null, sr: Math.round(UNRATED_SR), placing: null, trend: [], pugs: 0, form: [],
       survivor: { siDamage: 0, commonKills: 0 }, infected: { damageAsSi: 0, dpsLanded: 0 }, bestClass: null, skills: [],
     });
   });

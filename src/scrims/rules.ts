@@ -1,5 +1,5 @@
 import type { DB } from '../db.js';
-import { seasonSr, UNRATED_SR } from '../rating.js';
+import { seasonSr, unratedSr } from '../rating.js';
 import { currentSeasonId } from '../players.js';
 import { getSetting } from '../settings.js';
 import { activeMembers } from '../teams/teams.js';
@@ -29,7 +29,7 @@ export function sideSr(db: DB, side: ScrimSide): number {
   const season = currentSeasonId(db);
   if ('teamId' in side) {
     const members = activeMembers(db, side.teamId);
-    if (members.length === 0) return UNRATED_SR;
+    if (members.length === 0) return unratedSr(db, season);
     const total = members.reduce((sum, m) => sum + seasonSr(db, m.steamid, season), 0);
     return Math.round(total / members.length);
   }

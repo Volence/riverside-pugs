@@ -19,6 +19,8 @@ import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
+import { RankBadge as SeasonRankBadge, Top10Tag } from '../components/SeasonRank';
+import type { PastSeason, RankView } from '../api';
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
@@ -61,8 +63,12 @@ export function Profile(
   const privateRows = Object.entries(privateStatTotals ?? {})
     .filter(([k]) => !DEAD_STAT_KEYS.has(k));
 
-  const peak = history.length ? Math.max(...history.map((h) => h.sr)) : null;
+  const season = data.season;
+  const peak = season?.peakSr ?? (history.length ? Math.max(...history.map((h) => h.sr)) : null);
   const lastDelta = matches.length ? matches[0].srDelta : null;
+  // Best finish across finished seasons: the lowest final place.
+  const best = (data.pastSeasons ?? []).filter((p) => p.finalRank !== null)
+    .sort((a, b) => a.finalRank! - b.finalRank!)[0];
 
   return (
     <div class="page page--profile">
@@ -79,8 +85,20 @@ export function Profile(
           bio={player.bio}
           title={data.endorsements?.title}
           aka={data.alsoKnownAs}
-          badges={data.teams && data.teams.length > 0 ? <TeamChips teams={data.teams} /> : undefined}
+          badges={(data.teams && data.teams.length > 0) || best ? (
+            <>
+              {best && <span class="titletag" title={`${best.name}: #${best.finalRank} of ${best.of}`}>{`${best.name} #${best.finalRank}`}</span>}
+              {data.teams && data.teams.length > 0 && <TeamChips teams={data.teams} />}
+            </>
+          ) : undefined}
           rating={rating ? rating.sr : null}
+          placing={season?.placing ?? null}
+          rankSlot={season && !season.placing && (season.rank || season.top10) ? (
+            <>
+              {season.rank && <SeasonRankBadge rank={season.rank} />}
+              {season.top10 && <Top10Tag />}
+            </>
+          ) : undefined}
           delta={lastDelta}
           stats={rating ? [
             { label: 'Record', value: `${rating.wins}W ${rating.losses}L` },
@@ -139,8 +157,13 @@ export function Profile(
 
         <Panel>
           <h3>Rating over time</h3>
-          <Sparkline values={history.map((h) => h.sr)} />
+          {season?.placing
+            ? <p class="muted">{`Placement: ${season.placing.played} of ${season.placing.of} games played. SR and rank show after the last one.`}</p>
+            : <Sparkline values={history.map((h) => h.sr)} />}
+          {season?.rank && season.sr !== null && <RankProgress rank={season.rank} sr={season.sr} />}
         </Panel>
+
+        <SeasonHistory past={data.pastSeasons ?? []} />
 
         <ProfileFigures
           totals={totals} statTotals={statTotals} rating={rating}
@@ -188,7 +211,7 @@ export function Profile(
                         <td><ResultChip result={m.result} /></td>
                         <td class="campaign-cell"><a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a></td>
                         <td class="num">{m.teamAScore} - {m.teamBScore}</td>
-                        <td class="num"><SrDelta value={m.srDelta} /></td>
+                        <td class="num"><SrDelta value={m.srDelta} placement={m.placement} placedRank={m.placedRank} /></td>
                         <td class="num muted">{fmtDate(m.endedAt)}</td>
                       </tr>
                     ))}
@@ -417,6 +440,58 @@ function SharedPanel({ steamid, session }: { steamid: string; session: Session }
       <h3>Shared</h3>
       <div class="profile-shared__cards">
         {data.map((e) => <CommunityCard key={e.id} entry={e} session={session} size="compact" />)}
+      </div>
+    </Panel>
+  );
+}
+
+/** "120 SR to Gold I", with a bar across the current division. */
+function RankProgress({ rank, sr }: { rank: RankView; sr: number }) {
+  if (rank.next === null) return <div class="rank-progress"><span class="muted">Top division: Master I</span></div>;
+  const span = rank.next - rank.floor;
+  const pct = Math.max(0, Math.min(100, ((sr - rank.floor) / span) * 100));
+  return (
+    <div class="rank-progress">
+      <span class="muted">{`${Math.max(0, rank.next - sr)} SR to the next division`}</span>
+      <div class="rank-progress__bar"><div class="rank-progress__fill" style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
+
+/** Every finished season, frozen as it ended: place, rank, SR, peak, record. */
+function SeasonHistory({ past }: { past: PastSeason[] }) {
+  if (past.length === 0) return null;
+  return (
+    <Panel class="panel--table">
+      <h3>Past seasons</h3>
+      <div class="table-wrap">
+        <table class="season-history">
+          <thead>
+            <tr>
+              <th>Season</th>
+              <th class="num">Place</th>
+              <th>Rank</th>
+              <th class="num">Final SR</th>
+              <th class="num">Peak</th>
+              <th class="num">Record</th>
+            </tr>
+          </thead>
+          <tbody>
+            {past.map((p) => (
+              <tr key={p.seasonId}>
+                <td><a href={`/leaderboard?season=${p.seasonId}`}>{p.name}</a></td>
+                <td class="num">
+                  {p.finalRank !== null ? `#${p.finalRank} of ${p.of}` : <span class="muted" title="Under the season's minimum games for a final place">n/a</span>}
+                  {p.top10 && <Top10Tag />}
+                </td>
+                <td>{p.rank ? <SeasonRankBadge name={p.rank} /> : <span class="muted">–</span>}</td>
+                <td class="num">{p.sr}</td>
+                <td class="num">{p.peakSr}</td>
+                <td class="num muted">{`${p.wins}W ${p.losses}L`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </Panel>
   );

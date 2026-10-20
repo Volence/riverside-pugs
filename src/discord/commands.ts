@@ -119,7 +119,10 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   if (rating) {
     const decided = rating.wins + rating.losses;
     const wr = decided > 0 ? ` (${Math.round((rating.wins / decided) * 100)}%)` : '';
-    lines.push(`**SR ${rating.sr}** · ${rating.wins}W ${rating.losses}L${wr} · ${games} matches`);
+    const season = data.season;
+    const head = season.placing ? `**Placing ${season.placing.played}/${season.placing.of}**`
+      : `${season.rank ? `**${season.rank.name}** · ` : ''}**SR ${rating.sr}**${season.top10 ? ' · Top 10' : ''}`;
+    lines.push(`${head} · ${rating.wins}W ${rating.losses}L${wr} · ${games} matches`);
   } else {
     lines.push(`No rated matches yet · ${games} matches`);
   }
@@ -161,8 +164,10 @@ function leaderboard(deps: CommandDeps): InteractionReply {
     // Escaped plain form, not a mention: a row of up to ten of these next to
     // each other is noisy as mentions, and this is an embed description,
     // which still renders markdown, so the name still needs escaping.
-    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}** ${plainLabelEscaped(identityOf(deps.db, r.steamid))} · ${r.wins}W ${r.losses}L`).join('\n')
-    : 'Nobody is ranked yet. It takes 3 matches.';
+    ? ranked.map((r, n) => `\`${String(n + 1).padStart(2, ' ')}\` **${r.sr}**${r.rank ? ` ${r.rank.name}` : ''} ${plainLabelEscaped(identityOf(deps.db, r.steamid))} · ${r.wins}W ${r.losses}L`).join('\n')
+    : data.season.placementGames > 0
+      ? `Nobody has placed yet. It takes ${data.season.placementGames} matches.`
+      : 'Nobody is ranked yet. It takes 3 matches.';
   return pub({
     embeds: [{ title: `Leaderboard · ${data.season.name}`, url, color: COLOR, description: body }],
     components: [[{ kind: 'link', url, label: 'Full leaderboard' }]],

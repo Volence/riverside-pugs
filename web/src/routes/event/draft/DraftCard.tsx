@@ -16,7 +16,7 @@ export function DraftCard({ card, note, chemistry, action }: {
     <article class="draftcard" aria-label={card.name}>
       <header class="draftcard__head">
         <h4 class="draftcard__name">{card.name}</h4>
-        <span class="draftcard__sr">{`SR ${card.sr}`}</span>
+        <span class="draftcard__sr">{card.placing ? `Placing ${card.placing.played}/${card.placing.of}` : `SR ${card.sr}`}</span>
       </header>
       {trend && <p class="draftcard__line muted">{trend}</p>}
       <p class="draftcard__line">{`Survivor: ${card.survivor.siDamage} SI damage, ${card.survivor.commonKills} commons a game`}</p>

@@ -83,7 +83,10 @@ export function ensureRating(db: DB, steamid: string, seasonId?: number): Rating
     .prepare('SELECT * FROM player_ratings WHERE player_id = ? AND season_id = ?')
     .get(steamid, season) as RatingRow | undefined;
   if (existing) return existing;
-  const r = rating(); // openskill defaults: mu=25, sigma=25/3
+  // A returning player's soft-reset start (season_seeds), else openskill's
+  // defaults: mu=25, sigma=25/3.
+  const r = (db.prepare('SELECT mu, sigma FROM season_seeds WHERE season_id = ? AND player_id = ?')
+    .get(season, steamid) as { mu: number; sigma: number } | undefined) ?? rating();
   db.prepare(
     'INSERT INTO player_ratings (player_id, season_id, mu, sigma) VALUES (?, ?, ?, ?)',
   ).run(steamid, season, r.mu, r.sigma);

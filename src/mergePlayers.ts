@@ -512,6 +512,11 @@ export function mergePlayers(
     //    recompute below rebuilds them from the merged rosters.
     db.prepare('DELETE FROM rating_history WHERE player_id IN (?, ?)').run(from, into);
     db.prepare('DELETE FROM player_ratings WHERE player_id = ?').run(from);
+    // A season's soft-reset start: the survivor keeps their own, and takes
+    // the alt's only when they had none. Frozen season_results stay as they
+    // were on purpose: a finished ladder is never reordered.
+    db.prepare('UPDATE OR IGNORE season_seeds SET player_id = ? WHERE player_id = ?').run(into, from);
+    db.prepare('DELETE FROM season_seeds WHERE player_id = ?').run(from);
 
     // 4. Endorsements have TWO player columns inside one primary key
     //    (match_id, from_id, to_id), so they fit neither PLAIN nor KEYED: a

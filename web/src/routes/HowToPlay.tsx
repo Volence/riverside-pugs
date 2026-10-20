@@ -26,7 +26,7 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'How does SR work?',
-    a: <>SR comes from an OpenSkill rating, updated after every match from whether your team won, lost or drew. It is shown cautiously: a new player's rating is uncertain, so it starts lower and settles as you play. You are <strong>provisional</strong> for your first 3 matches and are listed below the ranked part of the leaderboard until then. If you join a match as a sub and play under half of it, your stats count but your rating does not change.</>,
+    a: <>SR comes from an OpenSkill rating, updated after every match from whether your team won, lost or drew. Only winning moves it: your own stats never do. Each season you play <strong>5 placement matches</strong> first; your SR and rank show after the fifth. Ranks go Bronze, Silver, Gold, Platinum, Diamond and Master, each with three divisions (III, II, I). Silver starts at 1400 SR and every rank is 500 SR wide. You rank up the moment you cross a line, and only drop once you are 50 SR below it. The <strong>Top 10</strong> badge and a place in the final standings need 20 matches in the season. A new season starts everyone from a soft reset of their old rating, so you keep most of what you earned. If you join a match as a sub and play under half of it, your stats count but your rating does not change.</>,
   },
   {
     q: 'What happens if I miss a ready check or do not show up?',

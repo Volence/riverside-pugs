@@ -175,17 +175,50 @@ export interface SiteInfo {
   requireDiscord: boolean;
 }
 
+/** A Bronze..Master rank with its division (src/seasonRules.ts rankView). */
+export interface RankView {
+  index: number;
+  tier: 'Bronze' | 'Silver' | 'Gold' | 'Platinum' | 'Diamond' | 'Master';
+  division: 'III' | 'II' | 'I';
+  name: string;
+  floor: number;
+  next: number | null;
+}
+
+export interface Placing { played: number; of: number }
+
+/** src/seasons.ts seasonResetPreview: what starting a new season would do. */
+export interface SeasonResetPreview {
+  seasonId: number | null;
+  rows: {
+    steamid: string; name: string; games: number; oldSr: number; finalRank: number | null;
+    newMu: number; newSigma: number; startSr: number; startRank: string;
+  }[];
+}
+
+export interface PastSeason {
+  seasonId: number; name: string; sr: number; peakSr: number; wins: number; losses: number; games: number;
+  finalRank: number | null; of: number; rank: string | null; top10: boolean;
+}
+
 export interface LeaderboardRow {
   steamid: string;
   name: string;
   avatar: string | null;
-  sr: number;
+  /** Null while placing: the SR is not shown until placement is done. */
+  sr: number | null;
   wins: number;
   losses: number;
   games: number;
-  /** False under three games: listed as provisional, below the ranked rows,
-   *  with no rank number and no claim on the top-rated card. */
+  /** False while placing (or, in Season 0, under three games): listed below
+   *  the ranked rows, with no rank number and no claim on the top card. In a
+   *  finished season, whether they hold a place in the final standings. */
   ranked: boolean;
+  placing?: Placing | null;
+  rank?: RankView | null;
+  top10?: boolean;
+  /** A finished season's frozen place, null under its minimum games. */
+  finalRank?: number | null;
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
@@ -194,7 +227,7 @@ export interface LeaderboardRow {
 }
 
 export interface Leaderboard {
-  season: { id: number; name: string };
+  season: { id: number; name: string; placementGames?: number; ranks?: boolean; finalMinGames?: number; ended?: boolean };
   /** Distinct matches that produced a rating this season. */
   matchesRated: number;
   rows: LeaderboardRow[];
@@ -253,8 +286,13 @@ export interface MatchPlayerStats {
   commonKills: number;
   ffDealt: number;
   revives: number;
-  /** Null when the rating never touched this player in this match. */
+  /** Null when the rating never touched this player in this match, or it
+   *  was one of their placement games. */
   srDelta: number | null;
+  /** Placement games: still placing after this match, or this match placed
+   *  them (placedRank names the rank, in a season with ranks). */
+  placement?: GamePhase | null;
+  placedRank?: string | null;
   /** Skill-detect stats, already filtered server-side for the viewer: a
    *  self-visibility stat is present only when the viewer is the subject. */
   stats: Record<string, number>;
@@ -552,10 +590,15 @@ export interface MapBreakdownRow {
   campaignName?: string | null;
 }
 
+export type GamePhase = { kind: 'placing'; played: number; of: number } | { kind: 'placed' } | { kind: 'ranked' };
+
 export interface ProfileMatch extends MatchSummary {
   team: Team;
   result: MatchResult;
-  srDelta: number;
+  /** Null for a placement game (see placement) or an unrated one. */
+  srDelta: number | null;
+  placement?: GamePhase | null;
+  placedRank?: string | null;
 }
 
 export interface SocialLink {
@@ -672,7 +715,15 @@ export interface Profile {
     twitchName: string | null;
   };
   social: SocialLink[];
-  rating: { sr: number; mu: number; sigma: number; wins: number; losses: number } | null;
+  /** sr is null and mu/sigma absent while placing. */
+  rating: { sr: number | null; mu?: number; sigma?: number; wins: number; losses: number } | null;
+  /** This season under its rules. */
+  season?: {
+    id: number; placementGames: number; ranks: boolean; finalMinGames: number; games: number;
+    sr: number | null; placing: Placing | null; rank: RankView | null; peakSr: number | null; top10: boolean;
+  };
+  /** Frozen results from each finished season, newest first. */
+  pastSeasons?: PastSeason[];
   /** Matches this player's team forfeited with !gg, and !gg votes they started.
    *  Optional so a response from before the field still renders. */
   forfeits?: { forfeits: number; ggStarted: number };
@@ -2676,7 +2727,10 @@ export interface AdminDraftTeamsView {
 }
 /** Drafts plan D2b1: mirrors src/events/draftCards.ts PlayerCard. Public numbers only. */
 export interface PlayerCardView {
-  steamid: string; name: string; avatar: string | null; sr: number; trend: number[]; pugs: number; form: ('W' | 'L' | 'D')[];
+  steamid: string; name: string; avatar: string | null; sr: number;
+  /** Still placing this season: shown instead of sr, which is then 0. */
+  placing?: Placing | null;
+  trend: number[]; pugs: number; form: ('W' | 'L' | 'D')[];
   survivor: { siDamage: number; commonKills: number }; infected: { damageAsSi: number; dpsLanded: number };
   bestClass: { cls: 'hunter' | 'smoker' | 'boomer' | 'tank'; damage: number } | null;
   skills: { key: string; label: string; total: number }[];
@@ -2926,6 +2980,7 @@ export const adminApi = {
   audit: (signal?: AbortSignal) => get<{ actions: AuditEntry[] }>('/api/admin/audit', signal),
   renameSeason: (id: number, name: string) => post(`/api/admin/seasons/${id}/rename`, { name }),
   newSeason: (name: string) => post<{ ok: true; id: number }>('/api/admin/seasons/new', { name }),
+  seasonPreview: (signal?: AbortSignal) => get<SeasonResetPreview>('/api/admin/seasons/preview', signal),
   integrityReview: (matchId: number, ordinal: number, half: number, slot: number, state: string, note: string) =>
     post(`/api/admin/integrity/${matchId}/${ordinal}/${half}/${slot}/review`, { state, note }),
   integrityJob: (signal?: AbortSignal) =>

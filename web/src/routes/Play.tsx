@@ -136,7 +136,7 @@ function Landing() {
   const matches = (recent?.matches ?? []).slice(0, 5);
   // Ranked only: a provisional player at the top of an empty board would
   // misrepresent the ladder to the one audience with no context for it.
-  const top = (board?.rows ?? []).filter((r) => r.ranked).slice(0, 5);
+  const top = (board?.rows ?? []).filter((r) => r.ranked && r.sr !== null).slice(0, 5);
 
   return (
     <>

@@ -53,7 +53,7 @@ describe('the public room', () => {
     expect(v.me).toEqual({ role: null, team: null, onClock: false, list: null, chemistry: null });
     expect(v.order.map((o: { steamid: string }) => o.steamid)).toEqual(CAPTAINS);
     expect(v.pool).toHaveLength(15);
-    expect(Object.keys(v.pool[0]).sort()).toEqual(['avatar', 'bestClass', 'form', 'infected', 'name', 'pugs', 'skills', 'sr', 'steamid', 'survivor', 'trend']);
+    expect(Object.keys(v.pool[0]).sort()).toEqual(['avatar', 'bestClass', 'form', 'infected', 'name', 'placing', 'pugs', 'skills', 'sr', 'steamid', 'survivor', 'trend']);
   });
 
   it('answers 409 before the cut and 404 behind a closed switch', async () => {

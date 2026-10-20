@@ -336,6 +336,12 @@ export function renderMatch(v: MatchView): MessagePayload {
 export interface ResultPlayer extends PlayerView {
   srBefore: number | null;
   srAfter: number | null;
+  /** Still placing after this match ("placing 3/5"), or this match completed
+   *  placement (placedRank, or SR alone in a season without ranks). Absent
+   *  for an ordinary rated game. */
+  placing?: { played: number; of: number } | null;
+  placedRank?: string | null;
+  placed?: boolean;
 }
 
 export interface ResultView {
@@ -359,6 +365,8 @@ export interface ResultView {
 
 function srChange(p: ResultPlayer): string {
   const who = mentionLabel(p);
+  if (p.placing) return `${who} (placing ${p.placing.played}/${p.placing.of})`;
+  if (p.placed && p.srAfter !== null) return `${who} placed${p.placedRank ? ` ${p.placedRank}` : ''} (${p.srAfter})`;
   if (p.srBefore === null || p.srAfter === null) return `${who} (not rated)`;
   const d = p.srAfter - p.srBefore;
   return `${who} ${p.srAfter} (${d >= 0 ? '+' : ''}${d})`;

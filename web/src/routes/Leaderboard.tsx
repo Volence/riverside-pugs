@@ -7,6 +7,7 @@ import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
 import { TitleTag } from '../components/TitleTag';
+import { PlacingTag, RankBadge, Top10Tag } from '../components/SeasonRank';
 import { WeeklyBoard } from './WeeklyBoard';
 import { EndorseBoard } from './EndorseBoard';
 
@@ -53,7 +54,10 @@ export function Leaderboard({ me }: { me: string | null }) {
   const weekly = board === 'week';
   const endorse = board === 'endorse';
   const [week, setWeek] = useState<string | undefined>(params.get('week') ?? undefined);
-  const [season, setSeason] = useState<number | undefined>(undefined);
+  // A profile's past-season row links `/leaderboard?season=N`.
+  const [season, setSeason] = useState<number | undefined>(
+    params.has('season') && Number.isInteger(Number(params.get('season'))) ? Number(params.get('season')) : undefined,
+  );
   const { data, error } = useFetch((s) => api.leaderboard(s, season), [season]);
   const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
   const seasons = seasonList?.seasons ?? [];
@@ -100,6 +104,14 @@ export function Leaderboard({ me }: { me: string | null }) {
       {sort.key === key && <span class="sortable__arrow">{sort.desc ? '▾' : '▴'}</span>}
     </th>
   );
+
+  // Seasons from Season 1 on carry ranks and placement; Season 0 neither.
+  const showRanks = !!data?.season.ranks;
+  const placementGames = data?.season.placementGames ?? 0;
+  const groupLabel = data?.season.ended
+    ? `Under the ${data.season.finalMinGames ?? 20}-game minimum for a final place`
+    : placementGames > 0 ? `Placing, under ${placementGames} games` : 'Provisional, under 3 games';
+  const cols = 2 + (showRanks ? 1 : 0) + BASE_COLS.length + statCols.length;
 
   const totals = useMemo(() => {
     const t: Record<string, number> = {};
@@ -171,7 +183,11 @@ export function Leaderboard({ me }: { me: string | null }) {
                     <tr>
                       <th class="rank lb__rank">#</th>
                       <th class="lb__pcol">Player</th>
-                      {BASE_COLS.map((c) => th(c.key, c.label, c.cls))}
+                      {th(BASE_COLS[0].key, BASE_COLS[0].label, BASE_COLS[0].cls)}
+                      {/* After SR, not before: SR pins beside the name on a
+                          phone, and a column between them pushed it off screen. */}
+                      {showRanks && <th class="lb__rankcol">Rank</th>}
+                      {BASE_COLS.slice(1).map((c) => th(c.key, c.label, c.cls))}
                       {statCols.map((k) => th(k, labelFor(k)))}
                     </tr>
                   </thead>
@@ -181,7 +197,9 @@ export function Leaderboard({ me }: { me: string | null }) {
                       // Rank follows the CURRENT sort, so it stays meaningful
                       // when the table is ordered by something other than SR.
                       // A provisional row has no rank at all, not a low one.
-                      const rank = r.ranked ? String(i + 1).padStart(2, '0') : '–';
+                      // A finished season shows its frozen final place.
+                      const place = data.season.ended ? r.finalRank ?? null : r.ranked ? i + 1 : null;
+                      const rank = place !== null ? String(place).padStart(2, '0') : '–';
                       const rowClass = [
                         r.steamid === me ? 'is-me' : '',
                         r.ranked ? '' : 'is-provisional',
@@ -190,18 +208,19 @@ export function Leaderboard({ me }: { me: string | null }) {
                         <Fragment key={r.steamid}>
                           {i === ranked.length && (
                             <tr class="lb__group">
-                              <td colSpan={2 + BASE_COLS.length + statCols.length}>
-                                <span class="eyebrow">Provisional, under 3 games</span>
+                              <td colSpan={cols}>
+                                <span class="eyebrow">{groupLabel}</span>
                               </td>
                             </tr>
                           )}
                           <tr class={rowClass}>
-                            <td class={`rank lb__rank${r.ranked && i < 3 ? ' rank--top' : ''}`}>{rank}</td>
+                            <td class={`rank lb__rank${place !== null && place <= 3 ? ' rank--top' : ''}`}>{rank}</td>
                             {/* The cell is a fixed width so SR can pin beside it on a
                                 phone; a long name is clipped, and the title carries
                                 the rest. */}
-                            <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} /><TitleTag kind={r.title} /></td>
-                            <td class="num sr lb__sr">{r.sr}</td>
+                            <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} />{r.top10 && <Top10Tag />}<TitleTag kind={r.title} /></td>
+                            <td class="num sr lb__sr">{r.placing ? <PlacingTag placing={r.placing} /> : r.sr ?? <span class="muted">n/a</span>}</td>
+                            {showRanks && <td class="lb__rankcol">{r.rank ? <RankBadge rank={r.rank} /> : <span class="muted">–</span>}</td>}
                             <td class="num lb__wl">{r.wins}</td>
                             <td class="num lb__wl">{r.losses}</td>
                             <td class="num muted">{r.games}</td>
@@ -229,14 +248,14 @@ export function Leaderboard({ me }: { me: string | null }) {
           </Panel>
           {/* Top rated is chosen among RANKED players only: a provisional SR
               after one game is not a claim on the card. */}
-          {ranked.length > 0 && (() => {
-            const top = [...ranked].sort((a, b) => b.sr - a.sr)[0];
+          {ranked.some((r) => r.sr !== null) && (() => {
+            const top = [...ranked].filter((r) => r.sr !== null).sort((a, b) => b.sr! - a.sr!)[0];
             const decided = top.wins + top.losses;
             return (
               <Headliner
                 eyebrow="Top rated"
                 name={top.name}
-                rating={top.sr}
+                rating={top.sr!}
                 stats={[
                   { label: 'Record', value: `${top.wins}W ${top.losses}L` },
                   { label: 'Win %', value: decided > 0 ? `${Math.round((top.wins / decided) * 100)}%` : 'n/a' },
