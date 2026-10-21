@@ -27,6 +27,9 @@ export class Queue {
   private order: string[] = [];
   /** When each queued player's current stint began. */
   private since = new Map<string, { at: number; requeued: boolean }>();
+  /** How many whole duos the last takeBatch passed over (reached but did not
+   *  fit, and not swapped in), for the duo trial review. */
+  lastSkippedDuos = 0;
 
   constructor(private hooks: QueueHooks = {}) {}
 
@@ -113,16 +116,19 @@ export class Queue {
     }
     // One short: only a duo is ever skipped, so one is waiting, and an odd
     // count holds at least one solo. Swap the last solo out for that duo.
+    let swapped = 0;
     if (taken.length === n - 1 && skipped.length > 0) {
       for (let i = taken.length - 1; i >= 0; i--) {
         const p = partnerOf?.(taken[i]) ?? null;
         if (!p || !taken.includes(p)) {
           taken.splice(i, 1);
           taken.push(...skipped[0]);
+          swapped = 1;
           break;
         }
       }
     }
+    this.lastSkippedDuos = skipped.length - swapped;
     const out = new Set(taken);
     this.order = this.order.filter((id) => !out.has(id));
     for (const id of taken) this.end(id, 'popped');

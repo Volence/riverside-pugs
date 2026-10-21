@@ -2998,6 +2998,12 @@ export function openDb(path: string): DB {
       outcome     TEXT
     );
     CREATE INDEX IF NOT EXISTS duo_invites_open_to ON duo_invites (to_id) WHERE resolved_at IS NULL;
+    -- One row per queued duo passed over at a pop because it did not fit
+    -- (src/queue.ts takeBatch), for the trial review (scripts/duo-review.ts).
+    CREATE TABLE IF NOT EXISTS duo_pop_skips (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL
+    );
   `);
   // Who a player was duoed with in this match and the bonus (mu) the
   // balancer and the rating used. Stored so a season recompute replays the

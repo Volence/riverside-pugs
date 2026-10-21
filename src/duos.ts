@@ -126,6 +126,12 @@ export function openDuoInvites(db: DB, steamid: string, now = new Date()): { inc
   };
 }
 
+/** Note `n` duos passed over at one pop, for the trial review. */
+export function recordDuoPopSkips(db: DB, n: number, now = new Date()): void {
+  const ins = db.prepare('INSERT INTO duo_pop_skips (at) VALUES (?)');
+  for (let i = 0; i < n; i++) ins.run(now.toISOString());
+}
+
 /** The duos present in `ids`, each once, in the order their first member appears. */
 export function pairsAmong(ids: string[], partner: (id: string) => string | null): [string, string][] {
   const present = new Set(ids);

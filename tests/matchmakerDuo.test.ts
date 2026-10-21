@@ -243,6 +243,32 @@ describe('standing and staff action on a duo', () => {
   });
 });
 
+describe('duo pop skips', () => {
+  const skips = () => (db.prepare('SELECT COUNT(*) AS n FROM duo_pop_skips').get() as { n: number }).n;
+
+  it('records a duo passed over at a pop, one row per duo', () => {
+    const X = '76561198000000199';
+    upsertPlayer(db, { steamid: X, name: 'nX', avatar: null }, []);
+    activatePlayer(db, X);
+    for (const id of IDS.slice(2, 10)) mm.join(id);
+    duo();
+    mm.join(A);
+    mm.join(X);
+    for (const id of IDS.slice(2, 9)) mm.ready(id);
+    sched.fireAll(); // IDS[9] misses; 7 go back in front of the duo and X
+    expect(mm.lobbies()[0].snapshot.players).not.toContain(A);
+    expect(skips()).toBe(1);
+  });
+
+  it('records nothing when the duo is swapped in', () => {
+    for (const id of IDS.slice(2, 9)) mm.join(id);
+    duo();
+    mm.join(A);
+    expect(mm.lobbies()[0].snapshot.players).toContain(A);
+    expect(skips()).toBe(0);
+  });
+});
+
 describe('lobby completion with a duo', () => {
   it('puts the duo on one team and stores partner and bonus', () => {
     duo();
