@@ -569,20 +569,24 @@ function RequeueToggle({ matchId, on, refresh }: { matchId: number; on: boolean;
 function Slots({ players, duos = [], me = null, onInvite }: {
   players: NamedPlayer[]; duos?: [string, string][]; me?: string | null; onInvite?: (steamid: string) => void;
 }) {
-  const inDuo = new Set(duos.flat());
+  // Each queued pair's number, by its order in the queue: with two duos
+  // queued, the shared label says who is with whom.
+  const pairNo = new Map(duos.flatMap((pair, i) => pair.map((id) => [id, i + 1] as const)));
   return (
     <div class="slots">
       {Array.from({ length: QUEUE_SIZE }, (_, i) => {
         const p = players[i];
+        const pair = p ? pairNo.get(p.steamid) : undefined;
         return (
-          <div key={i} class={`slot ${p ? 'slot--filled' : ''} ${p && inDuo.has(p.steamid) ? 'slot--duo' : ''}`} title={p?.name}>
+          <div key={i} class={`slot ${p ? 'slot--filled' : ''} ${pair ? 'slot--duo' : ''}`} title={p?.name}>
             {p && (
               <>
                 {p.avatar
                   ? <img class="slot__avatar" src={p.avatar} alt="" />
                   : <span class="slot__avatar slot__avatar--none" aria-hidden="true" />}
                 <span class="slot__name">{p.name}</span>
-                {onInvite && p.steamid !== me && !inDuo.has(p.steamid) && (
+                {pair && <span class="slot__pair">Duo {pair}</span>}
+                {onInvite && p.steamid !== me && !pair && (
                   <button type="button" class="slot__duo" onClick={() => onInvite(p.steamid)}>Duo</button>
                 )}
               </>
