@@ -49,7 +49,8 @@ export function winChances(sides: { mu: number; sigma: number }[][]): number[] {
   return predictWin(sides.map((side) => side.map((r) => rating({ mu: r.mu, sigma: r.sigma }))));
 }
 
-interface MpRow { player_id: string; team: 'a' | 'b'; joined_map: number }
+/** duo_bonus is selected only by applyMatchRatings, hence optional. */
+interface MpRow { player_id: string; team: 'a' | 'b'; joined_map: number; duo_bonus?: number | null }
 
 /** What the ratings said about a match before it was played. */
 export interface MatchForecast {
@@ -90,6 +91,10 @@ export interface MatchForecast {
    *  only for a match still in flight, where nothing has updated yet and the
    *  two are the same thing. */
   source: 'history' | 'current';
+  /** winProbA with each duo member counted as stronger by the bonus the
+   *  balancer and the rating used (match_players.duo_bonus). Null when the
+   *  match had no duo. Compare with winProbA to see what the bonus did. */
+  winProbAWithDuo: number | null;
 }
 
 /**
@@ -116,11 +121,11 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
 
   let source: 'history' | 'current' = 'history';
   let rows = db.prepare(
-    `SELECT mp.team AS team, rh.mu_before AS mu, rh.sigma_before AS sigma
+    `SELECT mp.team AS team, rh.mu_before AS mu, rh.sigma_before AS sigma, mp.duo_bonus AS bonus
      FROM rating_history rh
      JOIN match_players mp ON mp.match_id = rh.match_id AND mp.player_id = rh.player_id
      WHERE rh.match_id = ?`,
-  ).all(matchId) as { team: 'a' | 'b'; mu: number; sigma: number }[];
+  ).all(matchId) as { team: 'a' | 'b'; mu: number; sigma: number; bonus: number | null }[];
 
   // A match still in flight has no history: applyMatchRatings runs at
   // completion. Its players' current ratings ARE their pre-match ratings,
@@ -132,11 +137,11 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
   if (rows.length === 0 && match.state !== 'completed' && match.state !== 'aborted') {
     source = 'current';
     rows = db.prepare(
-      `SELECT mp.team AS team, pr.mu AS mu, pr.sigma AS sigma
+      `SELECT mp.team AS team, pr.mu AS mu, pr.sigma AS sigma, mp.duo_bonus AS bonus
        FROM match_players mp
        JOIN player_ratings pr ON pr.player_id = mp.player_id AND pr.season_id = ?
        WHERE mp.match_id = ?`,
-    ).all(match.season_id, matchId) as { team: 'a' | 'b'; mu: number; sigma: number }[];
+    ).all(match.season_id, matchId) as { team: 'a' | 'b'; mu: number; sigma: number; bonus: number | null }[];
   }
 
   const a = rows.filter((r) => r.team === 'a');
@@ -155,12 +160,17 @@ export function matchForecast(db: DB, matchId: number): MatchForecast | null {
 
   const [winProbA, winProbB] = winChances([a, b]) as [number, number];
 
+  const inflate = (side: typeof a) => side.map((r) => ({ mu: r.mu + (r.bonus ?? 0), sigma: r.sigma }));
+  const winProbAWithDuo = rows.some((r) => r.bonus !== null)
+    ? (winChances([inflate(a), inflate(b)]) as [number, number])[0]
+    : null;
+
   const muA = meanMu(a);
   const muB = meanMu(b);
   return {
     srA, srB, srGap: srA - srB, muGap: muA - muB,
     muA, muB, sigmaA: meanSigma(a), sigmaB: meanSigma(b),
-    winProbA, winProbB, ratedA: a.length, ratedB: b.length, source,
+    winProbA, winProbB, ratedA: a.length, ratedB: b.length, source, winProbAWithDuo,
   };
 }
 
@@ -313,7 +323,7 @@ export function applyMatchRatings(db: DB, matchId: number): RatingOutcome {
     return { applied: false, reason: 'already', ratedA: 0, ratedB: 0 };
   }
 
-  const all = db.prepare('SELECT player_id, team, joined_map FROM match_players WHERE match_id = ? AND rated = 1').all(matchId) as MpRow[];
+  const all = db.prepare('SELECT player_id, team, joined_map, duo_bonus FROM match_players WHERE match_id = ? AND rated = 1').all(matchId) as MpRow[];
   const mapsPlayed = (db.prepare('SELECT COUNT(*) AS n FROM match_maps WHERE match_id = ?').get(matchId) as { n: number }).n;
   const mps = all.filter((r) => ratedForMaps(r.joined_map, mapsPlayed));
   const teamA = mps.filter((r) => r.team === 'a').map((r) => r.player_id);
@@ -337,10 +347,35 @@ export function applyMatchRatings(db: DB, matchId: number): RatingOutcome {
 
   const before = new Map([...qA, ...qB].map((id) => [id, ensureRating(db, id, match.season_id)]));
   const rank = match.winner === 'a' ? [1, 2] : match.winner === 'b' ? [2, 1] : [1, 1];
-  const [newA, newB] = rate(
-    [teamA.map((id) => rating(before.get(id)!)), teamB.map((id) => rating(before.get(id)!))],
-    { rank },
-  );
+  // Duo bonus (spec section 5b), stored at lobby time so a recompute replays
+  // the same number. Duo members are rated as if every duo were as strong as
+  // the bonus says; each solo as if only the OTHER side's duos were, so a
+  // solo who landed with a duo is rated as though they were two players.
+  const bonus = new Map(mps.filter((r) => r.duo_bonus != null).map((r) => [r.player_id, r.duo_bonus as number]));
+  const run = (inflateA: boolean, inflateB: boolean) => {
+    const side = (ids: string[], inflate: boolean) => ids.map((id) => {
+      const b = before.get(id)!;
+      return rating({ mu: b.mu + (inflate ? bonus.get(id) ?? 0 : 0), sigma: b.sigma });
+    });
+    const [ra, rb] = rate([side(teamA, inflateA), side(teamB, inflateB)], { rank });
+    const back = (ids: string[], rs: { mu: number; sigma: number }[], inflate: boolean) =>
+      rs.map((r, i) => ({ mu: r.mu - (inflate ? bonus.get(ids[i]) ?? 0 : 0), sigma: r.sigma }));
+    return [back(teamA, ra, inflateA), back(teamB, rb, inflateB)] as const;
+  };
+  let newA: { mu: number; sigma: number }[];
+  let newB: { mu: number; sigma: number }[];
+  if (bonus.size === 0) {
+    [newA, newB] = rate(
+      [teamA.map((id) => rating(before.get(id)!)), teamB.map((id) => rating(before.get(id)!))],
+      { rank },
+    );
+  } else {
+    const every = run(true, true);
+    const forA = run(false, true);
+    const forB = run(true, false);
+    newA = teamA.map((id, i) => (bonus.has(id) ? every[0][i] : forA[0][i]));
+    newB = teamB.map((id, i) => (bonus.has(id) ? every[1][i] : forB[1][i]));
+  }
 
   db.transaction(() => {
     const upd = db.prepare(
