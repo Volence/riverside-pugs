@@ -54,6 +54,11 @@ drafts, scrims, tournaments.
   and the next entry is a duo, it is skipped for this pop and keeps its spot
   at the front; the next solo fills the slot. A duo never falls behind people
   who joined after it.
+- When there is no solo behind it (the usual case: a duo joining behind 7
+  solos makes 9), the pop goes at once with the duo, and the most recently
+  joined of the 7 solos stays at the front for the next pop (my call
+  2026-10-21, owner to confirm; the alternative is to hold the pop until a
+  10th player joins).
 - Queue display shows the pair bracketed together (site and Discord card).
 
 ## 4. Ready check
@@ -114,8 +119,9 @@ Quitters keep `quitterLoss` unchanged.
   resolved_at, outcome).
 - `match_players.duo_partner` (TEXT NULL) and `match_players.duo_bonus`
   (REAL NULL).
-- `matches.p_win_a_plain` (REAL NULL): predicted win for team A without duo
-  bonuses, next to the bonus-aware prediction, so the review can compare both.
+- No stored prediction column: `matchForecast` rebuilds the plain chance from
+  `rating_history` and gains `winProbAWithDuo` from `match_players.duo_bonus`,
+  so the review can compare both from one source.
 
 ## 7. Surfaces
 
