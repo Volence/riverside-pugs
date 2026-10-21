@@ -55,7 +55,7 @@ const text = (r: Awaited<ReturnType<typeof run>>) => JSON.stringify(r.payload);
 
 describe('slash commands', () => {
   it('defines profile, leaderboard, matches, queue and link', () => {
-    expect(COMMAND_DEFS.map((d) => d.name).sort()).toEqual(['leaderboard', 'link', 'matches', 'profile', 'queue', 'report']);
+    expect(COMMAND_DEFS.map((d) => d.name).sort()).toEqual(['duo', 'leaderboard', 'link', 'matches', 'profile', 'queue', 'report', 'unduo']);
   });
 
   it('/profile shows your SR, record and recent matches as links, publicly', async () => {
@@ -234,5 +234,34 @@ describe('/report', () => {
     removeAlias(db, IDS[0]);
     expect(text(await run('report', { player: '905', reason: 'afk' }))).toMatch(/reported player5/i);
     expect(filed()).toBe(1);
+  });
+});
+
+describe('/duo and /unduo', () => {
+  beforeEach(() => { db.prepare('UPDATE seasons SET ranks = 1').run(); });
+
+  it('/duo posts an invite that pings only the invitee, with Accept and Decline', async () => {
+    const r = await run('duo', { user: '905' });
+    expect(r.ephemeral).toBe(false);
+    expect(r.payload.mentionUserIds).toEqual(['905']);
+    expect(text(r)).toMatch(/dq:\d+:a/);
+    expect(text(r)).toMatch(/dq:\d+:d/);
+  });
+
+  it('/duo to an unlinked user says so privately', async () => {
+    const r = await run('duo', { user: '999' });
+    expect(r.ephemeral).toBe(true);
+    expect(text(r)).toMatch(/not linked/);
+  });
+
+  it('/unduo with no duo says so', async () => {
+    const r = await run('unduo');
+    expect(r.ephemeral).toBe(true);
+    expect(text(r)).toMatch(/not in a duo/);
+  });
+
+  it('/duo before Season 1 refuses', async () => {
+    db.prepare('UPDATE seasons SET ranks = 0').run();
+    expect(text(await run('duo', { user: '905' }))).toMatch(/not on right now/);
   });
 });

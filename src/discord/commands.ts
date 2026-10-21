@@ -9,6 +9,7 @@ import { fileReport, latestSharedMatch, REPORT_CATEGORIES, type ReportCategory, 
 import { linkPrompt, resolve } from './controller.js';
 import { escapeName } from './presenter.js';
 import { chatButton } from './ticketCard.js';
+import { DUO_BUTTON_PREFIX } from './duoButtons.js';
 import { identityOf, plainLabelEscaped, type Identity } from '../identity.js';
 import type { BotInteraction, InteractionReply, MessagePayload, SlashCommandDef } from './transport.js';
 
@@ -45,6 +46,12 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   },
   { name: 'queue', description: 'Who is in the queue right now' },
   { name: 'link', description: 'Link your Discord to your Steam account' },
+  {
+    name: 'duo',
+    description: 'Ask someone to duo queue with you (always on the same team)',
+    options: [{ name: 'user', description: 'Who to duo with', type: 'user', required: true }],
+  },
+  { name: 'unduo', description: 'End your duo' },
   {
     name: 'report',
     description: 'Privately report someone, in a game or in the Discord',
@@ -94,6 +101,8 @@ export async function handleCommand(deps: CommandDeps, i: Cmd): Promise<Interact
     case 'queue': return queue(deps);
     case 'link': return link(deps, i);
     case 'report': return report(deps, i);
+    case 'duo': return duo(deps, i);
+    case 'unduo': return unduo(deps, i);
     default: return priv({ content: 'Unknown command.' });
   }
 }
@@ -220,6 +229,31 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
 }
 
 /** Always private: nobody else in the channel learns who reported whom. */
+function duo(deps: CommandDeps, i: Cmd): InteractionReply {
+  const who = resolve(deps, i);
+  if ('reply' in who) return who.reply;
+  const targetDiscord = i.options.user;
+  const target = targetDiscord ? playerByDiscordId(deps.db, targetDiscord) : undefined;
+  if (!target) return priv({ content: 'That user has not linked a Steam account, so they cannot duo yet.' });
+  const r = deps.matchmaker.inviteDuo(who.player.steamid, target.steamid, 'discord');
+  if (!r.ok) return priv({ content: `Could not: ${r.error}.` });
+  return pub({
+    content: `<@${targetDiscord}> ${escapeName(who.player.name)} wants to duo queue with you. You would always play on the same team. The invite lasts 10 minutes.`,
+    mentionUserIds: [targetDiscord!],
+    components: [[
+      { kind: 'button', customId: `${DUO_BUTTON_PREFIX}${r.inviteId}:a`, label: 'Accept', style: 'success' },
+      { kind: 'button', customId: `${DUO_BUTTON_PREFIX}${r.inviteId}:d`, label: 'Decline', style: 'secondary' },
+    ]],
+  });
+}
+
+function unduo(deps: CommandDeps, i: Cmd): InteractionReply {
+  const who = resolve(deps, i);
+  if ('reply' in who) return who.reply;
+  const r = deps.matchmaker.endDuo(who.player.steamid);
+  return priv({ content: r.ok ? 'Your duo has ended. You both queue as solos now.' : 'You are not in a duo.' });
+}
+
 function report(deps: CommandDeps, i: Cmd): InteractionReply {
   // A linked presser goes through the same door as the buttons (standing,
   // bans, merges). Someone only in the Discord files as themselves; fileReport
