@@ -21,7 +21,7 @@ import { requeueOptIns, wantsRequeue, type RequeueResult } from './matchRequeue.
 import { seasonOneLive } from './seasonThemes.js';
 import {
   duoQueueLive, partnerOf, pairsAmong, createDuoInvite, acceptDuoInvite, declineDuoInvite,
-  cancelDuoInvite, endDuo as endDuoRow, getDuoInvite, openDuoInvites, type DuoResult,
+  cancelDuoInvite, endDuo as endDuoRow, getDuoInvite, openDuoInvites, recordDuoPopSkips, type DuoResult,
 } from './duos.js';
 
 export interface MatchmakerDeps {
@@ -625,6 +625,12 @@ export class Matchmaker {
   private maybeStartLobby(): void {
     while (this.queue.count() >= QUEUE_SIZE) {
       const players = this.queue.takeBatch(QUEUE_SIZE, (id) => this.partner(id));
+      // Review data only: never let it stop a pop.
+      try {
+        recordDuoPopSkips(this.db, this.queue.lastSkippedDuos);
+      } catch (err) {
+        console.error('[matchmaker] could not record duo pop skips:', err);
+      }
       const id = `${this.idPrefix}${++this.lobbySeq}`;
       const lobby = new Lobby(id, players, this.lobbyOpts(), this.lobbyEvents(id), this.deps.scheduler ?? realScheduler);
       this.lobbyMap.set(id, lobby);

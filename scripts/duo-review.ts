@@ -126,6 +126,11 @@ function load(db: DB, seasonId: number): DuoMatchRow[] {
   return out;
 }
 
+/** Duos passed over at a pop (did not fit, not swapped in) since `sinceMs`. */
+export function duoPopSkipsSince(db: DB, sinceMs: number): number {
+  return (db.prepare('SELECT COUNT(*) AS n FROM duo_pop_skips WHERE at >= ?').get(new Date(sinceMs).toISOString()) as { n: number }).n;
+}
+
 function queueHealth(db: DB, sinceMs: number) {
   const since = new Date(sinceMs).toISOString();
   const duosOpen = (db.prepare('SELECT COUNT(*) AS n FROM duos WHERE ended_at IS NULL').get() as { n: number }).n;
@@ -144,8 +149,7 @@ function queueHealth(db: DB, sinceMs: number) {
   return {
     duosOpen, formed, acceptedBySource: bySource, avgDuoLifeDays: lengths,
     stints: summarizeStints(stints, duos, readyFails),
-    // How often a duo was passed over at a pop is not tracked anywhere.
-    skippedAtPop: 'not recorded',
+    skippedAtPop: duoPopSkipsSince(db, sinceMs),
   };
 }
 

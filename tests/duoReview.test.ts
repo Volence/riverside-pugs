@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeDuoMatches, summarizeStints } from '../scripts/duo-review.js';
+import { summarizeDuoMatches, summarizeStints, duoPopSkipsSince } from '../scripts/duo-review.js';
+import { openDb } from '../src/db.js';
+import { recordDuoPopSkips } from '../src/duos.js';
 
 describe('summarizeDuoMatches', () => {
   it('compares duo team wins with plain and bonus predictions', () => {
@@ -48,5 +50,14 @@ describe('summarizeStints', () => {
       [],
     );
     expect(s.duoShare).toBe(1);
+  });
+});
+
+describe('duo pop skips', () => {
+  it('counts the skips since the season start', () => {
+    const db = openDb(':memory:');
+    recordDuoPopSkips(db, 2, new Date('2026-10-01T00:00:00Z'));
+    recordDuoPopSkips(db, 3, new Date('2026-10-22T00:00:00Z'));
+    expect(duoPopSkipsSince(db, Date.parse('2026-10-21T00:00:00Z'))).toBe(3);
   });
 });

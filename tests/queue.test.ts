@@ -137,6 +137,21 @@ describe('duos in the queue', () => {
     expect(q.list()).toEqual(['s']);
   });
 
+  it('counts the duos it passed over, but not one swapped in', () => {
+    const q = new Queue();
+    fill(q, ['1', '2', '3', '4', '5', '6', '7', 'd1', 'd2', '8']);
+    q.takeBatch(8, pairs(['d1', 'd2']));
+    expect(q.lastSkippedDuos).toBe(1);
+    const r = new Queue();
+    fill(r, ['1', '2', '3', '4', '5', '6', '7', 'd1', 'd2']);
+    r.takeBatch(8, pairs(['d1', 'd2']));
+    expect(r.lastSkippedDuos).toBe(0);
+    const s = new Queue();
+    fill(s, ['1', '2', '3', '4', '5', '6', '7', '8', 'd1', 'd2']);
+    s.takeBatch(8, pairs(['d1', 'd2']));
+    expect(s.lastSkippedDuos).toBe(0); // never reached: not passed over
+  });
+
   it('a duo member whose partner is not queued pops as a solo', () => {
     const q = new Queue();
     fill(q, ['d1', '1', '2', '3', '4', '5', '6', '7']);
