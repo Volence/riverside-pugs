@@ -228,7 +228,6 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
   return linkPrompt({ ...deps }, i.userId, i.userName);
 }
 
-/** Always private: nobody else in the channel learns who reported whom. */
 function duo(deps: CommandDeps, i: Cmd): InteractionReply {
   const who = resolve(deps, i);
   if ('reply' in who) return who.reply;
@@ -254,6 +253,7 @@ function unduo(deps: CommandDeps, i: Cmd): InteractionReply {
   return priv({ content: r.ok ? 'Your duo has ended. You both queue as solos now.' : 'You are not in a duo.' });
 }
 
+/** Always private: nobody else in the channel learns who reported whom. */
 function report(deps: CommandDeps, i: Cmd): InteractionReply {
   // A linked presser goes through the same door as the buttons (standing,
   // bans, merges). Someone only in the Discord files as themselves; fileReport
