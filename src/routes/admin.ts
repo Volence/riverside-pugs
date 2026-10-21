@@ -783,7 +783,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!adminId) return reply;
     const { steamid } = (req.body ?? {}) as { steamid?: unknown };
     if (typeof steamid !== 'string') return reply.code(400).send({ error: 'steamid required' });
-    matchmaker.leave(steamid);
+    matchmaker.staffRemoveFromQueue(steamid);
     logAdmin(db, adminId, 'queue_remove', steamid);
     return { ok: true };
   });
