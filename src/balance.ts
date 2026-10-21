@@ -52,5 +52,6 @@ export function balanceTeams(players: RatedPlayer[], opts: { groups?: [string, s
       };
     }
   }
-  return best!;
+  if (!best) throw new Error('balanceTeams: no split keeps every group together');
+  return best;
 }

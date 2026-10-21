@@ -75,4 +75,10 @@ describe('balanceTeams with duo groups', () => {
     const players = Array.from({ length: 8 }, (_, i) => p(`p${i}`, 25));
     expect(() => balanceTeams(players, { groups: [['p0', 'ghost']] })).not.toThrow();
   });
+
+  it('throws when no split keeps every group together', () => {
+    const players = Array.from({ length: 6 }, (_, i) => p(`p${i}`, 25));
+    const groups: [string, string][] = [['p0', 'p1'], ['p2', 'p3'], ['p4', 'p5']];
+    expect(() => balanceTeams(players, { groups })).toThrow('balanceTeams: no split keeps every group together');
+  });
 });
