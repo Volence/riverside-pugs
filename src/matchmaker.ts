@@ -18,6 +18,10 @@ import { abortNoticeFor, type AbortNotice } from './matchAborts.js';
 import { recordQueueStint } from './queueActivity.js';
 import { requeueOptIns, wantsRequeue, type RequeueResult } from './matchRequeue.js';
 import { seasonOneLive } from './seasonThemes.js';
+import {
+  duoQueueLive, partnerOf, pairsAmong, createDuoInvite, acceptDuoInvite, declineDuoInvite,
+  cancelDuoInvite, endDuo as endDuoRow, getDuoInvite, openDuoInvites, type DuoResult,
+} from './duos.js';
 
 export interface MatchmakerDeps {
   broadcast: (event: string) => void;
@@ -50,8 +54,16 @@ export interface NamedPlayer {
   avatar: string | null;
 }
 
+export const DUO_OFF = 'duo queue is not on right now';
+
+export interface DuoView {
+  partner: NamedPlayer | null;
+  incoming: { id: number; from: NamedPlayer }[];
+  outgoing: { id: number; to: NamedPlayer } | null;
+}
+
 export interface StateSnapshot {
-  queue: { count: number; joined: boolean; players: NamedPlayer[]; sideOptIn: boolean };
+  queue: { count: number; joined: boolean; players: NamedPlayer[]; sideOptIn: boolean; duos: [string, string][] };
   lobby:
     | (Omit<LobbySnapshot, 'players'> & {
       /** Each player's own ready block, so the roster can show who is
@@ -102,6 +114,8 @@ export interface StateSnapshot {
     removed?: NamedPlayer;
     /** Set instead when staff cancelled the pop outright (cancelLobby). */
     cancelled?: true;
+    /** Set when the viewer's duo partner did not come back to the queue with them, so neither did they. */
+    duoMissed?: NamedPlayer;
   } | null;
   /**
    * The match the viewer was on, if it was aborted and they have not
@@ -110,6 +124,8 @@ export interface StateSnapshot {
    * the way they lose the only explanation.
    */
   abortNotice: AbortNotice | null;
+  /** The viewer's duo and open invites; null while the duo queue is off (before Season 1, or switched off). */
+  duo: DuoView | null;
 }
 
 /** Lifecycle events the broadcast cannot carry, because it sends only an
@@ -139,7 +155,7 @@ export class Matchmaker {
   /** Per-player "your ready check failed", keyed by steamid. In memory and
    *  deliberately not persisted: it is about something that happened seconds
    *  ago, and a notice that outlived a restart would be noise. */
-  private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string; cancelled?: true }>();
+  private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string; cancelled?: true; duoMissed?: string }>();
   /** Queued players who asked for side games (2v2/3v3 while waiting). Kept
    *  through a pop so a failed ready check resumes the game; see sideGames.ts. */
   private sideOptIn = new Set<string>();
@@ -270,18 +286,24 @@ export class Matchmaker {
   }
 
   join(steamid: string): { ok: boolean; error?: string } {
-    if (this.playerLobby.has(steamid)) return { ok: false, error: 'already in a lobby' };
-    if (this.hasOpenMatch(steamid)) return { ok: false, error: 'already in an active match' };
-    const block = this.deps.queueGate?.(steamid) ?? null;
-    if (block) return { ok: false, error: QUEUE_BLOCK_MESSAGE[block] };
-    const timeout = activeTimeout(this.db, steamid);
-    if (timeout) {
-      return { ok: false, error: `timed out for ${timeoutCause(timeout.kind)} until ${timeout.until.toISOString()}` };
+    const own = this.joinBlock(steamid);
+    if (own) return { ok: false, error: own };
+    // A duo queues together or not at all.
+    const partner = this.partner(steamid);
+    if (partner) {
+      const theirs = this.joinBlock(partner);
+      if (theirs) return { ok: false, error: `your duo partner ${this.named(partner).name} cannot queue: ${theirs}` };
     }
     // Queueing again is moving on: the notice is about the pop they just
     // lost, and holding it over the next one would be wrong.
     this.notices.delete(steamid);
     this.queue.join(steamid);
+    if (partner) {
+      // placePair queues the partner straight behind the joiner (or moves an
+      // already queued partner there), so the pair sits together at the back.
+      this.notices.delete(partner);
+      this.queue.placePair(steamid, partner);
+    }
     const thresholds = safeThresholds(getSetting(this.db, 'discord_queue_thresholds'));
     if (thresholds.includes(this.queue.count())) {
       this.deps.notify?.(`🧟 ${this.queue.count()}/${QUEUE_SIZE} in queue`);
@@ -292,8 +314,11 @@ export class Matchmaker {
   }
 
   leave(steamid: string): void {
-    this.queue.leave(steamid);
-    this.sideOptIn.delete(steamid);
+    const partner = this.partner(steamid);
+    for (const id of partner ? [steamid, partner] : [steamid]) {
+      this.queue.leave(id);
+      this.sideOptIn.delete(id);
+    }
     this.changed();
   }
 
@@ -314,6 +339,8 @@ export class Matchmaker {
   remove(steamid: string): void {
     const lobbyId = this.playerLobby.get(steamid);
     if (!lobbyId && !this.queue.has(steamid)) return;
+    // A removed player's duo ends; the partner carries on as a solo.
+    if (this.partner(steamid)) endDuoRow(this.db, steamid, 'system');
     this.sideOptIn.delete(steamid);
     this.queue.leave(steamid);
     if (lobbyId) {
@@ -357,10 +384,11 @@ export class Matchmaker {
     for (const p of excluded) this.sideOptIn.delete(p);
     for (const p of back) this.notices.set(p, { notReady: [], youWereReady: true, cancelled: true });
     this.emit('lobbyFailed', lobby.id, [...back], []);
-    this.queue.requeueFront(back);
+    const kept = this.keepPairs(back);
+    this.queue.requeueFront(kept);
     this.maybeStartLobby();
     this.changed();
-    return { ok: true, lobbyId: lobby.id, requeued: back, excluded };
+    return { ok: true, lobbyId: lobby.id, requeued: kept, excluded };
   }
 
   /**
@@ -378,11 +406,12 @@ export class Matchmaker {
       && inGoodStanding(this.db, id)
       && !this.deps.queueGate?.(id)
       && !activeTimeout(this.db, id));
-    if (back.length === 0) return [];
-    this.queue.requeueFront(back);
+    const kept = this.keepPairs(back);
+    if (kept.length === 0) return [];
+    this.queue.requeueFront(kept);
     this.maybeStartLobby();
     this.changed();
-    return back;
+    return kept;
   }
 
   /**
@@ -403,6 +432,62 @@ export class Matchmaker {
     if (this.queue.has(steamid) || this.playerLobby.has(steamid)) return { ok: true };
     const r = this.join(steamid);
     return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'could not join the queue' };
+  }
+
+  inviteDuo(fromId: string, toId: string, source: 'site' | 'discord'): { ok: true; inviteId: number } | { ok: false; error: string } {
+    if (!duoQueueLive(this.db)) return { ok: false, error: DUO_OFF };
+    const r = createDuoInvite(this.db, fromId, toId, source);
+    if (r.ok) this.changed();
+    return r;
+  }
+
+  /** Accept a duo invite. If either is queued the pair is seated at the
+   *  later spot, so the other must be able to queue right now. */
+  acceptDuo(inviteId: number, steamid: string): DuoResult {
+    if (!duoQueueLive(this.db)) return { ok: false, error: DUO_OFF };
+    const inv = getDuoInvite(this.db, inviteId);
+    if (!inv || inv.toId !== steamid) return { ok: false, error: 'that invite is no longer open' };
+    const pair = [inv.fromId, inv.toId];
+    for (const id of pair) {
+      if (this.playerLobby.has(id) || this.hasOpenMatch(id)) {
+        return { ok: false, error: `${this.named(id).name} is in a ready check or a match; try again after it` };
+      }
+    }
+    const queued = pair.some((id) => this.queue.has(id));
+    if (queued) {
+      for (const id of pair) {
+        if (this.queue.has(id)) continue;
+        const b = this.joinBlock(id);
+        if (b) return { ok: false, error: `${this.named(id).name} cannot queue: ${b}` };
+      }
+    }
+    const r = acceptDuoInvite(this.db, inviteId, steamid);
+    if (!r.ok) return r;
+    if (queued) {
+      this.queue.placePair(inv.fromId, inv.toId);
+      this.maybeStartLobby();
+    }
+    this.changed();
+    return { ok: true };
+  }
+
+  declineDuo(inviteId: number, steamid: string): DuoResult {
+    const r = declineDuoInvite(this.db, inviteId, steamid);
+    if (r.ok) this.changed();
+    return r;
+  }
+
+  cancelDuo(inviteId: number, steamid: string): DuoResult {
+    const r = cancelDuoInvite(this.db, inviteId, steamid);
+    if (r.ok) this.changed();
+    return r;
+  }
+
+  /** End the viewer's duo. Both stay where they are, as solos. */
+  endDuo(steamid: string): DuoResult {
+    const r = endDuoRow(this.db, steamid, steamid);
+    if (r.ok) this.changed();
+    return r;
   }
 
   ready(steamid: string): { ok: boolean; error?: string } {
@@ -480,9 +565,44 @@ export class Matchmaker {
       .get(steamid) !== undefined;
   }
 
+  /** The viewer's duo partner while duos are on, else null: with the switch
+   *  off every duo queues as two solos. */
+  private partner(steamid: string): string | null {
+    return duoQueueLive(this.db) ? partnerOf(this.db, steamid) : null;
+  }
+
+  private queuedPairs(): [string, string][] {
+    return pairsAmong(this.queue.list(), (id) => this.partner(id));
+  }
+
+  /** Why this player may not queue right now, or null. join()'s own rules,
+   *  shared so a duo can check both members before queueing either. */
+  private joinBlock(steamid: string): string | null {
+    if (this.playerLobby.has(steamid)) return 'already in a lobby';
+    if (this.hasOpenMatch(steamid)) return 'already in an active match';
+    const block = this.deps.queueGate?.(steamid) ?? null;
+    if (block) return QUEUE_BLOCK_MESSAGE[block];
+    const timeout = activeTimeout(this.db, steamid);
+    if (timeout) return `timed out for ${timeoutCause(timeout.kind)} until ${timeout.until.toISOString()}`;
+    return null;
+  }
+
+  /** Drop anyone whose duo partner is neither going back with them nor
+   *  already queued: a duo never queues half. Each one dropped is told why. */
+  private keepPairs(ids: string[]): string[] {
+    const coming = new Set(ids);
+    return ids.filter((id) => {
+      const p = this.partner(id);
+      if (!p || coming.has(p) || this.queue.has(p)) return true;
+      const n = this.notices.get(id);
+      this.notices.set(id, { notReady: n?.notReady ?? [], youWereReady: n?.youWereReady ?? true, ...n, duoMissed: p });
+      return false;
+    });
+  }
+
   private maybeStartLobby(): void {
     while (this.queue.count() >= QUEUE_SIZE) {
-      const players = this.queue.takeBatch(QUEUE_SIZE);
+      const players = this.queue.takeBatch(QUEUE_SIZE, (id) => this.partner(id));
       const id = `${this.idPrefix}${++this.lobbySeq}`;
       const lobby = new Lobby(id, players, this.lobbyOpts(), this.lobbyEvents(id), this.deps.scheduler ?? realScheduler);
       this.lobbyMap.set(id, lobby);
@@ -515,7 +635,7 @@ export class Matchmaker {
       this.emit('lobbyFailed', id, [...ready], [...notReady]);
       this.dissolveLobby(id);
       for (const p of notReady) this.sideOptIn.delete(p);
-      this.queue.requeueFront(ready);
+      this.queue.requeueFront(this.keepPairs(ready));
       this.maybeStartLobby();
     } catch (err) {
       console.error(`lobby ${id} fail handler error:`, err);
@@ -623,6 +743,7 @@ export class Matchmaker {
         joined: this.queue.has(steamid),
         players: this.queue.list().map(named),
         sideOptIn: this.sideOptIn.has(steamid),
+        duos: this.queuedPairs(),
       },
       lobby: snap && lobby
         ? {
@@ -645,9 +766,20 @@ export class Matchmaker {
           notReady: n.notReady.map(named), youWereReady: n.youWereReady,
           ...(n.removed ? { removed: named(n.removed) } : {}),
           ...(n.cancelled ? { cancelled: true as const } : {}),
+          ...(n.duoMissed ? { duoMissed: named(n.duoMissed) } : {}),
         };
       })(),
       abortNotice: abortNoticeFor(this.db, steamid),
+      duo: (() => {
+        if (!duoQueueLive(this.db)) return null;
+        const p = partnerOf(this.db, steamid);
+        const inv = openDuoInvites(this.db, steamid);
+        return {
+          partner: p ? named(p) : null,
+          incoming: inv.incoming.map((i) => ({ id: i.id, from: named(i.fromId) })),
+          outgoing: inv.outgoing ? { id: inv.outgoing.id, to: named(inv.outgoing.toId) } : null,
+        };
+      })(),
     };
   }
 
@@ -658,12 +790,13 @@ export class Matchmaker {
    * viewer-relative (are YOU queued, YOUR lobby, YOUR vote) and would be
    * meaningless anonymously. Carries no connect block and no match id.
    */
-  publicQueue(): { count: number; players: NamedPlayer[]; phase: LobbyPhase | null } {
+  publicQueue(): { count: number; players: NamedPlayer[]; phase: LobbyPhase | null; duos: [string, string][] } {
     const anyLobby = [...this.lobbyMap.values()][0];
     return {
       count: this.queue.count(),
       players: this.queue.list().map((id) => this.named(id)),
       phase: anyLobby?.snapshot().phase ?? null,
+      duos: this.queuedPairs(),
     };
   }
 
