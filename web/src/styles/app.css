@@ -1119,6 +1119,12 @@ a.ctile { text-decoration: none; }
   font-size: var(--fs-label);
   padding: 0 var(--sp-1);
 }
+/* "Duo 1", "Duo 2": the pair a duo slot belongs to. */
+.slot__pair {
+  font-size: var(--fs-label);
+  color: var(--accent);
+  white-space: nowrap;
+}
 .slot__avatar {
   width: 28px;
   height: 28px;

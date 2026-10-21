@@ -1016,6 +1016,18 @@ describe('Play', () => {
     expect(document.querySelectorAll('.slot').length).toBe(8);
   });
 
+  // Two duos queued: a shared label per pair says who is with whom.
+  it('labels each queued duo so both members carry the same number', () => {
+    const players = ['1', '2', '3', '4', '5'].map((id) => ({ steamid: id, name: `p${id}`, avatar: null }));
+    render(<QueuePanel count={5} joined={false} players={players} refresh={() => {}} duos={[['2', '4'], ['1', '5']]} />);
+    const label = (name: string) => screen.getByText(name).closest('.slot')!.querySelector('.slot__pair')?.textContent ?? null;
+    expect(label('p2')).toBe('Duo 1');
+    expect(label('p4')).toBe('Duo 1');
+    expect(label('p1')).toBe('Duo 2');
+    expect(label('p5')).toBe('Duo 2');
+    expect(label('p3')).toBeNull();
+  });
+
   describe('side game', () => {
     const me = { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false };
     const toggle = () => screen.queryByRole('checkbox', { name: /2v2\/3v3 while I wait/i });

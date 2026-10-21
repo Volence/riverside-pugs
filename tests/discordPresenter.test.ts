@@ -343,12 +343,19 @@ describe('endorse flow payloads', () => {
   });
 });
 
-it('marks duo members on the queue card', () => {
+it('numbers duo members on the queue card so each pair can be told apart', () => {
   const out = renderPanel({
     publicUrl: 'https://x.test', size: 8, phase: null,
-    players: [{ name: 'a', discordId: null, sr: null, duo: true }, { name: 'b', discordId: null, sr: null, duo: true }, { name: 'c', discordId: null, sr: null }],
+    players: [
+      { name: 'a', discordId: null, sr: null, duo: 1 }, { name: 'b', discordId: null, sr: null, duo: 2 },
+      { name: 'c', discordId: null, sr: null }, { name: 'd', discordId: null, sr: null, duo: 1 },
+      { name: 'e', discordId: null, sr: null, duo: 2 },
+    ],
   });
-  const desc = out.embeds[0].description ?? '';
-  expect(desc).toMatch(/a.*duo/);
-  expect(desc).not.toMatch(/c.*duo/);
+  const lines = (out.embeds[0].description ?? '').split('\n');
+  expect(lines.find((l) => l.includes(' a'))).toMatch(/ · duo 1$/);
+  expect(lines.find((l) => l.includes(' d'))).toMatch(/ · duo 1$/);
+  expect(lines.find((l) => l.includes(' b'))).toMatch(/ · duo 2$/);
+  expect(lines.find((l) => l.includes(' e'))).toMatch(/ · duo 2$/);
+  expect(lines.find((l) => l.includes(' c'))).not.toMatch(/duo/);
 });
