@@ -5,7 +5,8 @@
  *   cp pug.db /tmp/pug-copy.db && npx tsx scripts/duo-review.ts /tmp/pug-copy.db
  *
  * Run ~2 weeks after the Season 1 flip, then again at 40 duo matches (or 4
- * weeks, whichever is later). Baseline is Season 1 non-duo matches only.
+ * weeks, whichever is later). Baseline is Season 1 non-duo matches only;
+ * draws are left out so win rates and predictions compare.
  */
 import { pathToFileURL } from 'node:url';
 import { openDb, type DB } from '../src/db.js';
@@ -57,14 +58,50 @@ export function summarizeDuoMatches(rows: DuoMatchRow[]) {
   };
 }
 
+export interface StintRow { playerId: string; joinedMs: number; endedMs: number; outcome: 'popped' | 'left'; requeued: boolean }
+export interface DuoSpan { playerA: string; playerB: string; createdMs: number; endedMs: number | null }
+
+/**
+ * Queue stints split by whether the player had a duo active over the whole
+ * stint, with the popped wait (requeued stints left out: their clock carries
+ * over) and ready fails per popped stint. A ready fail counts as duo when the
+ * player was in an active duo at the penalty time.
+ */
+export function summarizeStints(stints: StintRow[], duos: DuoSpan[], readyFails: { playerId: string; atMs: number }[]) {
+  const spans = (id: string) => duos.filter((d) => d.playerA === id || d.playerB === id);
+  const inDuo = (id: string, from: number, to: number) =>
+    spans(id).some((d) => d.createdMs <= from && (d.endedMs === null || d.endedMs >= to));
+  const duo = stints.filter((s) => inDuo(s.playerId, s.joinedMs, s.endedMs));
+  const solo = stints.filter((s) => !inDuo(s.playerId, s.joinedMs, s.endedMs));
+  const duoFails = readyFails.filter((f) => inDuo(f.playerId, f.atMs, f.atMs)).length;
+  const group = (xs: StintRow[], fails: number) => {
+    const popped = xs.filter((s) => s.outcome === 'popped');
+    return {
+      stints: xs.length,
+      meanPoppedWaitMinutes: mean(popped.filter((s) => !s.requeued).map((s) => (s.endedMs - s.joinedMs) / 60000)),
+      readyFails: fails,
+      readyFailRate: popped.length ? fails / popped.length : 0,
+    };
+  };
+  return {
+    stints: stints.length,
+    duoShare: stints.length ? duo.length / stints.length : 0,
+    duo: group(duo, duoFails),
+    solo: group(solo, readyFails.length - duoFails),
+  };
+}
+
+/** ISO text, or SQLite datetime('now') text (UTC without a zone), to ms. */
+const toMs = (t: string) => Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : `${t.replace(' ', 'T')}Z`);
+
 function load(db: DB, seasonId: number): DuoMatchRow[] {
   const minSr = Number((db.prepare("SELECT value FROM settings WHERE key = 'duo_bonus_min_sr'").get() as { value: string } | undefined)?.value ?? 50);
   const maxSr = Number((db.prepare("SELECT value FROM settings WHERE key = 'duo_bonus_max_sr'").get() as { value: string } | undefined)?.value ?? 200);
   const third = (maxSr - minSr) / 3;
   const matches = db.prepare(
     `SELECT id, winner, team_a_score, team_b_score, forfeit_why FROM matches
-     WHERE season_id = ? AND state = 'completed' AND kind = 'pug' AND winner IS NOT NULL`,
-  ).all(seasonId) as { id: number; winner: 'a' | 'b' | 'draw'; team_a_score: number; team_b_score: number; forfeit_why: string | null }[];
+     WHERE season_id = ? AND state = 'completed' AND kind = 'pug' AND winner IN ('a','b')`,
+  ).all(seasonId) as { id: number; winner: 'a' | 'b'; team_a_score: number; team_b_score: number; forfeit_why: string | null }[];
   const out: DuoMatchRow[] = [];
   for (const m of matches) {
     const f = matchForecast(db, m.id);
@@ -90,22 +127,34 @@ function load(db: DB, seasonId: number): DuoMatchRow[] {
 }
 
 function queueHealth(db: DB, sinceMs: number) {
+  const since = new Date(sinceMs).toISOString();
   const duosOpen = (db.prepare('SELECT COUNT(*) AS n FROM duos WHERE ended_at IS NULL').get() as { n: number }).n;
-  const formed = (db.prepare('SELECT COUNT(*) AS n FROM duos WHERE created_at >= ?').get(new Date(sinceMs).toISOString()) as { n: number }).n;
-  const bySource = db.prepare("SELECT source, COUNT(*) AS n FROM duo_invites WHERE outcome = 'accepted' GROUP BY source").all();
+  const formed = (db.prepare('SELECT COUNT(*) AS n FROM duos WHERE created_at >= ?').get(since) as { n: number }).n;
+  const bySource = db.prepare("SELECT source, COUNT(*) AS n FROM duo_invites WHERE outcome = 'accepted' AND created_at >= ? GROUP BY source").all(since);
   const lengths = db.prepare('SELECT AVG(julianday(ended_at) - julianday(created_at)) AS days FROM duos WHERE ended_at IS NOT NULL').get();
-  const waits = db.prepare(
-    `SELECT AVG(ended_at - joined_at) / 60000.0 AS minutes FROM queue_stints WHERE outcome = 'popped' AND requeued = 0 AND ended_at >= ?`,
-  ).get(sinceMs);
-  const readyFails = (db.prepare("SELECT COUNT(*) AS n FROM penalties WHERE kind = 'ready_fail' AND created_at >= ?").get(new Date(sinceMs).toISOString()) as { n: number }).n;
-  return { duosOpen, formed, acceptedBySource: bySource, avgDuoLifeDays: lengths, avgPoppedWaitMinutes: waits, readyFails };
+  const stints = (db.prepare('SELECT player_id, joined_at, ended_at, outcome, requeued FROM queue_stints WHERE ended_at >= ?').all(sinceMs) as
+    { player_id: string; joined_at: number; ended_at: number; outcome: 'popped' | 'left'; requeued: number }[])
+    .map((r) => ({ playerId: r.player_id, joinedMs: r.joined_at, endedMs: r.ended_at, outcome: r.outcome, requeued: !!r.requeued }));
+  const duos = (db.prepare('SELECT player_a, player_b, created_at, ended_at FROM duos').all() as
+    { player_a: string; player_b: string; created_at: string; ended_at: string | null }[])
+    .map((d) => ({ playerA: d.player_a, playerB: d.player_b, createdMs: toMs(d.created_at), endedMs: d.ended_at === null ? null : toMs(d.ended_at) }));
+  const readyFails = (db.prepare("SELECT player_id, created_at FROM penalties WHERE kind = 'ready_fail' AND created_at >= ?").all(since) as
+    { player_id: string; created_at: string }[])
+    .map((p) => ({ playerId: p.player_id, atMs: toMs(p.created_at) }));
+  return {
+    duosOpen, formed, acceptedBySource: bySource, avgDuoLifeDays: lengths,
+    stints: summarizeStints(stints, duos, readyFails),
+    // How often a duo was passed over at a pop is not tracked anywhere.
+    skippedAtPop: 'not recorded',
+  };
 }
 
 /**
  * Mean SR movement per game (rating_history, mu_after - mu_before, x100):
  * duo members in their duo games vs the same players' solo games, and the
- * opponents of a duo vs those players' other games. In a match with a duo on
- * both sides a duo member counts as a duo member, not as an opponent.
+ * opponents of a duo vs those players' games where they neither were in a
+ * duo nor faced one. In a match with a duo on both sides a duo member
+ * counts as a duo member, not as an opponent.
  */
 function srMovement(db: DB, seasonId: number) {
   const rows = db.prepare(
@@ -130,7 +179,7 @@ function srMovement(db: DB, seasonId: number) {
     opponents: {
       players: opponents.size,
       vsDuo: sr(rows.filter(opp)),
-      other: sr(rows.filter((r) => opponents.has(r.player_id) && !opp(r))),
+      other: sr(rows.filter((r) => opponents.has(r.player_id) && !r.duo && !r.vs_duo)),
     },
   };
 }
@@ -143,8 +192,7 @@ function main(): void {
   }
   const db = openDb(path);
   const season = db.prepare('SELECT id, started_at FROM seasons WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1').get() as { id: number; started_at: string };
-  // started_at is SQLite datetime('now'): UTC without a zone, which Date.parse would read as local.
-  const startedMs = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(season.started_at) ? season.started_at : `${season.started_at.replace(' ', 'T')}Z`);
+  const startedMs = toMs(season.started_at);
   const rows = load(db, season.id);
   console.log(JSON.stringify({
     season: season.id,
