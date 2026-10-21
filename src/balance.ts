@@ -23,11 +23,17 @@ function combos(n: number, k: number): number[][] {
   return out;
 }
 
-export function balanceTeams(players: RatedPlayer[]): BalanceResult {
+export function balanceTeams(players: RatedPlayer[], opts: { groups?: [string, string][] } = {}): BalanceResult {
   const n = players.length;
   if (n !== 4 && n !== 6 && n !== 8) throw new Error(`balanceTeams needs 4, 6 or 8 players, got ${n}`);
   const ratings = players.map((p) => rating({ mu: p.mu, sigma: p.sigma }));
   const all = Array.from({ length: n }, (_, i) => i);
+  // Duos (src/duos.ts) must share a team: a split that separates one is not
+  // a candidate. A group naming someone not here is ignored.
+  const index = new Map(players.map((p, i) => [p.steamid, i]));
+  const groups = (opts.groups ?? [])
+    .map(([x, y]) => [index.get(x), index.get(y)])
+    .filter((g): g is [number, number] => g[0] !== undefined && g[1] !== undefined);
 
   let best: BalanceResult | null = null;
   // player 0 always on team A; choose the rest of A from indices 1..n-1, in
@@ -35,6 +41,7 @@ export function balanceTeams(players: RatedPlayer[]): BalanceResult {
   // 8-player answer (ties included) is unchanged.
   for (const rest of combos(n, n / 2 - 1)) {
     const aIdx = [0, ...rest];
+    if (groups.some(([x, y]) => aIdx.includes(x) !== aIdx.includes(y))) continue;
     const bIdx = all.filter((x) => !aIdx.includes(x));
     const [pA] = predictWin([aIdx.map((x) => ratings[x]), bIdx.map((x) => ratings[x])]);
     if (!best || Math.abs(pA - 0.5) < Math.abs(best.pWinA - 0.5)) {

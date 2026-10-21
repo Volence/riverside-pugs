@@ -49,3 +49,30 @@ describe('balanceTeams', () => {
     expect(() => balanceTeams(Array.from({ length: 10 }, (_, i) => p(`p${i}`, 25)))).toThrow(/4, 6 or 8/);
   });
 });
+
+describe('balanceTeams with duo groups', () => {
+  it('never splits a group', () => {
+    const players = [p('s1', 40), p('s2', 40), ...Array.from({ length: 6 }, (_, i) => p(`p${i}`, 25))];
+    const { teamA, teamB } = balanceTeams(players, { groups: [['s1', 's2']] });
+    const together = (t: string[]) => t.includes('s1') && t.includes('s2');
+    expect(together(teamA) || together(teamB)).toBe(true);
+  });
+
+  it('puts a strong duo and a weak duo on the same side when that is the even split (owner example)', () => {
+    const players = [p('s1', 35), p('s2', 35), p('w1', 15), p('w2', 15), p('m1', 25), p('m2', 25), p('m3', 25), p('m4', 25)];
+    const { teamA, teamB, pWinA } = balanceTeams(players, { groups: [['s1', 's2'], ['w1', 'w2']] });
+    const side = teamA.includes('s1') ? teamA : teamB;
+    expect([...side].sort()).toEqual(['s1', 's2', 'w1', 'w2']);
+    expect(pWinA).toBeCloseTo(0.5, 2);
+  });
+
+  it('with no groups gives exactly the old answer', () => {
+    const players = [p('a', 35), p('b', 33), p('c', 31), p('d', 29), p('e', 24), p('f', 22), p('g', 20), p('h', 18)];
+    expect(balanceTeams(players, { groups: [] })).toEqual(balanceTeams(players));
+  });
+
+  it('ignores a group naming someone not in the lobby', () => {
+    const players = Array.from({ length: 8 }, (_, i) => p(`p${i}`, 25));
+    expect(() => balanceTeams(players, { groups: [['p0', 'ghost']] })).not.toThrow();
+  });
+});
