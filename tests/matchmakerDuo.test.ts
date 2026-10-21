@@ -213,3 +213,23 @@ describe('standing and staff action on a duo', () => {
     expect(penalties(A)).toBe(0);
   });
 });
+
+describe('lobby completion with a duo', () => {
+  it('puts the duo on one team and stores partner and bonus', () => {
+    duo();
+    mm.join(A);
+    for (const id of IDS.slice(2, 8)) mm.join(id);
+    for (const id of mm.lobbies()[0].snapshot.players) mm.ready(id);
+    sched.fireAll(); // campaign vote closes
+    const rows = db.prepare('SELECT player_id, team, duo_partner, duo_bonus FROM match_players').all() as
+      { player_id: string; team: string; duo_partner: string | null; duo_bonus: number | null }[];
+    const a = rows.find((r) => r.player_id === A)!;
+    const b = rows.find((r) => r.player_id === B)!;
+    expect(a.team).toBe(b.team);
+    expect(a.duo_partner).toBe(B);
+    expect(b.duo_partner).toBe(A);
+    expect(a.duo_bonus).toBeGreaterThan(0);
+    expect(a.duo_bonus).toBe(b.duo_bonus);
+    expect(rows.filter((r) => r.duo_partner === null)).toHaveLength(6);
+  });
+});
