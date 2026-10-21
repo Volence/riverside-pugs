@@ -94,8 +94,12 @@ export class Queue {
    *
    *  With `partnerOf`, a duo whose two members are both queued is taken whole
    *  or not at all (src/duos.ts). A duo that does not fit keeps its place and
-   *  the next solo behind it fills the slot. Always returns exactly `n` when
-   *  at least `n` are queued. */
+   *  the next solo behind it fills the slot.
+   *
+   *  When nobody behind can fill the last slot (a duo joining behind 7 solos
+   *  makes 9), nothing is taken and this returns []: the pop waits for one
+   *  more player. Owner 2026-10-21: bumping a solo who had waited the whole
+   *  queue to make room for a duo that just joined is the worse wait. */
   takeBatch(n: number, partnerOf?: (id: string) => string | null): string[] {
     const taken: string[] = [];
     const skipped: [string, string][] = [];
@@ -114,21 +118,11 @@ export class Queue {
       done.add(id);
       taken.push(id);
     }
-    // One short: only a duo is ever skipped, so one is waiting, and an odd
-    // count holds at least one solo. Swap the last solo out for that duo.
-    let swapped = 0;
-    if (taken.length === n - 1 && skipped.length > 0) {
-      for (let i = taken.length - 1; i >= 0; i--) {
-        const p = partnerOf?.(taken[i]) ?? null;
-        if (!p || !taken.includes(p)) {
-          taken.splice(i, 1);
-          taken.push(...skipped[0]);
-          swapped = 1;
-          break;
-        }
-      }
+    if (taken.length < n) {
+      this.lastSkippedDuos = 0;
+      return [];
     }
-    this.lastSkippedDuos = skipped.length - swapped;
+    this.lastSkippedDuos = skipped.length;
     const out = new Set(taken);
     this.order = this.order.filter((id) => !out.has(id));
     for (const id of taken) this.end(id, 'popped');

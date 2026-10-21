@@ -625,6 +625,9 @@ export class Matchmaker {
   private maybeStartLobby(): void {
     while (this.queue.count() >= QUEUE_SIZE) {
       const players = this.queue.takeBatch(QUEUE_SIZE, (id) => this.partner(id));
+      // Enough people, but only a duo is left for the last slot: wait for
+      // one more player rather than bump someone who queued first.
+      if (players.length === 0) break;
       // Review data only: never let it stop a pop.
       try {
         recordDuoPopSkips(this.db, this.queue.lastSkippedDuos);

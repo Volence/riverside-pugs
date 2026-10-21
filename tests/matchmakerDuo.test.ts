@@ -110,15 +110,15 @@ describe('queueing as a duo', () => {
     expect(partnerOf(db, A)).toBeNull();
   });
 
-  it('7 solos then a duo joins: pops now with the duo, the newest solo goes to the front', () => {
-    for (const id of IDS.slice(2, 9)) mm.join(id); // 7 solos, IDS[8] joined last
+  it('7 solos then a duo joins: the pop waits for one more player, then goes without bumping anyone', () => {
+    for (const id of IDS.slice(2, 9)) mm.join(id); // 7 solos
     duo();
-    mm.join(A); // 9 queued: the duo cannot fit behind 7 solos
+    mm.join(A); // 9 queued, but only the duo is left for slot 8
+    expect(mm.lobbies()).toHaveLength(0);
+    mm.join(IDS[9]); // a solo fills slot 8
     const lobby = mm.lobbies()[0].snapshot.players;
-    expect(lobby).toContain(A);
-    expect(lobby).toContain(B);
-    expect(lobby).not.toContain(IDS[8]);
-    expect(mm.publicQueue().players.map((p) => p.steamid)).toEqual([IDS[8]]);
+    expect([...lobby].sort()).toEqual([...IDS.slice(2, 10)].sort());
+    expect(mm.publicQueue().players.map((p) => p.steamid)).toEqual([A, B]);
   });
 
   it('when the partner misses ready, the ready one is not requeued and is told why', () => {
@@ -260,11 +260,11 @@ describe('duo pop skips', () => {
     expect(skips()).toBe(1);
   });
 
-  it('records nothing when the duo is swapped in', () => {
+  it('records nothing while the pop is held', () => {
     for (const id of IDS.slice(2, 9)) mm.join(id);
     duo();
     mm.join(A);
-    expect(mm.lobbies()[0].snapshot.players).toContain(A);
+    expect(mm.lobbies()).toHaveLength(0);
     expect(skips()).toBe(0);
   });
 });
