@@ -18,7 +18,7 @@ import { EndorsementCounts } from '../components/TitleTag';
 import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
-import { useSeasonLook } from '../seasonTheme';
+import { useDuoQueueOn } from '../seasonTheme';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
 import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../components/SeasonRank';
 import type { PastSeason, WrappedSeason } from '../api';
@@ -533,12 +533,13 @@ function useWrappedFor(past: PastSeason[]): WrappedSeason[] {
   return list;
 }
 
-/** Ask this player to duo queue. The server refuses with a reason when the
- *  duo queue is off or either player cannot duo; that reason is shown. */
+/** Ask this player to duo queue; hidden while the duo queue is off. The
+ *  server refuses with a reason when either player cannot duo; that reason
+ *  is shown. */
 function DuoInviteChip({ steamid }: { steamid: string }) {
   const [msg, setMsg] = useState('');
-  const seasonOne = useSeasonLook()?.ranks === true;
-  if (!seasonOne) return null;
+  const duoQueueOn = useDuoQueueOn();
+  if (!duoQueueOn) return null;
   const send = async () => {
     try {
       await api.duoInvite(steamid);

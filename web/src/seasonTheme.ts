@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, SEASON_THEMES, type CurrentSeasonLook, type SeasonThemeId } from './api';
+import { api, SEASON_THEMES, type CurrentSeasonLook, type SeasonThemeId, type SiteInfo } from './api';
 
 /** The current season's look, from /api/site (src/seasonThemes.ts).
  *
@@ -49,19 +49,33 @@ export function syncSeasonTheme(season: CurrentSeasonLook | null) {
   applySeasonTheme(preview === 'standard' ? null : preview ?? theme);
 }
 
-let pending: Promise<CurrentSeasonLook | null | undefined> | null = null;
+let pending: Promise<SiteInfo | undefined> | null = null;
 /** One /api/site request for the whole app, shared by everything that asks.
- *  undefined = the request failed (keep whatever look is showing), null = no
+ *  undefined = the request failed. */
+function loadSite(): Promise<SiteInfo | undefined> {
+  pending ??= api.site().catch(() => { pending = null; return undefined; });
+  return pending;
+}
+
+/** undefined = the request failed (keep whatever look is showing), null = no
  *  current season. */
 export function loadSeasonLook(): Promise<CurrentSeasonLook | null | undefined> {
-  pending ??= api.site().then((s) => s.season ?? null).catch(() => { pending = null; return undefined; });
-  return pending;
+  return loadSite().then((s) => (s === undefined ? undefined : s.season ?? null));
 }
 
 export function useSeasonLook(): CurrentSeasonLook | null {
   const [season, setSeason] = useState<CurrentSeasonLook | null>(null);
   useEffect(() => { let live = true; void loadSeasonLook().then((s) => { if (live) setSeason(s ?? null); }); return () => { live = false; }; }, []);
   return season;
+}
+
+/** Whether the duo queue is on (Season 1 live, staff switch not off), from
+ *  the same /api/site request. False until it answers and from an older
+ *  server, so no duo surface shows by mistake. */
+export function useDuoQueueOn(): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => { let live = true; void loadSite().then((s) => { if (live) setOn(s?.duoQueue === true); }); return () => { live = false; }; }, []);
+  return on;
 }
 
 /** Banner facts: which week of the season this is, and days left when an end
