@@ -4,6 +4,7 @@ import { Queue, QUEUE_SIZE } from './queue.js';
 import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase, type PersistedLobby } from './lobby.js';
 import { balanceTeams } from './balance.js';
 import { balanceMu } from './newcomerPrior.js';
+import { duoBonusMu } from './duoBonus.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
@@ -659,11 +660,21 @@ export class Matchmaker {
       // when newcomer_balance_offset is set (see newcomerPrior.ts); the stored
       // rating is never changed.
       const mus = balanceMu(this.db, ratings);
+      // Duos share a team and count as stronger than their ratings by a
+      // bonus that grows with how high they are rated (src/duoBonus.ts).
+      const groups = pairsAmong(result.players, (p) => this.partner(p));
+      const bonus = new Map<string, { partner: string; mu: number }>();
+      for (const [x, y] of groups) {
+        const b = duoBonusMu(this.db, x, y);
+        bonus.set(x, { partner: y, mu: b });
+        bonus.set(y, { partner: x, mu: b });
+      }
       const { teamA, teamB } = balanceTeams(
         result.players.map((steamid) => {
           const r = ratings.get(steamid)!;
-          return { steamid, mu: mus.get(steamid) ?? r.mu, sigma: r.sigma };
+          return { steamid, mu: (mus.get(steamid) ?? r.mu) + (bonus.get(steamid)?.mu ?? 0), sigma: r.sigma };
         }),
+        { groups },
       );
       const season = currentSeasonId(this.db);
       const matchId = this.db.transaction(() => {
@@ -672,10 +683,12 @@ export class Matchmaker {
         );
         const id = Number(insertMatch.run(season, result.campaign).lastInsertRowid);
         const insertMp = this.db.prepare(
-          'INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)',
+          'INSERT INTO match_players (match_id, player_id, team, duo_partner, duo_bonus) VALUES (?, ?, ?, ?, ?)',
         );
-        for (const p of teamA) insertMp.run(id, p, 'a');
-        for (const p of teamB) insertMp.run(id, p, 'b');
+        const ins = (p: string, team: 'a' | 'b') =>
+          insertMp.run(id, p, team, bonus.get(p)?.partner ?? null, bonus.get(p)?.mu ?? null);
+        for (const p of teamA) ins(p, 'a');
+        for (const p of teamB) ins(p, 'b');
         return id;
       })();
 
