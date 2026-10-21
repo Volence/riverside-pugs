@@ -51,6 +51,13 @@ export interface NamedPlayer {
   avatar: string | null;
 }
 
+/** The viewer's duo and open invites (duo queue, Season 1). */
+export interface DuoView {
+  partner: NamedPlayer | null;
+  incoming: { id: number; from: NamedPlayer }[];
+  outgoing: { id: number; to: NamedPlayer } | null;
+}
+
 export type LobbyPhase = 'ready_check' | 'map_vote' | 'done' | 'failed';
 
 /** What stands between a player and pressing Ready: no Discord linked, or
@@ -95,10 +102,16 @@ export interface PublicQueue {
    *  sitters on the box), and the switch that allows them. */
   sideGame?: { phase: 'running' | 'popped' | 'closing'; size: 2 | 3 | null; players: number } | null;
   sideGamesEnabled?: boolean;
+  /** Queued duos as steamid pairs. Optional: an older server sends none. */
+  duos?: [string, string][];
 }
 
 export interface StateSnapshot {
-  queue: { count: number; joined: boolean; players: NamedPlayer[]; sideOptIn?: boolean };
+  queue: {
+    count: number; joined: boolean; players: NamedPlayer[]; sideOptIn?: boolean;
+    /** Queued duos as steamid pairs. Optional: an older server sends none. */
+    duos?: [string, string][];
+  };
   lobby: LobbySnapshot | null;
   match: {
     id: number;
@@ -129,7 +142,14 @@ export interface StateSnapshot {
    *  where they find out. */
   /** `removed` is set instead of `notReady` when the pop was cancelled because
    *  a player was taken out of it (banned mid ready check). */
-  lobbyNotice?: { notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer; cancelled?: true } | null;
+  /** `duoMissed` is the viewer's duo partner who could not go back in the
+   *  queue, which took the viewer out too. Optional: an older server sends none. */
+  lobbyNotice?: {
+    notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer; cancelled?: true; duoMissed?: NamedPlayer;
+  } | null;
+  /** The viewer's duo and invites; null while the duo queue is off.
+   *  Optional: an older server sends none. */
+  duo?: DuoView | null;
   /** The match the viewer was on, aborted, until they dismiss it. Stored on
    *  the server (src/matchAborts.ts), so a reload keeps it. */
   abortNotice?: AbortNotice | null;
@@ -3452,6 +3472,11 @@ export const api = {
   joinQueue: () => post('/api/queue/join'),
   leaveQueue: () => post('/api/queue/leave'),
   setRequeue: (matchId: number, on: boolean) => post('/api/queue/requeue', { matchId, on }),
+  duoInvite: (steamid: string) => post<{ ok: true; inviteId: number }>('/api/duo/invite', { steamid }),
+  duoAccept: (id: number) => post(`/api/duo/invites/${id}/accept`),
+  duoDecline: (id: number) => post(`/api/duo/invites/${id}/decline`),
+  duoCancel: (id: number) => post(`/api/duo/invites/${id}/cancel`),
+  duoEnd: () => post('/api/duo/end'),
   setSideOptIn: (on: boolean) => post('/api/queue/side', { on }),
   ready: () => post('/api/lobby/ready'),
   dismissNotice: () => post('/api/lobby/dismiss-notice'),
