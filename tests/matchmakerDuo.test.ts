@@ -5,6 +5,7 @@ import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { partnerOf } from '../src/duos.js';
 import type { Scheduler } from '../src/lobby.js';
+import { banPlayer } from '../src/admin/players.js';
 
 class FakeScheduler implements Scheduler {
   timers = new Map<number, () => void>();
@@ -155,5 +156,60 @@ describe('queueing as a duo', () => {
     expect(mm.endDuo(B)).toEqual({ ok: true });
     expect(mm.publicQueue().count).toBe(2);
     expect(mm.publicQueue().duos).toEqual([]);
+  });
+});
+
+describe('standing and staff action on a duo', () => {
+  const penalties = (id: string) =>
+    (db.prepare("SELECT COUNT(*) AS n FROM penalties WHERE player_id = ? AND kind = 'ready_fail'").get(id) as { n: number }).n;
+
+  it('a partner banned while idle stops the other from queueing', () => {
+    duo();
+    banPlayer(db, B, 'admin', 'cheating', null);
+    const r = mm.join(A);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/your duo partner .* cannot queue/);
+    expect(mm.publicQueue().count).toBe(0);
+  });
+
+  it('an inviter banned before the accept forms no duo', () => {
+    const inv = mm.inviteDuo(A, B, 'site');
+    if (!inv.ok) throw new Error(inv.error);
+    banPlayer(db, A, 'admin', 'cheating', null);
+    const r = mm.acceptDuo(inv.inviteId, B);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/cannot duo right now/);
+    expect(partnerOf(db, B)).toBeNull();
+  });
+
+  it('removing an idle duo member ends the duo', () => {
+    duo();
+    mm.remove(A);
+    expect(partnerOf(db, B)).toBeNull();
+  });
+
+  it('a duo that readied goes back to the front together when someone else misses', () => {
+    duo();
+    mm.join(A);
+    for (const id of IDS.slice(2, 8)) mm.join(id);
+    const lobby = mm.lobbies()[0].snapshot.players;
+    for (const id of lobby) if (id !== IDS[2]) mm.ready(id);
+    sched.fireAll();
+    const order = mm.publicQueue().players.map((p) => p.steamid);
+    expect(order).toEqual([A, B, ...IDS.slice(3, 8)]);
+    expect(mm.publicQueue().duos).toEqual([[A, B]]);
+    expect(penalties(IDS[2])).toBe(1);
+    expect(penalties(A)).toBe(0);
+    expect(penalties(B)).toBe(0);
+  });
+
+  it('only the partner who missed ready is penalised, not the one who readied', () => {
+    duo();
+    mm.join(A);
+    for (const id of IDS.slice(2, 8)) mm.join(id);
+    for (const id of mm.lobbies()[0].snapshot.players) if (id !== B) mm.ready(id);
+    sched.fireAll();
+    expect(penalties(B)).toBe(1);
+    expect(penalties(A)).toBe(0);
   });
 });
