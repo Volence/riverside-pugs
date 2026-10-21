@@ -96,3 +96,65 @@ describe('Queue requeue flag survives a restore', () => {
     expect(ended[0].requeued).toBe(true);
   });
 });
+
+describe('duos in the queue', () => {
+  const pairs = (...ps: [string, string][]) => {
+    const m = new Map<string, string>();
+    for (const [a, b] of ps) { m.set(a, b); m.set(b, a); }
+    return (id: string) => m.get(id) ?? null;
+  };
+  const fill = (q: Queue, ids: string[]) => ids.forEach((id) => q.join(id));
+
+  it('without partners pops the first n exactly as before', () => {
+    const q = new Queue();
+    fill(q, ['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    expect(q.takeBatch(8)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
+    expect(q.list()).toEqual(['9']);
+  });
+
+  it('skips a duo straddling slot 8; it keeps its place and the next solo fills in', () => {
+    const q = new Queue();
+    fill(q, ['1', '2', '3', '4', '5', '6', '7', 'd1', 'd2', '8']);
+    expect(q.takeBatch(8, pairs(['d1', 'd2']))).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
+    expect(q.list()).toEqual(['d1', 'd2']);
+  });
+
+  it('pops a duo whole even when its members are not adjacent', () => {
+    const q = new Queue();
+    fill(q, ['d1', '1', '2', '3', '4', '5', '6', '7', 'd2']);
+    const got = q.takeBatch(8, pairs(['d1', 'd2']));
+    expect(got).toHaveLength(8);
+    expect(got).toContain('d1');
+    expect(got).toContain('d2');
+    expect(q.list()).toEqual(['7']);
+  });
+
+  it('still pops exactly 8 when greedy order comes up one short', () => {
+    const q = new Queue();
+    fill(q, ['s', 'a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'd1', 'd2']);
+    const got = q.takeBatch(8, pairs(['a1', 'a2'], ['b1', 'b2'], ['c1', 'c2'], ['d1', 'd2']));
+    expect([...got].sort()).toEqual(['a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'd1', 'd2']);
+    expect(q.list()).toEqual(['s']);
+  });
+
+  it('a duo member whose partner is not queued pops as a solo', () => {
+    const q = new Queue();
+    fill(q, ['d1', '1', '2', '3', '4', '5', '6', '7']);
+    expect(q.takeBatch(8, pairs(['d1', 'd2']))).toHaveLength(8);
+  });
+
+  it('placePair seats both at the later spot', () => {
+    const q = new Queue();
+    fill(q, ['a', 'x', 'b', 'y']);
+    q.placePair('a', 'b');
+    expect(q.list()).toEqual(['x', 'b', 'a', 'y']);
+  });
+
+  it('placePair with one not queued puts both at the back', () => {
+    const q = new Queue();
+    fill(q, ['a', 'x', 'y']);
+    q.placePair('a', 'b');
+    expect(q.list()).toEqual(['x', 'y', 'a', 'b']);
+    expect(q.has('b')).toBe(true);
+  });
+});
