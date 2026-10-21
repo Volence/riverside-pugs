@@ -17,6 +17,7 @@ import { MERGED_MESSAGE, inGoodStanding } from '../standing.js';
 import { competitiveAccess, scrimsAccess } from '../teams/access.js';
 import { teamChipsOf } from '../teams/teams.js';
 import { currentSeasonLook } from '../seasonThemes.js';
+import { duoQueueLive } from '../duos.js';
 import { tournamentOpen } from '../events/events.js';
 
 const NEXT_COOKIE = 'pug_next';
@@ -180,6 +181,8 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
     discordInviteUrl: getSetting(db, 'discord_invite_url') || null,
     requireDiscord: config.discord !== null && getSetting(db, 'require_discord_to_queue') === '1',
     season: currentSeasonLook(db),
+    // Whether duo surfaces show at all (Season 1 live, switch not off).
+    duoQueue: duoQueueLive(db),
   }));
 
   app.post('/api/register', async (req, reply) => {

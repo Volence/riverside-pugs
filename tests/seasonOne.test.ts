@@ -7,6 +7,7 @@ import { completeMatch } from '../src/matchResult.js';
 import { currentSeasonId } from '../src/players.js';
 import { recomputeSeasonRatings } from '../src/rating.js';
 import { startNewSeason } from '../src/seasons.js';
+import { setSetting } from '../src/settings.js';
 import {
   DEMOTION_BUFFER, rankAfter, rankFloor, rankIndexOf, rankView, softResetRating, seasonLadder, seasonRules,
 } from '../src/seasonRules.js';
@@ -272,5 +273,15 @@ describe('season look', () => {
     expect((await post(`/api/admin/seasons/${id}/look`, { theme: '', endsAt: '' })).statusCode).toBe(200);
     expect((await get('/api/site')).season).toMatchObject({ theme: null, endsAt: null });
     expect((await post(`/api/admin/seasons/${id}/look`, { theme: 'wrong-way' }, authedCookie(app, db, IDS[1]))).statusCode).toBe(403);
+  });
+
+  // The site hides every duo surface (the profile's Duo queue chip) unless
+  // this is true: Season 1 live and duo_queue_enabled not switched off.
+  it('/api/site says whether the duo queue is on', async () => {
+    expect((await get('/api/site')).duoQueue).toBe(false);
+    db.prepare('UPDATE seasons SET ranks = 1').run();
+    expect((await get('/api/site')).duoQueue).toBe(true);
+    setSetting(db, 'duo_queue_enabled', '0');
+    expect((await get('/api/site')).duoQueue).toBe(false);
   });
 });

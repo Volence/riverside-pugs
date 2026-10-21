@@ -309,6 +309,9 @@ export interface SiteInfo {
   discordInviteUrl: string | null;
   requireDiscord: boolean;
   season: CurrentSeasonLook | null;
+  /** The duo queue is on: Season 1 live and duo_queue_enabled not '0'.
+   *  Optional: an older server sends none. */
+  duoQueue?: boolean;
 }
 
 /** A Bronze..Master rank with its division (src/seasonRules.ts rankView). */
