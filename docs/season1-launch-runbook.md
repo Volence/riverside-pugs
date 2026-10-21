@@ -37,6 +37,7 @@ Seasons turns all of it on at once.
 - [ ] **Discord:** create or choose the announcements channel; set its id in
       Admin > Setup > Settings > Discord > News channel id.
 - [ ] **Video:** use the PNGs in `~/l4d/trailer/season1/rank-emblems/` (not `old/` or `old-v2/`).
+- [ ] Duo queue: run `scripts/duo-calibrate.ts` on a fresh prod copy, send the owner the proposed `duo_bonus_min_sr` / `duo_bonus_max_sr`, set them in Admin > Settings > Queue before the flip. Duos turn on with the flip (seasonOneLive). Trial review: `scripts/duo-review.ts` ~2 weeks after the flip and again at 40 duo matches.
 
 ## Deploy (target around Tue 10-27, owner's go)
 
