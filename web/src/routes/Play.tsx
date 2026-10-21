@@ -353,7 +353,11 @@ export function LobbyNotice(
     <Panel>
       <div class="lobby-notice">
         <div>
-          <h3>{notice.removed || notice.cancelled ? 'Pop cancelled' : 'Ready check failed'}</h3>
+          {/* A duo partner left out after an aborted match carries no ready
+              check at all (notReady empty, not cancelled). */}
+          <h3>{notice.removed || notice.cancelled ? 'Pop cancelled'
+            : notice.duoMissed && notice.notReady.length === 0 ? 'Out of the queue'
+            : 'Ready check failed'}</h3>
           <p>
             {notice.duoMissed ? (
               <>Your duo partner {notice.duoMissed.name} did not go back in the queue, so you were taken out too.

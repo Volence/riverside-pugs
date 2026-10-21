@@ -59,4 +59,12 @@ describe('LobbyNotice', () => {
     render(<LobbyNotice notice={{ notReady: [{ steamid: 'x', name: 'Bob', avatar: null }], youWereReady: true, duoMissed: { steamid: 'x', name: 'Bob', avatar: null } }} refresh={() => {}} />);
     expect(screen.getByText(/duo partner Bob/)).toBeTruthy();
   });
+
+  // The same notice follows an aborted match, where no ready check ran.
+  it('does not call an aborted match a failed ready check for a duo left out', () => {
+    render(<LobbyNotice notice={{ notReady: [], youWereReady: true, duoMissed: p('amy') }} refresh={() => {}} />);
+    const body = document.body.textContent ?? '';
+    expect(body).toMatch(/duo partner amy/);
+    expect(body).not.toMatch(/ready check failed/i);
+  });
 });
