@@ -510,7 +510,9 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
   // moved is no longer true; an aborted one never moved anything.
   const showSr = match.state === 'completed' && !voided;
   const versusName = (p: typeof players[number]) => (
-    showSr ? { name: p.name, srDelta: p.srDelta ?? null, placement: p.placement ?? null, placedRank: p.placedRank ?? null } : p.name
+    showSr
+      ? { name: p.name, srDelta: p.srDelta ?? null, placement: p.placement ?? null, placedRank: p.placedRank ?? null, duo: !!p.duoPartner }
+      : { name: p.name, srDelta: null, duo: !!p.duoPartner }
   );
   const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
     : aborted ? 'Aborted'

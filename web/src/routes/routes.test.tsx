@@ -309,6 +309,36 @@ describe('MatchDetail', () => {
     winProbA: 0.62, winProbB: 0.38, ratedA: 4, ratedB: 4, source: 'history' as const,
   };
 
+  it('tags both members of a duo on the roster, and nobody else', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: 12, duoPartner: '2' },
+        { steamid: '2', name: 'bob', team: 'a', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: 10, duoPartner: '1' },
+        { steamid: '3', name: 'carol', team: 'b', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: -12, duoPartner: null },
+        { steamid: '4', name: 'dan', team: 'b', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: -10 },
+      ],
+    }));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    const [sideA, sideB] = [...container.querySelectorAll('.versus__names')];
+    expect(sideA.querySelectorAll('.duotag').length).toBe(2);
+    expect(sideA.querySelector('.duotag')!.textContent).toBe('Duo');
+    expect(sideB.querySelectorAll('.duotag').length).toBe(0);
+  });
+
+  it('tags a duo on an aborted match too, where no SR is shown', async () => {
+    mockApi.match.mockResolvedValue(matchWith({
+      match: { id: 7, campaign: 'no_mercy', state: 'aborted', endedAt: '2026-09-06T04:00:00', teamAScore: 0, teamBScore: 0, winner: null },
+      players: [
+        { steamid: '1', name: 'alice', team: 'a', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: null, duoPartner: '2' },
+        { steamid: '2', name: 'bob', team: 'a', siDamage: 0, siKills: 0, commonKills: 0, ffDealt: 0, revives: 0, srDelta: null, duoPartner: '1' },
+      ],
+    }));
+    const { container } = render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(container.querySelector('.versus')).toBeTruthy());
+    expect(container.querySelectorAll('.versus .duotag').length).toBe(2);
+  });
+
   it('shows the forecast when the server sent one, naming the favoured team', async () => {
     mockApi.match.mockResolvedValue(matchWith({ forecast: FORECAST }));
     render(<MatchDetail id="7" me="1" />);

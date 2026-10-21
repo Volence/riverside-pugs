@@ -273,7 +273,7 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const rules = matchSeason === undefined ? null : seasonRules(db, matchSeason);
     const gameNo = gameNumbers(db, id);
     const players = (db.prepare(
-      `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team,
+      `SELECT mp.player_id AS steamid, p.name, p.discord_name AS discordName, mp.team, mp.duo_partner,
               mp.si_damage, mp.si_kills, mp.common_kills, mp.ff_dealt, mp.revives,
               rh.mu_before, rh.sigma_before, rh.mu_after, rh.sigma_after
        FROM match_players mp
@@ -288,6 +288,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       // same as an unlinked or matching Discord name does.
       discordName: viewer !== null && p.discordName && !sameName(p.name, p.discordName) ? p.discordName : null,
       title: titles.get(p.steamid) ?? null,
+      // Their duo partner's steamid when they queued as a duo, else null.
+      duoPartner: p.duo_partner ?? null,
       siDamage: p.si_damage, siKills: p.si_kills, commonKills: p.common_kills, ffDealt: p.ff_dealt, revives: p.revives,
       // Null, not 0, when the rating never touched them: "+0" claims a result.
       ...matchSrChange(rules, gameNo.get(p.steamid), p),

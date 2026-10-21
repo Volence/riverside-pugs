@@ -50,3 +50,19 @@ describe('duo routes', () => {
     expect((await app.inject({ method: 'POST', url: '/api/duo/end' })).statusCode).toBe(401);
   });
 });
+
+describe('match page roster', () => {
+  it('names each duo member partner and null for everyone else', async () => {
+    const C = '76561198000000203';
+    for (const id of [A, B, C]) db.prepare("INSERT INTO players (steamid, name) VALUES (?, ?)").run(id, id.slice(-3));
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign, winner) VALUES (1, 1, 'completed', 'no_mercy', 'a')").run();
+    const mp = db.prepare('INSERT INTO match_players (match_id, player_id, team, duo_partner, duo_bonus) VALUES (1, ?, ?, ?, ?)');
+    mp.run(A, 'a', B, 0.5);
+    mp.run(B, 'a', A, 0.5);
+    mp.run(C, 'b', null, null);
+    const res = await app.inject({ method: 'GET', url: '/api/matches/1' });
+    expect(res.statusCode).toBe(200);
+    const byId = Object.fromEntries(res.json().players.map((p: { steamid: string; duoPartner: string | null }) => [p.steamid, p.duoPartner]));
+    expect(byId).toEqual({ [A]: B, [B]: A, [C]: null });
+  });
+});
