@@ -18,6 +18,7 @@ import { EndorsementCounts } from '../components/TitleTag';
 import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
+import { useSeasonLook } from '../seasonTheme';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
 import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../components/SeasonRank';
 import type { PastSeason, WrappedSeason } from '../api';
@@ -115,6 +116,7 @@ export function Profile(
         {session?.kind === 'active' && session.me.steamid !== steamid && (
           <div class="admin-actions">
             <ReportPlayer target={{ steamid, name: player.name }} />
+            <DuoInviteChip steamid={steamid} />
             {(session.me.isAdmin || session.me.isMod) && (
               <button class="chip" type="button"
                 onClick={async () => {
@@ -529,4 +531,26 @@ function useWrappedFor(past: PastSeason[]): WrappedSeason[] {
     return () => { live = false; };
   }, [ids]);
   return list;
+}
+
+/** Ask this player to duo queue. The server refuses with a reason when the
+ *  duo queue is off or either player cannot duo; that reason is shown. */
+function DuoInviteChip({ steamid }: { steamid: string }) {
+  const [msg, setMsg] = useState('');
+  const seasonOne = useSeasonLook()?.ranks === true;
+  if (!seasonOne) return null;
+  const send = async () => {
+    try {
+      await api.duoInvite(steamid);
+      setMsg('Invite sent. It lasts 10 minutes.');
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : 'Something went wrong.');
+    }
+  };
+  return (
+    <>
+      <button class="chip" type="button" onClick={send}>Duo queue</button>
+      {msg && <span class="muted">{msg}</span>}
+    </>
+  );
 }

@@ -15,6 +15,7 @@ import { PageHeader } from '../components/PageHeader';
 import { SetupChecklist } from '../components/SetupChecklist';
 import { PracticeCard } from '../components/PracticeCard';
 import { NewsStrip } from '../components/NewsStrip';
+import { DuoPanel } from '../components/DuoPanel';
 import type { Session } from '../hooks/useLiveState';
 
 /** Display only: the server's `sidegames_min_players` setting still decides
@@ -108,7 +109,7 @@ function SignIn() {
             <span class="hero">{q.count}</span>
             <span class="queue-count__of">/ {QUEUE_SIZE}</span>
           </div>
-          <Slots players={q.players} />
+          <Slots players={q.players} duos={q.duos} />
         </Panel>
       )}
       <PracticeCard signedIn={false} />
@@ -306,10 +307,12 @@ function LiveBody(
   return (
     <>
       {state.lobbyNotice && <LobbyNotice notice={state.lobbyNotice} refresh={refresh} />}
+      {state.duo && <DuoPanel duo={state.duo} refresh={refresh} />}
       <QueuePanel
         count={queue.count} joined={queue.joined} players={queue.players} refresh={refresh}
         timeout={state.timeout ?? null} queueBlock={state.queueBlock ?? null} me={sessionMe}
         sideGamesEnabled={state.sideGamesEnabled ?? false} sideOptIn={queue.sideOptIn} sideGame={state.sideGame ?? null}
+        duos={queue.duos ?? []} canInvite={!!state.duo && !state.duo.partner}
       />
     </>
   );
@@ -352,7 +355,10 @@ export function LobbyNotice(
         <div>
           <h3>{notice.removed || notice.cancelled ? 'Pop cancelled' : 'Ready check failed'}</h3>
           <p>
-            {notice.cancelled ? (
+            {notice.duoMissed ? (
+              <>Your duo partner {notice.duoMissed.name} did not go back in the queue, so you were taken out too.
+                Join again when you are both ready.</>
+            ) : notice.cancelled ? (
               <>Staff cancelled the pop. Nobody was penalised, and you went back to the front of the queue.</>
             ) : notice.removed ? (
               <>The pop was cancelled because {notice.removed.name} was removed from it by an admin.
@@ -429,7 +435,10 @@ export function AbortNoticePanel({ notice, refresh }: { notice: AbortNotice; ref
 }
 
 export function QueuePanel(
-  { count, joined, players, refresh, timeout = null, queueBlock = null, me = null, sideGamesEnabled = false, sideOptIn, sideGame = null }:
+  {
+    count, joined, players, refresh, timeout = null, queueBlock = null, me = null, sideGamesEnabled = false, sideOptIn, sideGame = null,
+    duos = [], canInvite = false,
+  }:
     {
       count: number; joined: boolean; players: NamedPlayer[]; refresh: () => void;
       /** A queue timeout being served; the join button is disabled until it ends. */
@@ -444,6 +453,11 @@ export function QueuePanel(
       sideOptIn?: boolean;
       /** The unrecorded 2v2/3v3 running (or closing) while the queue fills. */
       sideGame?: StateSnapshot['sideGame'];
+      /** Queued duos as steamid pairs, marked on their slots. */
+      duos?: [string, string][];
+      /** The viewer may send a duo invite (duo queue on, no partner yet):
+       *  each other solo slot then carries a Duo button. */
+      canInvite?: boolean;
     },
 ) {
   const [error, setError] = useState('');
@@ -468,7 +482,10 @@ export function QueuePanel(
         <span class="hero">{count}</span>
         <span class="queue-count__of">/ {QUEUE_SIZE}</span>
       </div>
-      <Slots players={players} />
+      <Slots
+        players={players} duos={duos} me={me?.steamid ?? null}
+        onInvite={canInvite ? (id) => act(() => api.duoInvite(id)) : undefined}
+      />
       {joined ? (
         <button class="btn btn--block btn--ghost" onClick={() => act(api.leaveQueue)}>Leave queue</button>
       ) : queueBlock ? (
@@ -542,19 +559,25 @@ function RequeueToggle({ matchId, on, refresh }: { matchId: number; on: boolean;
  *  look like a half-full queue: the empty slots are the information. Filled
  *  ones now name who is in them, which is what a friend group actually wants
  *  to know before deciding to join. */
-function Slots({ players }: { players: NamedPlayer[] }) {
+function Slots({ players, duos = [], me = null, onInvite }: {
+  players: NamedPlayer[]; duos?: [string, string][]; me?: string | null; onInvite?: (steamid: string) => void;
+}) {
+  const inDuo = new Set(duos.flat());
   return (
     <div class="slots">
       {Array.from({ length: QUEUE_SIZE }, (_, i) => {
         const p = players[i];
         return (
-          <div key={i} class={`slot ${p ? 'slot--filled' : ''}`} title={p?.name}>
+          <div key={i} class={`slot ${p ? 'slot--filled' : ''} ${p && inDuo.has(p.steamid) ? 'slot--duo' : ''}`} title={p?.name}>
             {p && (
               <>
                 {p.avatar
                   ? <img class="slot__avatar" src={p.avatar} alt="" />
                   : <span class="slot__avatar slot__avatar--none" aria-hidden="true" />}
                 <span class="slot__name">{p.name}</span>
+                {onInvite && p.steamid !== me && !inDuo.has(p.steamid) && (
+                  <button type="button" class="slot__duo" onClick={() => onInvite(p.steamid)}>Duo</button>
+                )}
               </>
             )}
           </div>

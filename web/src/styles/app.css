@@ -1111,6 +1111,14 @@ a.ctile { text-decoration: none; }
   border-color: var(--accent);
   border-style: solid;
 }
+/* Duo queue: both members of a duo carry the accent edge. */
+.slot--duo {
+  border-left: 3px solid var(--accent);
+}
+.slot__duo {
+  font-size: var(--fs-label);
+  padding: 0 var(--sp-1);
+}
 .slot__avatar {
   width: 28px;
   height: 28px;

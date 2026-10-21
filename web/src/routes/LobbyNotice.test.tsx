@@ -55,4 +55,8 @@ describe('LobbyNotice', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
+  it('explains a duo partner who did not come back', () => {
+    render(<LobbyNotice notice={{ notReady: [{ steamid: 'x', name: 'Bob', avatar: null }], youWereReady: true, duoMissed: { steamid: 'x', name: 'Bob', avatar: null } }} refresh={() => {}} />);
+    expect(screen.getByText(/duo partner Bob/)).toBeTruthy();
+  });
 });

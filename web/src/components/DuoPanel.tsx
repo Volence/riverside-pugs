@@ -1,0 +1,45 @@
+import { useState } from 'preact/hooks';
+import { api, ApiError, type DuoView } from '../api';
+import { Panel } from './bits';
+
+/** Your duo and duo invites, above the queue (duo queue, Season 1). */
+export function DuoPanel({ duo, refresh }: { duo: DuoView; refresh: () => void }) {
+  const [error, setError] = useState('');
+  const act = async (fn: () => Promise<unknown>) => {
+    setError('');
+    try {
+      await fn();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong.');
+    }
+    refresh();
+  };
+  if (!duo.partner && duo.incoming.length === 0 && !duo.outgoing) return null;
+  const out = duo.outgoing;
+  return (
+    <Panel class="duopanel">
+      <p class="eyebrow">Duo</p>
+      {duo.partner && (
+        <p>
+          You are a duo with <strong>{duo.partner.name}</strong>. Either of you joining the queue brings the other,
+          and you always play on the same team.{' '}
+          <button type="button" class="btn btn--ghost btn--sm" onClick={() => act(api.duoEnd)}>End duo</button>
+        </p>
+      )}
+      {duo.incoming.map((i) => (
+        <p key={i.id}>
+          <strong>{i.from.name}</strong> wants to duo queue with you.{' '}
+          <button type="button" class="btn btn--sm" onClick={() => act(() => api.duoAccept(i.id))}>Accept</button>{' '}
+          <button type="button" class="btn btn--ghost btn--sm" onClick={() => act(() => api.duoDecline(i.id))}>Decline</button>
+        </p>
+      ))}
+      {out && (
+        <p>
+          Waiting for <strong>{out.to.name}</strong> to accept your duo invite.{' '}
+          <button type="button" class="btn btn--ghost btn--sm" onClick={() => act(() => api.duoCancel(out.id))}>Cancel</button>
+        </p>
+      )}
+      {error && <p class="error">{error}</p>}
+    </Panel>
+  );
+}
