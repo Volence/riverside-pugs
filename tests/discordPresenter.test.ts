@@ -342,3 +342,13 @@ describe('endorse flow payloads', () => {
     expect(p.content).toContain('b\\*ob');
   });
 });
+
+it('marks duo members on the queue card', () => {
+  const out = renderPanel({
+    publicUrl: 'https://x.test', size: 8, phase: null,
+    players: [{ name: 'a', discordId: null, sr: null, duo: true }, { name: 'b', discordId: null, sr: null, duo: true }, { name: 'c', discordId: null, sr: null }],
+  });
+  const desc = out.embeds[0].description ?? '';
+  expect(desc).toMatch(/a.*duo/);
+  expect(desc).not.toMatch(/c.*duo/);
+});

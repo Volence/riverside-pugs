@@ -348,13 +348,14 @@ export class DiscordSync {
     // 4. The queue-filling alert, before the panel so the panel still ends up
     //    last in the channel.
     const q = mm.publicQueue();
+    const inDuo = new Set(q.duos.flat());
     if (await this.maybeAlert(q.count)) posted = true;
 
     // 5. The panel, kept last in the channel.
     const panel = renderPanel({
       publicUrl: this.deps.publicUrl,
       size: QUEUE_SIZE,
-      players: q.players.map((p) => this.player(p.steamid)),
+      players: q.players.map((p) => ({ ...this.player(p.steamid), duo: inDuo.has(p.steamid) })),
       phase: q.phase,
       alertRoleId: getSetting(db, 'discord_pug_role_id') || undefined,
       sideGame: this.deps.sideGame?.() ?? null,

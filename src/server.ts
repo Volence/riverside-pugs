@@ -168,6 +168,7 @@ import { teamRoutes } from './routes/teams.js';
 import { eventRoutes } from './routes/events.js';
 import { keepRoutes } from './routes/keepTeam.js';
 import { handleTeamButton, TEAM_BUTTON_PREFIX } from './discord/teamButtons.js';
+import { handleDuoButton, DUO_BUTTON_PREFIX } from './discord/duoButtons.js';
 import { handleStandinButton } from './discord/standinButtons.js';
 import { handleKeepButton } from './discord/keepButtons.js';
 import { BookingRunner, TICK_MS as BOOKING_TICK_MS } from './bookings/runner.js';
@@ -2047,6 +2048,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         'ap:': (i) => handleAppealButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
         [MOD_CALL_PREFIX]: (i) => modCalls!.handleButton(i),
         [TEAM_BUTTON_PREFIX]: (i) => handleTeamButton({ db: deps.db, publicUrl: deps.config.publicUrl }, i),
+        [DUO_BUTTON_PREFIX]: (i) => handleDuoButton({ db: deps.db, matchmaker }, i),
         [STANDIN_BUTTON_PREFIX]: (i) => handleStandinButton({ db: deps.db, publicUrl: deps.config.publicUrl, standins: () => standinsRef }, i),
         [KEEP_BUTTON_PREFIX]: (i) => handleKeepButton({ db: deps.db, publicUrl: deps.config.publicUrl, notifier }, i),
       },

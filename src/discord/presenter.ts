@@ -29,6 +29,8 @@ export interface PlayerView {
    *  `name` (case-insensitively) and the mention speaks for itself. */
   discordName?: string | null;
   sr: number | null;
+  /** In a duo with someone else on this card. */
+  duo?: boolean;
 }
 
 /** Mention when linked (Discord shows their server nickname), with the Steam
@@ -71,7 +73,7 @@ export interface PanelView {
 
 export function renderPanel(v: PanelView): MessagePayload {
   const lines = v.players.length
-    ? v.players.map((p, i) => `\`${String(i + 1).padStart(2, ' ')}\` ${playerLabel(p)}`).join('\n')
+    ? v.players.map((p, i) => `\`${String(i + 1).padStart(2, ' ')}\` ${playerLabel(p)}${p.duo ? ' · duo' : ''}`).join('\n')
     : '_The queue is empty. Be the first in._';
   const status = v.phase === 'ready_check'
     ? '\nA queue just popped: ready check in progress.'
