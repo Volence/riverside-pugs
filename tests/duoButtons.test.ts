@@ -4,6 +4,7 @@ import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { partnerOf } from '../src/duos.js';
 import { handleDuoButton, DUO_BUTTON_PREFIX } from '../src/discord/duoButtons.js';
+import { banPlayer } from '../src/admin/players.js';
 
 const [A, B, C] = ['76561198000000301', '76561198000000302', '76561198000000303'];
 let db: DB;
@@ -36,6 +37,18 @@ describe('duo invite buttons', () => {
 
   it('anyone else is told it is not for them', async () => {
     expect(JSON.stringify((await press('802', 'a')).payload)).toMatch(/not for you/);
+    expect(partnerOf(db, A)).toBeNull();
+  });
+
+  it('an unlinked presser is told to link their account', async () => {
+    expect(JSON.stringify((await press('999', 'a')).payload)).toMatch(/Link this Discord account/);
+  });
+
+  it('a linked but banned presser is told they cannot duo, not to link', async () => {
+    banPlayer(db, B, 'admin', 'cheating', null);
+    const text = JSON.stringify((await press('801', 'a')).payload);
+    expect(text).toMatch(/You cannot duo right now\./);
+    expect(text).not.toMatch(/Link/);
     expect(partnerOf(db, A)).toBeNull();
   });
 
