@@ -291,7 +291,9 @@ export class Matchmaker {
     // A duo queues together or not at all.
     const partner = this.partner(steamid);
     if (partner) {
-      const theirs = this.joinBlock(partner);
+      // The joiner's own standing is the caller's check (requireActive); the
+      // partner's is ours, or a banned or held partner would ride along.
+      const theirs = inGoodStanding(this.db, partner) ? this.joinBlock(partner) : 'not an active player';
       if (theirs) return { ok: false, error: `your duo partner ${this.named(partner).name} cannot queue: ${theirs}` };
     }
     // Queueing again is moving on: the notice is about the pop they just
@@ -337,10 +339,10 @@ export class Matchmaker {
    * cancelled rather than naming people who did nothing wrong.
    */
   remove(steamid: string): void {
+    // A removed player's duo ends, idle or not; the partner carries on as a solo.
+    if (this.partner(steamid)) endDuoRow(this.db, steamid, 'system');
     const lobbyId = this.playerLobby.get(steamid);
     if (!lobbyId && !this.queue.has(steamid)) return;
-    // A removed player's duo ends; the partner carries on as a solo.
-    if (this.partner(steamid)) endDuoRow(this.db, steamid, 'system');
     this.sideOptIn.delete(steamid);
     this.queue.leave(steamid);
     if (lobbyId) {
@@ -448,6 +450,10 @@ export class Matchmaker {
     const inv = getDuoInvite(this.db, inviteId);
     if (!inv || inv.toId !== steamid) return { ok: false, error: 'that invite is no longer open' };
     const pair = [inv.fromId, inv.toId];
+    // Banned or held: no duo, whether or not either is queued.
+    for (const id of pair) {
+      if (!inGoodStanding(this.db, id)) return { ok: false, error: `${this.named(id).name} cannot duo right now` };
+    }
     for (const id of pair) {
       if (this.playerLobby.has(id) || this.hasOpenMatch(id)) {
         return { ok: false, error: `${this.named(id).name} is in a ready check or a match; try again after it` };
