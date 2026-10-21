@@ -20,7 +20,8 @@ export async function handleDuoButton(
   const inviteId = Number(rawId);
   if (!Number.isInteger(inviteId) || (choice !== 'a' && choice !== 'd')) return say('That button no longer does anything.');
   const player = playerByDiscordId(deps.db, i.userId);
-  if (!player || !inGoodStanding(deps.db, player.steamid)) return say('Link this Discord account to your Steam account on the site first.');
+  if (!player) return say('Link this Discord account to your Steam account on the site first.');
+  if (!inGoodStanding(deps.db, player.steamid)) return say('You cannot duo right now.');
   const inv = getDuoInvite(deps.db, inviteId);
   if (inv && inv.toId !== player.steamid) return say('That invite is not for you.');
   const r = choice === 'a'
