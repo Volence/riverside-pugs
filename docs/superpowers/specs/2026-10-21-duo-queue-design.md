@@ -17,9 +17,13 @@ trial: build it behind a switch, run it, then review how duos affect the game
 - The worry is two high players together beating a team that never felt it
   had a chance. Answer: a **sliding duo bonus** (section 5) that both
   balances teams and changes rating, bigger the higher the duo.
-- Switch: `duo_queue_enabled` (off / admins / everyone, same shape as
-  `scrims_enabled`). Off hides every duo surface and the queue treats any
-  existing duo as two solos. Nothing is deleted.
+- **Ships with Season 1 exactly** (owner 2026-10-21). Built on the `season1`
+  branch and gated by `seasonOneLive(db)` like requeue and end notes, so it
+  can deploy with the ~10-27 web deploy and stays invisible and unusable
+  until the 11-03 flip. Add a line to `docs/season1-launch-runbook.md`.
+- Kill switch: `duo_queue_enabled` (on / off, default on). Duos work only
+  when `seasonOneLive(db)` AND the switch is on. Off hides every duo surface
+  and the queue treats any existing duo as two solos. Nothing is deleted.
 
 Out of scope: 2v2/3v3 side games (duos ignored, partners may be split),
 drafts, scrims, tournaments.
@@ -65,10 +69,13 @@ Each duo member counts as `b` mu stronger than their rating:
 
 ```
 b = duo_bonus_min + (duo_bonus_max - duo_bonus_min) * pct
-pct = percentile of the pair's average season SR among players with a
-      completed PUG this season (0 = bottom, 1 = top)
+pct = percentile of the pair's average hidden rating (mu) among players
+      with a rating row this season (0 = bottom, 1 = top)
 ```
 
+- Hidden mu, not display SR: Season 1 hides SR for the first 5 games
+  (placement) and the soft reset keeps everyone's order, so mu is a sound
+  ranking from the first day while SR is not. The balancer already uses mu.
 - Two settings, `duo_bonus_min` and `duo_bonus_max` (mu units). Starting
   values come from the calibration in section 8, set before the switch goes on.
 - `b` is computed when the lobby completes and stored on `match_players`
@@ -129,7 +136,7 @@ the owner with the proposed numbers.
 
 ## 9. Trial review
 
-`scripts/duo-review.ts`, read-only, run at about 2 weeks for a first look and
+`scripts/duo-review.ts`, read-only, run at about 2 weeks after the 11-03 flip for a first look and
 again at 40 duo matches (or 4 weeks, whichever is later) for the keep/change
 decision. It reports, duo matches against non-duo matches over the same
 period:
@@ -146,6 +153,9 @@ period:
   (`queue_stints`), ready-fail rate for duos vs solos, how often a duo was
   skipped at a pop.
 - **Use:** duos formed, how long they last, site vs Discord invites.
+
+Baseline is Season 1 non-duo matches only (the new SR scale and placement
+change the numbers, so Season 0 is not a fair comparison).
 
 Output is a short report for the owner with a recommendation: keep, retune
 the bonus, or switch off.
