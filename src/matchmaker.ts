@@ -325,6 +325,17 @@ export class Matchmaker {
     this.changed();
   }
 
+  /** Staff take a player out of the queue. A duo still goes as a pair (one
+   *  left behind would queue half a duo), and the partner is told why. */
+  staffRemoveFromQueue(steamid: string): void {
+    const partner = this.partner(steamid);
+    if (partner && this.queue.has(partner)) {
+      const n = this.notices.get(partner);
+      this.notices.set(partner, { notReady: n?.notReady ?? [], youWereReady: n?.youWereReady ?? true, ...n, duoMissed: steamid });
+    }
+    this.leave(steamid);
+  }
+
   /**
    * Take a player out of matchmaking altogether: the queue, and any ready
    * check or campaign vote they are in. For a ban. leave() only ever knew
@@ -341,9 +352,13 @@ export class Matchmaker {
    */
   remove(steamid: string): void {
     // A removed player's duo ends, idle or not; the partner carries on as a solo.
-    if (this.partner(steamid)) endDuoRow(this.db, steamid, 'system');
+    const endedDuo = this.partner(steamid) !== null && endDuoRow(this.db, steamid, 'system').ok;
     const lobbyId = this.playerLobby.get(steamid);
-    if (!lobbyId && !this.queue.has(steamid)) return;
+    if (!lobbyId && !this.queue.has(steamid)) {
+      // Idle, but the partner's page still shows the duo.
+      if (endedDuo) this.changed();
+      return;
+    }
     this.sideOptIn.delete(steamid);
     this.queue.leave(steamid);
     if (lobbyId) {

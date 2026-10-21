@@ -188,6 +188,35 @@ describe('standing and staff action on a duo', () => {
     expect(partnerOf(db, B)).toBeNull();
   });
 
+  // The partner's page shows the duo, so ending it must reach them even
+  // though nobody's queue or lobby changed.
+  it('removing an idle duo member tells every surface', () => {
+    duo();
+    let changes = 0;
+    mm.on({ stateChanged: () => { changes++; } });
+    mm.remove(A);
+    expect(changes).toBe(1);
+  });
+
+  it('staff taking a duo member out of the queue takes both and tells the partner', () => {
+    duo();
+    mm.join(A);
+    mm.join(IDS[2]);
+    mm.staffRemoveFromQueue(A);
+    expect(mm.publicQueue().players.map((p) => p.steamid)).toEqual([IDS[2]]);
+    expect(partnerOf(db, B)).toBe(A);
+    expect(mm.stateFor(B).lobbyNotice!.duoMissed!.steamid).toBe(A);
+    expect(mm.stateFor(A).lobbyNotice).toBeNull();
+  });
+
+  it('staff taking a solo out of the queue leaves no notice', () => {
+    mm.join(IDS[2]);
+    mm.join(IDS[3]);
+    mm.staffRemoveFromQueue(IDS[2]);
+    expect(mm.publicQueue().players.map((p) => p.steamid)).toEqual([IDS[3]]);
+    expect(mm.stateFor(IDS[3]).lobbyNotice).toBeNull();
+  });
+
   it('a duo that readied goes back to the front together when someone else misses', () => {
     duo();
     mm.join(A);
