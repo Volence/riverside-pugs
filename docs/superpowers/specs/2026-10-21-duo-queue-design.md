@@ -55,10 +55,9 @@ drafts, scrims, tournaments.
   at the front; the next solo fills the slot. A duo never falls behind people
   who joined after it.
 - When there is no solo behind it (the usual case: a duo joining behind 7
-  solos makes 9), the pop goes at once with the duo, and the most recently
-  joined of the 7 solos stays at the front for the next pop (my call
-  2026-10-21, owner to confirm; the alternative is to hold the pop until a
-  10th player joins).
+  solos makes 9), the pop waits for one more player; the duo never bumps a
+  solo who queued before it (owner 2026-10-21: a solo who waited 30 minutes
+  must not wait through a second fill because a duo just joined).
 - Queue display shows the pair bracketed together (site and Discord card).
 
 ## 4. Ready check
