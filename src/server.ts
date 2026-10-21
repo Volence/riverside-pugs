@@ -143,6 +143,7 @@ import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
 import { pruneLiveFilesSafely } from './replayPush.js';
 import { apiRoutes } from './routes/api.js';
+import { duoRoutes } from './routes/duo.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { modCallRoutes } from './routes/modCalls.js';
 import { serverChatRoutes } from './routes/serverChat.js';
@@ -2117,6 +2118,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db, matchmaker, adminSteamIds: deps.config.adminSteamIds, broadcast: (e) => hub.broadcast(e),
     requeue: (matchId, steamid, on) => onRequeueRequest(matchId, steamid, on, null),
   });
+  await app.register(duoRoutes, { db: deps.db, matchmaker });
   await app.register(ticketRoutes, {
     db: deps.db, matchmaker, broadcast: (e) => hub.broadcast(e), adminSteamIds: deps.config.adminSteamIds,
     guildId: deps.config.discord?.guildId ?? null,
