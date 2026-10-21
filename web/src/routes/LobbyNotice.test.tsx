@@ -55,9 +55,18 @@ describe('LobbyNotice', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
-  it('explains a duo partner who did not come back', () => {
+  it('says the duo partner did not ready up when that is why', () => {
     render(<LobbyNotice notice={{ notReady: [{ steamid: 'x', name: 'Bob', avatar: null }], youWereReady: true, duoMissed: { steamid: 'x', name: 'Bob', avatar: null } }} refresh={() => {}} />);
-    expect(screen.getByText(/duo partner Bob/)).toBeTruthy();
+    const body = document.body.textContent ?? '';
+    expect(body).toMatch(/Your duo partner Bob did not ready up, so you were taken out of the queue too\./);
+    expect(body).not.toMatch(/did not go back/);
+  });
+
+  it('keeps the did-not-go-back wording when the partner readied but someone else missed', () => {
+    render(<LobbyNotice notice={{ notReady: [p('cal')], youWereReady: true, duoMissed: p('bobby') }} refresh={() => {}} />);
+    const body = document.body.textContent ?? '';
+    expect(body).toMatch(/duo partner bobby did not go back in the queue/);
+    expect(body).not.toMatch(/did not ready up/);
   });
 
   // The same notice follows an aborted match, where no ready check ran.
