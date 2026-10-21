@@ -129,15 +129,25 @@ describe('duos in the queue', () => {
     expect(q.list()).toEqual(['7']);
   });
 
-  it('still pops exactly 8 when greedy order comes up one short', () => {
+  it('takes nothing when only a duo is left for the last slot, and the queue is untouched', () => {
     const q = new Queue();
-    fill(q, ['s', 'a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'd1', 'd2']);
-    const got = q.takeBatch(8, pairs(['a1', 'a2'], ['b1', 'b2'], ['c1', 'c2'], ['d1', 'd2']));
-    expect([...got].sort()).toEqual(['a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'd1', 'd2']);
-    expect(q.list()).toEqual(['s']);
+    const order = ['1', '2', '3', '4', '5', '6', '7', 'd1', 'd2'];
+    fill(q, order);
+    expect(q.takeBatch(8, pairs(['d1', 'd2']))).toEqual([]);
+    expect(q.list()).toEqual(order);
   });
 
-  it('counts the duos it passed over, but not one swapped in', () => {
+  it('holds with one solo ahead of four duos, then pops once another solo joins', () => {
+    const q = new Queue();
+    fill(q, ['s', 'a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'd1', 'd2']);
+    const p = pairs(['a1', 'a2'], ['b1', 'b2'], ['c1', 'c2'], ['d1', 'd2']);
+    expect(q.takeBatch(8, p)).toEqual([]);
+    q.join('t');
+    expect(q.takeBatch(8, p)).toEqual(['s', 'a1', 'a2', 'b1', 'b2', 'c1', 'c2', 't']);
+    expect(q.list()).toEqual(['d1', 'd2']);
+  });
+
+  it('counts the duos it passed over at a pop, none when the pop is held', () => {
     const q = new Queue();
     fill(q, ['1', '2', '3', '4', '5', '6', '7', 'd1', 'd2', '8']);
     q.takeBatch(8, pairs(['d1', 'd2']));
