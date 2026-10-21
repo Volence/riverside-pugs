@@ -15,7 +15,11 @@ import { SrDelta } from './bits';
  */
 /** A plain name, or a name with the SR it moved in this match. A null delta
  *  means the rating never touched them, and shows nothing rather than "+0". */
-export type VersusName = string | { name: string; srDelta: number | null; placement?: GamePhase | null; placedRank?: string | null };
+export type VersusName = string | {
+  name: string; srDelta: number | null; placement?: GamePhase | null; placedRank?: string | null;
+  /** Queued as a duo with someone on this roster: a small Duo tag. */
+  duo?: boolean;
+};
 
 function names(team: VersusName[]) {
   return team.map((n, i) => {
@@ -23,10 +27,12 @@ function names(team: VersusName[]) {
     const delta = typeof n === 'string' ? null : n.srDelta;
     const placement = typeof n === 'string' ? null : n.placement ?? null;
     const placedRank = typeof n === 'string' ? null : n.placedRank ?? null;
+    const duo = typeof n !== 'string' && n.duo === true;
     return (
       <Fragment key={i}>
         {i > 0 && ' · '}
         {name}
+        {duo && <span class="titletag duotag">Duo</span>}
         {(delta !== null || placement) && <> <SrDelta value={delta} placement={placement} placedRank={placedRank} /></>}
       </Fragment>
     );

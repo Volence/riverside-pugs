@@ -440,6 +440,9 @@ export interface MatchPlayerStats {
   stats: Record<string, number>;
   /** The endorsement title they have earned, if any. */
   title?: EndorseKind | null;
+  /** Their duo partner's steamid when they queued as a duo (src/duos.ts),
+   *  else null. Optional for an older server. */
+  duoPartner?: string | null;
 }
 
 export interface StatDef {
