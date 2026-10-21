@@ -359,7 +359,10 @@ export function LobbyNotice(
             : notice.duoMissed && notice.notReady.length === 0 ? 'Out of the queue'
             : 'Ready check failed'}</h3>
           <p>
-            {notice.duoMissed ? (
+            {notice.duoMissed && notice.notReady.some((p) => p.steamid === notice.duoMissed!.steamid) ? (
+              <>Your duo partner {notice.duoMissed.name} did not ready up, so you were taken out of the queue too.
+                Join again when you are both ready.</>
+            ) : notice.duoMissed ? (
               <>Your duo partner {notice.duoMissed.name} did not go back in the queue, so you were taken out too.
                 Join again when you are both ready.</>
             ) : notice.cancelled ? (
