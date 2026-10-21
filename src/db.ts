@@ -1632,6 +1632,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   practice_max_leases: '2',
   sidegames_enabled: '0',
   sidegames_min_players: '4',
+  duo_queue_enabled: '1',
+  duo_bonus_min_sr: '50',
+  duo_bonus_max_sr: '200',
   // Pick a match's server by the players' measured ping (src/serverPick.ts).
   // Off by default: with it off, the admin-set pick order alone decides.
   server_pick_by_ping: '0',
@@ -2968,6 +2971,39 @@ export function openDb(path: string): DB {
     );
     CREATE INDEX IF NOT EXISTS news_posts_published ON news_posts (published_at);
   `);
+  db.exec(`
+    -- Duo queue (docs/superpowers/specs/2026-10-21-duo-queue-design.md). Two
+    -- players who always queue and play on the same team, src/duos.ts. A duo
+    -- is open while ended_at IS NULL; a player is in at most one, enforced in
+    -- code inside the accepting transaction.
+    CREATE TABLE IF NOT EXISTS duos (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_a   TEXT NOT NULL,
+      player_b   TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      ended_at   TEXT,
+      ended_by   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS duos_open_a ON duos (player_a) WHERE ended_at IS NULL;
+    CREATE INDEX IF NOT EXISTS duos_open_b ON duos (player_b) WHERE ended_at IS NULL;
+    -- outcome: accepted | declined | cancelled | replaced | void. An open
+    -- invite is resolved_at IS NULL and younger than DUO_INVITE_MS.
+    CREATE TABLE IF NOT EXISTS duo_invites (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_id     TEXT NOT NULL,
+      to_id       TEXT NOT NULL,
+      source      TEXT NOT NULL CHECK (source IN ('site','discord')),
+      created_at  TEXT NOT NULL,
+      resolved_at TEXT,
+      outcome     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS duo_invites_open_to ON duo_invites (to_id) WHERE resolved_at IS NULL;
+  `);
+  // Who a player was duoed with in this match and the bonus (mu) the
+  // balancer and the rating used. Stored so a season recompute replays the
+  // same number after the settings change.
+  ensureColumn(db, 'match_players', 'duo_partner', 'TEXT');
+  ensureColumn(db, 'match_players', 'duo_bonus', 'REAL');
 
   seed(db);
   return db;
