@@ -65,13 +65,13 @@ describe('playerWeek', () => {
 
 describe('playerWeekHistory', () => {
   it('groups by the Monday-noon week and lists frozen awards won, not shame', () => {
-    seedMatch(db, { endedAt: '2026-09-22 10:00:00', lines: [{ id: P[0], team: 'a', fixed: { si_damage: 500, ff_dealt: 90 }, stats: { skeets: 2 } }] });
+    seedMatch(db, { endedAt: '2026-09-22 10:00:00', lines: [{ id: P[0], team: 'a', fixed: { si_damage: 500, common_kills: 40, ff_dealt: 90 }, stats: { skeets: 2 } }] });
     // Monday 11:00 UTC is still the week before (the week turns at noon).
     seedMatch(db, { endedAt: '2026-09-28 11:00:00', lines: [{ id: P[0], team: 'a', stats: { skeets: 1 } }] });
     freezeWeek(db, '2026-09-21');
     const rows = playerWeekHistory(db, P[0]);
     expect(rows.map((r) => [r.week, r.games, r.skeets, r.live])).toEqual([[W, 5, 15, true], ['2026-09-21', 2, 3, false]]);
-    expect(rows[1].siDamage).toBe(500);
+    expect(rows[1].commonKills).toBe(40);
     expect(rows[1].awards.some((a) => a.key === 'skeets' && a.kind === 'total')).toBe(true);
     expect(rows[1].awards.some((a) => a.key === 'friendly_fire')).toBe(false);
     expect(rows[0].awards).toEqual([]);

@@ -10,7 +10,7 @@ const { ProfileWeekly } = await import('./ProfileWeekly');
 
 afterEach(cleanup);
 
-const row = (week: string, extra: object = {}) => ({ week, live: false, games: 6, skeets: 12, siDamage: 30000, damageAsSi: 2500, awards: [], ...extra });
+const row = (week: string, extra: object = {}) => ({ week, live: false, games: 6, skeets: 12, commonKills: 900, damageAsSi: 2500, awards: [], ...extra });
 
 describe('ProfileWeekly', () => {
   it('shows this week\'s best boards and the weeks played, each linking to its board', async () => {
@@ -50,5 +50,14 @@ describe('ProfileWeekly', () => {
     const { container } = render(<ProfileWeekly steamid="76561199000000001" />);
     await new Promise((r) => setTimeout(r, 20));
     expect(container.textContent).toBe('');
+  });
+
+  it('leaves the awards column out when no week has an award', async () => {
+    mockApi.weeklyPlayer.mockResolvedValue({ week: '2026-10-19', games: 0, minGames: 5, qualifies: false, players: 41, stats: [] });
+    mockApi.weeklyPlayerHistory.mockResolvedValue({ weeks: [row('2026-10-12'), row('2026-10-05')] });
+    const { container } = render(<ProfileWeekly steamid="1" />);
+    await screen.findByText('Commons');
+    expect(container.querySelector('.pweek__awards')).toBeNull();
+    expect([...container.querySelectorAll('th')].map((t) => t.textContent)).not.toContain('Awards');
   });
 });

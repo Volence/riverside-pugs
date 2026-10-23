@@ -56,7 +56,7 @@ export function playerWeek(db: DB, week: string, steamid: string): PlayerWeek {
 /** The profile's week rows: games, a few headline stats, and the awards won. */
 export interface PlayerWeekRow {
   week: string; live: boolean; games: number;
-  skeets: number; siDamage: number; damageAsSi: number;
+  skeets: number; commonKills: number; damageAsSi: number;
   awards: { key: string; label: string; kind: 'avg' | 'total' | 'single' }[];
 }
 
@@ -64,10 +64,10 @@ const HEADLINE_STATS = ['skeets', 'damage_as_si'];
 
 export function playerWeekHistory(db: DB, steamid: string, now: Date = new Date()): PlayerWeekRow[] {
   const matches = db.prepare(
-    `SELECT m.id, m.ended_at, mp.si_damage FROM matches m
+    `SELECT m.id, m.ended_at, mp.common_kills FROM matches m
      JOIN match_players mp ON mp.match_id = m.id AND mp.player_id = ?
      WHERE ${completedPug('m')} AND m.voided_at IS NULL AND m.ended_at IS NOT NULL`,
-  ).all(steamid) as { id: number; ended_at: string; si_damage: number }[];
+  ).all(steamid) as { id: number; ended_at: string; common_kills: number }[];
   if (!matches.length) return [];
   const statRows = db.prepare(
     `SELECT match_id, stat, value FROM match_player_stats
@@ -80,9 +80,9 @@ export function playerWeekHistory(db: DB, steamid: string, now: Date = new Date(
   for (const m of matches) {
     // ended_at is "YYYY-MM-DD HH:MM:SS" UTC; the week turns Monday 12:00 UTC.
     const week = weekStartOf(new Date(`${m.ended_at.replace(' ', 'T')}Z`));
-    const w = weeks.get(week) ?? { week, live: week === current, games: 0, skeets: 0, siDamage: 0, damageAsSi: 0, awards: [] };
+    const w = weeks.get(week) ?? { week, live: week === current, games: 0, skeets: 0, commonKills: 0, damageAsSi: 0, awards: [] };
     const s = byMatch.get(m.id) ?? {};
-    w.games++; w.siDamage += m.si_damage ?? 0; w.skeets += s.skeets ?? 0; w.damageAsSi += s.damage_as_si ?? 0;
+    w.games++; w.commonKills += m.common_kills ?? 0; w.skeets += s.skeets ?? 0; w.damageAsSi += s.damage_as_si ?? 0;
     weeks.set(week, w);
   }
   for (const w of weeks.values()) {

@@ -20,7 +20,7 @@ function bestBoards(stats: WeeklyPlayerStat[]): WeeklyPlayerStat[] {
     .slice(0, STATS_SHOWN);
 }
 
-function WeekRow({ r }: { r: WeeklyHistoryRow }) {
+function WeekRow({ r, awards }: { r: WeeklyHistoryRow; awards: boolean }) {
   return (
     <tr>
       <td>
@@ -29,15 +29,17 @@ function WeekRow({ r }: { r: WeeklyHistoryRow }) {
       </td>
       <td class="num">{r.games}</td>
       <td class="num">{n0(r.skeets)}</td>
-      <td class="num pweek__opt">{n0(r.siDamage)}</td>
+      <td class="num pweek__opt">{n0(r.commonKills)}</td>
       <td class="num pweek__opt">{n0(r.damageAsSi)}</td>
-      <td class="pweek__awards">
-        {r.awards.map((a) => (
-          <span class="pweek__award" key={`${a.key}:${a.kind}`}>
-            {a.kind === 'avg' ? `${a.label} (avg)` : a.kind === 'total' ? `${a.label} (total)` : a.label}
-          </span>
-        ))}
-      </td>
+      {awards && (
+        <td class="pweek__awards">
+          {r.awards.map((a) => (
+            <span class="pweek__award" key={`${a.key}:${a.kind}`}>
+              {a.kind === 'avg' ? `${a.label} (avg)` : a.kind === 'total' ? `${a.label} (total)` : a.label}
+            </span>
+          ))}
+        </td>
+      )}
     </tr>
   );
 }
@@ -56,6 +58,8 @@ export function ProfileWeekly({ steamid }: { steamid: string }) {
   if ((now?.games ?? 0) === 0 && !weeks.length) return null;
   const best = now && now.games > 0 ? bestBoards(now.stats) : [];
   const shown = all ? weeks : weeks.slice(0, WEEKS_SHOWN);
+  // Most players never win a weekly award; an always-empty column is noise.
+  const anyAwards = weeks.some((w) => w.awards.length > 0);
   return (
     <section class="panel pweek" aria-label="Weekly">
       <h3>Weekly</h3>
@@ -87,12 +91,12 @@ export function ProfileWeekly({ steamid }: { steamid: string }) {
                 <th>Week</th>
                 <th class="num">Games</th>
                 <th class="num">Skeets</th>
-                <th class="num pweek__opt">SI dmg</th>
+                <th class="num pweek__opt">Commons</th>
                 <th class="num pweek__opt">Dmg as SI</th>
-                <th>Awards</th>
+                {anyAwards && <th>Awards</th>}
               </tr>
             </thead>
-            <tbody>{shown.map((r) => <WeekRow key={r.week} r={r} />)}</tbody>
+            <tbody>{shown.map((r) => <WeekRow key={r.week} r={r} awards={anyAwards} />)}</tbody>
           </table>
         </div>
       )}

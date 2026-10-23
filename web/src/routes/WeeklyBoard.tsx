@@ -167,7 +167,12 @@ export function WeeklyBoard({ week, onWeek, me }: { week?: string; onWeek: (w: s
   // Monday IS the current week, so treat it as no week at all (live) rather
   // than asking the API for a week id that no longer means anything special.
   const effectiveWeek = list && week && week === list.current ? undefined : week;
-  const { data, error } = useFetch((s) => api.weekly(s, effectiveWeek), [effectiveWeek]);
+  // One quiet retry: a request that lands during a deploy's two second restart
+  // fails once and would otherwise strand the reader on "Could not load".
+  const { data, error, reload } = useFetch(
+    (s) => api.weekly(s, effectiveWeek).catch(() => new Promise<never>((_, reject) => setTimeout(reject, 1500)).catch(() => api.weekly(s, effectiveWeek))),
+    [effectiveWeek],
+  );
   // The signed-in viewer's own standing on every board, for the "You" rows.
   const { data: mine } = useFetch(
     (s) => (me ? api.weeklyPlayer(me, s, effectiveWeek).catch(() => null) : Promise.resolve(null)),
@@ -191,7 +196,10 @@ export function WeeklyBoard({ week, onWeek, me }: { week?: string; onWeek: (w: s
     return (
       <div class="weekly">
         <div class="weekly__bar">{picker}</div>
-        <Empty>Could not load this week.</Empty>
+        <Empty>
+          Could not load this week.{' '}
+          <button type="button" class="btn btn--ghost btn--sm" onClick={reload}>Try again</button>
+        </Empty>
       </div>
     );
   }
