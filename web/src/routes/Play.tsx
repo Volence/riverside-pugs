@@ -575,7 +575,14 @@ function ReadyCheck(
       >
         {iAmReady ? `Ready, waiting for ${lobby.players.length - lobby.ready.length}` : 'Ready'}
       </button>
-      {!iAmReady && readyBlock && <p class="ready-notice">{READY_BLOCK_NOTICE[readyBlock]}</p>}
+      {!iAmReady && readyBlock && (
+        <p class="ready-notice">
+          {READY_BLOCK_NOTICE[readyBlock]}{' '}
+          {/* Same escape hatch as the queue block: joining voice normally
+              refreshes on its own, but the bot can miss it. */}
+          <button class="chip" type="button" onClick={refresh}>Check again</button>
+        </p>
+      )}
     </Panel>
   );
 }

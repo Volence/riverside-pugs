@@ -304,6 +304,14 @@ export interface FinishRetryOpts {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** Whether a Discord user joining voice is worth a 'refresh': only when they
+ *  are linked to someone in a lobby right now, whose Ready button the voice
+ *  gate may be holding. Everyone else's voice traffic wakes nobody. */
+export function voiceJoinWakes(db: DB, lobbyMembers: readonly string[], userId: string): boolean {
+  const p = playerByDiscordId(db, userId);
+  return p !== undefined && lobbyMembers.includes(p.steamid);
+}
+
 export async function finishWithRetry(
   db: DB, orchestrator: RealOrchestrator, matchId: number, releaser: ServerReleaser,
   opts: FinishRetryOpts = {},
@@ -1914,6 +1922,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   presence.onLeave((userId) => {
     const p = playerByDiscordId(deps.db, userId);
     if (p && matchmaker.readyBlock(p.steamid)) matchmaker.unready(p.steamid);
+  });
+  // The other direction: someone held at Ready by the voice gate who joins
+  // voice should see the button come alive without reloading. Only for a
+  // lobby member, so ordinary voice traffic wakes nobody.
+  presence.onJoin((userId) => {
+    if (voiceJoinWakes(deps.db, matchmaker.lobbyMembers(), userId)) hub.broadcast('refresh');
   });
   if (botEnabled(deps.config)) {
     startBot({
