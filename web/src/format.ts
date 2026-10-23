@@ -1,4 +1,5 @@
 import type { MatchResult, Winner } from './api';
+import { withNetDamageAsSi } from '../../src/siDamage';
 
 export const CAMPAIGN_NAMES: Record<string, string> = {
   no_mercy: 'No Mercy',
@@ -153,7 +154,7 @@ export function secondsLeft(deadline: number, now: number = Date.now()): number 
  *  src/statKeys.ts rather than importing it, because web/ cannot import
  *  server code. Kept here so MatchDetail and Profile share one copy. */
 export const STAT_LABELS: Record<string, string> = {
-  skeets: 'Skeets', team_skeets: 'Team', skeets_hurt: 'Chip',
+  skeets: 'Skeets', team_skeets: 'Team skeets', skeets_hurt: 'Chip',
   skeet_assists: 'Assists', skeets_shotgun: 'Shotgun skeets',
   skeets_sniper: 'Sniper skeets', skeets_melee: 'Melee skeets',
   deadstops: 'Deadstops', boomer_pops: 'Boomer pops', crowns: 'Crowns',
@@ -462,9 +463,13 @@ export function fmtBytes(bytes: number): string {
  * A rate with a zero denominator is ABSENT, not zero. Nobody has played boomer
  * yet is a different fact from played boomer and landed nothing, and the table
  * renders absent as "n/a".
+ *
+ * Damage as SI comes out net of what only drained incapped survivors
+ * (src/siDamage.ts, owner 2026-10-23). Call this once per raw bag from the
+ * API: the net figure is not idempotent.
  */
 export function deriveLiveStats(stats: Record<string, number>): Record<string, number> {
-  const out = { ...stats };
+  const out = withNetDamageAsSi(stats);
   // successes/attempts, exactly as l4dcompstats prints it, so the site and
   // the console never disagree. Uses boom_successes (once per boomer life),
   // NOT biles_landed (once per vomit) and not the per-survivor counters.
@@ -721,6 +726,39 @@ export const FEATURED_STAT_KEYS: readonly string[] = [
 
 export interface StatLeader { steamid: string; name: string; value: number }
 
+/** Games before a per-game stat ranks on the leaderboard or earns a leader
+ *  card (owner, 2026-10-23). Fallback only: the server sends its
+ *  standing_min_games, the same gate as the profile's badges. */
+export const STAT_MIN_GAMES = 10;
+
+/** How the leaderboard's stat columns and cards read: per game (default,
+ *  owner 2026-10-23) or season totals. */
+export type StatMode = 'avg' | 'total';
+
+/**
+ * One leaderboard row's figure for a stat.
+ *
+ * Totals are the raw season sum. Per game divides by the completed PUGs the
+ * sum came from, and is null (absent: no rank, sorts last) for anyone under
+ * `minGames`, since three lucky games divided by three tops any per-game
+ * board. Absent too when the stat itself is.
+ */
+export function statFigure(
+  r: { games: number; statGames?: number; stats?: Record<string, number> },
+  key: string, mode: StatMode, minGames = STAT_MIN_GAMES,
+): number | null {
+  const v = r.stats?.[key];
+  if (v === undefined) return null;
+  if (mode === 'total') return v;
+  const games = r.statGames ?? r.games;
+  return games >= minGames && games > 0 ? v / games : null;
+}
+
+/** A per-game figure: one decimal under 10 (1.4 skeets), whole above (812). */
+export function fmtPerGame(v: number): string {
+  return Math.abs(v) < 10 ? (Math.round(v * 10) / 10).toFixed(1) : Math.round(v).toLocaleString();
+}
+
 /**
  * Top `limit` players for one stat, from rows already loaded.
  *
@@ -733,13 +771,16 @@ export interface StatLeader { steamid: string; name: string; value: number }
  * Players with no value, or zero, are excluded rather than filling the podium:
  * "third best, with none" is not a standing.
  */
-export function statLeaders(
-  rows: { steamid: string; name: string; stats?: Record<string, number> }[],
+export function statLeaders<R extends { steamid: string; name: string; stats?: Record<string, number> }>(
+  rows: R[],
   key: string,
   limit = 3,
+  /** The figure to rank by; the raw total unless given. Null or undefined
+   *  leaves the row out (under the per-game minimum, say). */
+  value: (r: R) => number | null | undefined = (r) => r.stats?.[key],
 ): StatLeader[] {
   return rows
-    .map((r) => ({ steamid: r.steamid, name: r.name, value: r.stats?.[key] ?? 0 }))
+    .map((r) => ({ steamid: r.steamid, name: r.name, value: value(r) ?? 0 }))
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
     .slice(0, limit);

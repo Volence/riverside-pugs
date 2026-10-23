@@ -259,11 +259,16 @@ export interface CastPlayer {
 
 export type CastRole = 'captain' | 'cocaptain' | 'member';
 
-/** Career PUG numbers for the lineup cards (completed, unvoided PUGs),
- *  from the owner's stat set (2026-10-02): skeets, DPs, boomer %. */
+/** PUG numbers for the lineup cards (completed, unvoided PUGs), from the
+ *  owner's stat set (2026-10-02): skeets, DPs, boomer %. This season's, or
+ *  the career's for a player with no PUG this season yet; `scope` names
+ *  which, and the card shows it. */
 export interface CastCareer {
+  /** The season's name ("Season 1"), or "Career". */
+  scope: string;
   matches: number; wins: number; losses: number;
-  /** skeets + team_skeets: every skeet, all weapons, counted once. */
+  /** Solo skeets (the `skeets` stat), as "Skeets" means everywhere players
+   *  compare themselves (owner, 2026-10-23). Team skeets are not added. */
   skeets: number;
   /** dps_landed: damage pounces. */
   dps: number;
@@ -271,12 +276,13 @@ export interface CastCareer {
   boomerRate: number | null;
 }
 
-/** The skeet total the overlays show: solo plus team skeets. The weapon
- *  subsets are breakdowns of these two and are never added on top (see the
- *  skeet ruleset in src/statKeys.ts). */
-export function skeetTotal(stats: Record<string, number>): number | null {
-  if (stats.skeets === undefined && stats.team_skeets === undefined) return null;
-  return (stats.skeets ?? 0) + (stats.team_skeets ?? 0);
+/** The skeet count the overlays show: solo skeets only, the `skeets` stat
+ *  (owner, 2026-10-23: "Skeets" means solo wherever players compare
+ *  themselves; team skeets are their own stat). Null when not recorded. */
+export function soloSkeets(stats: Record<string, number>): number | null {
+  if (stats.skeets !== undefined) return stats.skeets;
+  // Skeets were recorded (team ones), just no solo one: that is 0, not "-".
+  return stats.team_skeets !== undefined ? 0 : null;
 }
 
 /** Boomer % as the site computes it (src/standings.ts): booms landed per
@@ -397,7 +403,9 @@ export interface CastInfected {
   ghost: boolean;
   alive: boolean;
   health: number;
-  /** Damage dealt as SI this half, from LIVEHUD; null without it. */
+  /** Damage dealt as SI this half, from LIVEHUD; null without it. GROSS:
+   *  it includes damage to incapped survivors, unlike Damage as SI on the
+   *  site (src/siDamage.ts), so the HUD labels it Dmg, never Damage as SI. */
   dmg: number | null;
 }
 

@@ -137,16 +137,25 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   const { player, rating, totals, matches: recent, statTotals, standings } = data;
   const url = `${deps.publicUrl}/player/${player.steamid}`;
   const games = totals.games;
+  // Every number in this card is the current season's (owner, 2026-10-23),
+  // and the card says so; the career is one click away on the site.
+  const seasonName = data.season?.name ?? 'This season';
   const lines: string[] = [];
-  if (rating) {
+  // Nothing this season, not even a rated abandon loss.
+  if (games === 0 && (rating?.wins ?? 0) + (rating?.losses ?? 0) === 0) {
+    // Day one of a season (or a player back after a break): no wall of zeros.
+    const career = (profileData(deps.db, who.steamid, null, { kind: 'career' })?.totals.games) ?? 0;
+    lines.push(`**${seasonName}:** no matches yet${data.season?.placing ? `. Placing 0/${data.season.placing.of}` : ''}.`);
+    if (career > 0) lines.push(`${career} career ${career === 1 ? 'match' : 'matches'} on the full profile.`);
+  } else if (rating && data.season) {
+    const season = data.season;
     const decided = rating.wins + rating.losses;
     const wr = decided > 0 ? ` (${Math.round((rating.wins / decided) * 100)}%)` : '';
-    const season = data.season;
     const head = season.placing ? `**Placing ${season.placing.played}/${season.placing.of}**`
       : `${season.rank ? `**${season.rank.name}** · ` : ''}**SR ${rating.sr}**${season.top10 ? ' · Top 10' : ''}`;
-    lines.push(`${head} · ${rating.wins}W ${rating.losses}L${wr} · ${games} matches`);
+    lines.push(`**${seasonName}:** ${head} · ${rating.wins}W ${rating.losses}L${wr} · ${games} matches`);
   } else {
-    lines.push(`No rated matches yet · ${games} matches`);
+    lines.push(`**${seasonName}:** no rated matches yet · ${games} matches`);
   }
   const per = (n: number) => (games > 0 ? Math.round(n / games) : null);
   const fields: { name: string; value: string; inline?: boolean }[] = [];
@@ -163,14 +172,14 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
     .sort(([, a], [, b]) => a.rank - b.rank)
     .slice(0, 6)
     .map(([k, s]) => `#${s.rank} ${standingLabel(k)}`);
-  if (top.length) fields.push({ name: 'Top 5 this season', value: top.join('\n') });
+  if (top.length) fields.push({ name: `Top 5 in ${seasonName}`, value: top.join('\n') });
 
   const recentLines = recent.slice(0, 5).map((m) => {
     const r = m.result === 'win' ? 'W' : m.result === 'loss' ? 'L' : 'D';
     const sr = m.srDelta ? ` (${m.srDelta > 0 ? '+' : ''}${m.srDelta})` : '';
     return `\`${r}\` [${campaign(deps.db, m.campaign)} ${m.teamAScore}-${m.teamBScore}](${deps.publicUrl}/match/${m.id})${sr}`;
   });
-  if (recentLines.length) fields.push({ name: 'Recent matches', value: recentLines.join('\n') });
+  if (recentLines.length) fields.push({ name: `Recent matches in ${seasonName}`, value: recentLines.join('\n') });
 
   return pub({
     embeds: [{ title: plainLabelEscaped(identityOf(deps.db, player.steamid)), url, color: COLOR, description: lines.join('\n'), fields }],
@@ -202,7 +211,9 @@ function matches(deps: CommandDeps, i: Cmd): InteractionReply {
   if (i.options.user) {
     const who = target(deps, i);
     if ('reply' in who) return who.reply;
-    const data = profileData(deps.db, who.steamid, null)!;
+    // A list of matches, not a set of figures: the latest across every
+    // season, so it is not empty on the first day of one.
+    const data = profileData(deps.db, who.steamid, null, { kind: 'career' })!;
     title = `Recent matches · ${plainLabelEscaped(identityOf(deps.db, data.player.steamid))}`;
     rows = data.matches.slice(0, 5).map((m) => ({
       id: m.id, campaign: m.campaign, teamAScore: m.teamAScore, teamBScore: m.teamBScore,

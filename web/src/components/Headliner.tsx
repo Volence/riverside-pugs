@@ -15,7 +15,7 @@ import { TitleTag } from './TitleTag';
 export function Headliner(
   {
     eyebrow, name, rating, delta, stats, avatar, avatarHref,
-    pronouns, countryCode, countryLabel, countryFlag, bio, title, aka, badges, placing, rankSlot,
+    pronouns, countryCode, countryLabel, countryFlag, bio, title, aka, badges, placing, rankSlot, unratedText,
   }: {
     eyebrow: string;
     name: string;
@@ -44,6 +44,9 @@ export function Headliner(
     placing?: { played: number; of: number } | null;
     /** Beside the SR: the season rank badge, Top 10, progress. */
     rankSlot?: ComponentChildren;
+    /** Said in place of a null rating; "Unrated this season" unless given
+     *  (the profile names the season, or says it is a career view). */
+    unratedText?: string;
   },
 ) {
   const hasIdentity = Boolean(countryFlag || pronouns);
@@ -91,7 +94,7 @@ export function Headliner(
         {placing
           ? <span class="headliner__unrated">{`Placing ${placing.played}/${placing.of}`}</span>
           : rating === null
-            ? <span class="headliner__unrated">Unrated this season</span>
+            ? <span class="headliner__unrated">{unratedText ?? 'Unrated this season'}</span>
             : <span class="headliner__rating num">{rating}</span>}
         {rankSlot}
         {delta !== undefined && delta !== null && (

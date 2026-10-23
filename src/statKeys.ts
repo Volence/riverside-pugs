@@ -142,6 +142,11 @@ export const STAT_DEFS: readonly StatDef[] = [
   // The part of damage_as_si that only drained an already-incapped survivor's
   // bleedout pool. Runs into the thousands and reflects no skill, which is why
   // it is separated out rather than left to inflate the total.
+  //
+  // Stored damage_as_si still includes it (the class parts above sum to the
+  // stored figure), but since 2026-10-23 everything that shows or ranks
+  // Damage as SI takes it off (src/siDamage.ts). On a page, then, the class
+  // parts add up to Damage as SI plus On incapped.
   def('dmg_to_incapped', 'infected', 'On incapped', 'neutral', false),
   // All four survivors pinned at once AND nobody gets back up before the round
   // ends. From pug-match's own pin tracking, so it needs no skill_detect.

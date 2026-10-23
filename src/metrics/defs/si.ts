@@ -65,7 +65,9 @@ export const defs: MetricDef[] = [
   { id: 'hunter.spawns', group: 'hunter', version: 1, description: 'Hunter spawns per round.',
     compute: (c) => countByPhase(c, spawnsOf(c, HUNTER)) },
   { id: 'hunter.skeet_rate', group: 'hunter', version: 2, description: 'Skeets per hunter spawn.',
-    public: { label: 'Hunters skeeted' },
+    // Counts every skeet event, solo and team alike (the feed does not tell
+    // them apart), so the label says so: plain "Skeets" means solo.
+    public: { label: 'Hunters skeeted (incl. team)' },
     compute: (c) => (skillEvents(c)
       ? ratioByPhase(c, kind(c, 'skeet').filter((e) => e.target !== null), spawnsOf(c, HUNTER))
       : null) },

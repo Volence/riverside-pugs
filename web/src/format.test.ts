@@ -4,7 +4,7 @@ import {
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
-  FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName,
+  FEATURED_STAT_KEYS, statLeaders, statFigure, fmtPerGame, STAT_MIN_GAMES, chapterName, chapterOrdinal, qualifiedMapName,
   STAT_LABELS, STAT_HELP, statHelp,
 } from './format';
 
@@ -210,6 +210,15 @@ describe('deriveLiveStats', () => {
 
   it('reports 0% for a boomer who landed nothing', () => {
     expect(deriveLiveStats({ boomer_spawns: 2, boom_successes: 0 }).boomer_rate).toBe(0);
+  });
+
+  // Owner 2026-10-23: Damage as SI is shown net of damage to incapped
+  // survivors, which keeps its own On incapped column.
+  it('shows Damage as SI net of damage to incapped survivors', () => {
+    const out = deriveLiveStats({ damage_as_si: 900, dmg_to_incapped: 250 });
+    expect(out.damage_as_si).toBe(650);
+    expect(out.dmg_to_incapped).toBe(250);
+    expect(deriveLiveStats({ skeets: 1 }).damage_as_si).toBeUndefined();
   });
 
   it('does not mutate its input', () => {
@@ -589,6 +598,45 @@ describe('statLeaders', () => {
 
   it('honours the limit', () => {
     expect(statLeaders(rows, 'skeets', 2).map((r) => r.name)).toEqual(['bob', 'carol']);
+  });
+
+  it('ranks by a given figure, leaving out rows it has none for', () => {
+    const per = (r: (typeof rows)[number]) => (r.name === 'bob' ? null : r.stats?.skeets);
+    expect(statLeaders(rows, 'skeets', 3, per).map((r) => r.name)).toEqual(['carol', 'alice']);
+  });
+});
+
+// Owner 2026-10-23: the leaderboard's stat columns and cards read per game by
+// default, ranked only from 10 games, with a Totals toggle.
+describe('statFigure', () => {
+  const row = (statGames: number, skeets?: number) => ({ games: statGames + 1, statGames, stats: (skeets === undefined ? {} : { skeets }) as Record<string, number> });
+
+  it('divides by completed PUGs, not rated games', () => {
+    expect(statFigure(row(10, 25), 'skeets', 'avg')).toBe(2.5);
+  });
+
+  it('is absent per game under the minimum, and present as a total', () => {
+    expect(STAT_MIN_GAMES).toBe(10);
+    expect(statFigure(row(9, 25), 'skeets', 'avg')).toBeNull();
+    expect(statFigure(row(9, 25), 'skeets', 'total')).toBe(25);
+    expect(statFigure(row(3, 25), 'skeets', 'avg', 3)).toBeCloseTo(8.33, 2);
+  });
+
+  it('is absent when the stat is', () => {
+    expect(statFigure(row(20), 'skeets', 'avg')).toBeNull();
+    expect(statFigure(row(20), 'skeets', 'total')).toBeNull();
+  });
+
+  it('falls back to games for a server without statGames', () => {
+    expect(statFigure({ games: 10, stats: { skeets: 5 } }, 'skeets', 'avg')).toBe(0.5);
+  });
+});
+
+describe('fmtPerGame', () => {
+  it('keeps one decimal under 10 and rounds above', () => {
+    expect(fmtPerGame(1.44)).toBe('1.4');
+    expect(fmtPerGame(2)).toBe('2.0');
+    expect(fmtPerGame(812.6)).toBe('813');
   });
 });
 

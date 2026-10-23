@@ -52,7 +52,8 @@ describe('StatsPanel', () => {
   it('shows only the columns the round has, and the numbers as of the playhead', () => {
     const { container } = mount(25000);
     const heads = [...container.querySelectorAll('table')[0].querySelectorAll('th')].map((h) => h.textContent);
-    expect(heads).toEqual(['', 'Skeets', 'Clears', 'FF dmg', 'Pinned']);
+    // Skeet EVENTS, team skeets among them, so not labelled as the solo stat.
+    expect(heads).toEqual(['', 'Skeets (incl. team)', 'Clears', 'FF dmg', 'Pinned']);
     // bill: at 25s he has been pinned once and cleared nobody; his skeet is at 30s.
     expect(cells(rowOf(container, 'bill'))).toEqual(['0', '0', '0', '1']);
     expect(cells(rowOf(container, 'zoey'))).toEqual(['0', '1', '0', '0']);

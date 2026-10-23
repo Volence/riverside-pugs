@@ -104,8 +104,8 @@ describe('Leaderboard', () => {
   it('lists players under three games after the ranked ones, as provisional, and reads the rated count from the API', async () => {
     // carol has the highest SR after one game. She is not the leader: her
     // row goes below the ranked group under a "Provisional" eyebrow with no
-    // rank number, and the top-rated card ignores her. "Matches rated" is
-    // the API's distinct-match count, not the top player's game count.
+    // rank number. "Matches rated" is the API's distinct-match count, not the
+    // top player's game count.
     mockApi.leaderboard.mockResolvedValue({
       season: { id: 1, name: 'Season 1' },
       matchesRated: 5,
@@ -1222,14 +1222,16 @@ describe('Play', () => {
 
 describe('Leaderboard sorting', () => {
   const rows = [
-    { steamid: '1', name: 'alice', avatar: null, sr: 900, wins: 1, losses: 3, games: 4, ranked: true, stats: { ck: 10, tank_damage: 500 } },
-    { steamid: '2', name: 'bob', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, ranked: true, stats: { ck: 99 } },
+    // 12 games each: past the 10-game minimum, so the per-game columns
+    // (the default) rank them.
+    { steamid: '1', name: 'alice', avatar: null, sr: 900, wins: 5, losses: 7, games: 12, ranked: true, stats: { ck: 10, tank_damage: 500 } },
+    { steamid: '2', name: 'bob', avatar: null, sr: 1200, wins: 7, losses: 5, games: 12, ranked: true, stats: { ck: 99 } },
   ];
 
   it('defaults to SR descending and renders every stat column', async () => {
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, matchesRated: 4, rows });
     const { container } = render(<Leaderboard me={null} />);
-    // bob is also the top-rated headliner now, so this appears twice.
+    // Twice: the podium card and the table row.
     await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
 
     const names = [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent);
@@ -1244,7 +1246,7 @@ describe('Leaderboard sorting', () => {
   it('re-sorts when a column header is clicked', async () => {
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, matchesRated: 4, rows });
     const { container } = render(<Leaderboard me={null} />);
-    // bob is also the top-rated headliner, so this appears twice.
+    // Twice: the podium card and the table row.
     await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
 
     // Commons descending puts bob first (99 vs 10); clicking again reverses.
@@ -1265,7 +1267,7 @@ describe('Leaderboard sorting', () => {
     // her first as though she had scored 0.
     mockApi.leaderboard.mockResolvedValue({ season: { id: 1, name: 'Season 1' }, matchesRated: 4, rows });
     const { container } = render(<Leaderboard me={null} />);
-    // bob is also the top-rated headliner, so this appears twice.
+    // Twice: the podium card and the table row.
     await waitFor(() => expect(screen.getAllByText('bob')).toHaveLength(2));
 
     const head = container.querySelector('thead') as HTMLElement;
@@ -2357,13 +2359,14 @@ describe('leaderboard stat leaders', () => {
     // table column, so getByText finds three.
     await waitFor(() => expect(screen.getByTitle('Sort the table by Skeets')).toBeTruthy());
 
+    // Per game by default (10 games each): 25 skeets is 2.5 a game.
     const card = screen.getByTitle('Sort the table by Skeets');
     expect(within(card).getByText('bob')).toBeTruthy();
-    expect(within(card).getByText('25')).toBeTruthy();
+    expect(within(card).getByText('2.5')).toBeTruthy();
 
     const tank = screen.getByTitle('Sort the table by Tank damage');
     expect(within(tank).getByText('alice')).toBeTruthy();
-    expect(within(tank).getByText('50,000')).toBeTruthy();
+    expect(within(tank).getByText('5,000')).toBeTruthy();
   });
 
   it('shows no card for a stat nobody has scored', async () => {
