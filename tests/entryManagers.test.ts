@@ -186,6 +186,13 @@ describe('booking a series between two draft entries', () => {
     const notice = bookingLines(s.db, b).find((l) => l.startsWith('l4d_booking_notice '))!;
     expect(notice).toBe(`l4d_booking_notice "${evName}: Team Alpha vs Team Beta"`);
     expect(notice).not.toContain('until');
+    // l4d_booking 1.6.0: each side's name and players, so the panel can name the team blocks.
+    const lines = bookingLines(s.db, b);
+    const line = (cv: string) => lines.find((l) => l.startsWith(`${cv} `));
+    expect(line('l4d_booking_name_a')).toBe('l4d_booking_name_a "Team Alpha"');
+    expect(line('l4d_booking_name_b')).toBe('l4d_booking_name_b "Team Beta"');
+    expect(line('l4d_booking_ids_a')).toBe(`l4d_booking_ids_a "${[...A.slice(0, 4)].sort().join(',')}"`);
+    expect(line('l4d_booking_ids_b')).toBe(`l4d_booking_ids_b "${[...BATS.slice(0, 4)].sort().join(',')}"`);
     // The voice category and the notice share one heading; too long for the limit falls back.
     expect(B.bookingHeading(s.db, b, 'Team Alpha', 'Team Beta', 100)).toBe(`${evName}: Team Alpha vs Team Beta`);
     expect(B.bookingHeading(s.db, b, 'Team Alpha', 'Team Beta', evName.length + 5)).toBe('Tournament: Team Alpha vs Team Beta'.slice(0, evName.length + 5));
