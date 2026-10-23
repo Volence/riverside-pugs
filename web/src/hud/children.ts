@@ -769,7 +769,7 @@ export const TAB_INFECTED_ROW: PanelChildren = {
   children: [
     { name: 'PlayerBackground', label: 'Other rows', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
       keys: [{ key: 'bgcolor_override', label: "Other rows' colour", type: 'colour', unsetLabel: 'File colour', gate: 'TS5b',
-        evidence: `${PANEL_BG}; the other infected rows were never on screen (probe TS5b needs a second infected player)` }] },
+        evidence: `${PANEL_BG}; client.dylib InfectedStatsPanel::SetSelected 0x3f4da0 shows PlayerBackground on every row but yours and sets no colour (TS5b, passed on the code: no second infected player was on screen)` }] },
     { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, codeShown: true,
       keys: [{ key: 'bgcolor_override', label: 'Your row colour', type: 'colour', unsetLabel: 'File colour', gate: 'TS5',
         evidence: `${PANEL_BG}; probe TS5, probe-tab tab1/runs/tab-infected/tab-c.png (your row yellow)` }],
