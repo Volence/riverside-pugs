@@ -12,7 +12,7 @@ import { baseFile, baseOf, baseTree, importedFiles, isCommunityImport, presetOve
 import { hudFileProblem, hudPathProblem } from '../../../src/hudFiles';
 
 export { baseTree };
-import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, pcFind, type KvNode } from './kv';
+import { parseKv, writeKv, kvFind, kvGet, kvSet, pcApplies, pcBlocks, pcFind, type KvNode } from './kv';
 import { parsePos, parseSize, formatPos, scaleToken, screenW, SCREEN_H, type Aspect } from './units';
 import { ELEMENTS, elementById, type HudElement } from './elements';
 import { SLOTS } from './slots';
@@ -36,7 +36,7 @@ import {
   type RowInput, type RowLayout, type LimitLine,
 } from './youritems';
 import { probe } from './probes';
-import { layoutBlocks, versusEstimate } from './tablayout';
+import { layoutBlocks, versusEstimate, type LaidBlock } from './tablayout';
 import { clampBarKeys } from './progress';
 
 /**
@@ -620,6 +620,7 @@ function tabVersusGrowPass(work: Work, design: HudDesign) {
     w = Math.max(w, Math.ceil(b.x + b.w));
     h = Math.max(h, Math.ceil(b.y + b.h));
   }
+  chapterFit(work, laid);
   if (w === base.w && h === base.h) return;
   const panel = work.panel(SCOREBOARD, [VERSUS_PANEL]);
   if (w !== base.w) pcSet(panel, 'wide', String(w));
@@ -639,6 +640,61 @@ function tabVersusGrowPass(work: Work, design: HudDesign) {
   everyLanguage(chapter, 'tall', String(h));
   everyLanguage(chapter, 'xpos', String(x + w > CHAPTER_WIDE ? Math.max(0, CHAPTER_WIDE - w) : x));
 }
+/**
+ * The chapter screen's slot for the versus panel, moved down so no moved
+ * piece sits above it. The slot is at ypos -20 (the stock layout's top
+ * piece, TeamYours, is at 30, so it draws 10 below the chapter screen's top
+ * edge), and the chapter screen clips its children: a piece moved above 30
+ * was cut off at the top and drew over the campaign title (Lulu's clip
+ * 2026-09-28, her design with the stat box at 0,0 and the team names at 6).
+ * No condition tells the Tab and the chapter screen apart (client.dylib
+ * CVersusModeScoreboard::ApplySchemeSettings sets only if_embedded, for
+ * both parents), so the slot moves instead of the pieces. When the pieces
+ * then reach past where stock's lowest ends (the stat box, 5 above Row1), the map rows, the divider and the campaign row move down by
+ * as much, the screen grows that much and rises to stay on screen. The
+ * label the game shows itself there (ROUND_END_SHOWN) counts even when the
+ * file hides it.
+ */
+function chapterFit(work: Work, laid: LaidBlock[]) {
+  const shown = (bs: LaidBlock[]) => bs.filter((b) => (b.visible || ROUND_END_SHOWN.has(b.name.toLowerCase())) && b.w > 0 && b.h > 0);
+  const now = shown(laid);
+  const stock = shown(versusLaid(work, baseTree(work.key, TAB_VERSUS_FILE)));
+  if (!now.length || !stock.length) return;
+  const top = (bs: LaidBlock[]) => Math.min(...bs.map((b) => b.y));
+  const bottom = (bs: LaidBlock[]) => Math.max(...bs.map((b) => b.y + b.h));
+  // Read from the base, so a design that needs nothing here ships no chapter file.
+  const baseSlot = blockIn(CHAPTER, baseTree(work.key, CHAPTER), [VERSUS_PANEL]);
+  if (!baseSlot) return;
+  const slotY = num(pcGet(baseSlot, 'ypos'));
+  const down = Math.max(0, Math.ceil(top(stock) - top(now)));
+  const y = slotY + down;
+  const over = Math.ceil(y + bottom(now) - (slotY + bottom(stock)));
+  if (!down && over <= 0) return;
+  const slot = work.optional(CHAPTER, [VERSUS_PANEL]);
+  if (!slot) return;
+  if (down) everyLanguage(slot, 'ypos', String(y));
+  if (over <= 0) return;
+  const kids = work.tree(CHAPTER);
+  const rowsAt = num(pcGet(blockIn(CHAPTER, kids, ['Row1']) ?? slot, 'ypos'));
+  for (const b of pcBlocks(kids)) {
+    if (b === slot || typeof b.value === 'string') continue;
+    const at = pcGet(b, 'ypos');
+    if (at !== undefined && num(at) >= rowsAt) everyLanguage(b, 'ypos', String(num(at) + over));
+  }
+  const grow = (b: KvNode | undefined) => { if (b) everyLanguage(b, 'tall', String(num(pcGet(b, 'tall')) + over)); };
+  grow(blockIn(CHAPTER, kids, ['BackgroundImage']));
+  const screen = blockIn(CHAPTER, kids, ['multimap_vs_scoreboard']);
+  grow(screen);
+  if (screen) everyLanguage(screen, 'ypos', String(Math.max(0, num(pcGet(screen, 'ypos')) - over)));
+}
+/**
+ * The versus label the game shows itself on the chapter screen, whatever the
+ * file says: InitControls starts the score animation, and UpdateScoreAnim
+ * shows StatAnimationBreakdownLabel. TeamWinLabel and
+ * TeamFlipExplanationLabel need the round-end flags only the fullscreen
+ * round-end panel sets (Update, client.dylib 0x406ca0).
+ */
+const ROUND_END_SHOWN = new Set(['statanimationbreakdownlabel']);
 /** A key set to one plain line, in place of its language lines ([$ENGLISH], [$!ENGLISH]). */
 function everyLanguage(block: KvNode, key: string, value: string) {
   const kids = block.value as KvNode[];

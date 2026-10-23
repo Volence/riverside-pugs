@@ -321,6 +321,33 @@ describe('moving the versus pieces (probe PIECES-1 and PIECES-2)', () => {
     expect(text(moved({ TeamYours: { x: 30, y: 30 } }), CHAPTER)).toBeUndefined();
   });
 
+  it('moves the chapter screen\'s slot down so no piece is cut off above it, and the map rows below the pieces', () => {
+    // Lulu's clip 2026-09-28: the slot sits at ypos -20, so her stat box at 0,0 and team names at 6 drew above the
+    // chapter screen's top edge, cut off and over the campaign title.
+    const CHAPTER = 'resource/ui/multimapversusmodescoreboard.res';
+    const at = (files: { path: string; data: Uint8Array }[], name: string) => pcFind(tree(files, CHAPTER), [name])!;
+    const lulu = moved({
+      DistanceLabel: { x: 13, y: 50 }, StatBreakdownHighlightImage: { x: 0, y: 0 }, TeamYours: { x: 20, y: 6 },
+      YourTeamHighlightImage: { x: 0, y: 40 }, EnemyTeamHighlightImage: { x: 160, y: 40 }, TeamYourScoreSurvivors: { y: 20 },
+      TeamEnemy: { y: 6 }, TeamEnemyScoreSurvivors: { y: 20 }, HealthLabel: { x: 180, y: 50 }, HealthAmount: { x: 250, y: 50 },
+    });
+    // Stock's top piece is at 30, hers at 0: the slot comes down 30, to 10. SurvivalMultLabel, which she left at stock's
+    // 95 to 115, comes down with it past where stock's lowest ended (115 at -20), so the rows go down the same 30.
+    expect(kvGet(at(lulu, 'CVersusModeScoreboard'), 'ypos')).toBe('10');
+    expect(kvGet(at(lulu, 'Row1'), 'ypos')).toBe('130');
+    // A piece moved low pushes the rows, the divider and the campaign row down by its overflow; the screen grows and rises.
+    const low = moved({ TeamYours: { x: 20, y: 0 }, StatBreakdownHighlightImage: { x: 0, y: 150 } });
+    const over = 10 + 195 - (-20 + 115);
+    expect(kvGet(at(low, 'CVersusModeScoreboard'), 'ypos')).toBe('10');
+    expect(['Row1', 'Row5', 'Divider', 'CampaignRow'].map((n) => kvGet(at(low, n), 'ypos'))).toEqual(['100', '260', '300', '310'].map((v) => String(Number(v) + over)));
+    expect(kvGet(at(low, 'BackgroundImage'), 'tall')).toBe(String(380 + over));
+    expect(kvGet(at(low, 'multimap_vs_scoreboard'), 'tall')).toBe(String(380 + over));
+    expect(kvGet(at(low, 'multimap_vs_scoreboard'), 'ypos')).toBe('0');
+    expect(kvGet(at(low, 'CampaignTitleLabel'), 'ypos')).toBe('20');
+    // Pieces moved but none above stock's top and none below its bottom: the chapter screen ships stock.
+    expect(text(moved({ TeamYours: { x: 30, y: 30 } }), CHAPTER)).toBeUndefined();
+  });
+
   it('grows the panel over the pieces a moved piece carries (the line after "Average Distance:")', () => {
     const files = moved({ DistanceLabel: { x: 13, y: 300 } });
     const p = panel(files);
