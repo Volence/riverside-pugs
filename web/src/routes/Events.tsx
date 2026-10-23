@@ -4,22 +4,29 @@ import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
-import { STATUS_LABEL, whenText } from '../eventFormat';
+import { STATUS_LABEL, roundWhenText } from '../eventFormat';
 
 const OVER = new Set(['finished', 'cancelled']);
 
-function EventRow({ ev }: { ev: EventListItem }) {
+const KIND_LABEL: Record<string, string> = { draft: 'Draft tournament', team: 'Team tournament' };
+
+function EventRow({ ev, past = false }: { ev: EventListItem; past?: boolean }) {
   const count = ev.entryKind === 'draft' ? `${ev.entries} signup${ev.entries === 1 ? '' : 's'}` : ev.entryKind === 'team' ? `${ev.entries} team${ev.entries === 1 ? '' : 's'}` : `${ev.entries} entr${ev.entries === 1 ? 'y' : 'ies'}`;
+  const meta = [ev.format.join(', then '), ev.entries > 0 ? count : ''].filter(Boolean).join(' · ');
   return (
-    <li>
-      <a class="eventrow" href={`/event/${ev.slug}`}>
-        {ev.bannerKey && <img class="eventrow__banner" src={bannerUrl(ev.bannerKey)} alt="" width={160} height={40} loading="lazy" />}
-        <span class="eventrow__name">{ev.name}</span>
-        <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span>
-        <span class="eventrow__meta">
-          {whenText(ev.startsAt)}
-          {ev.format.length > 0 && <> · {ev.format.join(', then ')}</>}
-          {ev.entries > 0 && <> · {count}</>}
+    <li class={`evcard${past ? ' evcard--past' : ''}`}>
+      <a class="evcard__link eventrow" href={`/event/${ev.slug}`}>
+        {ev.bannerKey
+          ? <img class="evcard__banner eventrow__banner" src={bannerUrl(ev.bannerKey)} alt="" width={640} height={160} loading="lazy" />
+          : !past && <span class="evcard__band" aria-hidden="true" data-name={ev.name} />}
+        <span class="evcard__body">
+          <span class="evcard__top">
+            <span class="eyebrow">{ev.official ? 'Official' : 'Community'} · {KIND_LABEL[ev.entryKind] ?? 'Tournament'}</span>
+            <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span>
+          </span>
+          <span class="evcard__name eventrow__name">{ev.name}</span>
+          <span class="evcard__when">{roundWhenText(ev.startsAt)}</span>
+          {meta && <span class="evcard__meta eventrow__meta">{meta}</span>}
         </span>
       </a>
     </li>
@@ -57,12 +64,12 @@ export function Events({ session }: { session: Session }) {
       <Panel>
         <h3>Upcoming and running</h3>
         {upcoming.length === 0 ? <Empty>Nothing is scheduled yet.</Empty>
-          : <ul class="eventlist">{upcoming.map((ev) => <EventRow key={ev.slug} ev={ev} />)}</ul>}
+          : <ul class="evcards">{upcoming.map((ev) => <EventRow key={ev.slug} ev={ev} />)}</ul>}
       </Panel>
       {past.length > 0 && (
         <Panel>
           <h3>Past</h3>
-          <ul class="eventlist">{past.map((ev) => <EventRow key={ev.slug} ev={ev} />)}</ul>
+          <ul class="evcards evcards--past">{past.map((ev) => <EventRow key={ev.slug} ev={ev} past />)}</ul>
         </Panel>
       )}
     </main>

@@ -155,7 +155,7 @@ describe('EventPage', () => {
     expect(await screen.findByRole('heading', { name: 'Teams' })).toBeTruthy();
     expect(screen.getByText('Team Ann')).toBeTruthy();
     expect(screen.getByText('Team Eve')).toBeTruthy();
-    expect(container.querySelector('img.evententry__logo')?.getAttribute('src')).toBe('/api/events/logos/abc.png');
+    expect(container.querySelector('img.evteam__logo')?.getAttribute('src')).toBe('/api/events/logos/abc.png');
     expect(screen.getByRole('heading', { name: 'Captains' })).toBeTruthy();
     expect(screen.queryByText('Checked in')).toBeNull();
     expect(container.textContent).not.toMatch(/\bSR\b(?! \d+ (or|to))|forecast|spread|average/i);
@@ -272,8 +272,22 @@ describe('EventPage', () => {
     }));
     render(<EventPage slug="riverside-cup" session={session} />);
     await screen.findByText('Team d20');
-    const li = screen.getByText('Team d20').closest('li')!;
-    expect(li.textContent).toContain('d20, d3, d4, d5');
-    expect(screen.getByText('Team d19').closest('li')!.querySelector('.evententry__players')).toBeNull();
+    const card = screen.getByText('Team d20').closest('li.evteam')!;
+    expect([...card.querySelectorAll('.evteam__players li')].map((li) => li.firstChild?.textContent)).toEqual(['d20', 'd3', 'd4', 'd5']);
+    expect(card.querySelector('.evteam__cap')?.closest('li')?.textContent).toContain('d20');
+    expect(screen.getByText('Team d19').closest('li.evteam')!.querySelector('.evteam__players')).toBeNull();
+  });
+
+  it('links each draft player to their profile when the server sends SteamIDs', async () => {
+    const entry = { id: 1, name: 'Team d20', tag: '', logoKey: null, seed: 1, status: 'registered', waitlist: null, placement: null };
+    mockEvents.get.mockResolvedValue(view({
+      entryKind: 'draft',
+      entries: [{ ...entry, players: ['d20', 'd3'], playerLinks: [{ steamid: '76561190000000020', name: 'd20' }, { steamid: '76561190000000003', name: 'd3' }] }],
+    }));
+    render(<EventPage slug="riverside-cup" session={session} />);
+    const link = await screen.findByRole('link', { name: 'd3' });
+    expect(link.getAttribute('href')).toBe('/player/76561190000000003');
+    expect(screen.getByText('Seed 1')).toBeTruthy();
+    expect(screen.getByText('D2', { selector: '.evteam__logo' })).toBeTruthy();
   });
 });
