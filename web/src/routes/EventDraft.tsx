@@ -7,9 +7,9 @@ import { useHubEvent } from '../hooks/useHubEvent';
 import type { Session } from '../hooks/useLiveState';
 import { playPopSound } from '../popSound';
 import { clockText } from './event/room/roomText';
-import { DraftCard } from './event/draft/DraftCard';
+import { DraftCard, DraftPoolList } from './event/draft/DraftCard';
 import { PickListDrawer } from './event/draft/PickListDrawer';
-import { STATUS_TEXT, freshPicks, pickKey, sortedPool, type PoolSort } from './event/draft/draftText';
+import { STATUS_TEXT, freshPicks, pickKey, sortedPool, type PoolSort, type PoolView } from './event/draft/draftText';
 
 const HEARTBEAT_MS = 10_000;
 /** A safety net under the hub push (a dropped socket, a status change made on the desk). */
@@ -35,6 +35,11 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
   const [now, setNow] = useState(Date.now());
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<PoolSort>('sr');
+  // Cards or one row per player; remembered on this browser only.
+  const [poolView, setPoolViewState] = useState<PoolView>(() => {
+    try { return localStorage.getItem('draftPoolView') === 'list' ? 'list' : 'cards'; } catch { return 'cards'; }
+  });
+  const setPoolView = (p: PoolView) => { setPoolViewState(p); try { localStorage.setItem('draftPoolView', p); } catch { /* private window: keep it for this visit */ } };
   const [reveal, setReveal] = useState<DraftPickView | null>(null);
   const [drawer, setDrawer] = useState(false);
   const seen = useRef<Set<string> | null>(null);
@@ -193,8 +198,15 @@ export function EventDraftPage({ slug, session: _session }: { slug: string; sess
               <option value="sr">SR, high to low</option>
               <option value="name">Name</option>
             </select>
+            <span class="draftpool__view" role="group" aria-label="Show the pool as">
+              <button class="btn btn--ghost btn--sm" type="button" aria-pressed={poolView === 'cards'} onClick={() => setPoolView('cards')}>Cards</button>
+              <button class="btn btn--ghost btn--sm" type="button" aria-pressed={poolView === 'list'} onClick={() => setPoolView('list')}>List</button>
+            </span>
           </div>
-          {pool.length === 0 ? <Empty>No player matches that name.</Empty> : (
+          {pool.length === 0 ? <Empty>No player matches that name.</Empty> : poolView === 'list' ? (
+            <DraftPoolList cards={pool} notes={v.notes}
+              action={canPick ? (c) => <button class="btn btn--sm" type="button" aria-label={`Pick ${c.name}`} disabled={busy} onClick={() => void run(() => eventsApi.draftPick(slug, c.steamid, onClock!.pickNo))}>Pick</button> : undefined} />
+          ) : (
             <div class="draftpool">
               {pool.map((c) => (
                 <DraftCard key={c.steamid} card={c} note={v.notes?.[c.steamid] ?? null} chemistry={v.me.chemistry?.[c.steamid] ?? null}
