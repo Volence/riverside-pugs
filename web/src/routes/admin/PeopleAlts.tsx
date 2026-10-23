@@ -4,6 +4,7 @@ import { countryName } from '../../countries';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
+import { fmtAgo } from '../../format';
 import { fileUrl } from './adminRoutes';
 import { KnownEvaders } from './KnownEvaders';
 import { SIGN_TEXT, type SecondSign } from '../../../../src/fingerprint';
@@ -62,12 +63,9 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <>
-      <KnownEvaders isAdmin={isAdmin} />
-
-      <IpWatchPanel />
-
-      <Panel class="panel--table">
-        <h3>On hold</h3>
+      {/* What needs a decision first; the standing records under it. */}
+      <Panel class={`panel--table alts-hold${data && data.open.length > 0 ? ' has-holds' : ''}`}>
+        <h3>On hold{data && <span class="alts-count">{data.open.length}</span>}</h3>
         <p class="muted">
           Held because their Discord account came from another Steam account, or because they hold infected
           buttons like a known evader and a second sign fired (marked fingerprint). They cannot queue or play, and
@@ -108,12 +106,14 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
                       )}
                     </td>
                     <td>{h.discordName || h.discordId}</td>
-                    <td class="muted">{fmtTime(h.createdAt)}</td>
-                    <td class="admin-actions">
-                      <button class="btn" disabled={busy} onClick={() => lift(h)}>Lift hold</button>
-                      {isAdmin && (h.source === 'fingerprint'
-                        ? <button class="btn btn--danger" disabled={busy} onClick={() => banSame(h)}>Ban as same person</button>
-                        : <button class="btn btn--danger" disabled={busy} onClick={() => ban(h)}>Ban</button>)}
+                    <td class="muted" title={fmtTime(h.createdAt)}>{fmtAgo(h.createdAt)}</td>
+                    <td>
+                      <div class="alts-acts">
+                        <button class="btn" disabled={busy} onClick={() => lift(h)}>Lift hold</button>
+                        {isAdmin && (h.source === 'fingerprint'
+                          ? <button class="btn btn--danger" disabled={busy} onClick={() => banSame(h)}>Ban as same person</button>
+                          : <button class="btn btn--danger" disabled={busy} onClick={() => ban(h)}>Ban</button>)}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -139,8 +139,10 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
         )}
       </Panel>
 
+      <KnownEvaders isAdmin={isAdmin} />
+
       <Panel>
-        <h3>Related accounts</h3>
+        <h3>Related accounts{data && <span class="alts-count">{shown.length}</span>}</h3>
         <p class="muted">
           Accounts tied together by a Discord moving between them, a merge, or a copy of the game lent through
           Family Sharing. A shared connection alone is evidence, not proof: households, siblings and VPNs look
@@ -153,8 +155,14 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
           </label>
         )}
         {data && shown.length === 0 && <Empty>No related accounts.</Empty>}
-        {shown.map((c) => <ClusterCard key={c.members.map((m) => m.steamid).join()} c={c} />)}
+        {shown.length > 0 && (
+          <div class="alts-clusters">
+            {shown.map((c) => <ClusterCard key={c.members.map((m) => m.steamid).join()} c={c} />)}
+          </div>
+        )}
       </Panel>
+
+      <IpWatchPanel />
     </>
   );
 }
@@ -162,22 +170,22 @@ export function PeopleAlts({ isAdmin }: { isAdmin: boolean }) {
 function ClusterCard({ c }: { c: AltCluster }) {
   const name = new Map(c.members.map((m) => [m.steamid, m.name]));
   return (
-    <div class="admin-cluster">
-      <p>
+    <div class={`admin-cluster${c.strong ? '' : ' is-weak'}`}>
+      <p class="admin-cluster__members">
         {c.members.map((m, i) => (
           <span key={m.steamid}>
-            {i > 0 && ' · '}
             <a href={fileUrl(m.steamid)}>{m.name}</a>
             {m.held && <> <span class="chip">on hold</span></>}
             {m.banned && <> <span class="admin-status admin-status--banned">banned</span></>}
           </span>
         ))}
-        {!c.strong && <span class="muted"> (shared connection only)</span>}
+        {!c.strong && <span class="muted">shared connection only</span>}
       </p>
       <ul class="admin-list muted">
         {c.edges.map((e, i) => (
           <li key={i}>
-            {name.get(e.a)} and {name.get(e.b)}: {SIGNAL_LABEL[e.signal]}
+            <span class={`alts-signal alts-signal--${e.signal}`}>{SIGNAL_LABEL[e.signal]}</span>{' '}
+            {name.get(e.a)} and {name.get(e.b)}
             {e.detail && e.detail !== SIGNAL_LABEL[e.signal] ? ` (${e.detail})` : ''}
             {e.at ? `, ${fmtTime(e.at)}` : ''}
           </li>
@@ -247,8 +255,8 @@ function IpWatchPanel() {
                       </span>
                     ))}
                   </td>
-                  <td class="admin-actions">
-                    <button class="btn" type="button" disabled={busy}
+                  <td>
+                    <button class="chip" type="button" disabled={busy}
                       onClick={() => run(() => peopleApi.unwatchIp(w.ipHash), 'Stop watching this connection?')}>Remove</button>
                   </td>
                 </tr>
@@ -258,6 +266,7 @@ function IpWatchPanel() {
         </div>
       )}
 
+      <h4>Watch an address by hand</h4>
       <form class="admin-merge" onSubmit={(e) => { e.preventDefault(); void add(); }}>
         <input value={ip} placeholder="IPv4 address" aria-label="Address to watch"
           onInput={(e) => setIp((e.target as HTMLInputElement).value)} />

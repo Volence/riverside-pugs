@@ -3,6 +3,7 @@ import { peopleApi, type AnalyzerRank } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
+import { fmtAgo } from '../../format';
 import { fileUrl, guideUrl } from './adminRoutes';
 import { SOURCE_LABEL } from './file/GlanceRow';
 import { AnalysisPanel } from './AnalysisPanel';
@@ -86,7 +87,7 @@ export function NeedsALook({ isAdmin }: { isAdmin: boolean }) {
           {data && players.length === 0 && <Empty>Nothing is waiting to be looked at.</Empty>}
           {players.length > 0 && (
             <div class="table-wrap">
-              <table class="admin-table admin-table--pin-last">
+              <table class="admin-table admin-table--pin-last nal-table">
                 <thead>
                   <tr>
                     <th>Player</th>
@@ -100,15 +101,15 @@ export function NeedsALook({ isAdmin }: { isAdmin: boolean }) {
                 <tbody>
                   {players.map((p) => (
                     <tr key={p.steamid}>
-                      <td><a href={fileUrl(p.steamid)}>{p.name}</a></td>
-                      <td>{p.arrived || p.sources.map((s) => SOURCE_LABEL[s]).join(', ')}</td>
-                      <td class="muted">{fmtTime(p.newestEvidenceAt)}</td>
+                      <td><a class="nal__name" href={fileUrl(p.steamid)}>{p.name}</a></td>
+                      <td class="nal__what">{p.arrived || p.sources.map((s) => SOURCE_LABEL[s]).join(', ')}</td>
+                      <td class="muted nal__when" title={fmtTime(p.newestEvidenceAt)}>{fmtAgo(p.newestEvidenceAt)}</td>
                       <td>
                         {p.openTickets === 0 ? <span class="muted">none</span>
-                          : <a href="/admin/people/tickets">{p.openTickets} open</a>}
+                          : <a class="nal__tickets" href="/admin/people/tickets">{p.openTickets} open</a>}
                       </td>
-                      <td class="muted">
-                        {p.lastReviewAt ? `${fmtTime(p.lastReviewAt)} by ${p.lastReviewBy}` : 'never'}
+                      <td class="muted" title={p.lastReviewAt ? fmtTime(p.lastReviewAt) : undefined}>
+                        {p.lastReviewAt ? `${fmtAgo(p.lastReviewAt)} by ${p.lastReviewBy}` : 'never'}
                       </td>
                       <td>
                         <button class="chip" type="button" disabled={busy}

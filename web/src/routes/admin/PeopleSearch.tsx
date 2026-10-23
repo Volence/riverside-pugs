@@ -15,7 +15,7 @@ export function PeopleSearch() {
 
   return (
     <Panel class="panel--table">
-      <form class="admin-search" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
+      <form class="admin-search ppl-search" onSubmit={(e) => { e.preventDefault(); setQuery(q.trim()); }}>
         <input
           value={q} placeholder="Name, SteamID or Discord" aria-label="Search players"
           onInput={(e) => setQ((e.target as HTMLInputElement).value)}
@@ -23,6 +23,9 @@ export function PeopleSearch() {
         <button class="btn" type="submit">Search</button>
       </form>
       {error && <Empty>Could not load the player list.</Empty>}
+      {players.length > 0 && (
+        <p class="muted ppl-count">{query ? `${players.length} match${players.length === 1 ? '' : 'es'} for "${query}"` : `Showing ${players.length}`}</p>
+      )}
       {data && players.length === 0 && <Empty>No players match.</Empty>}
       {players.length > 0 && (
         <div class="table-wrap">
@@ -37,7 +40,7 @@ export function PeopleSearch() {
               {players.map((p) => (
                 <tr key={p.steamid}>
                   <td>
-                    <a href={fileUrl(p.steamid)}>{p.name}</a>
+                    <a class="ppl-name" href={fileUrl(p.steamid)}>{p.name}</a>
                     {p.isAdmin && <span class="admin-tag">admin</span>}
                     {p.isMod && <span class="admin-tag">mod</span>}
                     <div class="mono muted">{p.steamid}</div>
@@ -46,7 +49,7 @@ export function PeopleSearch() {
                   <td class="num">{p.sr ?? <span class="muted">n/a</span>}</td>
                   <td class="num">{p.games}</td>
                   <td>{p.discordName ?? <span class="muted">not linked</span>}</td>
-                  <td class={`num${p.offenses ? ' admin-warn' : ' muted'}`}>{p.offenses}</td>
+                  <td class="num">{p.offenses ? <span class="ppl-off">{p.offenses}</span> : <span class="muted">0</span>}</td>
                 </tr>
               ))}
             </tbody>
