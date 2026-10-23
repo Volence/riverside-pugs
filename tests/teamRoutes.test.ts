@@ -135,7 +135,11 @@ describe('create, invite, accept, page', () => {
     expect(asStranger.manage).toBeNull();
     expect((await call('GET', '/api/teams/no-such-team', P[3])).statusCode).toBe(404);
 
-    expect((await call('GET', '/api/teams', P[3])).json().teams).toEqual([{ slug, name: 'Riverside Rats', tag: 'RR', logoKey: null, members: 2, captainName: 'player0' }]);
+    const listed = (await call('GET', '/api/teams', P[3])).json().teams;
+    expect(listed).toEqual([{
+      slug, name: 'Riverside Rats', tag: 'RR', logoKey: null, members: 2, captainName: 'player0',
+      roster: [expect.objectContaining({ steamid: P[0], name: 'player0' }), expect.objectContaining({ name: 'player1' })],
+    }]);
   });
 
   it('player search finds active players by name prefix, at least two characters', async () => {

@@ -2041,7 +2041,9 @@ export const studioApi = {
 // ---------- teams ----------
 
 export type TeamRole = 'captain' | 'cocaptain' | 'member';
-export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string }
+export interface TeamFace { steamid: string; name: string; avatar: string | null }
+/** roster: the captain first, then the rest in join order (team cards). */
+export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string; roster?: TeamFace[] }
 export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: TeamRole; members: number }
 export interface TeamInviteItem { id: number; slug: string; name: string; tag: string; invitedByName: string | null; createdAt: string }
 export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: TeamRole; joinedAt: string }

@@ -16,7 +16,9 @@ import type { CommunityStore } from '../community/store.js';
 import type { DmFn } from '../signonDropNotify.js';
 import { teamInviteDm } from '../discord/teamButtons.js';
 
-export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string }
+/** One face on a team card: the captain first, then the rest in join order. */
+export interface TeamFace { steamid: string; name: string; avatar: string | null }
+export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string; roster: TeamFace[] }
 export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: T.TeamRole; members: number }
 export interface InviteItem { id: number; slug: string; name: string; tag: string; invitedByName: string | null; createdAt: string }
 export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: T.TeamRole; joinedAt: string }
@@ -97,8 +99,12 @@ export async function teamRoutes(app: FastifyInstance, opts: TeamRoutesOpts): Pr
 
   app.get('/api/teams', async (req, reply) => {
     if (!allowedViewer(req, reply)) return;
+    const faces = (t: T.TeamRow): TeamFace[] => T.activeMembers(db, t.id)
+      .map((m) => { const p = getPlayer(db, m.steamid); return { steamid: m.steamid, name: p?.name ?? m.steamid, avatar: p?.avatar ?? null }; })
+      .sort((a, b) => Number(b.steamid === t.captain_steamid) - Number(a.steamid === t.captain_steamid));
     const teams: TeamListItem[] = T.liveTeams(db).map((t) => ({
       slug: t.slug, name: t.name, tag: t.tag, logoKey: t.logo_key, members: T.rosterSize(db, t.id), captainName: nameOf(t.captain_steamid),
+      roster: faces(t),
     }));
     return { teams };
   });
