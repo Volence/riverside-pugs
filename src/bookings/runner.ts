@@ -19,7 +19,7 @@ import { claimReviewAsk } from '../scrims/reviews.js';
 import { claimResultNotice, seriesTally } from './series.js';
 import { DEFAULT_GRACE_MINUTES, bookingLimits, byPriority, isLateCancel } from './rules.js';
 import {
-  acceptedPeople, actingSides, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
+  acceptedPeople, actingSides, bookingHeading, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox, markBoxRestarted,
   BOOKING_ERRORS, bookRoster, firstSurvivorSide, pressStartNow, startBookingNow, startNowSnapshot, undoStartNow, withdrawStartNow, type Result, type BookingRow, type Side, type SideRow,
@@ -291,7 +291,11 @@ function stateLines(db: DB, b: BookingRow): string[] {
 export function bookingLines(db: DB, b: BookingRow): string[] {
   if (!/^[a-z0-9]+$/.test(b.password) || !/^[a-z0-9]+$/.test(b.tv_password)) throw new Error('booking password has unexpected characters');
   const [a, bs] = sidesOf(db, b.id);
-  const notice = consoleText(`Booked: ${sideName(db, a)} vs ${sideName(db, bs)} until ${b.ends_at.slice(11, 16)} UTC`, 120);
+  // A tournament has no booked end (the series engine closes it), so it is
+  // named for its event with no until-time.
+  const notice = consoleText(b.purpose === 'tournament'
+    ? bookingHeading(db, b, sideName(db, a), sideName(db, bs), 120)
+    : `Booked: ${sideName(db, a)} vs ${sideName(db, bs)} until ${b.ends_at.slice(11, 16)} UTC`, 120);
   return [
     ...quietLines([
       `l4d_booking_tv_password ${quoted(b.tv_password)}`,

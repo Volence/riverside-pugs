@@ -2,6 +2,7 @@ import { adminApi, type AdminBookingPriority, type AdminBookingRow } from '../..
 import { Panel } from '../../components/bits';
 import { useFetch } from '../../hooks/useFetch';
 import { localLabel } from '../../bookingTime';
+import { eventAdminUrl } from './adminRoutes';
 import { useAction } from './useAction';
 
 /** Mirrors STATE_LABEL in routes/Bookings.tsx, the chip a captain sees. */
@@ -87,16 +88,25 @@ export function BookingsPanel({ nudge }: { nudge: number }) {
                     {b.toxic.a && <>{' '}<span class="teamchip teamchip--toxic" title={`${b.aName}: repeated toxic tags`}>Toxic tags</span></>}
                     {b.toxic.b && <>{' '}<span class="teamchip teamchip--toxic" title={`${b.bName}: repeated toxic tags`}>Toxic tags</span></>}
                   </td>
-                  <td>{localLabel(b.startsAt)} to {localLabel(b.endsAt)}</td>
+                  {/* A tournament match has no booked end: it runs until its result. */}
+                  <td>{b.purpose === 'tournament' ? <>From {localLabel(b.startsAt)}</> : <>{localLabel(b.startsAt)} to {localLabel(b.endsAt)}</>}</td>
                   <td><StateCell b={b} /></td>
                   <td>{b.server ?? ''}</td>
                   <td>{b.peak.a} / {b.peak.b}</td>
                   <td>
-                    {open && <button class="btn btn--ghost btn--sm" disabled={busy}
-                      onClick={() => run(() => adminApi.cancelBooking(b.id, ''), { title: `Cancel ${b.aName} vs ${b.bName}?`, body: 'Both sides are told. It counts against neither side.', confirmLabel: 'Cancel booking', danger: true })}>Cancel</button>}
-                    {open && <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => run(() => adminApi.extendBooking(b.id))}>+1 campaign</button>}
-                    {running && <button class="btn btn--ghost btn--sm" disabled={busy}
-                      onClick={() => run(() => adminApi.endBooking(b.id), { title: `End ${b.aName} vs ${b.bName} now?`, body: 'Everyone on the server is kicked and the box restarts.', confirmLabel: 'End now', danger: true })}>End</button>}
+                    {b.purpose === 'tournament' ? (
+                      // The event runs a tournament match: hold, reset, move
+                      // server and results live on its desk, not here.
+                      open && b.eventId !== null && <a class="btn btn--ghost btn--sm" href={eventAdminUrl(b.eventId)}>Event desk</a>
+                    ) : (
+                      <>
+                        {open && <button class="btn btn--ghost btn--sm" disabled={busy}
+                          onClick={() => run(() => adminApi.cancelBooking(b.id, ''), { title: `Cancel ${b.aName} vs ${b.bName}?`, body: 'Both sides are told. It counts against neither side.', confirmLabel: 'Cancel booking', danger: true })}>Cancel</button>}
+                        {open && <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => run(() => adminApi.extendBooking(b.id))}>+1 campaign</button>}
+                        {running && <button class="btn btn--ghost btn--sm" disabled={busy}
+                          onClick={() => run(() => adminApi.endBooking(b.id), { title: `End ${b.aName} vs ${b.bName} now?`, body: 'Everyone on the server is kicked and the box restarts.', confirmLabel: 'End now', danger: true })}>End</button>}
+                      </>
+                    )}
                   </td>
                 </tr>
               );

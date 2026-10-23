@@ -177,6 +177,18 @@ describe('the live board', () => {
     expect(mockAdmin.leaveClock).not.toHaveBeenCalled();
   });
 
+  it('a booked game says it is booked, not started in game, and a ready-up reads as ready-up', async () => {
+    // A tournament or scrim game has no went_live_at either, but the site
+    // started it: the card must not call it self-started.
+    mockAdmin.live.mockResolvedValue(board({ leaveTracking: false, bookingId: 3, state: 'live', phase: 'readyup' }));
+    render(<AdminLive isAdmin />);
+    const bob = await row('bob');
+    expect((within(bob).getByRole('button', { name: 'Hold' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/A booked game/)).toBeTruthy();
+    expect(screen.queryByText(/started in game/)).toBeNull();
+    expect(screen.getByText('ready-up')).toBeTruthy();
+  });
+
   it('locks only the row being acted on, so one stuck request cannot grey out the other Hold', async () => {
     // Two players dropped on one match is exactly when this matters: an rcon
     // call against a slow box takes up to its timeout, and for that whole

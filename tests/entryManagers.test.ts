@@ -181,7 +181,15 @@ describe('booking a series between two draft entries', () => {
     const sides = B.sidesOf(s.db, b.id);
     expect(sides.map((x) => B.sideName(s.db, x))).toEqual(['Team Alpha', 'Team Beta']);
     expect(B.bookingView(s.db, b.id, { steamid: A[0]!, staff: true })?.sides.map((x) => x.name)).toEqual(['Team Alpha', 'Team Beta']);
-    expect(bookingLines(s.db, b).find((l) => l.startsWith('l4d_booking_notice '))).toContain('Booked: Team Alpha vs Team Beta');
+    // A tournament box is named for its event, with no booked until-time.
+    const evName = (s.db.prepare('SELECT e.name FROM event_matches m JOIN events e ON e.id = m.event_id WHERE m.booking_id = ?').get(b.id) as { name: string }).name;
+    const notice = bookingLines(s.db, b).find((l) => l.startsWith('l4d_booking_notice '))!;
+    expect(notice).toBe(`l4d_booking_notice "${evName}: Team Alpha vs Team Beta"`);
+    expect(notice).not.toContain('until');
+    // The voice category and the notice share one heading; too long for the limit falls back.
+    expect(B.bookingHeading(s.db, b, 'Team Alpha', 'Team Beta', 100)).toBe(`${evName}: Team Alpha vs Team Beta`);
+    expect(B.bookingHeading(s.db, b, 'Team Alpha', 'Team Beta', evName.length + 5)).toBe('Tournament: Team Alpha vs Team Beta'.slice(0, evName.length + 5));
+    expect(B.bookingHeading(s.db, { ...b, purpose: 'scrim' }, 'Team Alpha', 'Team Beta', 100)).toBe('Scrim: Team Alpha vs Team Beta');
     expect(B.peopleOf(s.db, b.id).map((p) => [p.side, p.steamid, p.role])).toEqual([
       ...A.slice(0, 4).map((x) => ['a', x, 'player']), ['a', A[4], 'spectator'], ...BATS.slice(0, 4).map((x) => ['b', x, 'player']),
     ]);

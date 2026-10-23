@@ -16,7 +16,7 @@ const { BookingsPanel, endReasonText } = await import('./BookingsPanel');
 const ROW: AdminBookingRow = {
   id: 4, purpose: 'scrim', state: 'active', ending: false, startsAt: '2026-10-02T20:00:00.000Z', endsAt: '2026-10-02T22:00:00.000Z',
   aName: 'Rats', bName: "p1's group", server: 'Riverside #3', peak: { a: 4, b: 3 }, endReason: null,
-  toxic: { a: false, b: false },
+  toxic: { a: false, b: false }, eventId: null,
 };
 
 afterEach(cleanup);
@@ -30,6 +30,15 @@ describe('BookingsPanel', () => {
     expect(screen.getByText('Riverside #3')).toBeTruthy();
     expect(screen.getByText('4 / 3')).toBeTruthy();
     for (const name of ['Cancel', '+1 campaign', 'End']) expect(screen.getByRole('button', { name })).toBeTruthy();
+  });
+
+  it('a tournament booking has no Cancel, +1 campaign or End: it links to its event desk and shows no booked end', async () => {
+    mockAdmin.bookings.mockResolvedValue({ bookings: [{ ...ROW, purpose: 'tournament', eventId: 3 }] });
+    render(<BookingsPanel nudge={0} />);
+    await screen.findByText("Rats vs p1's group");
+    for (const name of ['Cancel', '+1 campaign', 'End']) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Event desk' }).getAttribute('href')).toBe('/admin/events/3');
+    expect(screen.getByText(/^From /)).toBeTruthy();
   });
 
   it('Cancel asks first, then cancels', async () => {
