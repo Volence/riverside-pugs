@@ -93,11 +93,14 @@ export function Profile(
   const scopeName = scopeInfo.kind === 'career' ? 'Career' : scopeInfo.name;
   const currentScope = scopeInfo.kind === 'season' && scopeInfo.current;
   const record = data.record ?? rating ?? { wins: 0, losses: 0 };
-  // Day one of a season (soft reset), or a season they sat out: no wall of
-  // zeros, a line saying so and the way to the career.
-  const empty = totals.games === 0;
+  // No completed PUG in scope: no stat panels, which would be all zeros.
+  const noStats = totals.games === 0;
+  // Nothing at all, not even a rated abandon loss: day one of a season (soft
+  // reset) or a season they sat out. A line saying so and the way to the
+  // career, instead of a wall of zeros.
+  const empty = noStats && record.wins + record.losses === 0;
   const seasonsPlayed = data.seasonsPlayed ?? [];
-  const hasCareer = career || seasonsPlayed.some((s) => s.games > 0);
+  const hasCareer = career || seasonsPlayed.some((s) => s.games > 0 || (s.rated ?? 0) > 0);
 
   // Filtered here rather than at the render site so the panel itself can be
   // dropped when nothing survives: a heading promising private numbers over an
@@ -248,7 +251,7 @@ export function Profile(
 
         <SeasonHistory past={data.pastSeasons ?? []} own={session?.kind === 'active' && session.me.steamid === steamid} />
 
-        {!empty && (
+        {!noStats && (
           <ProfileFigures
             totals={totals} statTotals={statTotals} record={record}
             standings={career ? {} : data.standings ?? {}} statDefs={data.statDefs} scopeName={scopeName}
@@ -257,11 +260,11 @@ export function Profile(
 
         <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
 
-        {!empty && <ChemistryPanel chemistry={data.chemistry} />}
-        {!empty && <EndorsementCounts endorsements={data.endorsements} />}
+        {!noStats && <ChemistryPanel chemistry={data.chemistry} />}
+        {!noStats && <EndorsementCounts endorsements={data.endorsements} />}
         <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
 
-        {!empty && <div class="profile-grid">
+        {!noStats && <div class="profile-grid">
           <Panel>
             <h3>{`${scopeName} totals`}</h3>
             <dl class="totals">

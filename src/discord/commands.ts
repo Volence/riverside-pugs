@@ -128,7 +128,8 @@ function profile(deps: CommandDeps, i: Cmd): InteractionReply {
   // and the card says so; the career is one click away on the site.
   const seasonName = data.season?.name ?? 'This season';
   const lines: string[] = [];
-  if (games === 0) {
+  // Nothing this season, not even a rated abandon loss.
+  if (games === 0 && (rating?.wins ?? 0) + (rating?.losses ?? 0) === 0) {
     // Day one of a season (or a player back after a break): no wall of zeros.
     const career = (profileData(deps.db, who.steamid, null, { kind: 'career' })?.totals.games) ?? 0;
     lines.push(`**${seasonName}:** no matches yet${data.season?.placing ? `. Placing 0/${data.season.placing.of}` : ''}.`);
