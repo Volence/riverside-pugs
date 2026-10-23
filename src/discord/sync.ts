@@ -89,9 +89,9 @@ export class DiscordSync {
   /** Matches born from a lobby whose card was never posted (the whole lobby
    *  ran between two passes). The next pass posts their card. */
   private needCard = new Set<number>();
-  /** A lobby started since the last pass. A whole ready check can in
-   *  principle run between two passes, and the open queue alert must still
-   *  be closed as "popped" rather than left inviting people in. */
+  /** A lobby became a match since the last pass, which is what closes the
+   *  open queue alert as "match started". A failed ready check is not one:
+   *  its players are put back in the queue and the alert carries on. */
   private poppedSinceLastPass = false;
   /** The count the open queue alert shows, by message id, so an unchanged
    *  queue does not re-edit it every pass. Unknown after a restart, which
@@ -113,8 +113,8 @@ export class DiscordSync {
     this.deps.matchmaker.on({
       // Synchronous, so by the time any pass runs the card is already keyed by
       // the match it became.
-      lobbyStarted: () => { this.poppedSinceLastPass = true; },
       lobbyCompleted: (lobbyId, matchId) => {
+        this.poppedSinceLastPass = true;
         if (getMessage(db, 'match', lobbyId)) rekeyMessage(db, 'match', lobbyId, String(matchId));
         else this.needCard.add(matchId);
       },
@@ -371,23 +371,24 @@ export class DiscordSync {
    */
   private async maybeAlert(count: number): Promise<boolean> {
     const { db } = this.deps;
-    const popping = this.poppedSinceLastPass || this.deps.matchmaker.lobbies().length > 0;
+    const popping = this.deps.matchmaker.lobbies().length > 0;
+    const popped = this.poppedSinceLastPass;
     this.poppedSinceLastPass = false;
     const cfg = queueAlertConfig(db, this.deps.channelId);
     const open = openAlerts(db);
     // Older open alerts than the newest should not exist; close any found as
     // the newest would be, so none is left inviting people in.
-    for (const stale of open.slice(1)) await this.closeAlert(stale, popping ? 'popped' : 'emptied', count);
+    for (const stale of open.slice(1)) await this.closeAlert(stale, popped ? 'popped' : 'emptied', count);
     const current = open[0] ?? null;
     if (!cfg) {
       // Turned off with an alert standing: close it rather than strand it.
-      if (current) await this.closeAlert(current, popping ? 'popped' : count === 0 ? 'emptied' : 'dropped', count);
+      if (current) await this.closeAlert(current, popped ? 'popped' : count === 0 ? 'emptied' : 'dropped', count);
       return false;
     }
 
     const now = this.deps.now?.() ?? Date.now();
     const decision = decideAlert({
-      count, popping, threshold: cfg.threshold, cooldownMs: cfg.cooldownMs, now,
+      count, popping, popped, threshold: cfg.threshold, cooldownMs: cfg.cooldownMs, now,
       lastAt: lastAlertAt(db),
       open: current ? { count: this.alertShows.get(current.message_id) ?? null } : null,
     });

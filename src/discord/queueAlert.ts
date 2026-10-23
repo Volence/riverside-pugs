@@ -69,9 +69,12 @@ export interface AlertInput {
   /** Players in the main queue, counted as the queue card counts them: each
    *  person once, so a duo is two. */
   count: number;
-  /** A ready check or campaign vote is running, or one started since the
-   *  last look. */
+  /** A ready check or campaign vote is running. The alert is left exactly
+   *  as it is: the pop may yet fail and put people back in the queue. */
   popping: boolean;
+  /** A pop became a match since the last look. Only this closes an alert as
+   *  "match started": a failed ready check is not a match. */
+  popped: boolean;
   threshold: number;
   cooldownMs: number;
   now: number;
@@ -86,7 +89,11 @@ export interface AlertInput {
  *  without a transport. */
 export function decideAlert(v: AlertInput): AlertDecision {
   if (v.open) {
-    if (v.popping) return { kind: 'close', why: 'popped' };
+    if (v.popped) return { kind: 'close', why: 'popped' };
+    // Mid ready check the queue reads near empty, and closing or editing on
+    // that would be wrong the moment the check fails and everyone who readied
+    // is put back. Once it ends either way, the rules below pick it up again.
+    if (v.popping) return { kind: 'none' };
     if (v.count === 0) return { kind: 'close', why: 'emptied' };
     if (v.count < v.threshold - ALERT_DROP_MARGIN) return { kind: 'close', why: 'dropped' };
     return v.count === v.open.count ? { kind: 'none' } : { kind: 'update' };

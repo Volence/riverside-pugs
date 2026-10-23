@@ -551,18 +551,50 @@ describe('queue-filling alert', () => {
     expect(now.mentionRoleIds).toEqual([]);
   });
 
-  it('closes the alert as "Match started" when the queue pops, and never pings during the pop', async () => {
+  it('leaves the alert alone during the ready check and closes it as "Match started" once the pop is a match', async () => {
     setRole();
     await build().start();
     await queueTo(6);
+    const before = structuredClone(alertMsg().payload);
     await queueTo(8);
     expect(mm.lobbies()).toHaveLength(1);
+    // The ready check could still fail: nothing is closed or edited yet.
+    expect(alertMsg().payload).toEqual(before);
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+
+    for (const id of IDS) mm.ready(id);
+    await sync.pass();
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    await sync.pass();
+    expect(mm.lobbies()).toHaveLength(0);
+
     expect(pings).toHaveLength(1);
     const closed = alertMsg().payload;
     expect(closed.content).toMatch(/Queue popped: match started/);
     expect(closed.content).not.toContain(`<@&${ROLE}>`);
     expect(closed.components).toEqual([]);
     expect(alertRows().map((r) => r.state)).toEqual(['popped']);
+  });
+
+  it('a failed ready check keeps the alert open, edited back to the live count, with no new ping', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    await queueTo(8);
+    // Seven ready, one does not: the seven go back to the front of the queue.
+    for (const id of IDS.slice(0, 7)) mm.ready(id);
+    sched.fireAll();
+    expect(mm.lobbies()).toHaveLength(0);
+    expect(mm.publicQueue().count).toBe(7);
+    await sync.pass();
+
+    expect(pings).toHaveLength(1);
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+    const now = alertMsg().payload;
+    expect(now.content).toContain('7/8');
+    expect(now.content).toContain(`<@&${ROLE}>`);
+    expect(now.mentionRoleIds).toEqual([]);
   });
 
   it('does not ping while a ready check is running, even past the threshold and the cooldown', async () => {
@@ -583,16 +615,28 @@ describe('queue-filling alert', () => {
     expect(pings).toHaveLength(0);
   });
 
-  it('closes a pop it only heard about, when the whole lobby ran between two passes', async () => {
+  it('closes as popped when the whole lobby became a match between two passes', async () => {
     setRole();
     await build().start();
     await queueTo(6);
     for (let i = 6; i < 8; i++) mm.join(IDS[i]);
-    // The ready check fails before any pass looks: everyone is requeued.
-    sched.fireAll();
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
     expect(mm.lobbies()).toHaveLength(0);
     await sync.pass();
     expect(alertMsg().payload.content).toMatch(/Queue popped/);
+  });
+
+  it('a pop that failed between two passes is not a match', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    for (let i = 6; i < 8; i++) mm.join(IDS[i]);
+    for (const id of IDS.slice(0, 6)) mm.ready(id);
+    sched.fireAll();
+    await sync.pass();
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+    expect(alertMsg().payload.content).toContain('6/8');
   });
 
   it('closes the alert as "Queue emptied" when everyone leaves', async () => {
@@ -660,6 +704,9 @@ describe('queue-filling alert', () => {
     sync.stop();
     await build().start();
     await queueTo(8);
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    await sync.pass();
     expect(alertMsg().payload.content).toMatch(/Queue popped/);
   });
 
