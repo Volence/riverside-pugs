@@ -85,7 +85,7 @@ describe('BookingsPanel', () => {
     });
     render(<BookingsPanel nudge={0} />);
     await screen.findByText('Owls vs Rats');
-    expect(screen.getByText('Match')).toBeTruthy();
+    expect(screen.getByText('Tournament match')).toBeTruthy();
     expect(screen.getAllByText('Scrim')).toHaveLength(2);
     expect(screen.getByTestId('booking-priority').textContent).toBe('Priority: Match, then Scrim, then PUG, then practice and side games. Scrims hold 1 of 2 servers they may hold at once; 2 always left for PUGs. A match with no free server bumps a scrim that has not started.');
     const bumped = screen.getByText('bumped by a match');
@@ -104,6 +104,21 @@ describe('BookingsPanel', () => {
     render(<BookingsPanel nudge={0} />);
     await screen.findByText("Rats vs p1's group");
     expect(screen.getByTestId('booking-priority').textContent).toBe('Priority: Match, then Scrim, then PUG, then practice and side games. Scrims hold 0 of 2 servers they may hold at once in EU, 2 of 2 in NA; 2 always left for PUGs. A match with no free server bumps a scrim that has not started.');
+  });
+
+  // The board's top is for what is happening: a booking that already ended
+  // (they stay listed for a day) must not take a full panel there.
+  it('folds finished bookings into one line, and says none is open', async () => {
+    mockAdmin.bookings.mockResolvedValue({ bookings: [{ ...ROW, id: 9, purpose: 'tournament', aName: 'Bone', bName: 'Poop', state: 'ended', endReason: 'done' }] });
+    const { container } = render(<BookingsPanel nudge={0} />);
+    const summary = await waitFor(() => {
+      const el = container.querySelector('details.bookings__done > summary');
+      if (!el) throw new Error('no summary yet');
+      return el;
+    });
+    expect(summary.textContent).toBe('Booked servers1 finished in the last day, none open');
+    expect((summary.parentElement as HTMLDetailsElement).open).toBe(false);
+    expect(screen.queryByRole('heading', { name: 'Booked servers' })).toBeNull();
   });
 
   it('shows no priority line when the answer carries none', async () => {

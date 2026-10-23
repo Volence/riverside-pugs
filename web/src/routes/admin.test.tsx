@@ -260,7 +260,7 @@ describe('the panels under the live board', () => {
     mockAdmin.overview.mockResolvedValue(o);
     renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
-    expect(screen.getByText('Aborted')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: /Aborted/ }));
     expect(screen.getByText(/181 - 105/)).toBeTruthy();
     expect(screen.getByText(/left: mayhem/)).toBeTruthy();
     expect(screen.getByText('#80').closest('a')?.getAttribute('href')).toBe('/match/80');
@@ -349,7 +349,8 @@ describe('the panels under the live board', () => {
     mockAdmin.overview.mockResolvedValue(o);
     renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
-    expect(screen.getByText('Slow to ready')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Slow to ready' }));
+    expect(screen.getByRole('tab', { name: 'Slow to ready' }).getAttribute('aria-selected')).toBe('true');
     const row = screen.getByText('killshot').closest('tr')!;
     expect(row.textContent).toContain('5 of 6');
     expect(row.textContent).toContain('1:40');
@@ -396,7 +397,8 @@ describe('AdminCampaigns', () => {
   it('shows free disk space so an admin sees headroom before uploading', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [] });
     renderAdmin('/admin/setup/campaigns');
-    expect(await waitFor(() => screen.getByText(/11(\.0)? GB free/i))).toBeTruthy();
+    expect(await waitFor(() => screen.getByText(/^11(\.0)? GB$/))).toBeTruthy();
+    expect(screen.getByText('free for uploads')).toBeTruthy();
   });
 
   // Every chapter of a campaign shares its slug, so a list keyed on ch.slug

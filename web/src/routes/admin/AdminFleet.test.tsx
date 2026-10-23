@@ -9,6 +9,10 @@ vi.mock('../../api', async (importOriginal) => {
 });
 const { AdminFleet } = await import('./AdminFleet');
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+// The table names a file by its file name with the folder under it; the
+// whole path is the cell's title.
+const fileRow = (path: string) => document.querySelector(`td.fleet-file[title="${path}"]`);
+const findFileRow = (path: string) => waitFor(() => { const r = fileRow(path); if (!r) throw new Error(`no row for ${path}`); return r; });
 
 const P = 'left4dead/addons/sourcemod/plugins/pug-match.smx';
 const C = 'left4dead/cfg/server.cfg';
@@ -36,15 +40,17 @@ describe('AdminFleet', () => {
     expect(await screen.findByText(/Repo: 57add2c/)).toBeTruthy();
     expect(screen.getByText(/Rotoblin-AZMod v8.6.4/)).toBeTruthy();
     expect(screen.getByText(/timed out after 600 s/)).toBeTruthy();
-    expect(screen.getByText(/1 difference: pug-match.smx \(Dallas\)/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '1 difference' })).toBeTruthy();
+    const diff = document.querySelector(`.fleet-diffs li[title="${P}"]`)!;
+    expect(diff.textContent).toBe('pug-match.smxDallas');
   });
 
   it('shows differences only by default and everything on request', async () => {
     render(<AdminFleet />);
-    await screen.findByText(P);
-    expect(screen.queryByText(C)).toBeNull();
+    await findFileRow(P);
+    expect(fileRow(C)).toBeNull();
     fireEvent.click(screen.getByLabelText('Differences only'));
-    expect(screen.getByText(C)).toBeTruthy();
+    expect(fileRow(C)).toBeTruthy();
     expect(screen.getAllByText(/patched on all boxes/).length).toBeGreaterThan(0);
   });
 
@@ -73,7 +79,7 @@ describe('AdminFleet', () => {
   it('marks a highlighted cell and checks a box or all', async () => {
     render(<AdminFleet />);
     const hi = await screen.findByText(/81639 · f7ee35c3/);
-    expect(hi.closest('td')!.className).toContain('admin-warn');
+    expect(hi.closest('td')!.className).toContain('fleet-cell--diff');
     fireEvent.click(screen.getByRole('button', { name: 'Check Dallas now' }));
     await waitFor(() => expect(mockAdmin.fleetCheck).toHaveBeenCalledWith({ serverId: 1 }));
     fireEvent.click(screen.getByRole('button', { name: 'Check all' }));
@@ -90,10 +96,10 @@ describe('AdminFleet', () => {
 
   it('filters by area', async () => {
     render(<AdminFleet />);
-    await screen.findByText(P);
+    await findFileRow(P);
     fireEvent.click(screen.getByLabelText('Differences only'));
     fireEvent.change(screen.getByLabelText('Area'), { target: { value: 'configs' } });
-    expect(screen.queryByText(P)).toBeNull();
-    expect(screen.getByText(C)).toBeTruthy();
+    expect(fileRow(P)).toBeNull();
+    expect(fileRow(C)).toBeTruthy();
   });
 });
