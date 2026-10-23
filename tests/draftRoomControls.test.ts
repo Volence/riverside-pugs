@@ -55,18 +55,18 @@ describe('undo', () => {
     expect(logs(f, 'draft_pick_undone')).toEqual([{ actor: ADMIN, picks: [{ pickNo: 3, steamid: third.steamid }] }]);
   });
 
-  it('gives the reopened pick an absent picker\'s 5 seconds, running or done, like any other turn', () => {
+  it('gives the reopened pick the full pick clock, present or not, running or done, like any other turn', () => {
     const f = startedDraft();
     drive(f, 3);
     must(DR.undoPick(f.db, staff(f, 40, NONE)));
-    expect(state(f).room.deadline_at).toBe(iso(at(45)));
+    expect(state(f).room.deadline_at).toBe(iso(at(115)));
     must(DR.undoPick(f.db, staff(f, 41, (s) => s !== CAPTAINS[1])));
-    expect(state(f).room.deadline_at).toBe(iso(at(46)));
+    expect(state(f).room.deadline_at).toBe(iso(at(116)));
 
     const g = startedDraft();
     drive(g, 14);
     must(DR.undoPick(g.db, staff(g, 60, NONE)));
-    expect(state(g).room).toMatchObject({ status: 'running', deadline_at: iso(at(65)) });
+    expect(state(g).room).toMatchObject({ status: 'running', deadline_at: iso(at(135)) });
   });
 
   it('asks about the delegate when the reopened pick is a delegated team\'s', () => {

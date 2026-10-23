@@ -33,9 +33,13 @@ const { mockApi } = vi.hoisted(() => ({
 }));
 
 const mockChat = vi.hoisted(() => vi.fn());
+const mockEventsList = vi.hoisted(() => vi.fn(async () => ({ events: [] as unknown[] })));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, api: { ...actual.api, ...mockApi }, peopleApi: { ...actual.peopleApi, chat: mockChat } };
+  return {
+    ...actual, api: { ...actual.api, ...mockApi }, peopleApi: { ...actual.peopleApi, chat: mockChat },
+    eventsApi: { ...actual.eventsApi, list: mockEventsList },
+  };
 });
 
 const { Leaderboard } = await import('./Leaderboard');
@@ -83,11 +87,12 @@ describe('Leaderboard', () => {
       ],
     });
     render(<Leaderboard me="2" />);
-    // alice is also the top-rated headliner (1200 beats bob's 1100), so her
-    // name and rating each appear twice: the table row and the side card.
+    // alice and bob are both on the podium too, so each name appears twice:
+    // the podium card and the table row. The podium formats the rating.
     await waitFor(() => expect(screen.getAllByText('alice')).toHaveLength(2));
     expect(screen.getByText('Season 1')).toBeTruthy();
-    expect(screen.getAllByText('1200')).toHaveLength(2);
+    expect(screen.getAllByText('1200')).toHaveLength(1);
+    expect(document.querySelector('.lbpod__card--1 .lbpod__sr')?.textContent).toBe('1,200SR');
   });
 
   it('says so when nobody is rated yet', async () => {
@@ -112,7 +117,7 @@ describe('Leaderboard', () => {
     });
     const { container } = render(<Leaderboard me={null} />);
     await waitFor(() => expect(screen.getAllByText('alice')).toHaveLength(2));
-    // carol appears once: in the table, not as the headliner.
+    // carol appears once: in the table, not on the podium.
     expect(screen.getAllByText('carol')).toHaveLength(1);
     const names = [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent);
     expect(names).toEqual(['alice', 'bob', 'carol']);
@@ -124,6 +129,25 @@ describe('Leaderboard', () => {
     const figure = screen.getByText('Matches rated').parentElement as HTMLElement;
     expect(figure.textContent).toMatch(/5/);
     expect(figure.textContent).not.toMatch(/4/);
+  });
+
+  it('puts the top three ranked players by SR on the podium, never a provisional one', async () => {
+    mockApi.leaderboard.mockResolvedValue({
+      season: { id: 1, name: 'Season 1' },
+      matchesRated: 9,
+      rows: [
+        { steamid: '9', name: 'zed', avatar: null, sr: 9000, wins: 1, losses: 0, games: 1, ranked: false },
+        { steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, ranked: true },
+        { steamid: '4', name: 'dan', avatar: null, sr: 900, wins: 2, losses: 2, games: 4, ranked: true },
+        { steamid: '2', name: 'bob', avatar: null, sr: 1100, wins: 1, losses: 3, games: 4, ranked: true },
+        { steamid: '3', name: 'carol', avatar: null, sr: 1000, wins: 2, losses: 2, games: 4, ranked: true },
+      ],
+    });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(container.querySelector('.lbpod')).toBeTruthy());
+    const podium = [...container.querySelectorAll('.lbpod__name')].map((a) => a.textContent);
+    expect(podium).toEqual(['alice', 'bob', 'carol']);
+    expect(container.querySelector('.lbpod__card--1 dd')?.textContent).toBe('3W 1L');
   });
 
   it('shows no top-rated card when nobody is ranked yet', async () => {
@@ -172,11 +196,27 @@ describe('Matches', () => {
       ],
     });
     render(<Matches />);
-    // Appears twice now: in the summary tiles and in the table row.
+    // Appears twice now: in the summary tiles and in the row.
     await waitFor(() => expect(screen.getAllByText('Blood Harvest').length).toBeGreaterThan(0));
-    expect(screen.getByText('Team A')).toBeTruthy();
+    // The winning side is marked on the row; a PUG's sides are its players, not "Team A".
+    expect(screen.getByText('Won')).toBeTruthy();
+    expect(screen.queryByText('Team A')).toBeNull();
     // The tile row is derived from the same fetch, so it must render too.
     expect(screen.getByText('Matches')).toBeTruthy();
+  });
+
+  it("names a scrim or tournament game's teams and what it was part of", async () => {
+    mockApi.matches.mockResolvedValue({
+      matches: [{
+        id: 798, campaign: 'blood_harvest', endedAt: '2026-10-23T08:44:00', teamAScore: 1107, teamBScore: 925, winner: 'a',
+        players: { a: [], b: [] },
+        booked: { kind: 'tournament', a: { name: 'Bone Breakage', tag: 'BB' }, b: { name: 'Poop Packers', tag: null }, event: { slug: 'cup', name: 'The Cup', matchId: 1 } },
+      }],
+    });
+    render(<Matches />);
+    await waitFor(() => expect(screen.getByText('Bone Breakage')).toBeTruthy());
+    expect(screen.getByText('Poop Packers')).toBeTruthy();
+    expect(screen.getByText('The Cup')).toBeTruthy();
   });
 
   it('summarises with facts that outlive a single match, not per-match team labels', async () => {
@@ -593,8 +633,9 @@ describe('Profile', () => {
     render(<Profile steamid="1" />);
     await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
     // history's peak (1200) equals the current rating, so the same number
-    // appears twice: the rating hero and the "Peak" stat tile.
-    expect(screen.getAllByText('1200')).toHaveLength(2);
+    // appears four times: the rating hero, its "Peak" stat tile, and the
+    // rating chart's Now and Peak figures.
+    expect(screen.getAllByText('1200')).toHaveLength(4);
     expect(screen.getByText('Dead Air')).toBeTruthy();
     // Shown twice by design: beside the rating hero, and in the match row.
     expect(screen.getAllByText('+12')).toHaveLength(2);
@@ -617,6 +658,28 @@ describe('Profile', () => {
     });
     render(<Profile steamid="1" />);
     expect(await screen.findByText(/Dead Center 2 · Streets/)).toBeTruthy();
+  });
+
+  // The bar is the rate itself (not how often the map came up), and a map
+  // with only a few games folds away instead of topping the list at 0%.
+  it('draws by-map bars as the win rate and folds small samples away', async () => {
+    mockApi.profile.mockResolvedValue({
+      ...profile,
+      byMap: [
+        { map: 'c1m2_streets', campaignName: 'Dead Center', games: 2, wins: 0, losses: 2, stats: {}, avgStats: {} },
+        { map: 'l4d_hospital01_apartment', campaignName: 'No Mercy', games: 20, wins: 15, losses: 5, stats: {}, avgStats: {} },
+      ],
+    });
+    const { container } = render(<Profile steamid="1" />);
+    await screen.findByText(/No Mercy 1/);
+    const rows = [...container.querySelectorAll('.bars > .bar')];
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.querySelector('.bar__fill') as HTMLElement).style.width).toBe('75%');
+    expect(rows[0]!.querySelector('.bar__mark')).toBeTruthy();
+    const few = container.querySelector('.bars__few')!;
+    expect(few.querySelector('summary')!.textContent).toBe('1 map with fewer than 5 games');
+    expect(few.querySelector('.bar--dim')).toBeTruthy();
+    expect(few.querySelector('.bar__fill--neutral')).toBeTruthy();
   });
 });
 
@@ -1763,10 +1826,22 @@ describe('CustomCampaigns', () => {
     mockApi.customCampaigns.mockResolvedValue({ campaigns: [{ ...campaign, slug: 'hunter_training', name: 'Hunter Training', inPool: false, practiceOnly: true }] });
     render(<CustomCampaigns />);
     const badge = await waitFor(() => screen.getByText('Practice map'));
-    // Scoped to this campaign's heading: the L4D2 pack block has vote badges of its own.
-    const heading = badge.closest('h3')!;
+    // Scoped to this campaign's card: the L4D2 pack block has vote badges of its own.
+    const heading = badge.closest('.cccard')!;
     expect(heading.textContent).toContain('Hunter Training');
     expect(heading.textContent).not.toContain('In the vote');
+  });
+
+  it('tells players a converted campaign also needs the L4D2 pack, and only that one', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [
+      { ...campaign, slug: 'detourahead', name: 'Detour Ahead', needsL4d2Pack: true },
+      campaign,
+    ] });
+    render(<CustomCampaigns />);
+    const link = await waitFor(() => screen.getByRole('link', { name: 'L4D2 campaigns pack' }));
+    expect(link.getAttribute('href')).toBe('#l4d2-pack');
+    expect(link.closest('section')!.textContent).toContain('Detour Ahead');
+    expect(screen.getAllByRole('link', { name: 'L4D2 campaigns pack' })).toHaveLength(1);
   });
 
   it('opts the download link out of the SPA router', async () => {
@@ -2139,16 +2214,31 @@ describe('Live with nothing running', () => {
     });
     render(<Live me={null} />);
     await waitFor(() => expect(screen.getByText(/nothing being played/i)).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('Last match')).toBeTruthy());
-    expect(screen.getByText('5 of 8')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/^Last match/)).toBeTruthy());
+    expect(screen.getByText('5')).toBeTruthy();
+    expect(screen.getByText('Waiting for players.')).toBeTruthy();
     expect(screen.getByText('Dead Air')).toBeTruthy();
     expect(screen.getByText(/how to play/i)).toBeTruthy();
   });
 
-  it('says the queue is empty rather than showing 0 of 8', async () => {
+  it('says the queue is empty in words, and leaves out cards it has nothing for', async () => {
     render(<Live me={null} />);
-    await waitFor(() => expect(screen.getByText(/the queue is empty/i)).toBeTruthy());
-    expect(screen.queryByText('Last match')).toBeNull();
+    await waitFor(() => expect(screen.getByText(/join and it starts filling/i)).toBeTruthy());
+    expect(screen.queryByText(/^Last match/)).toBeNull();
+    expect(screen.queryByText('Next event')).toBeNull();
+  });
+
+  it('points at the next event that has not finished', async () => {
+    mockEventsList.mockResolvedValueOnce({
+      events: [
+        { slug: 'old', name: 'Old Cup', status: 'finished', entryKind: 'draft', official: true, startsAt: '2026-10-01T00:00:00Z', bannerKey: null, format: [], entries: 8 },
+        { slug: 'cup', name: 'Draft Cup', status: 'registration', entryKind: 'draft', official: true, startsAt: '2026-10-24T00:00:00Z', bannerKey: null, format: ['Single elimination'], entries: 31, statusLabel: 'Signups open' },
+      ],
+    });
+    render(<Live me={null} />);
+    await waitFor(() => expect(screen.getByText('Draft Cup')).toBeTruthy());
+    expect(screen.queryByText('Old Cup')).toBeNull();
+    expect(screen.getByText(/Signups open/)).toBeTruthy();
   });
 });
 

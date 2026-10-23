@@ -19,7 +19,7 @@ import { claimReviewAsk } from '../scrims/reviews.js';
 import { claimResultNotice, seriesTally } from './series.js';
 import { DEFAULT_GRACE_MINUTES, bookingLimits, byPriority, isLateCancel } from './rules.js';
 import {
-  acceptedPeople, actingSides, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
+  acceptedPeople, actingSides, bookingHeading, advancePlaylist, allowInGame, subInGame, allowList, bookingRules, closeBooking, endBooking, expireUnconfirmed, addCampaign, gameName, getBooking, markActive,
   markReady, markReleased, markSetup, openBookings, recordPresence, resetSetupAttempts, setCloseAt, setNext, setReminded, setWarned, sideName, sidesOf, holdBox,
   beginMove, beginRecovery, bumpBooking, dropBox, finishRecovery, markUpAlerted, noteA2s, noteAlive, noteLost, reholdBox, markBoxRestarted,
   BOOKING_ERRORS, bookRoster, firstSurvivorSide, pressStartNow, startBookingNow, startNowSnapshot, undoStartNow, withdrawStartNow, type Result, type BookingRow, type Side, type SideRow,
@@ -291,7 +291,11 @@ function stateLines(db: DB, b: BookingRow): string[] {
 export function bookingLines(db: DB, b: BookingRow): string[] {
   if (!/^[a-z0-9]+$/.test(b.password) || !/^[a-z0-9]+$/.test(b.tv_password)) throw new Error('booking password has unexpected characters');
   const [a, bs] = sidesOf(db, b.id);
-  const notice = consoleText(`Booked: ${sideName(db, a)} vs ${sideName(db, bs)} until ${b.ends_at.slice(11, 16)} UTC`, 120);
+  // A tournament has no booked end (the series engine closes it), so it is
+  // named for its event with no until-time.
+  const notice = consoleText(b.purpose === 'tournament'
+    ? bookingHeading(db, b, sideName(db, a), sideName(db, bs), 120)
+    : `Booked: ${sideName(db, a)} vs ${sideName(db, bs)} until ${b.ends_at.slice(11, 16)} UTC`, 120);
   return [
     ...quietLines([
       `l4d_booking_tv_password ${quoted(b.tv_password)}`,
@@ -300,8 +304,25 @@ export function bookingLines(db: DB, b: BookingRow): string[] {
       `sm_cvar sv_password ${quoted(b.password)}`,
       `sm_cvar tv_password ${quoted(b.tv_password)}`,
     ]),
+    ...teamLines(db, b, a, bs),
     // T3b Ruling 10: the series engine speaks on a tournament box; the plugin's clock stays empty there.
     ...(b.purpose === 'tournament' ? [] : stateLines(db, b)),
+  ];
+}
+
+/** Each side's name and players for l4d_booking 1.6.0, which works out which
+ *  side stands on survivors and on infected (most of a game team's players
+ *  from one side) and puts the names on the ready-up panel's team blocks.
+ *  The game swaps sides every half, so the plugin watches rather than the
+ *  site predicting. Ids are SteamID64s, comma separated, players and
+ *  ringers only (bookRoster). */
+function teamLines(db: DB, b: BookingRow, a: SideRow, bs: SideRow): string[] {
+  const roster = bookRoster(db, b.id);
+  return [
+    `l4d_booking_name_a ${quoted(consoleText(sideName(db, a), 40))}`,
+    `l4d_booking_ids_a ${quoted(roster.a.join(','))}`,
+    `l4d_booking_name_b ${quoted(consoleText(sideName(db, bs), 40))}`,
+    `l4d_booking_ids_b ${quoted(roster.b.join(','))}`,
   ];
 }
 

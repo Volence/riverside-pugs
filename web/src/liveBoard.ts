@@ -11,6 +11,21 @@ export const OLD_PLUGIN_REASON =
 export const SELF_STARTED_REASON =
   'This match was started in game, so the server is not tracking reconnect time for it.';
 
+/** The same, for a booked game (a scrim or a tournament match): the site
+ *  starts it on the booking's box with no PUG reconnect clock, so the
+ *  booking's own rules handle a disconnect, not these controls. */
+export const BOOKING_REASON =
+  'A booked game (scrim or tournament match): the PUG reconnect clock does not run here. Disconnects follow the booking\'s rules.';
+
+/** The status chip on a live card: the match state, but a live match still
+ *  in its ready-up says so, so a card is not read as playing before it is. */
+export function liveStateLabel(state: 'waiting' | 'configuring' | 'live' | 'paused', phase: string | null): string {
+  if (state === 'waiting') return 'waiting for a server';
+  if (state === 'live' && phase === 'readyup') return 'ready-up';
+  if (state === 'live' && phase === 'loading') return 'loading';
+  return state;
+}
+
 /** A figure the server gave in seconds, counted down by the whole seconds
  *  since the payload arrived. `running` false is a held clock, which stands
  *  still. Null in, null out: an allowance the server did not know is not 0. */

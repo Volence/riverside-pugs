@@ -33,7 +33,7 @@ describe('startup grace', () => {
 });
 
 describe('the tick (Ruling 7)', () => {
-  it('auto-picks a running room once its deadline passes, pushes it, and gives an absent next picker 5 seconds', () => {
+  it('auto-picks a running room once its deadline passes, pushes it, and gives an absent next picker the full pick clock', () => {
     const f = startedDraft();
     let t = at(-30).getTime(); // the process started before the draft, so its startup grace is over
     const push = vi.fn();
@@ -46,7 +46,7 @@ describe('the tick (Ruling 7)', () => {
     clock.tick();
     expect(DR.livePicks(f.db, f.eventId)).toHaveLength(1);
     expect(push).toHaveBeenCalledWith(f.eventId);
-    expect(DR.roomOf(f.db, f.eventId)!.deadline_at).toBe(new Date(t + 5000).toISOString());
+    expect(DR.roomOf(f.db, f.eventId)!.deadline_at).toBe(new Date(t + 75_000).toISOString());
   });
 
   it('never picks for a paused room', () => {
@@ -75,8 +75,8 @@ describe('the tick (Ruling 7)', () => {
     t = Date.parse(deadline);
     after.tick();
     expect(DR.livePicks(f.db, f.eventId)[1]).toMatchObject({ pick_no: 2, captain_steamid: CAPTAINS[1], auto: 1 });
-    // Past the startup grace with no heartbeat since the restart: the next picker reads absent.
-    expect(DR.roomOf(f.db, f.eventId)!.deadline_at).toBe(new Date(t + 5000).toISOString());
+    // Past the startup grace with no heartbeat since the restart: the next picker reads absent, and still gets the full clock.
+    expect(DR.roomOf(f.db, f.eventId)!.deadline_at).toBe(new Date(t + 75_000).toISOString());
 
     must(DR.pauseRoom(f.db, { eventId: f.eventId, actor: ADMIN, now: new Date(t) }));
     new DraftClock({ db: f.db, now: () => t + 3_600_000 }).tick();

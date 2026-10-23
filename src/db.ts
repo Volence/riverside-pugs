@@ -1261,7 +1261,10 @@ CREATE TABLE IF NOT EXISTS input_bursts (
   -- tick), a scripted hold (constant) and a hand (5 to 12 ticks, never the
   -- same), and unlike a signature it cannot be backfilled: if it was not
   -- captured, it is gone.
-  holds TEXT
+  holds TEXT,
+  -- The tick rate every tick count on the row is at (l4d_inputstats 0.5.0).
+  -- NULL is 100, what every earlier row was recorded at.
+  tickrate INTEGER
 );
 CREATE INDEX IF NOT EXISTS input_bursts_match ON input_bursts(match_id);
 CREATE INDEX IF NOT EXISTS input_bursts_steamid ON input_bursts(steamid, at);
@@ -1296,7 +1299,9 @@ CREATE TABLE IF NOT EXISTS input_stalls (
   team INTEGER NOT NULL,
   cls INTEGER NOT NULL,
   lunging INTEGER NOT NULL,
-  at TEXT NOT NULL
+  at TEXT NOT NULL,
+  -- The tick rate gap is counted at (l4d_inputstats 0.5.0); NULL is 100.
+  tickrate INTEGER
 );
 CREATE INDEX IF NOT EXISTS input_stalls_match ON input_stalls(match_id, steamid);
 
@@ -1485,6 +1490,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
   discord_pug_role_id: '',
+  // The "queue almost full" ping (src/discord/queueAlert.ts): at 6 of 8, at
+  // most once per 45 minutes, in the queue channel unless a channel is set.
+  queue_alert_threshold: '6',
+  queue_alert_cooldown_minutes: '45',
+  discord_queue_alert_channel_id: '',
   mod_call_role_id: '',
   mod_calls_enabled: '1',
   // Empty: guild membership alone activates a linked player. A role id: the
@@ -1893,6 +1903,11 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'input_bursts', 'wire', 'INTEGER NOT NULL DEFAULT 1');
   ensureColumn(db, 'input_bursts', 'server_span', 'INTEGER');
   ensureColumn(db, 'input_bursts', 'holds', 'TEXT');
+  // The server's tick rate a burst or a stall was recorded at, from
+  // l4d_inputstats 0.5.0's rate=. NULL is 100: every row before it was
+  // recorded at 100 tick, and src/inputStats.ts reads NULL that way.
+  ensureColumn(db, 'input_bursts', 'tickrate', 'INTEGER');
+  ensureColumn(db, 'input_stalls', 'tickrate', 'INTEGER');
   ensureColumn(db, 'input_detections', 'note', "TEXT NOT NULL DEFAULT ''");
   // How many survivors were still standing when the round ended. NULL, not 0,
   // as the default: every round recorded before the plugin emitted this was
@@ -2581,6 +2596,9 @@ export function openDb(path: string): DB {
   // Practice-only campaigns (Hunter Training) install everywhere and are
   // downloadable, but are never offered for the PUG map pool.
   ensureColumn(db, 'custom_campaigns', 'practice_only', 'INTEGER NOT NULL DEFAULT 0');
+  // Converted L4D2 campaigns (l4d2to1) leave out every file our L4D2 pack
+  // already has, so the campaigns page tells players to get the pack too.
+  ensureColumn(db, 'custom_campaigns', 'needs_l4d2_pack', 'INTEGER NOT NULL DEFAULT 0');
   // Minutes staff added to this match's no-show deadline from the live board
   // (src/noShow.ts). Per match: it moves the whole rule, not one player's.
   ensureColumn(db, 'matches', 'noshow_extra_minutes', 'INTEGER NOT NULL DEFAULT 0');

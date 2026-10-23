@@ -679,6 +679,60 @@ export function setDraftCaptain(db: DB, o: { eventId: number; entryId: number; s
   }
 }
 
+/**
+ * Staff swap two starters between two draft teams (owner, 2026-10-23: a
+ * balance fix after the teams are published), in one transaction with one
+ * 'entry_players_swapped' row. Only from teams made until the event goes
+ * live: before that no match, lineup or booking holds either player, so the
+ * rosters are the whole change. Captains are refused (move the captaincy
+ * with Make captain first). draft_signups.draft_team follows, so the working
+ * teams read the same as the entries. Seeds are left as they are; staff can
+ * still reorder them before the start.
+ */
+export function swapDraftPlayers(db: DB, o: {
+  eventId: number; a: { entryId: number; steamid: string }; b: { entryId: number; steamid: string }; actor: string; now: Date;
+}): V.Checked<{ a: { entryId: number; steamid: string }; b: { entryId: number; steamid: string } }> {
+  const at = o.now.toISOString();
+  try {
+    return db.transaction((): V.Checked<{ a: { entryId: number; steamid: string }; b: { entryId: number; steamid: string } }> => {
+      const ev = E.getEvent(db, o.eventId);
+      if (!ev || ev.status === 'draft') return V.fail('not_found');
+      if (ev.entry_kind !== 'draft') return V.fail('replace_not_draft');
+      if (ev.teams_made_at === null || !LEAVE_OPEN.has(ev.status)) return V.fail('swap_closed');
+      if (o.a.entryId === o.b.entryId) return V.fail('swap_same_team');
+      const sides = [o.a, o.b].map((x) => {
+        const entry = getEntry(db, x.entryId);
+        if (!entry || entry.event_id !== ev.id) throw new Refused(V.fail('entry_not_found'));
+        if (entry.captain_steamid === null) throw new Refused(V.fail('replace_not_draft'));
+        if (!isActive(entry)) throw new Refused(V.fail('entry_out'));
+        if (x.steamid === entry.captain_steamid) throw new Refused(V.fail('swap_captain'));
+        const place = placesOf(db, entry.id).find((p) => p.steamid === x.steamid && p.role === 'starter');
+        if (!place) throw new Refused(V.fail('replace_not_starter'));
+        return { entry, place };
+      });
+      const [sa, sb] = sides as [typeof sides[number], typeof sides[number]];
+      db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id IN (?, ?)').run(at, sa.place.id, sb.place.id);
+      addPlace(db, sa.entry.id, o.b.steamid, 'starter', at);
+      addPlace(db, sb.entry.id, o.a.steamid, 'starter', at);
+      // The working teams (draft_signups.draft_team) swap too, so they never
+      // disagree with the entries.
+      const teamOf = db.prepare('SELECT draft_team FROM draft_signups WHERE event_id = ? AND steamid = ? AND withdrawn_at IS NULL');
+      const ta = (teamOf.get(ev.id, o.a.steamid) as { draft_team: number | null } | undefined)?.draft_team ?? null;
+      const tb = (teamOf.get(ev.id, o.b.steamid) as { draft_team: number | null } | undefined)?.draft_team ?? null;
+      const setTeam = db.prepare('UPDATE draft_signups SET draft_team = ? WHERE event_id = ? AND steamid = ? AND withdrawn_at IS NULL');
+      setTeam.run(tb, ev.id, o.a.steamid);
+      setTeam.run(ta, ev.id, o.b.steamid);
+      E.logEvent(db, ev.id, o.actor, 'entry_players_swapped', at, {
+        a: { entryId: sa.entry.id, steamid: o.a.steamid }, b: { entryId: sb.entry.id, steamid: o.b.steamid },
+      });
+      return V.ok({ a: o.a, b: o.b });
+    })();
+  } catch (err) {
+    if (err instanceof Refused) return err.r;
+    throw err;
+  }
+}
+
 export interface StandinPlaced {
   subbedInMatch: number | null; onBox?: BoxGame[]; requestId: number; entryId: number; out: string; in: string; scope: S.StandinScope; matchId: number | null;
 }

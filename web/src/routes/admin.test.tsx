@@ -510,9 +510,9 @@ describe('AdminCampaigns', () => {
     expect(await waitFor(() => screen.getByText(/cannot be added to the vote/i))).toBeTruthy();
     // It must not claim the download is blocked, because it is not.
     expect(screen.getByText(/can still download/i)).toBeTruthy();
-    // The one checkbox on the card is Practice only; none puts it in the vote.
+    // The card's checkboxes are Practice only and Needs the L4D2 pack; none puts it in the vote.
     expect(screen.getAllByRole('checkbox').map((b) => b.closest('label')?.textContent?.trim()))
-      .toEqual(['Practice only (never in the PUG pool)']);
+      .toEqual(['Practice only (never in the PUG pool)', 'Needs the L4D2 pack (converted from L4D2)']);
   });
 
   const draft = (over: Record<string, unknown> = {}) => ({

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, type LiveEvent, type LiveMatch, type LivePlayer } from '../api';
+import { api, eventsApi, type LiveEvent, type LiveMatch, type LivePlayer } from '../api';
 import {
-  campaignName, deriveLiveStats, fmtBytes, fmtDate, labelFor, liveGroupStarts, mapName,
-  orderLiveStatKeys, winnerLabel,
+  campaignName, campaignTint, deriveLiveStats, fmtAgo, fmtBytes, labelFor, liveGroupStarts, mapName,
+  orderLiveStatKeys,
 } from '../format';
+import { STATUS_LABEL, roundWhenText } from '../eventFormat';
 import { useFetch } from '../hooks/useFetch';
 import { QUEUE_SIZE } from '../queueSize';
-import { Empty, Panel, PlayerLink } from '../components/bits';
+import { Panel, PlayerLink } from '../components/bits';
 import { SpectatePanel } from '../components/SpectatePanel';
 import { StreamStrip } from '../components/StreamStrip';
 import { PageHeader } from '../components/PageHeader';
@@ -33,6 +34,9 @@ const POLL_MS = 5000;
 /** Stats that are a level rather than a counter: shown as-is, never
  *  differenced. Mirrors LEVEL_KEYS in src/liveView.ts. */
 const LEVEL_KEYS = new Set(['hp', 'hp_temp', 'hp_perm']);
+
+/** Events past their last match, left off the quiet page's Next event card. */
+const OVER = new Set(['finished', 'cancelled']);
 
 export function Live({ me }: { me: string | null }) {
   const [matches, setMatches] = useState<LiveMatch[] | null>(null);
@@ -215,9 +219,9 @@ function LiveOdds({ line }: { line: WinLine }) {
  * What the Live page shows when no match is running, which is most of the time.
  *
  * "Nothing being played right now." was a dead end: true, and no reason to
- * still be on the page. This is the same fact plus the two things a reader
- * actually wants next, which is whether a game is close to starting and what
- * the last one was.
+ * still be on the page. This is the same fact plus the three things a reader
+ * actually wants next: whether a game is close to starting, what is coming up
+ * on the events side, and what the last one was.
  *
  * Fetched here rather than lifted into Live, so the polling loop above is not
  * made to carry data it never uses while a match IS live.
@@ -225,38 +229,62 @@ function LiveOdds({ line }: { line: WinLine }) {
 function NothingLive() {
   const { data: queue } = useFetch((s) => api.queue(s), []);
   const { data: recent } = useFetch((s) => api.matches(s), []);
+  // The events list 404s while the competitive switch keeps events to staff;
+  // the card is simply left out then.
+  const { data: events } = useFetch((s) => eventsApi.list(s), []);
   const last = recent?.matches?.[0] ?? null;
+  const next = events?.events
+    .filter((e) => !OVER.has(e.status))
+    .sort((x, y) => x.startsAt.localeCompare(y.startsAt))[0] ?? null;
+  const count = queue?.count ?? 0;
 
   return (
-    <div class="stack">
-      <Panel>
-        <Empty>Nothing being played right now.</Empty>
-        {queue && (
-          <p class="nothinglive__queue">
-            {queue.count === 0
-              ? <>The queue is empty. <a href="/">Join it</a> and it starts filling.</>
-              : <><strong>{queue.count} of {QUEUE_SIZE}</strong> in the queue right now. <a href="/">Join</a>{queue.count >= QUEUE_SIZE - 2 ? ' and it pops.' : '.'}</>}
-          </p>
-        )}
-        <p class="muted">
-          New here? <a href="/how-to-play">How to play</a> walks through linking your
-          account and joining your first game.
-        </p>
-      </Panel>
+    <div class="quiet">
+      <p class="quiet__lede">
+        <span class="quiet__dot" aria-hidden="true" />
+        Nothing being played right now.
+      </p>
+      <div class="quiet__grid">
+        <a class="quiet__card" href="/">
+          <span class="eyebrow">Queue</span>
+          <span class="quiet__big num">{count}<span class="quiet__of"> / {QUEUE_SIZE}</span></span>
+          <span class="quiet__bar" aria-hidden="true"><span style={{ width: `${Math.min(100, (count / QUEUE_SIZE) * 100)}%` }} /></span>
+          <span class="quiet__line">
+            {count === 0 ? 'Empty. Join and it starts filling.'
+              : count >= QUEUE_SIZE - 2 ? `${QUEUE_SIZE - count} more and it pops.`
+                : 'Waiting for players.'}
+          </span>
+          <span class="quiet__cta">{count === 0 ? 'Start the queue' : 'Join the queue'}</span>
+        </a>
 
-      {last && (
-        <Panel>
-          <h3>Last match</h3>
-          <p class="nothinglive__last">
-            <a href={`/match/${last.id}`}>{campaignName(last.campaign)}</a>
-            {' · '}
-            <span class="num">{last.teamAScore} - {last.teamBScore}</span>
-            {last.winner ? <> · {winnerLabel(last.winner)}</> : null}
-            {last.endedAt ? <span class="muted"> · {fmtDate(last.endedAt)}</span> : null}
-          </p>
-          <p class="muted"><a href="/matches">All recent matches</a> · <a href="/leaderboard">Leaderboard</a></p>
-        </Panel>
-      )}
+        {next && (
+          <a class="quiet__card" href={`/event/${next.slug}`}>
+            <span class="eyebrow">Next event</span>
+            <span class="quiet__name">{next.name}</span>
+            <span class="quiet__line">{roundWhenText(next.startsAt)}</span>
+            <span class="quiet__line muted">{[next.statusLabel ?? STATUS_LABEL[next.status], next.format.join(', then ')].filter(Boolean).join(' · ')}</span>
+            <span class="quiet__cta">Event page</span>
+          </a>
+        )}
+
+        {last && (
+          <a class="quiet__card" href={`/match/${last.id}`}
+             style={{ '--campaign': campaignTint(last.campaign) } as Record<string, string>}>
+            <span class="eyebrow">Last match · {fmtAgo(last.endedAt)}</span>
+            <span class="quiet__name">{campaignName(last.campaign)}</span>
+            <span class="quiet__big num">
+              <span class={last.winner === 'a' ? 'is-won' : undefined}>{last.teamAScore}</span>
+              <span class="quiet__of"> - </span>
+              <span class={last.winner === 'b' ? 'is-won' : undefined}>{last.teamBScore}</span>
+            </span>
+            <span class="quiet__cta">Full stats</span>
+          </a>
+        )}
+      </div>
+      <p class="quiet__foot muted">
+        New here? <a href="/how-to-play">How to play</a> walks through linking your account and joining your first game.
+        {' '}<a href="/matches">All recent matches</a> · <a href="/leaderboard">Leaderboard</a>
+      </p>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer, activatePlayer, linkDiscord, consumeLinkCode } from '../src/players.js';
 import { addServer } from '../src/serverPool.js';
-import { handleButton } from '../src/discord/controller.js';
+import { handleButton, setAlertRole } from '../src/discord/controller.js';
 import type { Scheduler } from '../src/lobby.js';
 import type { InteractionReply } from '../src/discord/transport.js';
 import { setSetting } from '../src/settings.js';
@@ -196,7 +196,7 @@ describe('spectate button', () => {
 });
 
 describe('queue alert opt-in toggle', () => {
-  const ROLE = '55501';
+  const ROLE = '555000000000000001';
   let roles: FakeTransport['roles'];
   let t: FakeTransport;
 
@@ -214,11 +214,11 @@ describe('queue alert opt-in toggle', () => {
   it('adds the role, then removes it on a second press', async () => {
     const on = await toggle(did(0));
     expect(on.ephemeral).toBe(true);
-    expect(body(on)).toMatch(/will be pinged/i);
+    expect(body(on)).toMatch(/alerts are now ON: you will be pinged whenever/i);
     expect(t.rolesOf.get(did(0))?.has(ROLE)).toBe(true);
 
     const off = await toggle(did(0));
-    expect(body(off)).toMatch(/no longer be pinged/i);
+    expect(body(off)).toMatch(/alerts are now OFF/i);
     expect(t.rolesOf.get(did(0))?.has(ROLE)).toBe(false);
   });
 
@@ -226,7 +226,7 @@ describe('queue alert opt-in toggle', () => {
     // Wanting to know when games are filling is not the same as being ready to
     // play one, and an unlinked person is exactly who the nudge is for.
     const r = await toggle('never-seen-before');
-    expect(body(r)).toMatch(/will be pinged/i);
+    expect(body(r)).toMatch(/alerts are now ON: you will be pinged whenever/i);
     expect(t.rolesOf.get('never-seen-before')?.has(ROLE)).toBe(true);
   });
 
@@ -234,6 +234,13 @@ describe('queue alert opt-in toggle', () => {
     setSetting(db, 'discord_pug_role_id', '');
     const r = await toggle(did(0));
     expect(body(r)).toMatch(/not set up/i);
+  });
+
+  it('treats a stored role id that is not a Discord id as not set up, and touches no role', async () => {
+    setSetting(db, 'discord_pug_role_id', 'Queue Alerts');
+    expect(body(await toggle(did(0)))).toMatch(/not set up/i);
+    expect(body(await setAlertRole({ db, roles }, did(0), true))).toMatch(/not set up/i);
+    expect(t.rolesOf.get(did(0))).toBeUndefined();
   });
 
   it('does not guess when it cannot read the member', async () => {
@@ -258,6 +265,18 @@ describe('queue alert opt-in toggle', () => {
     // Nearly always the bot's role sitting below the target role, which no
     // amount of retrying fixes.
     expect(body(r)).toMatch(/role above the alert role/i);
+  });
+
+  it('/alerts on and off set the role either way, and say so when there is nothing to change', async () => {
+    const deps = { db, roles };
+    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/alerts are now ON: you will be pinged whenever/i);
+    expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(true);
+    // Asking for what you already have changes nothing, and never toggles.
+    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/already ON/i);
+    expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(true);
+    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/alerts are now OFF/i);
+    expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(false);
+    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/already OFF/i);
   });
 });
 

@@ -66,8 +66,32 @@ describe('EventMatchPage', () => {
   it('shows a team logo next to its name in the header only once it has one', async () => {
     mockEvents.room.mockResolvedValue(view({ a: { id: 1, name: 'Rats', tag: 'RAT', logoKey: 'abc', seed: 1, out: false } }));
     render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
-    const heading = await screen.findByRole('heading', { name: 'Rats vs Bats' });
-    expect(within(heading).getAllByRole('img')).toHaveLength(1);
+    await screen.findByRole('heading', { name: 'Rats vs Bats' });
+    const hero = screen.getByRole('region', { name: 'Match result' });
+    expect(within(hero).getAllByRole('img')).toHaveLength(1);
+  });
+
+  it('shows a finished match as a scoreboard, a game card with its stats link, and profile-linked lineups', async () => {
+    mockEvents.room.mockResolvedValue(view({
+      phase: 'done', deadline: null, finishedAt: '2026-10-23T08:48:00.000Z',
+      result: { winner: 'a', scoreA: 1, scoreB: 0, forfeit: false },
+      series: { bestOf: 1, totalScore: false, winsA: 1, winsB: 0, totalA: 0, totalB: 0, over: true, winner: 'a' },
+      games: [{ id: 1, game: 1, ordinal: 1, tiebreak: false, campaign: 'blood_harvest', campaignName: 'Blood Harvest', map: null, pickedBy: 'a', sideBy: 'b', firstSurvivors: 'a', matchId: 798, state: 'done', scoreA: 1107, scoreB: 925, winner: 'a', forfeit: null, live: null }],
+      lineups: {
+        a: [{ steamid: '76561197972484944', name: 'Bone Breaker', avatar: null, role: 'captain' }, { steamid: '2', name: 'mourn', avatar: null, role: null }],
+        b: [{ steamid: '3', name: 'KoRn', avatar: null, role: 'captain' }, { steamid: '4', name: 'Mya', avatar: null, role: 'standin' }],
+        aLocked: true, bLocked: true,
+      },
+    }));
+    render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+    await screen.findByRole('heading', { name: 'Rats vs Bats' });
+    expect(screen.getByText('Winner')).toBeTruthy();
+    expect(screen.getByText('Blood Harvest')).toBeTruthy();
+    expect(screen.getByText('1107')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Full stats and replay' }).getAttribute('href')).toBe('/match/798');
+    expect(screen.getByRole('link', { name: 'Bone Breaker' }).getAttribute('href')).toBe('/player/76561197972484944');
+    expect(screen.getAllByText('Captain')).toHaveLength(2);
+    expect(screen.getByText('Stand-in')).toBeTruthy();
   });
 
   it.each(['waiting', 'server', 'hold'] as const)('refetches every 10 s in the %s phase, since a result can close the room with no push', async (phase) => {
@@ -143,7 +167,9 @@ describe('EventMatchPage', () => {
     }));
     render(<EventMatchPage slug="cup" id="1" session={{ kind: 'active' } as never} />);
     expect(await screen.findByText('password pw; connect 10.0.0.1:27015')).toBeTruthy();
-    expect(screen.getByText('Game 1 · No Mercy · live on l4d_vs_hospital02_subway · Rats 80 - 120 Bats')).toBeTruthy();
+    expect(screen.getByText('Live on l4d_vs_hospital02_subway')).toBeTruthy();
+    expect(screen.getByText('80')).toBeTruthy();
+    expect(screen.getByText('120')).toBeTruthy();
     expect(screen.getByText('Live')).toBeTruthy();
   });
 

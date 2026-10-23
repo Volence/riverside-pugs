@@ -414,6 +414,22 @@ export interface MatchSummary {
   /** Who abandoned it after it was already decided (it completed, the
    *  leading team winning); null otherwise. */
   abandonedBy?: string | null;
+  /** Both rosters, highest SI damage first, for the faces on the recent
+   *  matches list. Absent from an older server and on the match page. */
+  players?: { a: MatchListPlayer[]; b: MatchListPlayer[] };
+  /** A scrim or tournament game's team names and event; absent for a PUG. */
+  booked?: BookedSides;
+}
+
+export interface MatchListPlayer { steamid: string; name: string; avatar: string | null }
+
+/** Who a booked game was between, by match team (src/matchSides.ts). */
+export interface BookedSides {
+  kind: 'scrim' | 'tournament';
+  a: { name: string; tag: string | null };
+  b: { name: string; tag: string | null };
+  /** The tournament and the event match page it was played under; null for a scrim. */
+  event: { slug: string; name: string; matchId: number } | null;
 }
 
 export interface MatchPlayerStats {
@@ -635,6 +651,8 @@ export interface MatchDetail {
   /** An aborted match's why, and who never got in or walked with what it
    *  cost them. Staff only, absent for anyone else. */
   abortWho?: AbortWho;
+  /** A scrim or tournament game's team names and event; absent for a PUG. */
+  booked?: BookedSides;
   /** Per-round side attribution. An empty array means this match predates
    *  round capture, which is NOT the same as a match that had no rounds. */
   rounds: {
@@ -671,6 +689,8 @@ export interface CustomCampaignRow {
   filename: string; notes: string | null; inPool: boolean;
   /** A practice map (Hunter Training): downloadable, never in the vote. */
   practiceOnly?: boolean;
+  /** A converted L4D2 campaign: it leaves out files the L4D2 pack has. */
+  needsL4d2Pack?: boolean;
   chapters: CustomCampaignChapter[];
 }
 
@@ -847,6 +867,18 @@ export interface EndorsementSummary {
 /** A team the player is on, as a chip in their profile header (src/teams/teams.ts TeamChip). */
 export interface ProfileTeam { slug: string; name: string; tag: string; logoKey: string | null; role: 'captain' | 'cocaptain' | 'member' }
 
+/** Mirrors src/events/profileEvents.ts: one event the player played, with
+ *  their entry's record and its matches. Never part of the PUG numbers. */
+export interface ProfileEventMatch {
+  id: number; roundLabel: string; opponent: string | null;
+  result: 'win' | 'loss' | null; scoreFor: number | null; scoreAgainst: number | null; forfeit: boolean; status: string;
+}
+export interface ProfileEvent {
+  slug: string; name: string; status: string; startsAt: string; finishedAt: string | null;
+  entry: { id: number; name: string; tag: string; logoKey: string | null; captain: boolean; seed: number | null };
+  placement: number | null; wins: number; losses: number; matches: ProfileEventMatch[];
+}
+
 export interface Profile {
   player: {
     steamid: string;
@@ -881,6 +913,8 @@ export interface Profile {
     revives: number;
   };
   matches: ProfileMatch[];
+  /** Events played, newest first. Optional so an older response still renders. */
+  events?: ProfileEvent[];
   history: { matchId: number; sr: number }[];
   /** Public skill-stat lifetime totals, keyed by stat. */
   statTotals: Record<string, number>;
@@ -1059,6 +1093,8 @@ export interface AdminPlayerDetail extends AdminPlayerRow {
     bursts: {
       id: number; at: string; weapon: string; presses: number; ratePerSec: number; meanTicks: number;
       wire: number; serverSpan: number | null; annotation: string;
+      /** Tick rate the tick counts are at; 100 when absent. */
+      tickrate?: number;
       hold: { n: number; medianTicks: number; minTicks: number; maxTicks: number; sdTicks: number; oneTickFrac: number; nearMedianFrac: number } | null;
     }[];
   }[];
@@ -1527,6 +1563,8 @@ export interface AdminCampaign {
   maps: string[];
   /** Custom campaigns only: installs and downloads, never offered for the PUG pool. */
   practiceOnly?: boolean;
+  /** Custom campaigns only: the campaigns page tells players to get the L4D2 pack too. */
+  needsL4d2Pack?: boolean;
   /** True for the stock four, which have no custom_campaigns row and so no
    *  upload, reinstall or delete controls. */
   stock: boolean;
@@ -2199,7 +2237,9 @@ export const studioApi = {
 // ---------- teams ----------
 
 export type TeamRole = 'captain' | 'cocaptain' | 'member';
-export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string }
+export interface TeamFace { steamid: string; name: string; avatar: string | null }
+/** roster: the captain first, then the rest in join order (team cards). */
+export interface TeamListItem { slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName: string; roster?: TeamFace[] }
 export interface MyTeamItem { slug: string; name: string; tag: string; logoKey: string | null; role: TeamRole; members: number }
 export interface TeamInviteItem { id: number; slug: string; name: string; tag: string; invitedByName: string | null; createdAt: string }
 export interface TeamMemberView { steamid: string; name: string; avatar: string | null; role: TeamRole; joinedAt: string }
@@ -2289,14 +2329,20 @@ export interface EventDraft { signupsCloseAt: string; draftAt: string }
 export interface EventListItem {
   slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; startsAt: string; bannerKey: string | null;
   format: string[]; entries: number;
+  /** The status chip's words (src/events/format.ts eventStatusLabel); optional for an older server. */
+  statusLabel?: string;
 }
 export interface EventStageView {
   ordinal: number; type: StageType; summary: string; veto: string; chapters: string; scheduling: Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
+  /** Rounds with a staff start time, earliest first; optional for an older server. */
+  roundTimes?: { round: number; at: string }[];
 }
 export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null;
   /** Draft entries only: current starters' names, captain first. */
-  players?: string[] }
+  players?: string[];
+  /** The same starters with SteamIDs, for profile links; optional for an older server. */
+  playerLinks?: { steamid: string; name: string }[] }
 export interface PlayEntry { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; out: boolean }
 /** Mirrors src/events/playViews.ts's RoomPhase. */
 export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'connect' | 'live' | 'confirming' | 'hold' | 'done';
@@ -2352,6 +2398,8 @@ export interface EventView {
   /** Draft-kind events only (drafts plan D1, mirrors src/events/views.ts): signup
    *  count and names, never SR, notes or preferences. Optional so a team event omits it. */
   draft?: EventDraftView | null;
+  /** The status chip's words (src/events/format.ts eventStatusLabel); optional for an older server. */
+  statusLabel?: string;
 }
 export interface EventDraftView {
   signupsCloseAt: string; draftAt: string; signups: number; names: string[];
@@ -2426,7 +2474,7 @@ export interface RoomServer {
   state: 'waiting' | 'setup' | 'ready' | 'ended'; name: string | null; since: string;
   connect: { host: string; port: number; password: string } | null; present: { a: number; b: number } | null; graceEndsAt: string | null;
 }
-export interface RoomPlayer { steamid: string; name: string }
+export interface RoomPlayer { steamid: string; name: string; avatar?: string | null; role?: 'captain' | 'sub' | 'standin' | null }
 /** Plan T4 (mirrors src/events/roomViews.ts). */
 export type RescheduleStatus = 'open' | 'accepted' | 'auto_accepted' | 'declined' | 'countered' | 'withdrawn' | 'expired';
 /** One reschedule proposal as the room page lists it (plan T4). */
@@ -2450,10 +2498,18 @@ export interface RoomSchedule {
   canPropose: boolean; canAnswer: boolean; canWithdraw: boolean;
 }
 /** a and b are null only while a bracket match still waits for its teams. */
+/** Mirrors src/events/veto.ts PlanStep. */
+export interface RoomPlanStep {
+  kind: 'order' | 'ban' | 'pick' | 'side' | 'wait'; by: 'a' | 'b' | null; game: number | null; state: 'done' | 'now' | 'later'; tentative: boolean;
+}
 export interface MatchRoomView {
   id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
+  /** When the match was decided. Optional for an older server. */
+  finishedAt?: string | null;
   higher: 'a' | 'b' | null; deadline: string | null; serverNow: string; ready: { a: boolean; b: boolean };
   vetoSummary: string; pool: RoomCampaign[]; log: RoomLogLine[]; games: RoomGame[];
+  /** Every veto step in order (src/events/veto.ts vetoPlan). Optional for an older server. */
+  plan?: RoomPlanStep[];
   next: { kind: 'order' | 'ban' | 'pick' | 'side'; by: 'a' | 'b'; game: number | null; step: number } | { kind: 'wait'; game: number } | null;
   lineups: { a: RoomPlayer[] | null; b: RoomPlayer[] | null; aLocked: boolean; bLocked: boolean };
   holdReason: string | null;
@@ -2807,6 +2863,8 @@ export interface AdminBookingRow {
   server: string | null; peak: { a: number; b: number }; endReason: string | null;
   /** Plan 2 Ruling 6: a side whose team (or pickup captain) carries the toxic flag. */
   toxic: { a: boolean; b: boolean };
+  /** A tournament booking's event (its desk runs the match); null for a scrim. */
+  eventId: number | null;
 }
 
 /** src/routes/adminBookings.ts: the scrim cap and PUG reserve (each per region), and the scrims holding a box per region (server priority Ruling 9). */
@@ -2815,6 +2873,8 @@ export interface AdminBookingPriority { scrimMax: number; pugReserve: number; re
 /** src/routes/adminEvents.ts */
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: EventStatus; entryKind: EntryKind; startsAt: string; stages: number; updatedAt: string;
+  /** The status chip's words; optional for an older server. */
+  statusLabel?: string;
 }
 export interface AdminEventStage {
   id: number; ordinal: number; summary: string; settings: StageSettings; rulesSnapshotted: boolean;
@@ -2828,6 +2888,8 @@ export interface AdminEventDetail {
   cancelReason: string | null; createdAt: string; updatedAt: string;
   /** Draft-kind events: when the cut and the teams were published. */
   cutAt: string | null; teamsMadeAt: string | null;
+  /** The status chip's words; optional for an older server. */
+  statusLabel?: string;
   stages: AdminEventStage[];
   log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
 }
@@ -3081,6 +3143,9 @@ export const adminApi = {
   /** D2c addendum: staff make another starter a draft team's captain. */
   setEntryCaptain: (id: number, entryId: number, steamid: string) =>
     post<{ from: string; to: string }>(`/api/admin/events/${id}/entries/${entryId}/captain`, { steamid }),
+  /** Owner 2026-10-23: swap two starters between draft teams (teams published, not yet live). */
+  swapDraftPlayers: (id: number, a: { entryId: number; steamid: string }, b: { entryId: number; steamid: string }) =>
+    post<unknown>(`/api/admin/events/${id}/draft/swap-players`, { a, b }),
   /** Plan D3a: bench stand-ins on the desk. */
   eventStandins: (id: number, signal?: AbortSignal) => get<AdminStandinsView>(`/api/admin/events/${id}/standins`, signal),
   requestStandinFor: (id: number, body: { entryId: number; out: string; scope: StandinScope }) => post<{ requestId: number }>(`/api/admin/events/${id}/standins`, body),
@@ -3190,6 +3255,8 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/maps-to-play`, { maps }),
   setCampaignPracticeOnly: (slug: string, practiceOnly: boolean) =>
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/practice-only`, { practiceOnly }),
+  setCampaignNeedsL4d2Pack: (slug: string, needsL4d2Pack: boolean) =>
+    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/needs-l4d2-pack`, { needsL4d2Pack }),
   deleteCampaign: (slug: string) =>
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
   balancePatches: (signal?: AbortSignal) => get<{ patches: PatchSummary[] }>('/api/admin/balance/patches', signal),

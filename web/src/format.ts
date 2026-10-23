@@ -89,6 +89,24 @@ export function fmtDate(iso: string | null | undefined): string {
   return iso ? iso.replace('T', ' ').slice(0, 16) : '';
 }
 
+/** How long ago a moment was, for a list read at a glance: "just now",
+ *  "12 min ago", "3 h ago", "yesterday", "4 days ago", then the date. SQLite's
+ *  `2026-10-23 10:55:12` carries no zone and is UTC, as every ended_at is. */
+export function fmtAgo(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return '';
+  const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso.replace(' ', 'T')}Z`);
+  if (Number.isNaN(t)) return fmtDate(iso);
+  const min = Math.floor((now - t) / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h ago`;
+  const days = Math.floor(h / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return fmtDate(iso).slice(0, 10);
+}
+
 /** An SR delta, always signed, using a real minus (U+2212) rather than a hyphen
  *  so a column of deltas aligns and reads as arithmetic. Zero prints as ±0 so
  *  "rating did not move" is visibly different from a missing value. */

@@ -12,7 +12,7 @@ import * as N from '../src/events/entries.js';
 import * as PL from '../src/events/play.js';
 import * as R from '../src/events/room.js';
 import { EVENT_ERRORS } from '../src/events/validate.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { P, cutDraft, type DraftFixture } from './draftFixture.js';
 import { A, B as BATS, entryFixture, rosterA } from './entryFixture.js';
@@ -127,7 +127,7 @@ describe('a captain change during a booked series', () => {
   afterEach(() => { vi.restoreAllMocks(); s?.close(); });
 
   it('moves the booking side\'s captain to the new one, keeps the side\'s name, and leaves the other side alone', async () => {
-    s = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
+    s = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
     await s.tick();
     const b = s.booking();
     expect(B.isOpen(b)).toBe(true);
@@ -160,7 +160,7 @@ describe('a captain change on entry_b during a booked series', () => {
   let s: SeriesFixture;
   afterEach(() => { s?.close(); });
   it('moves booking side b\'s captain and leaves side a alone', async () => {
-    s = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
+    s = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
     await s.tick();
     const b = s.booking();
     expect(s.match().entry_b).toBe(s.entryB);
@@ -180,7 +180,7 @@ describe('setSideCaptain', () => {
   let s: SeriesFixture;
   afterEach(() => { s?.close(); });
   it('refuses a team side and a closed booking', async () => {
-    s = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
+    s = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
     await s.tick();
     const b = s.booking();
     s.db.prepare('UPDATE booking_sides SET team_id = ? WHERE booking_id = ? AND side = ?').run(

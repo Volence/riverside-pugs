@@ -49,10 +49,15 @@ function bookingParticipant(db: DB, bookingId: number, steamid: string): boolean
 }
 
 export function canViewMatch(db: DB, viewer: Viewer, matchId: number): boolean {
-  const row = db.prepare('SELECT visibility, booking_id FROM matches WHERE id = ?').get(matchId) as
-    { visibility: string; booking_id: number | null } | undefined;
+  const row = db.prepare('SELECT visibility, booking_id, kind, state FROM matches WHERE id = ?').get(matchId) as
+    { visibility: string; booking_id: number | null; kind: string; state: string } | undefined;
   if (!row) return false;
   if (row.visibility === 'public' || viewer.staff) return true;
+  // Foundation spec: "Tournament matches are public." A tournament game is
+  // stored as participants so nothing live leaks while it is played (no
+  // public live delay exists yet), and opens to everyone once it is over:
+  // its stats, replays and demos, like any finished PUG.
+  if (row.kind === 'tournament' && row.state === 'completed') return true;
   if (row.visibility !== 'participants' || !viewer.steamid) return false;
   if (db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, viewer.steamid)) return true;
   if (row.booking_id === null) return false;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  campaignName, winnerLabel, fmtDate, fmtDelta, deltaClass, fmtClock,
+  campaignName, winnerLabel, fmtDate, fmtAgo, fmtDelta, deltaClass, fmtClock,
   secondsLeft, sparklinePoints, fmtBytes, orderLiveStatKeys, orderStatKeysBySide, statGroupStarts, labelFor, liveGroupStarts, LIVE_STAT_ORDER,
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
@@ -689,5 +689,22 @@ describe('chapterName', () => {
   // Stripping must never leave an empty label.
   it('keeps the raw value when stripping would empty it', () => {
     expect(chapterName('1:', 'ignored')).toBe('1:');
+  });
+});
+
+describe('fmtAgo', () => {
+  const now = Date.parse('2026-10-23T12:00:00Z');
+  it('reads a zone-less SQLite time as UTC', () => {
+    expect(fmtAgo('2026-10-23 11:48:00', now)).toBe('12 min ago');
+    expect(fmtAgo('2026-10-23T09:00:00.000Z', now)).toBe('3 h ago');
+  });
+  it('steps from minutes to days, then the date', () => {
+    expect(fmtAgo('2026-10-23 11:59:40', now)).toBe('just now');
+    expect(fmtAgo('2026-10-22 08:00:00', now)).toBe('yesterday');
+    expect(fmtAgo('2026-10-19 12:00:00', now)).toBe('4 days ago');
+    expect(fmtAgo('2026-10-01 12:00:00', now)).toBe('2026-10-01');
+  });
+  it('is empty for no time', () => {
+    expect(fmtAgo(null, now)).toBe('');
   });
 });

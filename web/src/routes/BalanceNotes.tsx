@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { DocLayout } from '../components/DocLayout';
 import { useSeasonLook } from '../seasonTheme';
 import { PatchEntryView } from './balance/PatchEntryView';
 
@@ -42,20 +43,20 @@ export function BalanceNotes() {
           hand-written notes take that name and this becomes the change log. */}
       <PageHeader eyebrow={seasonOne ? 'Patch notes' : 'Balance'} title={seasonOne ? 'Full change log' : 'Patch notes'}>
         {seasonOne && (
-          <p>
+          <p class="patch-lede">
             Every tracked change to the game's settings, kept automatically. The <a href="/patch-notes">patch notes</a> say
             what changed in plain words; this is the exact record.
           </p>
         )}
-        <p>
+        <p class="patch-lede">
           Each balance patch, why it was made, and what the numbers measured afterwards. A change
           is only called a measured change when it is larger than normal game-to-game variation.
         </p>
-        <p>
+        <p class="patch-lede muted">
           A measured change is a difference between the games played before and after a patch. It
           can also come from who was playing and which maps were played, so read it next to the notes.
         </p>
-        <p><a href="/balance/values">Game values</a>: every balance setting as it is now, next to vanilla.</p>
+        <p class="patch-lede__link"><a class="btn btn--ghost btn--sm" href="/balance/values">Game values</a> <span>Every balance setting as it is now, next to vanilla.</span></p>
       </PageHeader>
 
       {error ? (
@@ -65,9 +66,9 @@ export function BalanceNotes() {
       ) : data.patches.length === 0 ? (
         <Empty>No patch notes yet.</Empty>
       ) : (
-        <div class="stack">
+        <DocLayout label="Patches" sections={data.patches.map((p) => ({ id: `patch-${p.id}`, label: p.name }))}>
           {data.patches.map((p) => <PatchPanel key={p.id} id={p.id} />)}
-        </div>
+        </DocLayout>
       )}
     </div>
   );

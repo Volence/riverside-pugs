@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { gameNumberOf, playOrder, seriesResult, seriesVerdict, tiebreakFirstSurvivors, tiebreakOrdinal, type SeriesGame } from '../src/events/seriesRules.js';
-import { presetConfig, type VetoConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig, type VetoConfig } from '../src/events/vetoConfig.js';
 import type { Side } from '../src/events/veto.js';
 
 let nextId = 1;
@@ -12,10 +12,10 @@ const played = (ordinal: number, a: number, b: number, o: Partial<SeriesGame> = 
   game(ordinal, { scoreA: a, scoreB: b, started: true, ...o });
 const forfeited = (ordinal: number, by: Side, o: Partial<SeriesGame> = {}): SeriesGame =>
   game(ordinal, { forfeit: by, started: true, ...o });
-const bo3: VetoConfig = presetConfig('loser_picks', 7);
-const bo2: VetoConfig = presetConfig('home_away', 4);
-const bo1: VetoConfig = presetConfig('ban_to_one', 7);
-// presetConfig has no Bo5 preset; a custom config is the only way to get one.
+const bo3: VetoConfig = legacyPresetConfig('loser_picks', 7);
+const bo2: VetoConfig = legacyPresetConfig('home_away', 4);
+const bo1: VetoConfig = legacyPresetConfig('ban_to_one', 7);
+// legacyPresetConfig has no Bo5 preset; a custom config is the only way to get one.
 const bo5: VetoConfig = { ...bo3, games: 5 };
 
 describe('seriesVerdict for games won (Bo1, Bo3, Bo5)', () => {

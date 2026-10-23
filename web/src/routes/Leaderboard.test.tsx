@@ -35,15 +35,16 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('Leaderboard', () => {
   it('shows season figures and stat leaders in season mode, but only the weekly board in weekly mode', async () => {
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => screen.getByRole('link', { name: 'p1' }));
+    await waitFor(() => screen.getAllByRole('link', { name: 'p1' }));
     expect(container.querySelector('.figures')).toBeTruthy();
     expect(container.querySelector('.statleaders')).toBeTruthy();
-    expect(container.querySelector('.lb-layout')).toBeTruthy();
+    expect(container.querySelector('.lbpod')).toBeTruthy();
+    expect(container.querySelector('.lb-full')).toBeTruthy();
 
     fireEvent.click(screen.getByText('This week'));
     await waitFor(() => screen.getByText('No awards yet this week.'));
     expect(container.querySelector('.figures')).toBeNull();
     expect(container.querySelector('.statleaders')).toBeNull();
-    expect(container.querySelector('.lb-layout')).toBeNull();
+    expect(container.querySelector('.lb-full')).toBeNull();
   });
 });

@@ -101,6 +101,27 @@ function PracticeOnly(
   );
 }
 
+/** Converted L4D2 campaigns ship without the files our L4D2 pack already
+ *  has; this makes the public campaigns page say so. */
+function NeedsL4d2Pack(
+  { c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run },
+) {
+  return (
+    <label>
+      <input
+        type="checkbox"
+        disabled={busy}
+        checked={c.needsL4d2Pack === true}
+        onChange={(e) => {
+          const on = (e.target as HTMLInputElement).checked;
+          run(() => adminApi.setCampaignNeedsL4d2Pack(c.slug, on));
+        }}
+      />
+      {' '}Needs the L4D2 pack (converted from L4D2)
+    </label>
+  );
+}
+
 /** How many maps a mapsToPlay-less card should treat as played, for dimming
  *  purposes: the same default the plugin and stopAfterMap fall back to. */
 function playCountOf(c: AdminCampaign): number {
@@ -164,6 +185,7 @@ function PublishedCard(
       <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
       <MapsToPlay c={c} busy={busy} run={run} />
       <PracticeOnly c={c} busy={busy} run={run} />
+      <NeedsL4d2Pack c={c} busy={busy} run={run} />
       <InstallList installs={c.installs} serverNames={serverNames} />
       <div class="admin-row">
         <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>

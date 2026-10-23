@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chaptersLabel, groupLabel, roundLabel, rulesLines, rulesSummary, stageSummary } from '../src/events/format.js';
+import { chaptersLabel, eventStatusLabel, groupLabel, roundLabel, rulesLines, rulesSummary, stageSummary } from '../src/events/format.js';
 import { TEMPLATES, parseRules } from '../src/rulesets.js';
 
 describe('stage summary', () => {
@@ -115,5 +115,22 @@ describe('round and group labels (plan T2)', () => {
     expect(groupLabel('double_elim', 2)).toBe('Lower bracket');
     expect(groupLabel('single_elim', 1)).toBe('Bracket');
     expect(groupLabel('swiss', 1)).toBe('Rounds');
+  });
+});
+
+describe('eventStatusLabel', () => {
+  const base = { status: 'registration' as const, entry_kind: 'draft' as const, draft_json: JSON.stringify({ signupsCloseAt: '2026-10-23T22:00:00.000Z', draftAt: '2026-10-23T23:00:00.000Z' }), locked_at: null, cut_at: null, teams_made_at: null };
+  const before = Date.parse('2026-10-23T21:00:00.000Z');
+  it('follows a draft through its night instead of saying Registration open', () => {
+    expect(eventStatusLabel(base, before)).toBe('Signups open');
+    expect(eventStatusLabel(base, Date.parse('2026-10-23T22:00:30.000Z'))).toBe('Signups closed');
+    expect(eventStatusLabel({ ...base, locked_at: '2026-10-23T21:30:00.000Z' }, before)).toBe('Signups closed');
+    expect(eventStatusLabel({ ...base, locked_at: 'x', cut_at: 'x' }, before)).toBe('Draft night');
+    expect(eventStatusLabel({ ...base, locked_at: 'x', cut_at: 'x', teams_made_at: 'x' }, before)).toBe('Teams set');
+  });
+  it('keeps the plain status for team events and outside registration', () => {
+    expect(eventStatusLabel({ ...base, entry_kind: 'team' }, before)).toBe('Registration open');
+    expect(eventStatusLabel({ ...base, status: 'live', teams_made_at: 'x' }, before)).toBe('Live');
+    expect(eventStatusLabel({ ...base, status: 'draft' }, before)).toBe('Draft');
   });
 });

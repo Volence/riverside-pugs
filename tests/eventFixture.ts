@@ -1,3 +1,4 @@
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { openDb, type DB } from '../src/db.js';
 import { upsertPlayer } from '../src/players.js';
 import * as E from '../src/events/events.js';
@@ -17,7 +18,11 @@ export function pugId(db: DB): number {
 }
 
 export function stageBody(db: DB, over: Record<string, unknown> = {}): Record<string, unknown> {
-  return { type: 'swiss', config: { rounds: 4 }, rulesetId: cupId(db), campaignPool: ['no_mercy', 'dead_air'], advanceCount: 8, ...over };
+  // The pre-2026-10-23 veto defaults (higher seed chooses who bans first,
+  // first banner picks): the flow tests were written against them. A test
+  // of the new defaults passes its own veto or vetoType.
+  const veto = 'veto' in over || 'vetoType' in over ? {} : { veto: legacyPresetConfig('ban_to_one', 2) };
+  return { type: 'swiss', config: { rounds: 4 }, rulesetId: cupId(db), campaignPool: ['no_mercy', 'dead_air'], advanceCount: 8, ...veto, ...over };
 }
 
 export function must<T>(r: E.EventResult<T>): T {

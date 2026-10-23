@@ -1,4 +1,4 @@
-import { decodeIntervals, MAX_HOLDS } from './inputStats.js';
+import { BASE_TICKRATE, burstMaxTicks, decodeIntervals, MAX_HOLDS, rateOf } from './inputStats.js';
 
 /**
  * Press fingerprints: how long a player holds infected buttons down.
@@ -11,18 +11,28 @@ import { decodeIntervals, MAX_HOLDS } from './inputStats.js';
  * the claw, pounce and smoker buttons, which no aimbot drives: their median
  * holds sat where every earlier dethisa account's did.
  *
- * A fingerprint is one histogram per press class of holds 2 to 20 ticks long.
- * 1-tick presses are a scroll wheel or a script, and over 20 is a held button
- * (30 is the plugin's "30 or more"), so neither says anything about a hand.
+ * A fingerprint is one histogram per press class of holds 20 to 200 ms long,
+ * in 10 ms bins. 1-tick presses are a scroll wheel or a script, and over 200
+ * ms is a held button (300 ms is the plugin's "that or more"), so neither
+ * says anything about a hand.
+ *
+ * Bins are TIME, so a hand gives the same fingerprint at any tick rate (see
+ * addHolds). At 100 tick each bin is exactly one tick, 2 to 20, which is what
+ * the whole calibration below was measured on.
  *
  * Pure: no database, so the live check, the history replay and the web can
  * all use it. It says "could be them", never "is them": across first matches
  * of 183 honest players, the dethisa pool landed in the top 5 for 3%.
  */
 
+/** Bin width, and the hold range in bin units: 10 ms, so 100 tick ticks. */
+export const BIN_MS = 10;
 export const HOLD_MIN = 2;
 export const HOLD_MAX = 20;
 export const BINS = HOLD_MAX - HOLD_MIN + 1;
+/** The time the bins cover: 15 to 205 ms, each bin its centre plus or minus 5. */
+const LOW_MS = (HOLD_MIN - 0.5) * BIN_MS;
+const HIGH_MS = (HOLD_MAX + 0.5) * BIN_MS;
 export const BASE_KINDS = ['fire', 'pounce'] as const;
 export const BASE_WEAPONS = ['weapon_hunter_claw', 'weapon_smoker_claw', 'weapon_boomer_claw'] as const;
 /** Both spellings, for SQL. The plugin sends weapon_*, but the parser accepts
@@ -43,10 +53,12 @@ export const TOP_RANK = 5;
 export const MEMBERS_WINDOW = 10;
 
 /** Class key ("fire:weapon_hunter_claw") to BINS counts; bin i is a hold of
- *  i + HOLD_MIN ticks. Counts, not shares, so pooling is addition. */
+ *  (i + HOLD_MIN) * 10 ms. Counts, not shares, so pooling is addition. A
+ *  count is whole at 100 tick and may be fractional at any other rate. */
 export type Fingerprint = Record<string, number[]>;
 
-export interface BurstHoldRow { kind: string; weapon: string; holds: string | null }
+/** `tickrate` is the column: null or absent is 100. */
+export interface BurstHoldRow { kind: string; weapon: string; holds: string | null; tickrate?: number | null }
 
 export function classOf(kind: string, weapon: string): string | null {
   const w = weapon.startsWith('weapon_') ? weapon : `weapon_${weapon}`;
@@ -62,21 +74,69 @@ export function classLabel(cls: string): string {
   return kind === 'fire' ? `${who} claw` : `${who} air attack`;
 }
 
-export function addHolds(fp: Fingerprint, cls: string, holds: readonly number[]): void {
+/**
+ * Holds recorded at `rate`, into their 10 ms bins.
+ *
+ * A reading of k ticks is a true hold somewhere around k ticks: the press and
+ * the release each land somewhere inside a tick, so k ticks at 100 is a hold
+ * of 10k ms give or take one tick, and the chance falls off linearly either
+ * side. That triangle is a one-tick box convolved with another one-tick box,
+ * so "k ticks" can be read as the box [k - 0.5, k + 0.5) ticks of a hold that
+ * already carries one box of blur. At 100 tick that box is exactly bin k, so
+ * every hold lands whole in one bin, as it always has.
+ *
+ * At 128 the box is 7.8125 ms wide and falls across one or two bins, so the
+ * hold is spread over them in proportion to how much of its box each covers
+ * (an 11 tick hold, 82.0 to 89.8 ms, puts 0.38 in the 80 ms bin and 0.62
+ * in the 90). Rounding it to the nearest bin instead would give some bins
+ * two tick values and others one (7.8 ms steps against 10 ms bins), a comb
+ * no hand has. Spreading adds about as much blur as the coarser 100
+ * tick reading carries anyway (a box of 7.8 ms twice is a variance of 10 ms^2,
+ * against 8.3 for one of 10 ms), far under the 20 ms and more a hand
+ * spreads by, so the same hand gives the same shape at either rate.
+ *
+ * What falls outside 15 to 205 ms is dropped, as 1 and 21+ ticks are at 100.
+ * A one-tick hold is dropped at any rate (RESOLUTION: one usercmd is a wheel
+ * notch or a script, whatever its length), and so is a hold at the rate's cap,
+ * which is "that or more", not a time.
+ */
+export function addHolds(fp: Fingerprint, cls: string, holds: readonly number[], rate: number = BASE_TICKRATE): void {
+  if (rate === BASE_TICKRATE) {
+    // The same arithmetic as the spread below, done exactly.
+    for (const h of holds) {
+      if (h < HOLD_MIN || h > HOLD_MAX) continue;
+      (fp[cls] ??= new Array<number>(BINS).fill(0))[h - HOLD_MIN] += 1;
+    }
+    return;
+  }
+  const tickMs = 1000 / rate;
+  const cap = burstMaxTicks(rate);
   for (const h of holds) {
-    if (h < HOLD_MIN || h > HOLD_MAX) continue;
-    (fp[cls] ??= new Array<number>(BINS).fill(0))[h - HOLD_MIN] += 1;
+    if (h <= 1 || h >= cap) continue;
+    const from = Math.max(LOW_MS, (h - 0.5) * tickMs);
+    const to = Math.min(HIGH_MS, (h + 0.5) * tickMs);
+    if (from >= to) continue;
+    const counts = (fp[cls] ??= new Array<number>(BINS).fill(0));
+    for (let i = Math.floor((from - LOW_MS) / BIN_MS); i < BINS; i++) {
+      const lo = Math.max(from, LOW_MS + i * BIN_MS);
+      const hi = Math.min(to, LOW_MS + (i + 1) * BIN_MS);
+      if (hi <= lo) break;
+      counts[i] += (hi - lo) / tickMs;
+    }
   }
 }
 
-/** One stored burst. A corrupt holds string decodes to null and is skipped
- *  rather than guessed at, as everywhere else holds are read. */
+/** One stored burst, read at the cap of the rate it was recorded at (38 at
+ *  128 tick, where a hold may run past 100 tick's 30). A corrupt holds string
+ *  decodes to null and is skipped rather than guessed at, as everywhere else
+ *  holds are read. */
 export function addBurst(fp: Fingerprint, row: BurstHoldRow): void {
   if (!row.holds) return;
   const cls = classOf(row.kind, row.weapon);
   if (!cls) return;
-  const holds = decodeIntervals(row.holds, MAX_HOLDS);
-  if (holds) addHolds(fp, cls, holds);
+  const rate = rateOf(row.tickrate);
+  const holds = decodeIntervals(row.holds, MAX_HOLDS, burstMaxTicks(rate));
+  if (holds) addHolds(fp, cls, holds, rate);
 }
 
 export function fingerprintOf(rows: Iterable<BurstHoldRow>): Fingerprint {
@@ -137,15 +197,16 @@ export function distance(candidate: Fingerprint, reference: Fingerprint): number
   return ds.length >= MIN_SHARED_CLASSES ? ds.reduce((a, b) => a + b, 0) / ds.length : null;
 }
 
-/** Median hold in ticks (the lower one on an even count), or null. */
+/** Median hold in 10 ms, which is ticks at 100 tick (the lower one on an
+ *  even count), or null. The bin where the running count first reaches half:
+ *  on whole counts that is the lower median exactly. */
 export function medianHold(counts?: readonly number[]): number | null {
   const total = countOf(counts);
   if (!counts || total === 0) return null;
-  const target = Math.floor((total - 1) / 2);
   let cum = 0;
   for (let i = 0; i < counts.length; i++) {
     cum += counts[i];
-    if (cum > target) return i + HOLD_MIN;
+    if (cum >= total / 2) return i + HOLD_MIN;
   }
   return null;
 }

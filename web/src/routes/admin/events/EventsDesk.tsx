@@ -84,7 +84,7 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
             {data.events.map((ev) => (
               <li key={ev.id}>
                 <a href={eventAdminUrl(ev.id)}><strong>{ev.name}</strong></a>{' '}
-                <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{STATUS_LABEL[ev.status]}</span>{' '}
+                <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span>{' '}
                 <span class="muted">· {whenText(ev.startsAt)} · {ev.stages} stage{ev.stages === 1 ? '' : 's'}</span>
               </li>
             ))}
