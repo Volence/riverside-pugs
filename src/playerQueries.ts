@@ -243,7 +243,9 @@ export function profileData(db: DB, steamid: string, viewer: string | null, scop
               (SELECT COUNT(*) FROM season_results x WHERE x.season_id = r.season_id AND x.final_rank IS NOT NULL) AS of
        FROM season_results r WHERE r.season_id = ? AND r.player_id = ?`,
     ).get(seasonId, steamid) as { sr: number; peak_sr: number; games: number; wins: number; losses: number; final_rank: number | null; rank_idx: number | null; placed: number; of: number } | undefined;
-    if (!r && frozen) record = { wins: frozen.wins, losses: frozen.losses };
+    // A finished season's record is its frozen one whenever it has one, as
+    // on the leaderboard: a later merge or recompute must not change it.
+    if (frozen) record = { wins: frozen.wins, losses: frozen.losses };
     let standing: PublicStanding;
     let games: number;
     if (frozen) {
@@ -290,15 +292,18 @@ export function profileData(db: DB, steamid: string, viewer: string | null, scop
   const fields = getProfileFields(db, steamid);
 
   // The seasons this player can be looked at in: the current one always (it
-  // is the default view), and every other they played a completed PUG in.
+  // is the default view), and every other they played a completed PUG or a
+  // rated game in. `rated` counts rating_history, so a season whose only
+  // rated game was an abandon loss (no completed PUG) is still listed.
   const seasonsPlayed = (db.prepare(
     `SELECT s.id, s.name, s.ended_at,
             (SELECT COUNT(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id
-              WHERE mp.player_id = ? AND m.season_id = s.id AND ${completedPug('m')}) AS games
+              WHERE mp.player_id = ? AND m.season_id = s.id AND ${completedPug('m')}) AS games,
+            (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = ? AND rh.season_id = s.id) AS rated
      FROM seasons s ORDER BY s.id DESC`,
-  ).all(steamid) as { id: number; name: string; ended_at: string | null; games: number }[])
-    .filter((s) => s.id === currentId || s.games > 0)
-    .map((s) => ({ id: s.id, name: s.name, current: s.ended_at === null, games: s.games }));
+  ).all(steamid, steamid) as { id: number; name: string; ended_at: string | null; games: number; rated: number }[])
+    .filter((s) => s.id === currentId || s.games > 0 || s.rated > 0)
+    .map((s) => ({ id: s.id, name: s.name, current: s.ended_at === null, games: s.games, rated: s.rated }));
 
   return {
     player: {

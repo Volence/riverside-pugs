@@ -196,3 +196,40 @@ describe('Skeets on the cast lineup card', () => {
     expect(me.stats).toMatchObject({ skeets: 3, team_skeets: 2 });
   });
 });
+
+describe('profile scope: review fixes', () => {
+  it('a finished season reads its frozen W-L even when the live rating row says otherwise', () => {
+    seasonZeroThenOne();
+    // A later recompute moved the live row; the frozen result stands.
+    db.prepare('UPDATE player_ratings SET wins = 9, losses = 9 WHERE player_id = ? AND season_id = 1').run(ME);
+    const p = profileData(db, ME, null, { kind: 'season', seasonId: 1 })!;
+    expect(p.record).toEqual({ wins: 3, losses: 1 });
+    expect(p.rating).toMatchObject({ wins: 3, losses: 1 });
+  });
+
+  /** An abandon loss: rated, on an aborted match, with no completed PUG. */
+  function abandonLoss(seasonId: number): void {
+    const m = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, kind) VALUES (?, 'aborted', 'dead_air', 'pug')").run(seasonId).lastInsertRowid);
+    db.prepare('INSERT INTO rating_history (player_id, match_id, season_id, mu_before, sigma_before, mu_after, sigma_after) VALUES (?, ?, ?, 25, 6, 24, 6)')
+      .run(ME, m, seasonId);
+    db.prepare('UPDATE player_ratings SET losses = losses + 1 WHERE player_id = ? AND season_id = ?').run(ME, seasonId);
+  }
+
+  it('lists a season whose only rated game is an abandon loss, with its record', async () => {
+    const s1 = seasonZeroThenOne();
+    abandonLoss(s1);
+    const p = profileData(db, ME, null)!;
+    expect(p.totals.games).toBe(0);
+    expect(p.record).toEqual({ wins: 0, losses: 1 });
+    expect(p.seasonsPlayed.find((s) => s.id === s1)).toMatchObject({ games: 0, rated: 1 });
+
+    db.prepare("UPDATE players SET discord_id = 'd1' WHERE steamid = ?").run(ME);
+    const deps = { db, publicUrl: 'https://x.test' } as unknown as Parameters<typeof handleCommand>[0];
+    const reply = (await handleCommand(deps, {
+      kind: 'command', name: 'profile', userId: 'd1', userName: 'me', options: {}, picked: {}, presserTimedOutUntil: null,
+    } as never) as any).payload;
+    const desc = reply.embeds[0].description as string;
+    expect(desc).not.toContain('no matches yet');
+    expect(desc).toContain('0W 1L');
+  });
+});
