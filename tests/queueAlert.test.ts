@@ -6,7 +6,7 @@ import { decideAlert, queueAlertConfig, type AlertInput } from '../src/discord/q
 import { renderQueueAlert, renderQueueAlertClosed } from '../src/discord/presenter.js';
 
 const MIN = 60 * 1000;
-const base: AlertInput = { count: 0, popping: false, threshold: 6, cooldownMs: 45 * MIN, now: 100 * MIN, lastAt: null, open: null };
+const base: AlertInput = { count: 0, popping: false, popped: false, threshold: 6, cooldownMs: 45 * MIN, now: 100 * MIN, lastAt: null, open: null };
 const decide = (v: Partial<AlertInput>) => decideAlert({ ...base, ...v });
 
 describe('decideAlert', () => {
@@ -25,8 +25,13 @@ describe('decideAlert', () => {
     expect(decide({ count: 7, popping: true }).kind).toBe('none');
   });
 
-  it('closes an open alert on a pop, an empty queue, or a fall of three under the threshold', () => {
-    expect(decide({ count: 6, popping: true, open: { count: 7 } })).toEqual({ kind: 'close', why: 'popped' });
+  it('leaves an open alert untouched while a ready check runs', () => {
+    expect(decide({ count: 0, popping: true, open: { count: 7 } }).kind).toBe('none');
+  });
+
+  it('closes an open alert on a pop that became a match, an empty queue, or a fall of three under the threshold', () => {
+    expect(decide({ count: 0, popped: true, open: { count: 7 } })).toEqual({ kind: 'close', why: 'popped' });
+    expect(decide({ count: 0, popped: true, popping: true, open: { count: 7 } })).toEqual({ kind: 'close', why: 'popped' });
     expect(decide({ count: 0, open: { count: 6 } })).toEqual({ kind: 'close', why: 'emptied' });
     expect(decide({ count: 3, open: { count: 6 } })).toEqual({ kind: 'close', why: 'dropped' });
     expect(decide({ count: 4, open: { count: 6 } }).kind).toBe('update');
