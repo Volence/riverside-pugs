@@ -1034,7 +1034,7 @@ export interface AdminOverview {
      *  Optional only for a browser holding new JS against an older server. */
     practice?: { leaseId: number; kind: PracticeKind; ownerName: string; ending: boolean } | null;
   }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[]; abandons?: AbandonRecord[] }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[]; abandons?: AbandonRecord[]; booked?: BookedSides | null }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
    *  path ended it, and is null for an admin abort or a reaped match. */
   aborted: {
