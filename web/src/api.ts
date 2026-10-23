@@ -231,7 +231,7 @@ export interface WeeklyStanding { value: number; rank: number | null; of: number
 export interface WeeklyPlayerStat { key: string; label: string; group: AwardGroup; avg: WeeklyStanding | null; total: WeeklyStanding | null }
 export interface WeeklyPlayerWeek { week: string; games: number; minGames: number; qualifies: boolean; players: number; stats: WeeklyPlayerStat[] }
 export interface WeeklyHistoryRow {
-  week: string; live: boolean; games: number; skeets: number; siDamage: number; damageAsSi: number;
+  week: string; live: boolean; games: number; skeets: number; commonKills: number; damageAsSi: number;
   awards: { key: string; label: string; kind: 'avg' | 'total' | 'single' }[];
 }
 

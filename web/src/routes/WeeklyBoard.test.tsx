@@ -60,9 +60,13 @@ describe('WeeklyBoard', () => {
   });
 
   it('still shows the week picker when the week fails to load', async () => {
+    mockApi.weekly.mockClear();
     mockApi.weekly.mockRejectedValue(new Error('boom'));
     render(<WeeklyBoard onWeek={() => {}} />);
-    await waitFor(() => screen.getByText('Could not load this week.'));
+    // It retries once quietly (a deploy restart), then gives up with Try again.
+    await waitFor(() => screen.getByText(/Could not load this week\./), { timeout: 4000 });
+    expect(mockApi.weekly).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'Week' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Week of Sep 21' })).toBeTruthy();
   });
