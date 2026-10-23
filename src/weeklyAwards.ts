@@ -22,10 +22,10 @@ export interface AwardResult { key: string; label: string; group: AwardGroup; ki
 export interface AwardDef { key: string; label: string; group: AwardGroup }
 
 type FixedColumn = 'si_damage' | 'si_kills' | 'common_kills' | 'revives' | 'ff_dealt';
-interface StatAward extends AwardDef { fixed?: FixedColumn; stats?: string[] }
+export interface StatAward extends AwardDef { fixed?: FixedColumn; stats?: string[] }
 
 /** Stat awards: an average and a total each. Order is display order. */
-const STAT_AWARDS: StatAward[] = [
+export const STAT_AWARDS: StatAward[] = [
   { key: 'si_damage', label: 'SI damage', group: 'survivor', fixed: 'si_damage' },
   { key: 'si_kills', label: 'SI kills', group: 'survivor', fixed: 'si_kills' },
   { key: 'common_kills', label: 'Common kills', group: 'survivor', fixed: 'common_kills' },
@@ -149,7 +149,7 @@ export function topOf<T extends { value: number }>(rows: T[]): T[] {
   return rows.filter((r) => r.value === best);
 }
 
-function statTotals(db: DB, week: string, a: StatAward): Map<string, number> {
+export function statTotals(db: DB, week: string, a: StatAward): Map<string, number> {
   const { from, to } = weekBounds(week);
   const rows = a.fixed
     ? db.prepare(

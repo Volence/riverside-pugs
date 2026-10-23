@@ -13,6 +13,9 @@ import type { MatchDetail } from '../api';
 
 const { mockApi } = vi.hoisted(() => ({
   mockApi: {
+    // The profile's Weekly section asks for these; nothing here is about it.
+    weeklyPlayer: vi.fn(async () => null),
+    weeklyPlayerHistory: vi.fn(async () => null),
     leaderboard: vi.fn(),
     seasons: vi.fn(),
     matches: vi.fn(),

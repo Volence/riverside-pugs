@@ -20,6 +20,7 @@ import { countryFlag, countryName } from '../countries';
 import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
+import { ProfileWeekly } from '../components/ProfileWeekly';
 
 /** Maps with fewer games than this fold away on the by-map bars: a 0W 2L map says little. */
 const MAP_MIN_SAMPLE = 5;
@@ -165,6 +166,7 @@ export function Profile(
         <div class="prof__cols">
           <div class="prof__main">
             <ProfileEvents events={data.events} />
+            <ProfileWeekly steamid={steamid} />
 
             <Panel class="panel--table prof__matches">
               <h3>Recent matches</h3>

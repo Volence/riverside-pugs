@@ -4,6 +4,7 @@ import { computeWeek, isWeekStart, weekStartOf, weeklyMinGames } from '../weekly
 import { computeRecap } from '../weeklyRecap.js';
 import { frozenWeek, frozenWeeks } from '../weeklyStore.js';
 import { avatarsOf } from '../avatars.js';
+import { playerWeek, playerWeekHistory } from '../weeklyPlayer.js';
 
 /** Public, like the other stats reads: a weekly board is for sharing. The
  *  current week is computed live; past weeks only ever come from the frozen
@@ -29,6 +30,23 @@ export async function weeklyRoutes(app: FastifyInstance, opts: { db: DB }): Prom
     const f = frozenWeek(db, week);
     if (!f) return reply.code(404).send({ error: 'no such week' });
     return { week, live: false, minGames, awards: withFaces(f.awards), recap: f.recap };
+  });
+
+  /** One player's standing on every stat board for a week (the current one
+   *  by default), so they can see how close they are. Public like the board. */
+  app.get('/api/weekly/player/:steamid', async (req, reply) => {
+    const { steamid } = req.params as { steamid: string };
+    const q = (req.query as { week?: string }).week;
+    if (!/^\d{17}$/.test(steamid)) return reply.code(400).send({ error: 'bad steamid' });
+    if (q !== undefined && !isWeekStart(q)) return reply.code(400).send({ error: 'bad week' });
+    return playerWeek(db, q ?? weekStartOf(new Date()), steamid);
+  });
+
+  /** The weeks a player played, newest first, with awards won in each. */
+  app.get('/api/weekly/player/:steamid/history', async (req, reply) => {
+    const { steamid } = req.params as { steamid: string };
+    if (!/^\d{17}$/.test(steamid)) return reply.code(400).send({ error: 'bad steamid' });
+    return { weeks: playerWeekHistory(db, steamid) };
   });
 
   app.get('/api/weekly/weeks', async () => ({ current: weekStartOf(new Date()), weeks: frozenWeeks(db) }));
