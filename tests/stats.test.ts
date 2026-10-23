@@ -308,6 +308,17 @@ describe('stats routes', () => {
     expect(me.losses).toBe(0);
   });
 
+  it('match list names each side after its top-rated player going in', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    // completeMatch rates everyone from the same start, so team a ties and
+    // falls back to the first rostered; on team b, IDS[6] went in highest.
+    db.prepare('UPDATE rating_history SET mu_before = 40, sigma_before = 2 WHERE match_id = ? AND player_id = ?')
+      .run(matchId, IDS[6]);
+    const nameOf = (id: string) => (db.prepare('SELECT name FROM players WHERE steamid = ?').get(id) as { name: string }).name;
+    const list = (await app.inject({ method: 'GET', url: '/api/matches', cookies })).json();
+    expect(list.matches[0]).toMatchObject({ teamALead: nameOf(IDS[0]), teamBLead: nameOf(IDS[6]) });
+  });
+
   it('match list and detail', async () => {
     const matchId = playCompletedMatch(db, 'b');
     const list = (await app.inject({ method: 'GET', url: '/api/matches', cookies })).json();

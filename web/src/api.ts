@@ -239,6 +239,11 @@ export interface MatchSummary {
   /** Who abandoned it after it was already decided (it completed, the
    *  leading team winning); null otherwise. */
   abandonedBy?: string | null;
+  /** Each side's top-rated player going in (else the first rostered), so a
+   *  list of many matches can name a side: "alice's team". Null for a side
+   *  with nobody rostered. */
+  teamALead?: string | null;
+  teamBLead?: string | null;
 }
 
 export interface MatchPlayerStats {
