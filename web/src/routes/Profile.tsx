@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
 import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
 import { useEffect, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
 import { TeamChips } from '../components/TeamChips';
@@ -29,14 +30,30 @@ export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
 ) {
   // Which numbers the page shows (owner, 2026-10-23): the current season by
-  // default, another season, or the career. Kept in the URL so a link to a
-  // career view stays one.
-  const [scope, setScopeState] = useState<ProfileScopeRequest>(readScope);
+  // default, another season, or the career. The URL is the only state
+  // (?season=N|career), read on every render: the router reuses this
+  // component when only the player changes, so a copy taken at mount would
+  // carry one player's Career view onto the next and ignore a ?season link
+  // between profiles.
+  const loc = useLocation();
+  const [, rerender] = useState(0);
+  const scope = parseScope(loc.query ? loc.query.season : readSearchSeason());
   const setScope = (next: ProfileScopeRequest) => {
-    setScopeState(next);
-    writeScope(next);
+    const url = scopedUrl(next);
+    if (!url) return;
+    // Through the router when there is one, replacing the entry: a scope is a
+    // view of the same page, not a step Back should walk through.
+    if (loc.route) loc.route(url, true);
+    else { window.history.replaceState(window.history.state, '', url); rerender((n) => n + 1); }
   };
   const { data, error } = useFetch((s) => api.profile(steamid, s, scope), [steamid, scope]);
+  // A season id the server does not know is answered with the current
+  // season; drop the stale parameter so the URL says what is shown.
+  useEffect(() => {
+    if (data?.scope?.kind === 'season' && typeof scope === 'number' && data.scope.seasonId !== scope) {
+      setScope(data.scope.current ? undefined : data.scope.seasonId);
+    }
+  }, [data]);
   // Per map by default: a career total on the per-map table mostly reports
   // which maps come up most in the rotation, not how the player does on them.
   const [mapMode, setMapMode] = useState<'avg' | 'total'>('avg');
@@ -486,22 +503,24 @@ function ProfileFigures(
 
 /** The profile's scope from the URL: `?season=career`, `?season=N`, or the
  *  current season. */
-function readScope(): ProfileScopeRequest {
-  if (typeof location === 'undefined') return undefined;
-  const raw = new URLSearchParams(location.search).get('season');
+function parseScope(raw: string | null | undefined): ProfileScopeRequest {
   if (raw === 'career') return 'career';
   const id = Number(raw);
   return raw && Number.isInteger(id) && id > 0 ? id : undefined;
 }
 
-/** Puts the scope in the URL without a navigation, so a shared link opens the
- *  same view; the current season is the bare URL. */
-function writeScope(scope: ProfileScopeRequest): void {
-  if (typeof location === 'undefined' || typeof history === 'undefined') return;
+/** ?season= straight off the address bar, for a render outside a router. */
+function readSearchSeason(): string | null {
+  return typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('season');
+}
+
+/** This page's URL showing `scope`; the current season is the bare URL. */
+function scopedUrl(scope: ProfileScopeRequest): string | null {
+  if (typeof location === 'undefined') return null;
   const url = new URL(location.href);
   if (scope === undefined) url.searchParams.delete('season');
   else url.searchParams.set('season', String(scope));
-  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 /**
