@@ -10,6 +10,7 @@ import { TitleTag } from '../components/TitleTag';
 import { PlacingTag, RankBadge, Top10Tag } from '../components/SeasonRank';
 import { WeeklyBoard } from './WeeklyBoard';
 import { EndorseBoard } from './EndorseBoard';
+import { withNetDamageAsSi } from '../../../src/siDamage';
 
 /** Columns that are not stats and so are not part of the stat bag.
  *
@@ -63,7 +64,12 @@ export function Leaderboard({ me }: { me: string | null }) {
   const seasons = seasonList?.seasons ?? [];
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'sr', desc: true });
 
-  const rows = (data?.rows ?? []) as Row[];
+  // Damage as SI net of damage to incapped survivors (src/siDamage.ts), once,
+  // here, so the column, its sort and the leader card all read one figure.
+  const rows = useMemo(
+    () => ((data?.rows ?? []) as Row[]).map((r) => ({ ...r, stats: withNetDamageAsSi(r.stats ?? {}) })),
+    [data],
+  );
 
   // Stat columns come from the data present, so a season with no skill_detect
   // matches shows no permanently empty columns.
@@ -115,9 +121,10 @@ export function Leaderboard({ me }: { me: string | null }) {
 
   const totals = useMemo(() => {
     const t: Record<string, number> = {};
-    for (const r of rows) for (const [k, v] of Object.entries(r.stats ?? {})) t[k] = (t[k] ?? 0) + v;
+    // From the raw rows: deriveLiveStats does the damage subtraction itself.
+    for (const r of data?.rows ?? []) for (const [k, v] of Object.entries(r.stats ?? {})) t[k] = (t[k] ?? 0) + v;
     return deriveLiveStats(t);
-  }, [rows]);
+  }, [data]);
 
   return (
     <div class="page page--list">

@@ -7,6 +7,7 @@ import { standingMinGames, RANKED_MIN_GAMES } from './standings.js';
 import { seasonRules, srUnder } from './seasonRules.js';
 import { ENDORSE_KINDS, titleFromCounts, type EndorseKind } from './endorsements.js';
 import { awardDef } from './weeklyAwards.js';
+import { DAMAGE_AS_SI, netDamageAsSi, withNetDamageAsSi } from './siDamage.js';
 
 /**
  * Season Wrapped: a story deck of each player's season, plus the community's.
@@ -233,6 +234,10 @@ export function computeWrapped(
     seasonTotals[s.stat] = (seasonTotals[s.stat] ?? 0) + s.value;
     if (s.stat === 'skeets' && s.value > (matchSkeets.get(s.player_id)?.value ?? 0)) matchSkeets.set(s.player_id, { matchId: s.match_id, map: null, value: s.value });
   }
+  // Damage as SI is net of damage to incapped survivors (src/siDamage.ts) on
+  // every card, leader line and signature rank below. Netted once, here.
+  for (const [id, bag] of statTotals) statTotals.set(id, withNetDamageAsSi(bag));
+  Object.assign(seasonTotals, withNetDamageAsSi(seasonTotals));
   const crownsOf = (bag: Record<string, number> | undefined) => (bag?.crowns ?? 0) + (bag?.draw_crowns ?? 0);
 
   // Maps a player was present for, with the map score.
@@ -270,7 +275,10 @@ export function computeWrapped(
       prev = { match_id: r.match_id, player_id: r.player_id, ordinal: r.ordinal, s };
       const mine = mapBest.get(r.player_id) ?? mapBest.set(r.player_id, {}).get(r.player_id)!;
       for (const k of MAP_BEST_KEYS) {
-        const d = (Number(s[k]) || 0) - (Number(base[k]) || 0);
+        // Damage as SI per map is net of damage to incapped survivors, like
+        // the season figure (both snapshots are cumulative, so net then diff).
+        const at = (bag: Record<string, number>) => (k === DAMAGE_AS_SI ? netDamageAsSi(bag) : Number(bag[k]) || 0);
+        const d = at(s) - at(base);
         if (d <= 0) continue;
         if (d > (mine[k]?.value ?? 0)) mine[k] = { matchId: r.match_id, map: r.map, value: d };
         if (!banned.has(r.player_id) && d > (communityMapBest[k]?.value ?? 0)) {

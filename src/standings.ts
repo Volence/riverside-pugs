@@ -2,6 +2,7 @@ import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import { STAT_DEFS } from './statKeys.js';
 import { completedPug } from './matchKinds.js';
+import { withNetDamageAsSi } from './siDamage.js';
 
 /** Games before a player holds a rank. Under this they are listed as
  *  provisional: one lucky night at high sigma should not top the board. */
@@ -99,7 +100,8 @@ export function playerStandings(db: DB, seasonId: number, steamid: string): Reco
     const matches = f?.matches ?? 0;
     if (matches === 0) return out;
     for (const k of FIXED_KEYS) out[k] = (f?.[k] ?? 0) / matches;
-    const bag = skillBy.get(r.steamid) ?? {};
+    // Damage as SI ranks net of damage to incapped survivors (src/siDamage.ts).
+    const bag = withNetDamageAsSi(skillBy.get(r.steamid) ?? {});
     for (const [k, v] of Object.entries(bag)) if (rankable.has(k)) out[k] = v / matches;
     if ((bag.boomer_spawns ?? 0) > 0) out.boomer_rate = (bag.boom_successes ?? 0) / bag.boomer_spawns;
     return out;

@@ -3,6 +3,7 @@ import { completedPug } from './matchKinds.js';
 import { gamePhase, seasonRules, srUnder } from './seasonRules.js';
 import { settingNumber } from './settings.js';
 import type { EndorseKind } from './endorsements.js';
+import { DAMAGE_AS_SI, DMG_TO_INCAPPED, netDamageAsSi } from './siDamage.js';
 
 /**
  * Weekly awards, computed from the live tables for any week.
@@ -149,8 +150,30 @@ export function topOf<T extends { value: number }>(rows: T[]): T[] {
   return rows.filter((r) => r.value === best);
 }
 
+/**
+ * The first award week whose Damage as SI award ranks the net figure (damage
+ * to incapped survivors taken off, src/siDamage.ts; owner 2026-10-23).
+ *
+ * Weeks before it keep the gross total they were judged on. Closed weeks are
+ * frozen anyway (weeklyStore.ts), but a rebuild of an old week, or a live
+ * read of one never frozen, must not hand its award to someone else. This is
+ * the first week to start after the change was approved, so no week changes
+ * its rule halfway through.
+ */
+export const NET_SI_DAMAGE_FROM_WEEK = '2026-10-26';
+
 function statTotals(db: DB, week: string, a: StatAward): Map<string, number> {
   const { from, to } = weekBounds(week);
+  if (a.key === 'damage_as_si' && week >= NET_SI_DAMAGE_FROM_WEEK) {
+    const parts = db.prepare(
+      `SELECT player_id AS steamid, stat, SUM(value) AS v FROM match_player_stats
+       WHERE match_id IN (${WEEK_MATCHES}) AND stat IN (?, ?)
+       GROUP BY player_id, stat`,
+    ).all(from, to, DAMAGE_AS_SI, DMG_TO_INCAPPED) as { steamid: string; stat: string; v: number }[];
+    const bags = new Map<string, Record<string, number>>();
+    for (const r of parts) (bags.get(r.steamid) ?? bags.set(r.steamid, {}).get(r.steamid)!)[r.stat] = r.v;
+    return new Map([...bags].filter(([, b]) => b[DAMAGE_AS_SI] !== undefined).map(([id, b]) => [id, netDamageAsSi(b)]));
+  }
   const rows = a.fixed
     ? db.prepare(
       `SELECT player_id AS steamid, SUM(${a.fixed}) AS v FROM match_players

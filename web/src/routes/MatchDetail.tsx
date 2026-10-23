@@ -14,6 +14,7 @@ import { EndorsePanel } from '../components/EndorsePanel';
 import { endorsable } from '../endorse';
 import { AbortPartyList } from '../components/AbortPartyList';
 import { sideTotals } from '../matchTotals';
+import { netDamageAsSi } from '../../../src/siDamage';
 import { Viewer } from '../replay/Viewer';
 import { DrillThis } from '../replay/DrillThis';
 import { WinChart } from '../components/WinChart';
@@ -427,8 +428,11 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
       a: sumFixed('a', (p) => p.siDamage), b: sumFixed('b', (p) => p.siDamage),
     },
     {
+      // Net of damage to incapped survivors (src/siDamage.ts); the table
+      // below keeps that part as its own On incapped column.
       label: 'Damage as SI', sub: 'as infected',
-      a: sideA.infected.damage_as_si, b: sideB.infected.damage_as_si,
+      a: sideA.infected.damage_as_si === undefined ? undefined : netDamageAsSi(sideA.infected),
+      b: sideB.infected.damage_as_si === undefined ? undefined : netDamageAsSi(sideB.infected),
     },
     { label: 'Commons', a: sumFixed('a', (p) => p.commonKills), b: sumFixed('b', (p) => p.commonKills) },
     { label: 'Friendly fire', a: sumFixed('a', (p) => p.ffDealt), b: sumFixed('b', (p) => p.ffDealt) },
