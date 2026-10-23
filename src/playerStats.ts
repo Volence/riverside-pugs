@@ -60,6 +60,9 @@ export interface RoundAggregate {
   /** Closed, reliable halves of this map. Two per playing when both were
    *  recorded, since each half is an independent survivor attempt. */
   attempts: number;
+  /** The quickest round the survivors lived through (survivors_alive > 0).
+   *  Null when no measured round was survived. avgSec and slowestSec are over
+   *  every timed round, wipes included. */
   fastestSec: number | null;
   avgSec: number | null;
   slowestSec: number | null;
@@ -122,11 +125,18 @@ function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
     )
     .all(...maps) as { map: string; secs: number | null; alive: number | null }[];
 
-  const acc = new Map<string, { secs: number[]; measured: number; survived: number }>();
+  const acc = new Map<string, { secs: number[]; cleared: number[]; measured: number; survived: number }>();
   for (const r of rows) {
     let a = acc.get(r.map);
-    if (!a) { a = { secs: [], measured: 0, survived: 0 }; acc.set(r.map, a); }
-    if (r.secs !== null && r.secs >= 0) a.secs.push(r.secs);
+    if (!a) { a = { secs: [], cleared: [], measured: 0, survived: 0 }; acc.set(r.map, a); }
+    if (r.secs !== null && r.secs >= 0) {
+      a.secs.push(r.secs);
+      // Fastest is the quickest the survivors got THROUGH the map. A wipe ends
+      // the round too, often in under a minute, so over every round it named
+      // the quickest death instead. NULL alive is unknown, not a clear, and
+      // stays out.
+      if (r.alive !== null && r.alive > 0) a.cleared.push(r.secs);
+    }
     if (r.alive !== null) {
       a.measured++;
       // > 0, not >= 1 by accident: a versus round ends when the survivors
@@ -139,7 +149,7 @@ function roundAggregates(db: DB, maps: string[]): Map<string, RoundAggregate> {
   for (const [map, a] of acc) {
     out.set(map, {
       attempts: a.secs.length,
-      fastestSec: a.secs.length ? Math.round(Math.min(...a.secs)) : null,
+      fastestSec: a.cleared.length ? Math.round(Math.min(...a.cleared)) : null,
       slowestSec: a.secs.length ? Math.round(Math.max(...a.secs)) : null,
       avgSec: a.secs.length ? Math.round(a.secs.reduce((x, y) => x + y, 0) / a.secs.length) : null,
       survivalPct: a.measured === 0 ? null : Math.round((a.survived / a.measured) * 100),

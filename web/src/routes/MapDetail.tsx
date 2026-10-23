@@ -5,6 +5,19 @@ import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 
+/** Maps played here before a player's win rate is shown. Same floor as
+ *  RANKED_MIN_GAMES in src/standings.ts: one or two maps make a 0% or 100%
+ *  that says nothing, and would sit at the top or bottom of the bars. */
+export const MAP_WINRATE_MIN_GAMES = 3;
+
+/** A player's win rate on this map, or null when there are too few maps or
+ *  every map was drawn. */
+export function mapWinRate(p: { games: number; wins: number; losses: number }): number | null {
+  const decided = p.wins + p.losses;
+  if (p.games < MAP_WINRATE_MIN_GAMES || decided === 0) return null;
+  return Math.round((p.wins / decided) * 100);
+}
+
 export function MapDetail({ map }: { map: string }) {
   const { data, error } = useFetch((s) => api.map(map, s), [map]);
   const [tab, setTab] = useState('winrate');
@@ -75,41 +88,45 @@ export function MapDetail({ map }: { map: string }) {
         />
         {(() => {
           if (tab === 'winrate') {
-            const maxGames = Math.max(...players.map((p) => p.games));
+            // Bar length is the win rate itself. Players under the floor
+            // follow, best rate first, like provisional rows on the
+            // leaderboard.
+            const rated = players
+              .map((p) => ({ p, wr: mapWinRate(p) }))
+              .sort((a, b) => (b.wr ?? -1) - (a.wr ?? -1) || b.p.games - a.p.games);
             return (
               <Bars>
-                {players.map((p) => {
-                  const decided = p.wins + p.losses;
-                  const wr = decided > 0 ? Math.round((p.wins / decided) * 100) : null;
-                  return (
-                    <BarRow
-                      key={p.steamid}
-                      name={p.name}
-                      href={`/player/${encodeURIComponent(p.steamid)}`}
-                      value={wr === null ? 'n/a' : `${wr}%`}
-                      detail={`(${p.wins}W ${p.losses}L)`}
-                      fraction={p.games / maxGames}
-                      tone={wr === null ? 'neutral' : wr >= 50 ? 'good' : 'bad'}
-                    />
-                  );
-                })}
+                {rated.map(({ p, wr }) => (
+                  <BarRow
+                    key={p.steamid}
+                    name={p.name}
+                    href={`/player/${encodeURIComponent(p.steamid)}`}
+                    value={wr === null ? 'n/a' : `${wr}%`}
+                    detail={p.games < MAP_WINRATE_MIN_GAMES
+                      ? `(${p.wins}W ${p.losses}L, under ${MAP_WINRATE_MIN_GAMES} played)`
+                      : `(${p.wins}W ${p.losses}L)`}
+                    fraction={wr === null ? 0 : wr / 100}
+                    tone={wr === null ? 'neutral' : wr >= 50 ? 'good' : 'bad'}
+                  />
+                ))}
               </Bars>
             );
           }
           // A stat tab: bar length is the value relative to the best, so the
-          // comparison is legible whatever the units happen to be.
-          const vals = players.map((p) => p.stats[tab] ?? 0);
+          // comparison is legible whatever the units happen to be. Follows the
+          // Per map / Totals choice below, like the table does.
+          const vals = players.map((p) => cellsOf(p)[tab] ?? 0);
           const max = Math.max(...vals, 1);
-          const ranked = [...players].sort((a, b) => (b.stats[tab] ?? 0) - (a.stats[tab] ?? 0));
+          const ranked = [...players].sort((a, b) => (cellsOf(b)[tab] ?? 0) - (cellsOf(a)[tab] ?? 0));
           return (
-            <Bars>
+            <Bars label={mode === 'avg' ? 'Per map' : 'Totals'}>
               {ranked.map((p) => (
                 <BarRow
                   key={p.steamid}
                   name={p.name}
                   href={`/player/${encodeURIComponent(p.steamid)}`}
-                  value={p.stats[tab] === undefined ? 'n/a' : String(p.stats[tab])}
-                  fraction={(p.stats[tab] ?? 0) / max}
+                  value={cellsOf(p)[tab] === undefined ? 'n/a' : String(cellsOf(p)[tab])}
+                  fraction={(cellsOf(p)[tab] ?? 0) / max}
                   tone="neutral"
                 />
               ))}
@@ -143,7 +160,7 @@ export function MapDetail({ map }: { map: string }) {
             </thead>
             <tbody>
               {players.map((p) => {
-                const decided = p.wins + p.losses;
+                const wr = mapWinRate(p);
                 return (
                   <tr key={p.steamid}>
                     <td class="lb__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /></td>
@@ -151,10 +168,11 @@ export function MapDetail({ map }: { map: string }) {
                     <td class="num">{p.wins}</td>
                     <td class="num">{p.losses}</td>
                     <td class="num">
-                      {/* Absent, not 0%, when every map was drawn. */}
-                      {decided > 0
-                        ? `${Math.round((p.wins / decided) * 100)}%`
-                        : <span class="muted">n/a</span>}
+                      {/* Absent, not 0%, when every map was drawn or too few
+                          were played here to mean anything. */}
+                      {wr !== null
+                        ? `${wr}%`
+                        : <span class="muted" title={p.games < MAP_WINRATE_MIN_GAMES ? `Fewer than ${MAP_WINRATE_MIN_GAMES} played here` : 'Every map drawn'}>n/a</span>}
                     </td>
                     {cols.map((k) => {
                       const v = cellsOf(p)[k];
