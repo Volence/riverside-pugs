@@ -128,6 +128,16 @@ export function tellPlayerReplaced(d: NoticeDeps, eventId: number, entryId: numb
   tell(d, [inn], eventId, 'draft_player_added', { entryId });
   tell(d, [entry.captain_steamid], eventId, 'draft_roster_changed', { entryId, out, in: inn });
 }
+/** Staff swapped two players between draft teams (owner 2026-10-23): each
+ *  moved player hears their new team, each captain who lost one who came. */
+export function tellPlayersSwapped(d: NoticeDeps, eventId: number, a: { entryId: number; steamid: string }, b: { entryId: number; steamid: string }): void {
+  tell(d, [a.steamid], eventId, 'draft_player_added', { entryId: b.entryId });
+  tell(d, [b.steamid], eventId, 'draft_player_added', { entryId: a.entryId });
+  for (const [entryId, out, inn] of [[a.entryId, a.steamid, b.steamid], [b.entryId, b.steamid, a.steamid]] as const) {
+    const captain = N.getEntry(d.db, entryId)?.captain_steamid;
+    if (captain) tell(d, [captain], eventId, 'draft_roster_changed', { entryId, out, in: inn });
+  }
+}
 /** Staff made another starter a draft team's captain (D2c addendum): the
  *  new captain (what they now run, with the event link) and the old one. */
 export function tellCaptainSet(d: NoticeDeps, eventId: number, entryId: number, from: string, to: string): void {
