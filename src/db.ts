@@ -713,6 +713,9 @@ CREATE TABLE IF NOT EXISTS match_players (
   joined_map INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, player_id)
 );
+-- The primary key leads with match_id, so "every match this player was in"
+-- (profiles, the map breakdown, chemistry, weekly awards) scanned the table.
+CREATE INDEX IF NOT EXISTS idx_match_players_player ON match_players (player_id);
 -- Post-match endorsements. The primary key is an anti abuse rule expressed
 -- structurally: one endorsement per giver per recipient per match, so nobody
 -- stacks all three kinds on one friend. Everything a CHECK cannot see (both
@@ -790,6 +793,9 @@ CREATE TABLE IF NOT EXISTS rating_history (
   sigma_after REAL NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rating_history_match_player ON rating_history (match_id, player_id);
+-- A player's games in a season (the leaderboard, standings and profiles count
+-- them per player) cannot use the (match_id, player_id) index above.
+CREATE INDEX IF NOT EXISTS idx_rating_history_player_season ON rating_history (player_id, season_id);
 -- Live-view scratch state, written from the LOSSY UDP feed.
 -- Deliberately SEPARATE from match_maps: the authoritative record is written
 -- once, at completion, from the rcon dump. Keeping the cosmetic running score
