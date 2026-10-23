@@ -2119,10 +2119,14 @@ export interface EventListItem {
 export interface EventStageView {
   ordinal: number; type: StageType; summary: string; veto: string; chapters: string; scheduling: Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
+  /** Rounds with a staff start time, earliest first; optional for an older server. */
+  roundTimes?: { round: number; at: string }[];
 }
 export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null;
   /** Draft entries only: current starters' names, captain first. */
-  players?: string[] }
+  players?: string[];
+  /** The same starters with SteamIDs, for profile links; optional for an older server. */
+  playerLinks?: { steamid: string; name: string }[] }
 export interface PlayEntry { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; out: boolean }
 /** Mirrors src/events/playViews.ts's RoomPhase. */
 export type RoomPhase = 'pending' | 'waiting' | 'ready' | 'veto' | 'lineup' | 'server' | 'connect' | 'live' | 'confirming' | 'hold' | 'done';

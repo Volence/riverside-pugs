@@ -12,6 +12,7 @@ import { KeepTeamPanel } from './event/KeepTeamPanel';
 import { EntryPanel } from './event/EntryPanel';
 import { PrepPanel } from './event/PrepPanel';
 import { StagePlay } from './event/StagePlay';
+import { EventFigures, EventTimeline, StageRulesCard, TeamsGrid } from './event/EventOverview';
 
 const BEFORE_START = new Set(['draft', 'announced', 'registration', 'checkin']);
 
@@ -58,38 +59,55 @@ function NameChips({ names }: { names: string[] }) {
 function DraftSection({ ev, draft, session }: { ev: EventView; draft: EventDraftView; session: Session }) {
   const cut = draft.cut;
   const closed = ev.lockedAt !== null || Date.now() >= Date.parse(draft.signupsCloseAt);
+  const open = !cut && ev.status === 'registration' && !closed;
   return (
     <Panel class="draftsection">
-      <h3>Draft</h3>
-      <p class="muted">Signups close {whenText(draft.signupsCloseAt)} · Draft night {whenText(draft.draftAt)}</p>
-      {!cut && ev.status === 'registration' && !closed && session.kind === 'anonymous' && (
-        <p>
-          <a href={`/auth/steam?next=${encodeURIComponent(`/event/${ev.slug}`)}`} target="_top" rel="noopener">Sign in through Steam</a> to sign up.
+      <div class="draftsection__head">
+        <h3>Draft</h3>
+        {cut && (
+          <a class={`btn${ev.status === 'registration' ? '' : ' btn--ghost'}`} href={`/event/${ev.slug}/draft`}>Draft room</a>
+        )}
+      </div>
+      {open && session.kind === 'anonymous' && (
+        <p class="draftsection__cta">
+          <a class="btn" href={`/auth/steam?next=${encodeURIComponent(`/event/${ev.slug}`)}`} target="_top" rel="noopener">Sign in through Steam</a>
+          <span class="muted">to sign up.</span>
         </p>
       )}
-      {!cut && ev.status === 'registration' && !closed && session.kind === 'pending' && (
+      {open && session.kind === 'pending' && (
         <p class="muted">Your account is not active yet, so you cannot sign up.</p>
       )}
-      {cut ? (
+      {cut && ev.entries.length > 0 ? (
+        <details class="draftsection__done">
+          <summary>Teams are drafted. Show who was captain, in the pool and on the bench</summary>
+          <DraftGroups cut={cut} />
+        </details>
+      ) : cut ? (
         <>
-          <p class="inlinerow">
-            <a class={`btn${ev.status === 'registration' ? '' : ' btn--ghost'}`} href={`/event/${ev.slug}/draft`}>Draft room</a>
-            <span class="muted">Player cards, captains' pick lists and the live draft.</span>
-          </p>
-          {([['Captains', cut.captains], ['Pool', cut.pool], ['Bench', cut.bench]] as const).map(([label, names]) => (
-            <div key={label}>
-              <h4>{label}</h4>
-              {names.length === 0 ? <Empty>Nobody.</Empty> : <NameChips names={names} />}
-            </div>
-          ))}
+          <p class="muted">Player cards, captains' pick lists and the live draft are in the draft room.</p>
+          <DraftGroups cut={cut} />
         </>
       ) : (
         <>
-          <p><strong>{draft.signups} signed up</strong></p>
+          <p class="draftsection__signed"><strong>{draft.signups} signed up</strong></p>
           {draft.names.length > 0 && <NameChips names={draft.names} />}
         </>
       )}
     </Panel>
+  );
+}
+
+/** The published cut's three lists, each with its count. */
+function DraftGroups({ cut }: { cut: NonNullable<EventDraftView['cut']> }) {
+  return (
+    <div class="draftsection__groups">
+      {([['Captains', cut.captains], ['Pool', cut.pool], ['Bench', cut.bench]] as const).map(([label, names]) => (
+        <div key={label} class="draftsection__group">
+          <div class="draftsection__grouphead"><h4>{label}</h4><span class="draftsection__count num">{names.length}</span></div>
+          {names.length === 0 ? <Empty>Nobody.</Empty> : <NameChips names={names} />}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -141,8 +159,24 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
   }
   if (!ev) return <PageSkeleton variant="profile" panels={3} />;
 
+  const draftEvent = ev.entryKind === 'draft' && ev.draft;
+  const myPanels = (
+    <>
+      {mine && draftEvent && (
+        <DraftSignupPanel slug={ev.slug} eventName={ev.name} status={ev.status} lockedAt={ev.lockedAt} draft={ev.draft!} view={mine} onChange={bump} />
+      )}
+      {mine?.captainOf && ev.entryKind === 'draft' && <DraftIdentityPanel slug={ev.slug} mine={mine.captainOf} onChange={bump} />}
+      {mine && ev.entryKind === 'draft' && <StandinPanel slug={ev.slug} />}
+      {mine && ev.entryKind === 'draft' && ev.status === 'finished' && <KeepTeamPanel slug={ev.slug} />}
+      {mine && ev.entryKind === 'team' && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
+      {mine && !['finished', 'cancelled'].includes(ev.status) && mine.entries
+        .filter((e) => e.manage && (e.status === 'registered' || e.status === 'checked_in'))
+        .map((e) => <PrepPanel key={e.id} slug={ev.slug} entryId={e.id} teamName={e.name} />)}
+    </>
+  );
+
   return (
-    <main class="page page--profile eventpage">
+    <main class="page page--list eventpage">
       {ev.bannerKey && <img class="eventbanner" src={bannerUrl(ev.bannerKey)} alt="" width={1600} height={400} />}
       <PageHeader
         eyebrow={ev.official ? 'Official event' : 'Community event'}
@@ -154,74 +188,54 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
           {BEFORE_START.has(ev.status) && <span class="eventpage__countdown"> · {untilText(ev.startsAt, now)}</span>}
           {ev.organizerName && <span class="muted"> · organized by {ev.organizerName}</span>}
         </p>
+        <EventFigures ev={ev} />
       </PageHeader>
       {ev.status === 'draft' && <p class="warning">Draft: only staff can see this page.</p>}
       {ev.status === 'cancelled' && <p class="warning">This event was cancelled{ev.cancelReason ? `: ${ev.cancelReason}` : '.'}</p>}
+      <EventTimeline ev={ev} now={now} />
       {/* Once play starts the bracket is what people come for, so it leads and the description follows. */}
       {ev.play.map((s) => <StagePlay key={s.ordinal} stage={s} slug={ev.slug} />)}
-      {ev.description && <Panel><RichText class="eventdesc" text={ev.description} /></Panel>}
-      <Panel>
-        <h3>Format</h3>
-        {ev.stages.length === 0 ? <Empty>The format is not set yet.</Empty> : (
-          <ol class="eventstrip">
-            {ev.stages.map((s) => (
-              <li key={s.ordinal} class="eventstrip__stage">
-                <span class="eyebrow">Stage {s.ordinal}</span>
-                <strong>{s.summary}</strong>
-              </li>
-            ))}
-          </ol>
-        )}
-      </Panel>
-      {ev.stages.map((s) => (
-        <Panel key={s.ordinal}>
-          <h3>Stage {s.ordinal}: rules and campaigns</h3>
-          <p class="muted">
-            {s.rulesetName ?? 'Ruleset'} · {s.veto} · {s.chapters} · {s.scheduling === 'window' ? 'played in scheduled windows' : 'played in one session'} · {s.gameConfig}
-          </p>
-          {s.rules.length > 0 && <ul class="eventrules">{s.rules.map((r) => <li key={r}>{r}</li>)}</ul>}
-          <p class="eventpool">{s.campaigns.map((c) => <span key={c.slug} class="teamchip">{c.name}</span>)}</p>
-        </Panel>
-      ))}
-      <Panel>
-        <h3>Entry</h3>
-        <ul class="eventrules">{entryLines(ev).map((l) => <li key={l}>{l}</li>)}</ul>
-        {ev.entryKind === 'team' && ev.checkinOpensAt && BEFORE_START.has(ev.status) && (
-          <p class="muted">Check-in {whenText(ev.checkinOpensAt)} to {whenText(ev.checkinClosesAt!)}</p>
-        )}
-        {ev.lockedAt && <p class="muted">The entry list is final.</p>}
-      </Panel>
-      {ev.entryKind === 'draft' && ev.draft && <DraftSection ev={ev} draft={ev.draft} session={session} />}
-      {mine && ev.entryKind === 'draft' && ev.draft && (
-        <DraftSignupPanel slug={ev.slug} eventName={ev.name} status={ev.status} lockedAt={ev.lockedAt} draft={ev.draft} view={mine} onChange={bump} />
-      )}
-      {mine?.captainOf && ev.entryKind === 'draft' && <DraftIdentityPanel slug={ev.slug} mine={mine.captainOf} onChange={bump} />}
-      {mine && ev.entryKind === 'draft' && <StandinPanel slug={ev.slug} />}
-      {mine && ev.entryKind === 'draft' && ev.status === 'finished' && <KeepTeamPanel slug={ev.slug} />}
-      {mine && ev.entryKind === 'team' && <EntryPanel slug={ev.slug} view={mine} maxSubs={ev.roster.maxSubs} onChange={bump} />}
-      {mine && !['finished', 'cancelled'].includes(ev.status) && mine.entries
-        .filter((e) => e.manage && (e.status === 'registered' || e.status === 'checked_in'))
-        .map((e) => <PrepPanel key={e.id} slug={ev.slug} entryId={e.id} teamName={e.name} />)}
-      {(ev.entryKind !== 'draft' || ev.entries.length > 0) && <Panel>
+      {myPanels}
+      {draftEvent && ev.entries.length === 0 && <DraftSection ev={ev} draft={ev.draft!} session={session} />}
+      {(ev.entryKind !== 'draft' || ev.entries.length > 0) && <Panel class="evteamspanel">
         <h3>Teams</h3>
         {ev.entries.length === 0
           ? <Empty>{ev.entryKind === 'team' ? 'No teams have entered yet.' : 'No entries yet.'}</Empty>
-          : (
-            <ul class="eventlist">
-              {ev.entries.map((e) => (
-                <li key={e.id} class="evententry">
-                  {e.logoKey ? <img class="evententry__logo" src={entryLogoUrl(e.logoKey)} alt="" width={28} height={28} /> : <span class="evententry__logo evententry__logo--none" aria-hidden="true">{e.name.slice(0, 1).toUpperCase()}</span>}
-                  <span class="evententry__name">{e.seed !== null && <span class="muted">#{e.seed} </span>}{e.name}{e.tag && <span class="muted"> [{e.tag}]</span>}</span>
-                  {ev.entryKind === 'team' && e.status === 'checked_in' && <span class="teamchip teamchip--ok">Checked in</span>}
-                  {e.waitlist !== null && <span class="teamchip">Waitlist {e.waitlist}</span>}
-                  {e.status === 'disqualified' && <span class="teamchip teamchip--bad">Disqualified</span>}
-                  {e.placement !== null && <span class="teamchip teamchip--ok">{placementText(e.placement)}</span>}
-                  {e.players && e.players.length > 0 && <span class="evententry__players muted">{e.players.join(', ')}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
+          : <TeamsGrid ev={ev} />}
       </Panel>}
+      {draftEvent && ev.entries.length > 0 && <DraftSection ev={ev} draft={ev.draft!} session={session} />}
+      <div class="evcols">
+        <div class="evcols__main">
+          {ev.description
+            ? <Panel class="evabout"><RichText class="eventdesc" text={ev.description} /></Panel>
+            : <Panel class="evabout"><Empty>No description yet.</Empty></Panel>}
+        </div>
+        <aside class="evcols__side">
+          {ev.stages.length === 0 && <Panel class="evside"><h3>Format</h3><Empty>The format is not set yet.</Empty></Panel>}
+          {ev.stages.length > 1 && (
+            <Panel class="evside">
+              <h3>Format</h3>
+              <ol class="eventstrip">
+                {ev.stages.map((s) => (
+                  <li key={s.ordinal} class="eventstrip__stage">
+                    <span class="eyebrow">Stage {s.ordinal}</span>
+                    <strong>{s.summary}</strong>
+                  </li>
+                ))}
+              </ol>
+            </Panel>
+          )}
+          {ev.stages.map((s) => <StageRulesCard key={s.ordinal} s={s} only={ev.stages.length === 1} />)}
+          <Panel class="evside">
+            <h3>Who can enter</h3>
+            <ul class="evchecks">{entryLines(ev).map((l) => <li key={l}>{l}</li>)}</ul>
+            {ev.entryKind === 'team' && ev.checkinOpensAt && BEFORE_START.has(ev.status) && (
+              <p class="muted">Check-in {whenText(ev.checkinOpensAt)} to {whenText(ev.checkinClosesAt!)}</p>
+            )}
+            {ev.lockedAt && <p class="muted">The entry list is final.</p>}
+          </Panel>
+        </aside>
+      </div>
     </main>
   );
 }

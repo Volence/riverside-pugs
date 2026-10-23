@@ -134,6 +134,19 @@ describe('stages', () => {
     }
   });
 
+  it('the public event view lists the rounds that have a start time, earliest first, and leaves rounds without one out', async () => {
+    const { eventView } = await import('../src/events/views.js');
+    const f = eventFixture('draft');
+    f.db.prepare("UPDATE event_stages SET scheduling = 'window' WHERE id = ?").run(f.s1);
+    must(E.setRoundSchedule(f.db, { eventId: f.eventId, stageId: f.s1, by: ADMIN, now: NOW, rounds: [
+      { round: 3, at: '2026-10-25T00:00:00Z', from: '2026-10-24T00:00:00Z', to: '2026-10-26T00:00:00Z' },
+      { round: 2, at: null, from: '2026-10-24T00:00:00Z', to: '2026-10-26T00:00:00Z' },
+    ] }));
+    const view = eventView(f.db, E.getEvent(f.db, f.eventId)!);
+    expect(view.stages.find((s) => s.ordinal === 1)!.roundTimes).toEqual([{ round: 3, at: '2026-10-25T00:00:00.000Z' }]);
+    expect(view.stages.find((s) => s.ordinal === 2)!.roundTimes).toEqual([]);
+  });
+
   it('stores a round schedule on a stage at any status but finished or cancelled, sorted, and logs it (plan T4)', () => {
     const f = eventFixture('draft');
     const rows = [{ round: 2, at: '2026-10-21T21:00:00Z', from: '2026-10-19T00:00:00Z', to: '2026-10-25T23:59:59Z' }, { round: 1, at: '2026-10-14T21:00:00Z', from: '2026-10-12T00:00:00Z', to: '2026-10-18T23:59:59Z' }];
