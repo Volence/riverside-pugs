@@ -146,7 +146,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       <PageHeader
         eyebrow={ev.official ? 'Official event' : 'Community event'}
         title={ev.name}
-        aside={<span class={`teamchip eventstatus eventstatus--${ev.status}`}>{STATUS_LABEL[ev.status]}</span>}
+        aside={<span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span>}
       >
         <p class="eventpage__when">
           Starts {whenText(ev.startsAt)}

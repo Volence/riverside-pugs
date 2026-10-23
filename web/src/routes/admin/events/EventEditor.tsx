@@ -136,7 +136,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   return (
     <div class="stack">
       <Panel>
-        <h3>{ev.fields.name} <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{STATUS_LABEL[ev.status]}</span></h3>
+        <h3>{ev.fields.name} <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span></h3>
         <p class="muted"><a href={`/event/${ev.slug}`}>/event/{ev.slug}</a> · last change {fmtTime(ev.updatedAt)}</p>
         {ev.cancelReason && <p class="muted">Cancelled: {ev.cancelReason}</p>}
         {!canEdit && <p class="muted">Read only: admins run events.</p>}

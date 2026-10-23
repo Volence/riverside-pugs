@@ -2099,6 +2099,8 @@ export interface EventDraft { signupsCloseAt: string; draftAt: string }
 export interface EventListItem {
   slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; startsAt: string; bannerKey: string | null;
   format: string[]; entries: number;
+  /** The status chip's words (src/events/format.ts eventStatusLabel); optional for an older server. */
+  statusLabel?: string;
 }
 export interface EventStageView {
   ordinal: number; type: StageType; summary: string; veto: string; chapters: string; scheduling: Scheduling;
@@ -2162,6 +2164,8 @@ export interface EventView {
   /** Draft-kind events only (drafts plan D1, mirrors src/events/views.ts): signup
    *  count and names, never SR, notes or preferences. Optional so a team event omits it. */
   draft?: EventDraftView | null;
+  /** The status chip's words (src/events/format.ts eventStatusLabel); optional for an older server. */
+  statusLabel?: string;
 }
 export interface EventDraftView {
   signupsCloseAt: string; draftAt: string; signups: number; names: string[];
@@ -2627,6 +2631,8 @@ export interface AdminBookingPriority { scrimMax: number; pugReserve: number; re
 /** src/routes/adminEvents.ts */
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: EventStatus; entryKind: EntryKind; startsAt: string; stages: number; updatedAt: string;
+  /** The status chip's words; optional for an older server. */
+  statusLabel?: string;
 }
 export interface AdminEventStage {
   id: number; ordinal: number; summary: string; settings: StageSettings; rulesSnapshotted: boolean;
@@ -2640,6 +2646,8 @@ export interface AdminEventDetail {
   cancelReason: string | null; createdAt: string; updatedAt: string;
   /** Draft-kind events: when the cut and the teams were published. */
   cutAt: string | null; teamsMadeAt: string | null;
+  /** The status chip's words; optional for an older server. */
+  statusLabel?: string;
   stages: AdminEventStage[];
   log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
 }

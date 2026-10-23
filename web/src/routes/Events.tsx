@@ -15,7 +15,7 @@ function EventRow({ ev }: { ev: EventListItem }) {
       <a class="eventrow" href={`/event/${ev.slug}`}>
         {ev.bannerKey && <img class="eventrow__banner" src={bannerUrl(ev.bannerKey)} alt="" width={160} height={40} loading="lazy" />}
         <span class="eventrow__name">{ev.name}</span>
-        <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{STATUS_LABEL[ev.status]}</span>
+        <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span>
         <span class="eventrow__meta">
           {whenText(ev.startsAt)}
           {ev.format.length > 0 && <> · {ev.format.join(', then ')}</>}

@@ -8,7 +8,7 @@ import * as D from './drafts.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import type * as V from './validate.js';
-import { STAGE_LABEL, chaptersLabel, rulesLines, stageSummary } from './format.js';
+import { STAGE_LABEL, chaptersLabel, eventStatusLabel, rulesLines, stageSummary } from './format.js';
 import { vetoSummary } from './vetoConfig.js';
 import { stagePlayViews, type StagePlayView } from './playViews.js';
 import * as P from './play.js';
@@ -18,6 +18,8 @@ import * as P from './play.js';
 export interface EventListItem {
   slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; official: boolean; startsAt: string; bannerKey: string | null;
   format: string[]; entries: number;
+  /** The status chip's words (format.ts eventStatusLabel): a draft's own phase while it is in registration. */
+  statusLabel: string;
 }
 export interface EventStageView {
   ordinal: number; type: V.StageType; summary: string; veto: string; chapters: string; scheduling: V.Scheduling;
@@ -36,6 +38,8 @@ export interface EventView {
   /** Draft-kind events only (plan D1 Ruling 9): the signup count and names in
    *  signup order. Never SR, notes or captain preference. */
   draft: EventDraftView | null;
+  /** The status chip's words (format.ts eventStatusLabel). */
+  statusLabel: string;
 }
 export interface EventDraftView {
   signupsCloseAt: string; draftAt: string; signups: number; names: string[];
@@ -63,6 +67,7 @@ export function eventListItems(db: DB, o: { staff: boolean }): EventListItem[] {
     bannerKey: e.banner_key,
     format: E.stagesOf(db, e.id).map((s) => STAGE_LABEL[s.type]),
     entries: entryCount(db, e),
+    statusLabel: eventStatusLabel(e),
   }));
 }
 
@@ -126,6 +131,7 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
       ? (() => { const t = R.checkinTimes(ev.starts_at, f.checkin); return { checkinOpensAt: t.opensAt, checkinClosesAt: t.closesAt }; })()
       : { checkinOpensAt: null, checkinClosesAt: null }),
     draft: draftView(db, ev, f),
+    statusLabel: eventStatusLabel(ev),
   };
 }
 
