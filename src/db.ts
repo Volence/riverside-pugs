@@ -1546,6 +1546,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   balance_stats_enabled: '0',
   balance_stats_gate_pct: '60',
   balance_stats_tolerance_pts: '5',
+  // Every Nth match id where the gate fires keeps the rating-best teams, as
+  // a holdout to measure the tie-break against. 0 turns the holdout off.
+  balance_stats_holdout_every: '4',
   // Matches in a week before a player's averages, win rate, SR climb or a
   // shame award count for the weekly awards. Five, not three: at three the
   // week of 2026-09-21 gave an average to a four-game player.
@@ -3031,6 +3034,9 @@ export function openDb(path: string): DB {
       tolerance       REAL NOT NULL,
       over_gate       INTEGER NOT NULL,
       gate_fired      INTEGER NOT NULL,
+      -- Gate fired but the match is a holdout (id % balance_stats_holdout_every
+      -- = 0): the rating-best split played, as the A/B control.
+      holdout         INTEGER NOT NULL DEFAULT 0,
       stat_avg        REAL NOT NULL,
       best_team_a     TEXT NOT NULL,
       best_team_b     TEXT NOT NULL,

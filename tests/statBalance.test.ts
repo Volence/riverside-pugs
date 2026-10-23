@@ -5,7 +5,7 @@ import { upsertPlayer } from '../src/players.js';
 import { balanceTeams, validSplits, type RatedPlayer } from '../src/balance.js';
 import {
   STAT_BALANCE_MODEL, averageSiDamage, balanceLogSummary, chooseTeams, favourite, logBalance, playersMoved,
-  recentBalanceLog, statBalanceConfig, statLines, statScore, statWinA,
+  isHoldout, recentBalanceLog, statBalanceConfig, statLines, statScore, statWinA,
 } from '../src/statBalance.js';
 
 let db: DB;
@@ -84,7 +84,7 @@ describe('the stat-aware odds', () => {
 const EVEN = ['s1', 's2', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((id) => p(id, 25));
 
 describe('chooseTeams', () => {
-  const on = { enabled: true, gate: 0.6, tolerance: 0.05 };
+  const on = { enabled: true, gate: 0.6, tolerance: 0.05, holdoutEvery: 4 };
   const off = { ...on, enabled: false };
 
   it('off: the chosen split is exactly balanceTeams', () => {
@@ -139,6 +139,21 @@ describe('chooseTeams', () => {
     }
   });
 
+  it('a holdout keeps the rating-best split when the gate fires, and is marked', () => {
+    const s = new Map([['s1', 2000], ['s2', 2000], ...EVEN.slice(2).map((x) => [x.steamid, 0] as [string, number])]);
+    const d = chooseTeams(EVEN, s, on, { holdout: true });
+    expect(d).toMatchObject({ gateFired: true, holdout: true, moved: 0 });
+    expect(d.chosen.teamA).toEqual(d.ratingBest.teamA);
+    // Under the gate a holdout id is just an ordinary match.
+    const flat = chooseTeams(EVEN, new Map(EVEN.map((x) => [x.steamid, 0])), on, { holdout: true });
+    expect(flat.holdout).toBe(false);
+  });
+
+  it('holds out every Nth match id, never with 0', () => {
+    expect([1, 2, 3, 4, 8, 9].filter((id) => isHoldout(id, on))).toEqual([4, 8]);
+    expect(isHoldout(4, { ...on, holdoutEvery: 0 })).toBe(false);
+  });
+
   it('keeps every duo together', () => {
     const s = new Map([['s1', 2000], ['s2', 2000], ...EVEN.slice(2).map((x) => [x.steamid, 0] as [string, number])]);
     // A duo of the two stars: the tie-break may not split them.
@@ -153,18 +168,19 @@ describe('chooseTeams', () => {
 
 describe('settings', () => {
   it('ship off at gate 60 and tolerance 5', () => {
-    expect(statBalanceConfig(db)).toEqual({ enabled: false, gate: 0.6, tolerance: 0.05 });
+    expect(statBalanceConfig(db)).toEqual({ enabled: false, gate: 0.6, tolerance: 0.05, holdoutEvery: 4 });
     setSetting(db, 'balance_stats_enabled', '1');
     setSetting(db, 'balance_stats_gate_pct', '65');
     setSetting(db, 'balance_stats_tolerance_pts', '3');
-    expect(statBalanceConfig(db)).toEqual({ enabled: true, gate: 0.65, tolerance: 0.03 });
+    setSetting(db, 'balance_stats_holdout_every', '0');
+    expect(statBalanceConfig(db)).toEqual({ enabled: true, gate: 0.65, tolerance: 0.03, holdoutEvery: 0 });
   });
 });
 
 describe('the log', () => {
   it('writes a row and summarises results joined from matches', () => {
     const s = new Map([['s1', 2000], ['s2', 2000], ...EVEN.slice(2).map((x) => [x.steamid, 0] as [string, number])]);
-    const cfg = { enabled: true, gate: 0.6, tolerance: 0.05 };
+    const cfg = { enabled: true, gate: 0.6, tolerance: 0.05, holdoutEvery: 4 };
     const d = chooseTeams(EVEN, s, cfg);
     const id = finished(Object.fromEntries(EVEN.map((x) => [x.steamid, 1000])));
     db.prepare("UPDATE matches SET winner = ? WHERE id = ?").run(d.chosen.statA >= 0.5 ? 'b' : 'a', id);
@@ -183,13 +199,20 @@ describe('the log', () => {
     db.prepare("UPDATE matches SET winner = ? WHERE id = ?").run(d2.chosen.statA >= 0.5 ? 'a' : 'b', id2);
     logBalance(db, id2, { ...cfg, enabled: false }, 5000, d2, []);
 
+    // A holdout: the gate fired, the rating-best teams played and their stat favourite won.
+    const d3 = chooseTeams(EVEN, s, cfg, { holdout: true });
+    const id3 = finished(Object.fromEntries(EVEN.map((x) => [x.steamid, 1000])));
+    db.prepare("UPDATE matches SET winner = ? WHERE id = ?").run(d3.chosen.statA >= 0.5 ? 'a' : 'b', id3);
+    logBalance(db, id3, cfg, 5000, d3, []);
+
     const sum = balanceLogSummary(db);
-    expect(sum.logged).toBe(2);
-    expect(sum.enabledMatches).toBe(1);
+    expect(sum.logged).toBe(3);
+    expect(sum.enabledMatches).toBe(2);
     expect(sum.gateFireRate).toBe(1);
     expect(sum.firedChosen).toMatchObject({ matches: 1, decided: 1, favWon: 0 });
+    expect(sum.holdout).toMatchObject({ matches: 1, decided: 1, favWon: 1 });
     expect(sum.firedRatingBestPredicted!).toBeGreaterThan(0.6);
     expect(sum.offOverGate).toMatchObject({ matches: 1, decided: 1, favWon: 1 });
-    expect(recentBalanceLog(db, 10).map((r) => r.matchId)).toEqual([id2, id]);
+    expect(recentBalanceLog(db, 10).map((r) => [r.matchId, r.holdout])).toEqual([[id3, true], [id2, false], [id, false]]);
   });
 });

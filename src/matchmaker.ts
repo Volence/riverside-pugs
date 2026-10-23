@@ -3,7 +3,7 @@ import type { DB } from './db.js';
 import { Queue, QUEUE_SIZE } from './queue.js';
 import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase, type PersistedLobby } from './lobby.js';
 import { balanceTeams, type RatedPlayer } from './balance.js';
-import { averageSiDamage, chooseTeams, logBalance, statBalanceConfig, statLines, type StatBalanceDecision, type StatLine } from './statBalance.js';
+import { averageSiDamage, chooseTeams, isHoldout, logBalance, statBalanceConfig, statLines, type StatBalanceDecision, type StatLine } from './statBalance.js';
 import { balanceMu } from './newcomerPrior.js';
 import { duoBonusMu } from './duoBonus.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
@@ -701,27 +701,34 @@ export class Matchmaker {
       // Stat-aware tie-break (src/statBalance.ts). The rating-best split is
       // computed first, exactly as before; with balance_stats_enabled off it
       // is what plays. Any failure in the stat side falls back to it, so a
-      // bad stat query can never stop a pop.
-      let teamA: string[];
-      let teamB: string[];
-      let statLog: { cfg: ReturnType<typeof statBalanceConfig>; avg: number; lines: Map<string, StatLine>; decision: StatBalanceDecision } | null = null;
+      // bad stat query can never stop a pop. The teams are picked once the
+      // match row exists, because the holdout is decided by match id.
+      let statIn: { cfg: ReturnType<typeof statBalanceConfig>; avg: number; lines: Map<string, StatLine> } | null = null;
       try {
         const cfg = statBalanceConfig(this.db);
         const avg = averageSiDamage(this.db);
-        const lines = statLines(this.db, result.players, avg);
-        const decision = chooseTeams(rated, new Map([...lines].map(([id, l]) => [id, l.s])), cfg, { groups });
-        statLog = { cfg, avg, lines, decision };
-        ({ teamA, teamB } = decision.chosen);
+        statIn = { cfg, avg, lines: statLines(this.db, result.players, avg) };
       } catch (err) {
-        console.error('[matchmaker] stat balance failed, using the rating split:', err);
-        ({ teamA, teamB } = balanceTeams(rated, { groups }));
+        console.error('[matchmaker] stat balance inputs failed, using the rating split:', err);
       }
+      let decision: StatBalanceDecision | null = null;
       const season = currentSeasonId(this.db);
       const matchId = this.db.transaction(() => {
         const insertMatch = this.db.prepare(
           "INSERT INTO matches (season_id, state, campaign, origin) VALUES (?, 'configuring', ?, 'queue')",
         );
         const id = Number(insertMatch.run(season, result.campaign).lastInsertRowid);
+        let teamA: string[];
+        let teamB: string[];
+        try {
+          if (!statIn) throw new Error('no stat inputs');
+          decision = chooseTeams(rated, new Map([...statIn.lines].map(([p, l]) => [p, l.s])), statIn.cfg,
+            { groups, holdout: isHoldout(id, statIn.cfg) });
+          ({ teamA, teamB } = decision.chosen);
+        } catch (err) {
+          if (statIn) console.error('[matchmaker] stat balance failed, using the rating split:', err);
+          ({ teamA, teamB } = balanceTeams(rated, { groups }));
+        }
         const insertMp = this.db.prepare(
           'INSERT INTO match_players (match_id, player_id, team, duo_partner, duo_bonus) VALUES (?, ?, ?, ?, ?)',
         );
@@ -731,6 +738,7 @@ export class Matchmaker {
         for (const p of teamB) ins(p, 'b');
         return id;
       })();
+      const statLog = statIn && decision ? { ...statIn, decision: decision as StatBalanceDecision } : null;
 
       if (statLog) {
         // Every queue match is logged, on or off; a failed write never

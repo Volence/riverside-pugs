@@ -18,6 +18,9 @@ import { balanceTeams, validSplits, type RatedPlayer, type Split } from './balan
  *      tolerance (5 points) further from even than the rating-best split's,
  *      and take the one whose stat-aware odds are closest to 50%.
  *   3. Otherwise keep the rating-best split.
+ *   Holdout: when the gate fires on a match whose id is a multiple of
+ *   balance_stats_holdout_every (4), the rating-best split plays anyway and
+ *   the row is marked, so the tie-break has a same-time A/B control.
  *
  * Ratings, SR and the admin rating forecast are never touched: this only
  * decides who plays on which side. Off (balance_stats_enabled 0) the chosen
@@ -125,6 +128,15 @@ export interface StatBalanceConfig {
   gate: number;
   /** How much further from even (0..1) a candidate's rating favourite may be. */
   tolerance: number;
+  /** Every Nth match id (id % N === 0) where the gate fires keeps the
+   *  rating-best split as a holdout, the honest A/B. 0: no holdout. */
+  holdoutEvery: number;
+}
+
+/** Whether this match is a holdout: it keeps the rating-best split even when
+ *  the gate fires, so the tie-break can be measured against teams as rated. */
+export function isHoldout(matchId: number, cfg: StatBalanceConfig): boolean {
+  return cfg.holdoutEvery > 0 && matchId % cfg.holdoutEvery === 0;
 }
 
 export function statBalanceConfig(db: DB): StatBalanceConfig {
@@ -132,6 +144,7 @@ export function statBalanceConfig(db: DB): StatBalanceConfig {
     enabled: getSetting(db, 'balance_stats_enabled') === '1',
     gate: settingNumber(db, 'balance_stats_gate_pct', 60, { min: 50, max: 100, integer: true }) / 100,
     tolerance: settingNumber(db, 'balance_stats_tolerance_pts', 5, { min: 0, max: 50, integer: true }) / 100,
+    holdoutEvery: settingNumber(db, 'balance_stats_holdout_every', 4, { min: 0, max: 100, integer: true }),
   };
 }
 
@@ -145,8 +158,10 @@ export interface StatBalanceDecision {
   chosen: ScoredSplit;
   /** The rating-best split's stat favourite is at or above the gate. */
   overGate: boolean;
-  /** The tie-break ran (enabled and over the gate). */
+  /** Enabled and over the gate (the tie-break ran, or would have but for the holdout). */
   gateFired: boolean;
+  /** The gate fired but this match is a holdout: the rating-best split plays. */
+  holdout: boolean;
   /** Players on a different side in the chosen split than in the rating-best one. */
   moved: number;
 }
@@ -168,7 +183,7 @@ export function chooseTeams(
   players: RatedPlayer[],
   s: Map<string, number>,
   cfg: StatBalanceConfig,
-  opts: { groups?: [string, string][] } = {},
+  opts: { groups?: [string, string][]; holdout?: boolean } = {},
 ): StatBalanceDecision {
   const mu = new Map(players.map((p) => [p.steamid, p.mu]));
   const score = (sp: Split): ScoredSplit => ({ ...sp, statA: statWinA(sp.teamA, sp.teamB, mu, s) });
@@ -176,8 +191,9 @@ export function chooseTeams(
   const ratingBest = score({ teamA: best.teamA, teamB: best.teamB, pWinA: best.pWinA });
   const overGate = favourite(ratingBest.statA) >= cfg.gate;
   const gateFired = cfg.enabled && overGate;
+  const holdout = gateFired && opts.holdout === true;
   let chosen = ratingBest;
-  if (gateFired) {
+  if (gateFired && !holdout) {
     // A hair of slack so the rating-best split always qualifies against itself.
     const limit = Math.abs(ratingBest.pWinA - 0.5) + cfg.tolerance + 1e-12;
     for (const sp of validSplits(players, opts)) {
@@ -187,7 +203,7 @@ export function chooseTeams(
       if (Math.abs(c.statA - 0.5) < Math.abs(chosen.statA - 0.5)) chosen = c;
     }
   }
-  return { ratingBest, chosen, overGate, gateFired, moved: playersMoved(ratingBest.teamA, chosen.teamA) };
+  return { ratingBest, chosen, overGate, gateFired, holdout, moved: playersMoved(ratingBest.teamA, chosen.teamA) };
 }
 
 /** Per-player detail written to match_balance_log.players_json. */
@@ -214,12 +230,12 @@ export function logBalance(
 ): void {
   db.prepare(
     `INSERT OR REPLACE INTO match_balance_log
-       (match_id, enabled, gate, tolerance, over_gate, gate_fired, stat_avg,
+       (match_id, enabled, gate, tolerance, over_gate, gate_fired, holdout, stat_avg,
         best_team_a, best_team_b, best_rating_a, best_stat_a,
         chosen_team_a, chosen_team_b, chosen_rating_a, chosen_stat_a, moved, players_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    matchId, cfg.enabled ? 1 : 0, cfg.gate, cfg.tolerance, d.overGate ? 1 : 0, d.gateFired ? 1 : 0, avg,
+    matchId, cfg.enabled ? 1 : 0, cfg.gate, cfg.tolerance, d.overGate ? 1 : 0, d.gateFired ? 1 : 0, d.holdout ? 1 : 0, avg,
     JSON.stringify(d.ratingBest.teamA), JSON.stringify(d.ratingBest.teamB), d.ratingBest.pWinA, d.ratingBest.statA,
     JSON.stringify(d.chosen.teamA), JSON.stringify(d.chosen.teamB), d.chosen.pWinA, d.chosen.statA,
     d.moved, JSON.stringify(players),
@@ -232,6 +248,7 @@ export interface BalanceLogRow {
   enabled: boolean;
   overGate: boolean;
   gateFired: boolean;
+  holdout: boolean;
   moved: number;
   bestRatingA: number;
   bestStatA: number;
@@ -256,8 +273,12 @@ export interface BalanceLogSummary {
   enabledMatches: number;
   /** Matches where the tie-break ran, over matches logged with it on. */
   gateFireRate: number | null;
-  /** Gate fired: stat favourite of the chosen teams (target near 50%). */
+  /** Gate fired and the tie-break picked the teams: stat favourite of the
+   *  chosen teams (target near 50%). Holdouts are not in it. */
   firedChosen: BalanceLogBucket;
+  /** Gate fired, holdout: the rating-best teams played. The A/B control for
+   *  firedChosen, under the same conditions and the same time. */
+  holdout: BalanceLogBucket;
   /** Gate fired: the rating-best split's stat favourite, predicted only
    *  (those teams never played, so it has no result). */
   firedRatingBestPredicted: number | null;
@@ -273,6 +294,7 @@ const rowOf = (r: Record<string, unknown>): BalanceLogRow => ({
   enabled: r.enabled === 1,
   overGate: r.over_gate === 1,
   gateFired: r.gate_fired === 1,
+  holdout: r.holdout === 1,
   moved: Number(r.moved),
   bestRatingA: Number(r.best_rating_a),
   bestStatA: Number(r.best_stat_a),
@@ -307,12 +329,14 @@ export function balanceLogSummary(db: DB): BalanceLogSummary {
   const rows = readRows(db);
   const on = rows.filter((r) => r.enabled);
   const fired = rows.filter((r) => r.gateFired);
+  const tieBreak = fired.filter((r) => !r.holdout);
   return {
     logged: rows.length,
     enabledMatches: on.length,
     gateFireRate: on.length ? fired.length / on.length : null,
-    firedChosen: bucket(fired),
-    firedRatingBestPredicted: fired.length ? fired.reduce((a, r) => a + favourite(r.bestStatA), 0) / fired.length : null,
+    firedChosen: bucket(tieBreak),
+    holdout: bucket(fired.filter((r) => r.holdout)),
+    firedRatingBestPredicted: tieBreak.length ? tieBreak.reduce((a, r) => a + favourite(r.bestStatA), 0) / tieBreak.length : null,
     offOverGate: bucket(rows.filter((r) => !r.enabled && r.overGate)),
     allChosen: bucket(rows),
   };
