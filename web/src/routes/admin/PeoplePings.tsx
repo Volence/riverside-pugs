@@ -11,6 +11,12 @@ function bestHost(cells: PingTable['players'][number]['cells']): string | null {
   return best;
 }
 
+/** A ping as a tone, for the cell's tint: what a versus player would call
+ *  fine, playable, laggy and bad. */
+export function pingTone(ms: number): 'good' | 'ok' | 'slow' | 'bad' {
+  return ms <= 50 ? 'good' : ms <= 90 ? 'ok' : ms <= 140 ? 'slow' : 'bad';
+}
+
 /**
  * Pings: every player's typical ping to every server host.
  *
@@ -40,12 +46,19 @@ export function PeoplePings() {
       {data && data.players.length === 0 && <Empty>No pings recorded yet. They arrive with each round played on a server running pug-match 0.3.23 or later.</Empty>}
       {data && data.players.length > 0 && (
         <>
-          <div class="admin-search">
+          <div class="admin-search pings-tools">
             <input type="search" placeholder="Filter by name or SteamID" value={q}
               aria-label="Filter players" onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
+            <span class="pings-key" aria-hidden="true">
+              <span class="ping ping--good">50 or less</span>
+              <span class="ping ping--ok">to 90</span>
+              <span class="ping ping--slow">to 140</span>
+              <span class="ping ping--bad">over 140</span>
+            </span>
+            <span class="muted">{players.length} player{players.length === 1 ? '' : 's'}</span>
           </div>
           <div class="table-wrap">
-            <table class="admin-table">
+            <table class="admin-table pings-table">
               <thead>
                 <tr>
                   <th>Player</th>
@@ -63,7 +76,7 @@ export function PeoplePings() {
                         if (!c) return <td key={h.host} class="num muted">-</td>;
                         const label = `${c.rounds} round${c.rounds === 1 ? '' : 's'}, ${c.loss}% loss`;
                         return (
-                          <td key={h.host} class="num" title={label}>
+                          <td key={h.host} class={`num ping ping--${pingTone(c.ms)}${h.host === best ? ' is-best' : ''}`} title={label}>
                             {h.host === best ? <strong>{c.ms} ms</strong> : `${c.ms} ms`}
                             {c.rounds < 3 && <span class="muted"> ({c.rounds})</span>}
                           </td>

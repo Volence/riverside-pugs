@@ -5829,3 +5829,122 @@ a.mapch__name:hover { color: var(--accent); }
 .fleet-cell__tag { display: block; font-size: var(--fs-label); color: var(--text-muted); }
 .fleet-cell--diff { background: color-mix(in srgb, var(--loss) 10%, transparent); box-shadow: inset 2px 0 0 var(--loss); }
 .fleet-cell--diff .fleet-sig { color: var(--text-bright); }
+
+/* ===== UI round 3, People desk pages ===== */
+
+/* Players */
+.ppl-search input { font-size: var(--fs-body); }
+.ppl-count { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); }
+.ppl-name { color: var(--text-bright); font-weight: 600; }
+.ppl-off { display: inline-block; min-width: 1.75rem; padding: 0 var(--sp-1); text-align: center; border: 1px solid color-mix(in srgb, var(--loss) 55%, transparent); color: var(--loss); }
+.page--admin .admin-table td .mono.muted { font-size: var(--fs-label); }
+
+/* Needs a look */
+.nal__name { color: var(--text-bright); font-weight: 600; }
+.nal__what { max-width: 32rem; }
+.nal__when { white-space: nowrap; }
+.nal__tickets { white-space: nowrap; }
+
+/* Bans */
+.bans-reason { color: var(--text-bright); }
+.bans-sub { font-size: var(--fs-label); }
+.bans-table tr.is-lifted td { color: var(--text-muted); }
+.bans-table tr.is-lifted .bans-reason { color: var(--text); }
+.ban-state {
+  display: inline-block; padding: 0 6px; border: 1px solid var(--border-strong);
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); white-space: nowrap; line-height: 1.5;
+}
+.ban-state--hold { border-color: var(--rating); color: var(--rating); }
+
+/* Alts */
+.alts-count { margin-left: var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); color: var(--text-muted); letter-spacing: 0.08em; vertical-align: middle; }
+.alts-hold.has-holds { border-color: color-mix(in srgb, var(--rating) 50%, var(--border)); border-top: 3px solid var(--rating); }
+.alts-acts { display: flex; gap: var(--sp-2); justify-content: flex-end; flex-wrap: wrap; }
+.alts-clusters { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: var(--sp-3); margin-top: var(--sp-3); }
+.alts-clusters .admin-cluster { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--surface-2); padding: var(--sp-3); margin: 0; }
+.alts-clusters .admin-cluster.is-weak { border-left-color: var(--border-strong); }
+.admin-cluster__members { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); margin: 0 0 var(--sp-2); }
+.admin-cluster__members a { font-weight: 600; }
+.admin-cluster .admin-list { margin: 0; }
+.admin-cluster .admin-list li { padding: 3px 0; }
+.alts-signal {
+  display: inline-block; padding: 0 var(--sp-1); border: 1px solid var(--border-strong);
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text);
+}
+.alts-signal--discord, .alts-signal--merged { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+
+/* Pings: each cell tinted by how playable the ping is; the best is outlined. */
+.pings-tools { align-items: center; }
+.pings-tools input { flex: 0 1 18rem; }
+.pings-key { display: inline-flex; gap: var(--sp-1); font-size: var(--fs-label); }
+.pings-key .ping { padding: 1px var(--sp-2); }
+.pings-tools > .muted { margin-left: auto; font-size: var(--fs-dense); }
+.pings-table { font-size: var(--fs-dense); }
+.pings-table td:first-child, .pings-table th:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.ping--good { background: color-mix(in srgb, var(--win) 13%, transparent); }
+.ping--ok { background: color-mix(in srgb, var(--win) 5%, transparent); }
+.ping--slow { background: color-mix(in srgb, var(--rating) 12%, transparent); }
+.ping--bad { background: color-mix(in srgb, var(--loss) 15%, transparent); }
+.pings-table td.is-best strong { color: var(--text-bright); }
+.pings-table td.is-best strong::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: var(--sp-2); vertical-align: middle; border-radius: 50%; background: var(--win); }
+
+/* Tickets: one aligned row per ticket, the whole row the link. */
+.page--admin .ticket-row {
+  display: grid; grid-template-columns: 3.5rem minmax(0, 1.6fr) minmax(0, 1fr) 11rem 6.5rem;
+  align-items: baseline; gap: var(--sp-1) var(--sp-3); padding: var(--sp-2) var(--sp-2);
+}
+.ticket-row__id { font-family: var(--font-label); }
+.ticket-row__who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0; }
+.ticket-row__who strong { color: var(--text-bright); }
+.ticket-row__cats { color: var(--text-muted); font-size: var(--fs-dense); }
+.ticket-row__reports { font-size: var(--fs-dense); }
+.ticket-row__claim { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--rating); }
+.ticket-row__claim.is-claimed { color: var(--text-muted); text-transform: none; letter-spacing: 0; font-family: var(--font-body); font-size: var(--fs-dense); }
+.ticket-row__when { text-align: right; font-size: var(--fs-dense); white-space: nowrap; }
+.ticket-row.is-closed .ticket-row__who strong { color: var(--text); }
+@media (max-width: 760px) {
+  .page--admin .ticket-row { grid-template-columns: 3rem minmax(0, 1fr) auto; }
+  .ticket-row__reports, .ticket-row__claim { grid-column: 2 / -1; }
+}
+
+/* Appeals */
+.appeal-state { display: inline-block; padding: 0 6px; border: 1px solid var(--border-strong); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; line-height: 1.5; color: var(--text-muted); }
+.appeal-state--act { border-color: var(--accent); color: var(--accent); }
+.appeal-state--wait { border-color: var(--rating); color: var(--rating); }
+.appeal-state--won { border-color: color-mix(in srgb, var(--win) 60%, transparent); color: var(--win); }
+.appeal-state--lost { color: var(--text); }
+
+/* In-game calls: each call a card, reason first, links on a quiet line. */
+.calls { display: grid; gap: var(--sp-2); }
+.calls > li { min-width: 0; }
+.call-row { padding: var(--sp-3); border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--surface-2); }
+.call-row.is-handled { border-left-color: var(--border-strong); }
+.calls--folded { margin: var(--sp-2) 0 0 var(--sp-5); padding-left: 0; border-left: 0; }
+.calls--folded .call-row { border-left-color: var(--border-strong); background: transparent; padding: var(--sp-2) var(--sp-3); }
+.call-row__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); }
+.call-row__reason { font-family: var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-bright); }
+.call-row__who { min-width: 0; }
+.call-row__when { margin-left: auto; color: var(--text-muted); font-size: var(--fs-dense); white-space: nowrap; }
+.call-row__act .chip { min-height: 28px; }
+.call-row blockquote { margin: var(--sp-2) 0; }
+.call-row p.call-row__meta { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin: var(--sp-2) 0 0; font-size: var(--fs-dense); color: var(--text-muted); }
+.call-row p.call-row__handled { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); color: var(--text-muted); }
+
+/* Guide: contents in a sticky column beside the sections on a wide screen. */
+.guide-layout { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.guide-index { position: sticky; top: var(--sp-4); }
+.guide-index__title { display: block; margin-bottom: var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
+.guide-layout .howto-index ul { flex-direction: column; flex-wrap: nowrap; gap: 0; }
+.guide-layout .howto-index li a { display: block; padding: var(--sp-1) var(--sp-2); border-left: 2px solid transparent; color: var(--text); }
+.guide-layout .howto-index li a:hover { border-left-color: var(--accent); color: var(--text-bright); text-decoration: none; }
+.guide-body .panel { scroll-margin-top: var(--sp-4); }
+.guide-body .panel p { max-width: 75ch; }
+@media (max-width: 900px) {
+  .guide-layout { grid-template-columns: minmax(0, 1fr); }
+  .guide-index { position: static; }
+  .guide-layout .howto-index ul { flex-direction: row; flex-wrap: wrap; }
+}
+@media (max-width: 760px) {
+  .ticket-row__when { grid-column: 3; grid-row: 1; }
+}
