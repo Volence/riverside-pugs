@@ -123,14 +123,17 @@ describe('profile scope', () => {
     expect(p.standings).toEqual({});
   });
 
-  it('serves ?season= on the route: career, an id, 400 for junk and 404 for no such season', async () => {
+  it('serves ?season= on the route: career, an id, 400 for junk, and the current season for an unknown id', async () => {
     seasonZeroThenOne();
     const get = (q: string) => app.inject({ method: 'GET', url: `/api/players/${ME}${q}` });
     expect((await get('?season=career')).json().scope).toEqual({ kind: 'career' });
     expect((await get('?season=1')).json().totals.games).toBe(4);
     expect((await get('')).json().totals.games).toBe(0);
     expect((await get('?season=junk')).statusCode).toBe(400);
-    expect((await get('?season=99')).statusCode).toBe(404);
+    // A stale or mistyped season id is not "no such player".
+    const unknown = await get('?season=99');
+    expect(unknown.statusCode).toBe(200);
+    expect(unknown.json().scope).toMatchObject({ kind: 'season', seasonId: 2, current: true });
   });
 
   it('keeps a weekly award with the season in play when its week closed', () => {
