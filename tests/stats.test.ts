@@ -254,6 +254,11 @@ describe('stats routes', () => {
     expect(b.sr.find((r: any) => r.steamid === banned)?.wins).toBe(1);
     expect(b.stat.map((r: any) => r.steamid)).toContain(banned);
     expect(b.endorse.map((r: any) => r.steamid)).toContain(banned);
+    // Endorsement rows carry the face the board shows (null without one).
+    db.prepare('UPDATE players SET avatar = ? WHERE steamid = ?').run('https://x/face.jpg', banned);
+    b = await boards();
+    expect(b.endorse.find((r: any) => r.steamid === banned)?.avatar).toBe('https://x/face.jpg');
+    expect(b.endorse.every((r: any) => 'avatar' in r)).toBe(true);
   });
 
   it('leaderboard: the rated-match count ignores another season', async () => {

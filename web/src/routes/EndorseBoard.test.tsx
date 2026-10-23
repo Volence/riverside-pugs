@@ -15,7 +15,7 @@ const data: EndorseBoardData = {
   season: { id: 1, name: 'Season 1' },
   rows: [row('1', 'vibey', 0, 1, 9, 6), row('2', 'shotcaller', 6, 1, 1, 5), row('3', 'duo', 0, 0, 10, 1)],
 };
-const names = () => screen.getAllByRole('link').map((a) => a.textContent);
+const names = () => [...document.querySelectorAll('tbody a')].map((a) => a.textContent);
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -23,13 +23,25 @@ describe('EndorseBoard', () => {
   it('ranks by total, breaking ties on how many different people, and sorts by any kind', async () => {
     mockApi.endorseBoard.mockResolvedValue(data);
     render(<EndorseBoard me={null} />);
-    await waitFor(() => screen.getByRole('link', { name: 'vibey' }));
+    await waitFor(() => expect(names()).toContain('vibey'));
     // vibey and duo both have 10; vibey's came from 6 people, duo's from 1.
     expect(names()).toEqual(['vibey', 'duo', 'shotcaller']);
-    fireEvent.click(screen.getByText('Caller'));
+    fireEvent.click(screen.getByRole('columnheader', { name: /Caller/ }));
     expect(names()[0]).toBe('shotcaller');
-    fireEvent.click(screen.getByText('People'));
+    fireEvent.click(screen.getByRole('columnheader', { name: /People/ }));
     expect(names()).toEqual(['vibey', 'shotcaller', 'duo']);
+  });
+
+  it('puts the top three by total on a podium with faces, whatever the table is sorted by', async () => {
+    mockApi.endorseBoard.mockResolvedValue({ ...data, rows: data.rows.map((r) => ({ ...r, avatar: r.steamid === '2' ? 'https://x/a.jpg' : null })) });
+    const { container } = render(<EndorseBoard me={null} />);
+    await waitFor(() => expect(container.querySelectorAll('.endpod .lbpod__card')).toHaveLength(3));
+    const podium = () => [...container.querySelectorAll('.endpod .lbpod__name')].map((a) => a.textContent);
+    expect(podium()).toEqual(['vibey', 'duo', 'shotcaller']);
+    fireEvent.click(screen.getByRole('columnheader', { name: /Caller/ }));
+    expect(podium()).toEqual(['vibey', 'duo', 'shotcaller']);
+    expect(container.querySelector('.endpod img.lbpod__face')!.getAttribute('src')).toBe('https://x/a.jpg');
+    expect(container.querySelectorAll('tbody .endlb__bar')).toHaveLength(9);
   });
 
   it('says so when nobody has been endorsed', async () => {

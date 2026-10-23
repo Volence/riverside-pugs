@@ -5028,3 +5028,60 @@ a.tmscrim__who:hover .tmscrim__vs, a.tmscrim__who:focus-visible .tmscrim__vs { c
   .community__bar { padding: var(--sp-3); }
   .community__count { margin-left: 0; flex-basis: 100%; }
 }
+
+/* Leaderboard, This week and Endorsements tabs. Weekly cards keep one fixed
+   shape: title, then a Best average and a Most total line, each with the
+   face and name on the left and the value on the right. Endorsements gets
+   the Season tab's podium and faces, and the three kinds as small bars. */
+.wk__strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); }
+.wk__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--win) 60%, var(--border));
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--win);
+}
+.wk__live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--win); }
+.wk__strip strong { color: var(--text-bright); font-weight: 600; }
+.weekly__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
+@media (max-width: 900px) { .weekly__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .weekly__grid { grid-template-columns: minmax(0, 1fr); } }
+.wk__card { align-content: start; gap: var(--sp-3); }
+.wk__title { padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border); }
+.weekly__winner.wk__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "kind kind" "who value";
+  align-items: center;
+  gap: 2px var(--sp-2);
+}
+.wk__kind { grid-area: kind; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; }
+.wk__who { grid-area: who; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.wk__names { display: flex; flex-wrap: wrap; gap: 0 var(--sp-2); min-width: 0; }
+.wk__names a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.weekly__value.wk__value { grid-area: value; margin-left: 0; white-space: nowrap; }
+.wk__num { font-weight: 600; color: var(--text-bright); }
+.wk__unit { font-size: var(--fs-dense); color: var(--text-muted); }
+.wk__face { flex: none; width: 24px; height: 24px; object-fit: cover; border-radius: 2px; }
+.wk__face--none { display: grid; place-items: center; background: var(--surface); font-size: 0.75rem; color: var(--text-muted); }
+.wk__face--none::before { content: attr(data-initial); }
+
+.endpod .lbpod__card { grid-template-areas: "face who" "face sr" "stats stats" "from from"; }
+.endpod .lbpod__sr { font-size: 1.75rem; }
+.endpod__from { grid-area: from; margin: 0; font-size: var(--fs-dense); }
+.endlb .lb__pcol .lbname a { text-transform: none; }
+.endlb th.endlb__kind, .endlb td.endlb__kind { min-width: 8rem; }
+.endlb__cell { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); width: 100%; }
+.endlb__bar { flex: 1 1 auto; max-width: 5rem; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+.endlb__bar > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.endlb__kind--caller .endlb__bar > span { background: var(--rating); }
+.endlb__kind--clutch .endlb__bar > span { background: var(--accent); }
+.endlb__kind--vibes .endlb__bar > span { background: var(--win); }
+.endlb__n { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
+.endlb__zero .endlb__n { color: var(--text-muted); }
+.endlb td.endlb__total { color: var(--text-bright); font-weight: 600; }

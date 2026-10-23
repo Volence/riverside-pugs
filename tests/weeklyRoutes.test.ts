@@ -29,6 +29,15 @@ describe('weekly routes', () => {
     expect(r.json().awards.find((a: { key: string; kind: string }) => a.key === 'skeets' && a.kind === 'total').winners[0].steamid).toBe(P[1]);
   });
 
+  it('adds each winner\'s avatar at read time, live and frozen', async () => {
+    db.prepare('UPDATE players SET avatar = ? WHERE steamid = ?').run('https://x/p1.jpg', P[1]);
+    const skeetsTotal = (j: any) => j.awards.find((a: { key: string; kind: string }) => a.key === 'skeets' && a.kind === 'total').winners[0];
+    expect(skeetsTotal((await app.inject({ url: '/api/weekly' })).json()).avatar).toBe('https://x/p1.jpg');
+    freezeWeek(db, '2026-09-21');
+    const past = (await app.inject({ url: '/api/weekly?week=2026-09-21' })).json();
+    expect(past.awards.every((a: { winners: object[] }) => a.winners.every((w) => 'avatar' in w))).toBe(true);
+  });
+
   it('past weeks come from the frozen rows, unfrozen ones 404, junk 400', async () => {
     expect((await app.inject({ url: '/api/weekly?week=2026-09-21' })).statusCode).toBe(404);
     freezeWeek(db, '2026-09-21');

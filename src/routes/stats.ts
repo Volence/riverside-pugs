@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { avatarsOf } from '../avatars.js';
 import { mapLooksFor } from '../mapLooks.js';
 import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
@@ -98,7 +99,9 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       ? db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string } | undefined
       : undefined;
     if (!season) return reply.code(404).send({ error: 'no such season' });
-    return { season, rows: endorsementBoard(db, season.id) };
+    const rows = endorsementBoard(db, season.id);
+    const faces = avatarsOf(db, rows.map((r) => r.steamid));
+    return { season, rows: rows.map((r) => ({ ...r, avatar: faces.get(r.steamid) ?? null })) };
   });
 
   /** Per-stat ladder. `self`-visibility stats are refused here rather than

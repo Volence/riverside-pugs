@@ -40,6 +40,19 @@ describe('WeeklyBoard', () => {
     expect(screen.getByText(/final Monday 12:00 UTC/)).toBeTruthy();
   });
 
+  it('gives every winner line a face, the name and the value in a fixed row', async () => {
+    const { container } = render(<WeeklyBoard onWeek={() => {}} />);
+    await waitFor(() => screen.getAllByText('Skeets'));
+    const rows = [...container.querySelectorAll('.wk__row')];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.querySelector('.wk__face')).toBeTruthy();
+      expect(r.querySelector('.wk__who a')).toBeTruthy();
+      expect(r.querySelector('.wk__value')!.textContent).not.toBe('');
+    }
+    expect(container.querySelector('.wk__live')!.textContent).toBe('Live');
+  });
+
   it('offers past weeks in the picker', async () => {
     render(<WeeklyBoard onWeek={() => {}} />);
     await waitFor(() => screen.getByRole('combobox', { name: 'Week' }));
