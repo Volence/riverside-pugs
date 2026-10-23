@@ -165,7 +165,7 @@ export function renderQueueAlert(v: QueueAlertView): MessagePayload {
 }
 
 export interface QueueAlertClosedView {
-  why: 'popped' | 'emptied' | 'dropped';
+  why: 'popped' | 'emptied' | 'dropped' | 'off';
   count: number;
   size: number;
 }
@@ -180,6 +180,8 @@ export function renderQueueAlertClosed(v: QueueAlertClosedView): MessagePayload 
     ? '**Queue popped: match started.** This alert is over; the next one goes out when the queue fills again.'
     : v.why === 'emptied'
       ? '**Queue emptied.** This alert is over; the next one goes out when the queue fills again.'
+      : v.why === 'off'
+        ? '**Queue alerts turned off.** This alert is over.'
       : `**Queue dropped to ${v.count}/${v.size}.** It is not close to popping any more; the next alert goes out when it fills again.`;
   return { content, embeds: [], components: [], mentionUserIds: [], mentionRoleIds: [] };
 }

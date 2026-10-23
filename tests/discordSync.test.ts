@@ -499,11 +499,13 @@ describe('queue-filling alert', () => {
     expect(b && b.label).toBe('Queue alerts (on/off)');
   });
 
-  it('treats a role id that is not a Discord id as off', async () => {
+  it('treats a role id that is not a Discord id as off, button included', async () => {
     setSetting(db, 'discord_pug_role_id', 'Queue Alerts');
     await build().start();
     await queueTo(6);
     expect(pings).toHaveLength(0);
+    const ids = t.byId(panelId())!.payload.components.flat().map((b) => ('customId' in b ? b.customId : ''));
+    expect(ids).not.toContain('q:notify');
   });
 
   it('pings only the role at 6 of 8, with the count, what is needed and a way in', async () => {
@@ -734,8 +736,12 @@ describe('queue-filling alert', () => {
     await queueTo(6);
     setSetting(db, 'discord_pug_role_id', '');
     await sync.pass();
-    expect(alertRows().map((r) => r.state)).not.toContain('open');
-    expect(alertMsg().payload.content).not.toContain(`<@&${ROLE}>`);
+    expect(alertRows().map((r) => r.state)).toEqual(['off']);
+    const closed = alertMsg().payload.content!;
+    expect(closed).toMatch(/Queue alerts turned off/);
+    // Neutral: the queue itself did nothing.
+    expect(closed).not.toMatch(/dropped|emptied|popped/i);
+    expect(closed).not.toContain(`<@&${ROLE}>`);
   });
 
   it('a Discord failure does not retry on every pass for the rest of the evening', async () => {

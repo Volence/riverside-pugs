@@ -86,7 +86,7 @@ describe('queue alert text', () => {
   });
 
   it('closes with no ping, no role tag and no buttons', () => {
-    for (const why of ['popped', 'emptied', 'dropped'] as const) {
+    for (const why of ['popped', 'emptied', 'dropped', 'off'] as const) {
       const p = renderQueueAlertClosed({ why, count: 3, size: 8 });
       expect(p.mentionRoleIds).toEqual([]);
       expect(p.components).toEqual([]);
