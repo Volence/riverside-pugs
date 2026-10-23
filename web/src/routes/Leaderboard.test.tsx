@@ -97,4 +97,15 @@ describe('Leaderboard stats per game', () => {
     const cell = container.querySelector('td[title^="Under 10 games"]');
     expect(cell?.textContent).toBe('5.0');
   });
+
+  it('gives no place to a ranked player under the minimum when sorted by a stat', async () => {
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => screen.getByRole('link', { name: 'fluke' }));
+    fireEvent.click(screen.getByTitle('Sort the table by Skeets'));
+    const rows = [...container.querySelectorAll('tbody tr:not(.lb__group)')].map((tr) => [
+      tr.querySelector('.pname a')?.textContent, tr.querySelector('td.rank')?.textContent,
+    ]);
+    // vet 1.5, grinder 1.0 ranked; fluke (6 games) listed with no place.
+    expect(rows.slice(0, 3)).toEqual([['vet', '01'], ['grinder', '02'], ['fluke', '–']]);
+  });
 });
