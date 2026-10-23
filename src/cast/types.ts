@@ -280,7 +280,9 @@ export interface CastCareer {
  *  (owner, 2026-10-23: "Skeets" means solo wherever players compare
  *  themselves; team skeets are their own stat). Null when not recorded. */
 export function soloSkeets(stats: Record<string, number>): number | null {
-  return stats.skeets ?? null;
+  if (stats.skeets !== undefined) return stats.skeets;
+  // Skeets were recorded (team ones), just no solo one: that is 0, not "-".
+  return stats.team_skeets !== undefined ? 0 : null;
 }
 
 /** Boomer % as the site computes it (src/standings.ts): booms landed per
@@ -401,7 +403,9 @@ export interface CastInfected {
   ghost: boolean;
   alive: boolean;
   health: number;
-  /** Damage dealt as SI this half, from LIVEHUD; null without it. */
+  /** Damage dealt as SI this half, from LIVEHUD; null without it. GROSS:
+   *  it includes damage to incapped survivors, unlike Damage as SI on the
+   *  site (src/siDamage.ts), so the HUD labels it Dmg, never Damage as SI. */
   dmg: number | null;
 }
 

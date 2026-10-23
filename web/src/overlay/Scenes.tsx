@@ -970,7 +970,7 @@ function InfectedRow({ i, tankMax, layout }: { i: CastInfected; tankMax: number;
         <span class="ov-mrow__name">{i.name}</span>
         <span class="ov-mrow__line">
           <b class="ov-mrow__state">{status}</b>
-          {i.dmg !== null && <span class="ov-mrow__dmg"><em>Dmg</em> {i.dmg}</span>}
+          {i.dmg !== null && <span class="ov-mrow__dmg" title="Damage this half, including to incapped survivors"><em>Dmg</em> {i.dmg}</span>}
         </span>
       </span>
     </div>
@@ -1228,7 +1228,7 @@ function BandCard({ i, tankMax }: { i: CastInfected; tankMax: number }) {
       <span class="ov-bc__bar"><span style={{ width: `${frac * 100}%` }} /></span>
       <span class="ov-bc__bottom">
         <span class="ov-bc__name">{i.name}</span>
-        {i.dmg !== null && <span class="ov-bc__dmg" title="Damage this round">{i.dmg}</span>}
+        {i.dmg !== null && <span class="ov-bc__dmg" title="Damage this round, including to incapped survivors">{i.dmg}</span>}
       </span>
     </div>
   );
