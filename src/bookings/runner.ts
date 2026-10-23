@@ -304,8 +304,25 @@ export function bookingLines(db: DB, b: BookingRow): string[] {
       `sm_cvar sv_password ${quoted(b.password)}`,
       `sm_cvar tv_password ${quoted(b.tv_password)}`,
     ]),
+    ...teamLines(db, b, a, bs),
     // T3b Ruling 10: the series engine speaks on a tournament box; the plugin's clock stays empty there.
     ...(b.purpose === 'tournament' ? [] : stateLines(db, b)),
+  ];
+}
+
+/** Each side's name and players for l4d_booking 1.6.0, which works out which
+ *  side stands on survivors and on infected (most of a game team's players
+ *  from one side) and puts the names on the ready-up panel's team blocks.
+ *  The game swaps sides every half, so the plugin watches rather than the
+ *  site predicting. Ids are SteamID64s, comma separated, players and
+ *  ringers only (bookRoster). */
+function teamLines(db: DB, b: BookingRow, a: SideRow, bs: SideRow): string[] {
+  const roster = bookRoster(db, b.id);
+  return [
+    `l4d_booking_name_a ${quoted(consoleText(sideName(db, a), 40))}`,
+    `l4d_booking_ids_a ${quoted(roster.a.join(','))}`,
+    `l4d_booking_name_b ${quoted(consoleText(sideName(db, bs), 40))}`,
+    `l4d_booking_ids_b ${quoted(roster.b.join(','))}`,
   ];
 }
 

@@ -75,6 +75,16 @@
  * new list, so someone removed or replaced on the site mid chapter is not left
  * playing until the next map.
  *
+ * 1.6.0: team names on the ready-up panel. The site pushes each side's name
+ * and players (l4d_booking_name_a / _ids_a, _name_b / _ids_b; ids are
+ * comma-separated SteamID64s). Once a second this plugin looks at who stands
+ * on survivors and on infected, names each game team for the side most of
+ * its players belong to, and publishes the names as l4d_booking_team_survivors
+ * and l4d_booking_team_infected, which l4dready reads for its team blocks.
+ * The game swaps the sides every half; watching the players follows the swap
+ * with no prediction. Not booked, a tie, or nobody known: the name is empty
+ * and the panel shows the plain SURVIVORS / INFECTED heading.
+ *
  * Build: ./build-booking.sh
  */
 #pragma semicolon 1
@@ -82,7 +92,7 @@
 #include <sourcemod>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "1.5.0"
+#define PLUGIN_VERSION "1.6.0"
 
 /** Longest arg= text on a PUGBOOK line, plus the null terminator. Matches
  *  the site parser's cap (Task 6). */
@@ -100,6 +110,14 @@ ConVar g_cvEnds;
 ConVar g_cvNextAt;
 ConVar g_cvNextName;
 ConVar g_cvCloseAt;
+ConVar g_cvNameA;
+ConVar g_cvIdsA;
+ConVar g_cvNameB;
+ConVar g_cvIdsB;
+ConVar g_cvTeamSurvivors;
+ConVar g_cvTeamInfected;
+/** SteamID64 -> side (1 = a, 2 = b), rebuilt whenever an ids cvar changes. */
+StringMap g_hSideOf;
 
 /** No countdown mark said yet for the current next_at / close_at. */
 #define MARK_NONE 1000
@@ -182,6 +200,87 @@ public void OnPluginStart()
 	RegServerCmd("sm_booking_status", Cmd_BookingStatus, "sm_booking_status - whether a list is loaded, its size, running graces and blocks");
 	// No TIMER_FLAG_NO_MAPCHANGE: graces keep running through a map change.
 	CreateTimer(1.0, Timer_Graces, _, TIMER_REPEAT);
+
+	// 1.6.0: team names for the ready-up panel.
+	g_cvNameA = CreateConVar("l4d_booking_name_a", "", "Side a's name.", FCVAR_DONTRECORD);
+	g_cvIdsA = CreateConVar("l4d_booking_ids_a", "", "Side a's players, comma-separated SteamID64s.", FCVAR_DONTRECORD);
+	g_cvNameB = CreateConVar("l4d_booking_name_b", "", "Side b's name.", FCVAR_DONTRECORD);
+	g_cvIdsB = CreateConVar("l4d_booking_ids_b", "", "Side b's players, comma-separated SteamID64s.", FCVAR_DONTRECORD);
+	g_cvTeamSurvivors = CreateConVar("l4d_booking_team_survivors", "", "The side standing on survivors now (read by l4dready); empty when unknown.", FCVAR_DONTRECORD);
+	g_cvTeamInfected = CreateConVar("l4d_booking_team_infected", "", "The side standing on infected now (read by l4dready); empty when unknown.", FCVAR_DONTRECORD);
+	g_hSideOf = new StringMap();
+	g_cvIdsA.AddChangeHook(OnIdsChanged);
+	g_cvIdsB.AddChangeHook(OnIdsChanged);
+	RebuildSides();
+	CreateTimer(1.0, Timer_Teams, _, TIMER_REPEAT);
+}
+
+public void OnIdsChanged(ConVar cv, const char[] oldValue, const char[] newValue)
+{
+	RebuildSides();
+}
+
+void RebuildSides()
+{
+	g_hSideOf.Clear();
+	AddSide(g_cvIdsA, 1);
+	AddSide(g_cvIdsB, 2);
+}
+
+void AddSide(ConVar cv, int side)
+{
+	char list[512];
+	cv.GetString(list, sizeof(list));
+	char ids[16][24];
+	int n = ExplodeString(list, ",", ids, sizeof(ids), sizeof(ids[]));
+	for (int i = 0; i < n; i++)
+	{
+		TrimString(ids[i]);
+		if (IsSteamId64(ids[i])) g_hSideOf.SetValue(ids[i], side);
+	}
+}
+
+/** The side most of a game team's humans belong to: 1 = a, 2 = b, 0 = a tie or nobody known. */
+int SideOnTeam(int team)
+{
+	int count[3];
+	char id[24];
+	int side;
+	for (int c = 1; c <= MaxClients; c++)
+	{
+		if (!IsClientInGame(c) || IsFakeClient(c) || GetClientTeam(c) != team) continue;
+		if (!GetClientAuthId(c, AuthId_SteamID64, id, sizeof(id))) continue;
+		if (g_hSideOf.GetValue(id, side) && side >= 1 && side <= 2) count[side]++;
+	}
+	return count[1] > count[2] ? 1 : count[2] > count[1] ? 2 : 0;
+}
+
+void PublishTeam(ConVar out, int side)
+{
+	char name[48];
+	if (side == 1) g_cvNameA.GetString(name, sizeof(name));
+	else if (side == 2) g_cvNameB.GetString(name, sizeof(name));
+	else name[0] = '\0';
+	char cur[48];
+	out.GetString(cur, sizeof(cur));
+	if (!StrEqual(cur, name)) out.SetString(name);
+}
+
+public Action Timer_Teams(Handle timer)
+{
+	if (!Booked())
+	{
+		PublishTeam(g_cvTeamSurvivors, 0);
+		PublishTeam(g_cvTeamInfected, 0);
+		return Plugin_Continue;
+	}
+	int surv = SideOnTeam(2);
+	int inf = SideOnTeam(3);
+	// Both teams read as the same side (a lopsided mix): name neither.
+	if (surv != 0 && surv == inf) { surv = 0; inf = 0; }
+	PublishTeam(g_cvTeamSurvivors, surv);
+	PublishTeam(g_cvTeamInfected, inf);
+	return Plugin_Continue;
 }
 
 public void OnConfigsExecuted()
