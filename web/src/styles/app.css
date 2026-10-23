@@ -3113,7 +3113,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .ccard__likes { margin-left: auto; }
 .ccard__like.is-on { border-color: var(--accent); color: var(--text-bright); }
 .ccard__actions, .ccard__mod { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
-.ccard__mod .report { margin-top: 0; flex-basis: 100%; }
+.ccard__mod div.report { margin-top: 0; flex-basis: 100%; }
 .ccard__status { margin: 0; font-size: var(--fs-dense); overflow-wrap: anywhere; }
 .ccard__remove { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; flex-basis: 100%; }
 .ccard__remove input { flex: 1 1 12rem; min-width: 0; }
@@ -4963,4 +4963,68 @@ a.tmscrim__who:hover .tmscrim__vs, a.tmscrim__who:focus-visible .tmscrim__vs { c
 @media (max-width: 480px) {
   .lb-full .lb { --lb-name-w: 9.5rem; }
   .lbname .titletag { display: none; }
+}
+
+/* ---- Site touchup: HUD community (hc) ------------------------------------
+   Gallery cards share one structure so every card in a row lines up: shot,
+   title, a one or two line description, author and likes, the main actions,
+   then the small moderation links at the foot. */
+.community__bar {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  gap: var(--sp-3) var(--sp-6);
+}
+.community__filter { display: flex; align-items: center; gap: var(--sp-3); }
+.community__filterlabel {
+  font-family: var(--font-display, inherit);
+  font-size: var(--fs-label);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.community__filter .tabs { margin: 0; border-bottom: 0; }
+.community__count { margin-left: auto; font-size: var(--fs-dense); font-variant-numeric: tabular-nums; }
+.ccards { align-items: stretch; }
+.ccard--card { display: flex; flex-direction: column; }
+.ccard--card .ccard__body { flex: 1; display: flex; flex-direction: column; gap: var(--sp-2); }
+.ccard--card .ccard__title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ccard--card .ccard__desc {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(2 * 1.45em);
+  line-height: 1.45;
+}
+.ccard__desc--none { visibility: hidden; }
+.ccard--card .ccard__who { flex-wrap: nowrap; }
+.ccard__author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ccard__author a { overflow-wrap: normal; }
+.ccard__like { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.ccard__heart { font-size: 1.05em; line-height: 1; }
+.ccard__like.is-on .ccard__heart { color: var(--accent); }
+.ccard--card .ccard__actions { margin-top: auto; padding-top: var(--sp-2); }
+.ccard--card .ccard__actions .btn { flex: 1 1 auto; justify-content: center; text-align: center; }
+.ccard__mod {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-2);
+  gap: var(--sp-4);
+}
+.ccard__mod > .chip.report, .ccard__modlink {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ccard__mod > .chip.report:hover, .ccard__modlink:hover { color: var(--accent); }
+@media (max-width: 640px) {
+  .community__bar { padding: var(--sp-3); }
+  .community__count { margin-left: 0; flex-basis: 100%; }
 }
