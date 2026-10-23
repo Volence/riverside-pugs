@@ -1,4 +1,5 @@
 import { api, ApiError, modApi, communityApi } from '../api';
+import { ProfileEvents } from '../components/ProfileEvents';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
 import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
@@ -152,6 +153,7 @@ export function Profile(
         <ChemistryPanel chemistry={data.chemistry} />
         <EndorsementCounts endorsements={data.endorsements} />
         <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
+        <ProfileEvents events={data.events} />
 
         <div class="profile-grid">
           <Panel>

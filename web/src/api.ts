@@ -661,6 +661,18 @@ export interface EndorsementSummary {
 /** A team the player is on, as a chip in their profile header (src/teams/teams.ts TeamChip). */
 export interface ProfileTeam { slug: string; name: string; tag: string; logoKey: string | null; role: 'captain' | 'cocaptain' | 'member' }
 
+/** Mirrors src/events/profileEvents.ts: one event the player played, with
+ *  their entry's record and its matches. Never part of the PUG numbers. */
+export interface ProfileEventMatch {
+  id: number; roundLabel: string; opponent: string | null;
+  result: 'win' | 'loss' | null; scoreFor: number | null; scoreAgainst: number | null; forfeit: boolean; status: string;
+}
+export interface ProfileEvent {
+  slug: string; name: string; status: string; startsAt: string; finishedAt: string | null;
+  entry: { id: number; name: string; tag: string; logoKey: string | null; captain: boolean; seed: number | null };
+  placement: number | null; wins: number; losses: number; matches: ProfileEventMatch[];
+}
+
 export interface Profile {
   player: {
     steamid: string;
@@ -687,6 +699,8 @@ export interface Profile {
     revives: number;
   };
   matches: ProfileMatch[];
+  /** Events played, newest first. Optional so an older response still renders. */
+  events?: ProfileEvent[];
   history: { matchId: number; sr: number }[];
   /** Public skill-stat lifetime totals, keyed by stat. */
   statTotals: Record<string, number>;
@@ -2240,7 +2254,7 @@ export interface RoomServer {
   state: 'waiting' | 'setup' | 'ready' | 'ended'; name: string | null; since: string;
   connect: { host: string; port: number; password: string } | null; present: { a: number; b: number } | null; graceEndsAt: string | null;
 }
-export interface RoomPlayer { steamid: string; name: string }
+export interface RoomPlayer { steamid: string; name: string; avatar?: string | null; role?: 'captain' | 'sub' | 'standin' | null }
 /** Plan T4 (mirrors src/events/roomViews.ts). */
 export type RescheduleStatus = 'open' | 'accepted' | 'auto_accepted' | 'declined' | 'countered' | 'withdrawn' | 'expired';
 /** One reschedule proposal as the room page lists it (plan T4). */
@@ -2270,6 +2284,8 @@ export interface RoomPlanStep {
 }
 export interface MatchRoomView {
   id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
+  /** When the match was decided. Optional for an older server. */
+  finishedAt?: string | null;
   higher: 'a' | 'b' | null; deadline: string | null; serverNow: string; ready: { a: boolean; b: boolean };
   vetoSummary: string; pool: RoomCampaign[]; log: RoomLogLine[]; games: RoomGame[];
   /** Every veto step in order (src/events/veto.ts vetoPlan). Optional for an older server. */

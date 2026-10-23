@@ -2,6 +2,7 @@ import { forfeitRecord } from './ggVotes.js';
 import type { DB } from './db.js';
 import { competitiveAccess, competitivePublic } from './teams/access.js';
 import { teamChipsOf } from './teams/teams.js';
+import { profileEvents } from './events/profileEvents.js';
 import { alsoKnownAs } from './playerNames.js';
 import { playerMapBreakdown } from './playerStats.js';
 import { displaySr } from './rating.js';
@@ -170,6 +171,10 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     // is at admins only nobody else gets a team here, and a chip never links
     // to a page that would answer 404.
     teams: (viewer ? competitiveAccess(db, viewer) : competitivePublic(db)) ? teamChipsOf(db, steamid) : [],
+    // Events they played (foundation spec, Profiles: a public Tournament
+    // tab), gated like the team chips above. Event play is listed here only
+    // and never folds into the PUG numbers below (src/matchKinds.ts).
+    events: (viewer ? competitiveAccess(db, viewer) : competitivePublic(db)) ? profileEvents(db, steamid) : [],
     social: socialLinks(db, steamid),
     rating: r ? { sr: displaySr(r.mu, r.sigma), mu: r.mu, sigma: r.sigma, wins: r.wins, losses: r.losses } : null,
     // Public on purpose: the owner wants forfeiting allowed but visible.
