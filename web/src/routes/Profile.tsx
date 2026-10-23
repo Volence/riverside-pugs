@@ -2,7 +2,7 @@ import { api, ApiError, modApi, communityApi } from '../api';
 import { ProfileEvents } from '../components/ProfileEvents';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
-import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
+import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, statHelp, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
 import { useEffect, useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, ResultChip, Sparkline, SrDelta, Tabs } from '../components/bits';
 import { Headliner } from '../components/Headliner';
@@ -332,7 +332,7 @@ export function Profile(
                     <th class="num">Played</th>
                     <th class="num">W</th>
                     <th class="num">L</th>
-                    {mapCols.map((k) => <th class="num" key={k}>{labelFor(k)}</th>)}
+                    {mapCols.map((k) => <th class="num" key={k} title={statHelp(k)}>{labelFor(k)}</th>)}
                   </tr>
                 </thead>
                 <tbody>

@@ -22,7 +22,11 @@ function Side({ m, team }: { m: MatchSummary; team: 'a' | 'b' }) {
   const won = m.winner === team;
   const players = m.players?.[team] ?? [];
   const named = m.booked?.[team];
-  const label = named ? named.name : players.map((p) => p.name).join(', ');
+  // A PUG side goes by its lead player ("alice's team": Team A / Team B are
+  // dealt afresh every match), then everyone on it.
+  const lead = team === 'a' ? m.teamALead : m.teamBLead;
+  const names = players.map((p) => p.name).join(', ');
+  const label = named ? named.name : lead ? (names ? `${lead}'s team: ${names}` : `${lead}'s team`) : names;
   return (
     <span class={`mlist__side mlist__side--${team}${won ? ' is-won' : ''}`} title={label || undefined}>
       {named ? <span class="mlist__team">{named.tag ? <b>{named.tag}</b> : null}{named.name}</span> : <Faces players={players} />}
@@ -31,12 +35,18 @@ function Side({ m, team }: { m: MatchSummary; team: 'a' | 'b' }) {
   );
 }
 
+/** A PUG side's name in words: its lead player's team, else the letter. */
+function sideName(m: MatchSummary, team: 'a' | 'b'): string {
+  const lead = team === 'a' ? m.teamALead : m.teamBLead;
+  return lead ? `${lead}'s team` : `Team ${team.toUpperCase()}`;
+}
+
 /** What else a row needs saying: a forfeit, a decided abandon, a scrim or
  *  tournament game (which only staff and the players see here). */
 function Notes({ m }: { m: MatchSummary }) {
   const notes: string[] = [];
   if (m.booked) notes.push(m.booked.kind === 'tournament' ? (m.booked.event?.name ?? 'Tournament') : 'Scrim');
-  if (m.forfeitTeam) notes.push(`${m.booked?.[m.forfeitTeam].name ?? `Team ${m.forfeitTeam.toUpperCase()}`} forfeited`);
+  if (m.forfeitTeam) notes.push(`${m.booked?.[m.forfeitTeam].name ?? sideName(m, m.forfeitTeam)} forfeited`);
   if (m.abandonedBy) notes.push(`decided, ${m.abandonedBy} abandoned`);
   if (m.winner === 'draw') notes.push('draw');
   return notes.length > 0 ? <span class="mlist__notes">{notes.join(' · ')}</span> : null;

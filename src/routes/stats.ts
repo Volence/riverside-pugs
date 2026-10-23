@@ -42,6 +42,19 @@ export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null
 
 const RECENT_MATCH_LIMIT = 50;
 
+/** The name a side of match `m` goes by in a list of many matches: its
+ *  top-rated player going in (displaySr's mu - 2 sigma, from rating_history),
+ *  else the first one rostered. "Team A" means nothing across matches, since
+ *  a and b are labels dealt afresh every match; "alice's team" does. */
+function teamLeadSql(team: 'a' | 'b'): string {
+  return `(SELECT COALESCE(lp.name, lmp.player_id) FROM match_players lmp
+             LEFT JOIN players lp ON lp.steamid = lmp.player_id
+             LEFT JOIN rating_history lrh ON lrh.match_id = lmp.match_id AND lrh.player_id = lmp.player_id
+             WHERE lmp.match_id = m.id AND lmp.team = '${team}'
+             ORDER BY lrh.mu_before IS NULL, lrh.mu_before - 2 * lrh.sigma_before DESC, lmp.rowid
+             LIMIT 1)`;
+}
+
 /** Strip self-only stats unless the requester IS the subject.
  *
  *  Enforced here rather than in the UI on purpose: a value the server sends is
@@ -199,7 +212,8 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
               m.forfeit_team AS forfeitTeam, m.booking_id AS bookingId,
               (SELECT GROUP_CONCAT(n, ' and ') FROM (SELECT COALESCE(p.name, a.player_id) AS n FROM match_abandons a
                  LEFT JOIN players p ON p.steamid = a.player_id
-                 WHERE a.match_id = m.id AND a.decided IS NOT NULL ORDER BY a.player_id)) AS abandonedBy
+                 WHERE a.match_id = m.id AND a.decided IS NOT NULL ORDER BY a.player_id)) AS abandonedBy,
+              ${teamLeadSql('a')} AS teamALead, ${teamLeadSql('b')} AS teamBLead
        FROM matches m WHERE m.state = 'completed' AND ${vis.sql} ORDER BY m.id DESC LIMIT ?`,
     ).all(...vis.params, RECENT_MATCH_LIMIT) as ({ id: number; bookingId: number | null } & Record<string, unknown>)[];
     // Each row's two rosters, for the faces on the list: one query for the

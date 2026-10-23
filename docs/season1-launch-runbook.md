@@ -18,7 +18,7 @@ Seasons turns all of it on at once.
 | Rank emblems (scripts/rank-art, scripts/rank-emblems.py) | Not shown (no ranks) | On |
 | Rank-up / placement animation on the site | Off | On |
 | Season-end trophies on profiles | Nothing to show | S0 top 10 get medals at the flip |
-| SR line in chat + disconnect box after every match (pug-match 0.3.38) | Off | On |
+| SR line in chat + disconnect box after every match (pug-match 0.3.38, ships as 0.3.39) | Off | On |
 | !rq / site checkbox / Discord "Queue again after" button | Off (!rq silent) | On |
 | News + hand-written Patch notes (`/patch-notes`), tracker page becomes "Full change log" | Drafts only; nav unchanged | On |
 | How to Play SR answer | Season 0 text | Season 1 text |
@@ -41,13 +41,14 @@ Seasons turns all of it on at once.
 
 ## Deploy (target around Tue 10-27, owner's go)
 
-1. Local test match on the l4d1-ds test server with pug-match 0.3.38 and a test Season 1 started
+1. Local test match on the l4d1-ds test server with pug-match 0.3.39 and a test Season 1 started
    on a copy of the DB: check the SR line in chat and in the disconnect box, `!rq`, `!rq off`, the
    site checkbox, the Discord button, and that a requeued player lands at the back of the queue.
    Also check that with Season 0 current, `!rq` does nothing and no SR line is sent.
 2. Merge `season1` into master (other sessions commit to master: merge, do not rebase their work).
 3. Web: `deploy-web.sh` (see memory pug-deploy-verification for the gated deploy rules).
-4. Plugin: pug-match 0.3.38 to all five pool servers between matches (it carries `pug-endnote.inc`).
+4. Plugin: pug-match 0.3.39 to all five pool servers between matches (it carries `pug-endnote.inc`;
+   0.3.39 = the 0.3.38 end notes and !rq plus s0-audit-fixes' FinalizeMap LIVESTAT flush).
    It stays silent until the site sends `sm_pug_requeue 1`, which it only does after the flip.
 5. Verify: the site still shows Season 0 everywhere, News is not in the nav, Patch notes still
    opens the tracker page, a normal match completes and rates as before.

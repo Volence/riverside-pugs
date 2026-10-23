@@ -24,7 +24,7 @@ const GLOSSARY: { label: string; text: string }[] = [
   { label: 'Insta clears', text: 'Freeing a pinned teammate within 0.75 seconds.' },
   { label: 'Damage pounces', text: 'Pounces from high enough up to count as a damage pounce.' },
   { label: 'Damage from pounces', text: 'The damage pounces deal on impact, which grows with how far the hunter flew. Scratching after landing counts toward Hunter damage.' },
-  { label: 'Quad caps', text: 'All four survivors pinned at the same time.' },
+  { label: 'Quad caps', text: 'All four survivors pinned at the same time, with none of them back on their feet before the round ended. Every infected player in the quad gets one.' },
   { label: 'Booms landed', text: 'Boomer lives that got vomit on at least one survivor, by a direct hit or the explosion.' },
   { label: 'Biggest SR climb', text: 'The most SR gained from the start of the week to the end.' },
   { label: 'Best win rate', text: 'Wins and losses from games with a winner; draws do not count.' },

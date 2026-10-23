@@ -4,10 +4,9 @@ import { useEffect, useRef } from 'preact/hooks';
  * Call `fn` when the server's hub broadcasts one of `names`.
  *
  * The app's own socket lives in useLiveState at the root and re-fetches the
- * player state on EVERY message, whatever it is called. The admin board cannot
- * ride that: the spectator feed broadcasts 'live' several times a second
- * during a match, and the board wants 'refresh' only. So it listens for
- * itself, by name. One extra socket per open admin board is nothing.
+ * player state on 'refresh' only (see wakesLiveState). A page that wants any
+ * other name ('live', a draft room, the staff chat) listens for itself, by
+ * name. One extra socket per open page that needs it is nothing.
  *
  * Same reconnect as useLiveState. Does nothing where there is no WebSocket.
  */

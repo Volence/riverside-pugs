@@ -315,6 +315,30 @@ export interface FinishRetryOpts {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** Someone joined the Discord server. A linked player who was only invited
+ *  goes through the gate (and may become active), and either way their queue
+ *  block ("join the Riverside Discord") has just cleared, so browsers get a
+ *  'refresh'. Someone not linked to any player wakes nobody. */
+export async function onGuildMemberAdd(
+  db: DB, userId: string, gate: ((steamid: string) => Promise<unknown>) | null, broadcast: () => void,
+): Promise<void> {
+  const p = playerByDiscordId(db, userId);
+  if (!p) return;
+  try {
+    if (p.status === 'invited' && gate) await gate(p.steamid);
+  } finally {
+    broadcast();
+  }
+}
+
+/** Whether a Discord user joining voice is worth a 'refresh': only when they
+ *  are linked to someone in a lobby right now, whose Ready button the voice
+ *  gate may be holding. Everyone else's voice traffic wakes nobody. */
+export function voiceJoinWakes(db: DB, lobbyMembers: readonly string[], userId: string): boolean {
+  const p = playerByDiscordId(db, userId);
+  return p !== undefined && lobbyMembers.includes(p.steamid);
+}
+
 export async function finishWithRetry(
   db: DB, orchestrator: RealOrchestrator, matchId: number, releaser: ServerReleaser,
   opts: FinishRetryOpts = {},
@@ -1240,7 +1264,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (ev.kind === 'match_end') {
           noTankWatch.forget(ev.token);
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
-          if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
+          // 'refresh' once collection settles: browsers no longer refetch the
+          // queue state on 'live' (web/src/hooks/useLiveState.ts), and the
+          // match leaving 'live' changes what /api/state shows its roster.
+          if (row) {
+            void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser)
+              .finally(() => hub.broadcast('refresh'));
+          }
           return;
         }
         if (ev.kind === 'abandon') {
@@ -1255,7 +1285,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               // Owner ruling 2026-10-10: a decided match ends with the leader
               // winning, collected exactly as a MATCH_END would be.
               endDecided: (serverId, token, steamid) => orch.endDecidedAbandon(serverId, token, steamid),
-              finish: (matchId) => { void finishWithRetry(deps.db, orch, matchId, releaser); },
+              // 'refresh' once collection settles, like the MATCH_END path:
+              // the decided match leaving 'live' changes its roster's state.
+              finish: (matchId) => {
+                void finishWithRetry(deps.db, orch, matchId, releaser).finally(() => hub.broadcast('refresh'));
+              },
             },
             ev.token, ev.steamid,
           ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
@@ -1579,7 +1613,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // (see the token re-registration above), and a deploy while a match is
       // waiting on a box must not strand it. Registered after reconcileServers
       // so a server it just freed can drain straight into a waiting match.
-      pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id));
+      // 'refresh' once setup settles, for the same reason as in the
+      // matchmaker: the connect block appears when the match goes live.
+      pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id)
+        .finally(() => hub.broadcast('refresh')));
       pending.rebuildFromDb();
       releaser.onFreed(() => pending.drain());
       holdFreed = () => pending?.drain();
@@ -1628,6 +1665,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           (orchestrator as RealOrchestrator).assignMatchId(serverId, token, matchId),
         adminSteamIds: deps.config.adminSteamIds,
         notify,
+        adopted: () => hub.broadcast('refresh'),
       });
     }
   }
@@ -1943,8 +1981,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
   // Someone who linked before joining the server is let in the moment they join.
   membership.onAdd((userId) => {
-    const p = playerByDiscordId(deps.db, userId);
-    if (p && p.status === 'invited' && discordApi) void applyGate(deps.db, discordApi, p.steamid);
+    void onGuildMemberAdd(
+      deps.db, userId,
+      discordApi ? (steamid) => applyGate(deps.db, discordApi, steamid) : null,
+      () => hub.broadcast('refresh'),
+    ).catch((err) => console.error('[discord] member add handling failed:', err));
   });
   // Someone who readied and then left voice has to press Ready again, so a
   // match never starts with a player outside voice. Only bites during a ready
@@ -1953,6 +1994,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   presence.onLeave((userId) => {
     const p = playerByDiscordId(deps.db, userId);
     if (p && matchmaker.readyBlock(p.steamid)) matchmaker.unready(p.steamid);
+  });
+  // The other direction: someone held at Ready by the voice gate who joins
+  // voice should see the button come alive without reloading. Only for a
+  // lobby member, so ordinary voice traffic wakes nobody.
+  presence.onJoin((userId) => {
+    if (voiceJoinWakes(deps.db, matchmaker.lobbyMembers(), userId)) hub.broadcast('refresh');
   });
   if (botEnabled(deps.config)) {
     startBot({
@@ -2262,6 +2309,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // and an aborted game's token stops being listened for.
     logPublicAddress: deps.config.logPublicAddress,
     unregisterToken: (token) => logListener?.unregister(token),
+    changed: () => hub.broadcast('refresh'),
     // A private voice channel per side (plan 4c). Read per call: the bot logs
     // in some seconds after this runs, and may never (no bot, dev mode).
     voice: new BookingVoice({ db: deps.db, voice: () => bot?.transport?.voice ?? null }),

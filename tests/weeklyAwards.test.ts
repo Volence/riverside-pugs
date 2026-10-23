@@ -221,3 +221,32 @@ describe('endorsement awards', () => {
     expect(find(computeWeek(db, '2026-09-14'), 'endorsed_clutch', 'single')).toBeUndefined();
   });
 });
+
+describe('banned players', () => {
+  const ban = (id: string) =>
+    db.prepare(
+      "INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'admin', '2026-09-01T00:00:00Z')",
+    ).run(id);
+
+  it('win nothing new: the award goes to the best player who is not banned', () => {
+    play(P[0], 5, { skeets: 9 });
+    play(P[1], 5, { skeets: 3 });
+    ban(P[0]);
+    const r = computeWeek(db, W);
+    expect(find(r, 'skeets', 'avg')!.winners.map((w) => w.steamid)).toEqual([P[1]]);
+    expect(find(r, 'skeets', 'total')!.winners.map((w) => w.steamid)).toEqual([P[1]]);
+    expect(playerGames(db, W).has(P[0])).toBe(false);
+  });
+
+  it('cannot take an endorsement award', () => {
+    const m = seedMatch(db, { endedAt: at(0), lines: P.map((id, i) => ({ id, team: i < 4 ? 'a' as const : 'b' as const })) });
+    const endorse = (from: string, to: string) =>
+      db.prepare("INSERT INTO endorsements (match_id, from_id, to_id, kind, created_at) VALUES (?, ?, ?, 'caller', ?)")
+        .run(m, from, to, at(0, '23:00:00'));
+    endorse(P[5], P[0]); endorse(P[6], P[0]);
+    endorse(P[7], P[1]);
+    ban(P[0]);
+    const r = computeWeek(db, W);
+    expect(find(r, 'endorsed_caller', 'single')!.winners.map((w) => w.steamid)).toEqual([P[1]]);
+  });
+});

@@ -8,12 +8,19 @@ export type Session =
   | { kind: 'pending'; me: Me }
   | { kind: 'active'; me: Me };
 
-/** Whether a hub event should refetch the queue state. A draft room's change
- *  (draft:<eventId>, drafts plan D2b1) can come every few seconds and only
- *  the room page and the desk controls want it; they listen with
- *  useHubEvent. */
+/** Whether a hub event should refetch the queue state (/api/me and
+ *  /api/state). Only 'refresh' can change what those return: every queue,
+ *  lobby, match state, ban and session change in src/ broadcasts it. The rest
+ *  are for pages that listen with useHubEvent:
+ *  - 'live' ends every spectator feed line, several times a second per live
+ *    match. Waking on it made every open tab refetch on every kill line, which
+ *    was most of the site's traffic. The Live page polls on its own, and the
+ *    match going live or finishing now broadcasts 'refresh' (src/server.ts).
+ *  - draft:<eventId> (drafts plan D2b1), 'event_room' and 'server_chat' are
+ *    for the draft room, the match room and the staff chat drawer.
+ *  An unreadable frame (null) still wakes, as it always has. */
 export function wakesLiveState(name: string | null): boolean {
-  return name === null || !name.startsWith('draft:');
+  return name === null || name === 'refresh';
 }
 
 /** Live queue/lobby/match state, refreshed on every websocket nudge.
@@ -70,11 +77,19 @@ export function useLiveState(): {
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    // Set once the first socket has opened. Any later open is a reconnect
+    // (a web restart or a network blip), and whatever 'refresh' went out
+    // while the socket was down was missed, so refetch once on it.
+    let openedBefore = false;
 
     const connect = () => {
       if (closed) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => {
+        if (openedBefore) refreshRef.current();
+        openedBefore = true;
+      };
       ws.onmessage = (m) => {
         const name = eventName(m.data);
         // 'tickets' is for ticket pages, goes only to staff, and says nothing

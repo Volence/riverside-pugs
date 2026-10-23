@@ -219,6 +219,21 @@ describe('Matches', () => {
     expect(screen.getByText('The Cup')).toBeTruthy();
   });
 
+  it("names a PUG side after its lead player, not a per-match letter", async () => {
+    mockApi.matches.mockResolvedValue({
+      matches: [
+        { id: 7, campaign: 'blood_harvest', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800,
+          winner: 'a', teamALead: 'alice', teamBLead: 'bob' },
+        { id: 8, campaign: 'dead_air', endedAt: '2026-09-07T04:00:00', teamAScore: 0, teamBScore: 100,
+          winner: 'b', forfeitTeam: 'a', teamALead: 'carol', teamBLead: 'dave' },
+      ],
+    });
+    render(<Matches />);
+    await waitFor(() => expect(screen.getByTitle("alice's team")).toBeTruthy());
+    expect(screen.getByText("carol's team forfeited")).toBeTruthy();
+    expect(screen.queryByText(/Team A/)).toBeNull();
+  });
+
   it('summarises with facts that outlive a single match, not per-match team labels', async () => {
     mockApi.matches.mockResolvedValue({
       matches: [
@@ -951,6 +966,28 @@ describe('Play', () => {
     expect(rows[2].textContent).toContain('no Discord');
   });
 
+  it('a blocked ready check offers Check again, which refreshes', () => {
+    const refresh = vi.fn();
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 8, joined: true, players: [] },
+          lobby: {
+            id: 'l1', phase: 'ready_check',
+            players: [{ steamid: '1', name: 'alice', avatar: null, readyBlock: 'join_voice' }],
+            ready: [], options: [], votes: {}, deadline: Date.now() + 30_000, myVote: null,
+          },
+          match: null,
+          readyBlock: 'join_voice',
+        }}
+        refresh={refresh}
+      />,
+    );
+    (screen.getByRole('button', { name: 'Check again' }) as HTMLButtonElement).click();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('a viewer who may ready sees an enabled Ready button and no voice notice', () => {
     render(
       <Play
@@ -1277,7 +1314,7 @@ describe('MapDetail', () => {
     (within(strip).getByText('Tank damage') as HTMLElement).click();
     await waitFor(() => expect(
       [...container.querySelectorAll('.bar__value')].map((e) => e.textContent),
-    ).toEqual(['900', 'n/a']));
+    ).toEqual(['300', 'n/a']));
   });
 
   it('says "not recorded" for the average when no playing of the map has a real score', async () => {
@@ -1313,6 +1350,40 @@ describe('MapDetail', () => {
     (within(strip).getByText('Totals') as HTMLElement).click();
     const body = container.querySelector('.lb tbody') as HTMLElement;
     await waitFor(() => expect(within(body).getByText('30')).toBeTruthy());
+  });
+
+  it('sizes the win-rate bars by win rate and holds back players under three maps', async () => {
+    mockApi.map.mockResolvedValue({
+      ...mapData,
+      players: [
+        { steamid: '3', name: 'carol', games: 1, wins: 1, losses: 0, stats: {}, avgStats: {} },
+        { steamid: '2', name: 'bob', games: 8, wins: 2, losses: 6, stats: {}, avgStats: {} },
+        { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0, stats: {}, avgStats: {} },
+      ],
+    });
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+    const bars = [...container.querySelectorAll('.bars .bar')];
+    expect(bars.map((b) => b.querySelector('.bar__name')?.textContent)).toEqual(['alice', 'bob', 'carol']);
+    const widths = bars.map((b) => (b.querySelector('.bar__fill') as HTMLElement).style.width);
+    expect(widths).toEqual(['100%', '25%', '0%']);
+    // carol's 1-0 is not a 100% win rate.
+    expect(bars[2].querySelector('.bar__value')?.textContent).toMatch(/^n\/a/);
+  });
+
+  it('makes the stat bars follow the Per map / Totals choice', async () => {
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+    const tabs = container.querySelectorAll('.tabs');
+    (within(tabs[0] as HTMLElement).getByText('Tank damage') as HTMLElement).click();
+    await waitFor(() => expect(
+      [...container.querySelectorAll('.bar__value')].map((e) => e.textContent),
+    ).toEqual(['300', 'n/a']));
+    (within(tabs[1] as HTMLElement).getByText('Totals') as HTMLElement).click();
+    await waitFor(() => expect(
+      [...container.querySelectorAll('.bar__value')].map((e) => e.textContent),
+    ).toEqual(['900', 'n/a']));
   });
 
   it('carries the map baseline as a footer row', async () => {
@@ -1365,6 +1436,31 @@ describe('StatTable comparison', () => {
                  cols={['skeets']} showTotals />,
     );
     expect(screen.getAllByText('Team total')).toHaveLength(2);
+  });
+
+  it('counts each quad once in the team total, not once per pinner', () => {
+    const quad = (n: number[]) => n.map((v, i) => ({ steamid: `q${v}-${i}`, name: `q${i}`, stats: { quad_caps: v, times_quadded: v } }));
+    // Team A landed two quads (all four pinners credited twice); team B one,
+    // with three bots pinning beside its only rostered pinner, which sum / 4
+    // alone would round down to none.
+    render(
+      <StatTable teamA={quad([2, 2, 2, 2])} teamB={quad([1, 0, 0, 0])}
+                 cols={['quad_caps', 'times_quadded']} showTotals />,
+    );
+    const totals = screen.getAllByText('Team total').map((el) =>
+      [...el.closest('tr')!.querySelectorAll('td.num')].map((c) => c.textContent));
+    expect(totals).toEqual([['2', '2'], ['1', '1']]);
+  });
+
+  it('explains each stat column on hover', () => {
+    const { container } = render(
+      <StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets', 'ck']} />,
+    );
+    const titles = [...container.querySelectorAll('thead th')].slice(1).map((th) => th.getAttribute('title'));
+    expect(titles).toEqual([
+      'Hunters you killed mid-pounce with nobody else having damaged them.',
+      'Common infected you killed.',
+    ]);
   });
 
   it('omits total rows by default', () => {

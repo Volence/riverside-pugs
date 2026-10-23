@@ -286,7 +286,9 @@ const ROUND_SURV_COLS: RoundCol[] = [
 const ROUND_INF_COLS: RoundCol[] = [
   { key: 'damage_as_si', label: 'Damage', get: (s) => s.damage_as_si ?? 0 },
   { key: 'dps_landed', label: 'DPs', get: (s) => s.dps_landed ?? 0 },
-  { key: 'survivors_biled', label: 'Biled', get: (s) => s.survivors_biled ?? 0 },
+  // boomed_vomit, not survivors_biled: the same count (survivors vomited on
+  // directly), but survivors_biled is 0 for every match before 2026-09-29.
+  { key: 'boomed_vomit', label: 'Biled', get: (s) => s.boomed_vomit ?? 0 },
   { key: 'dmg_as_tank', label: 'As tank', get: (s) => s.dmg_as_tank ?? 0 },
 ];
 
