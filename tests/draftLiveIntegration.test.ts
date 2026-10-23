@@ -59,8 +59,8 @@ describe('a live draft from signups to entries', () => {
         continue;
       }
       if (s.picker === absent) {
-        // The absent captain's clock is 5 seconds from when the pick opened.
-        expect(Date.parse(s.room.deadline_at!) - t).toBe(5000);
+        // The absent captain gets the full clock too (owner 2026-10-23), then the auto-pick.
+        expect(Date.parse(s.room.deadline_at!) - t).toBe(75_000);
         t = Date.parse(s.room.deadline_at!);
         clock.tick();
         continue;
