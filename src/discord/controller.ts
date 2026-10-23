@@ -91,7 +91,7 @@ export async function handleButton(
   // Before resolve(), deliberately. Wanting to be told when games are filling
   // is not the same as being ready to play one, and someone who has not linked
   // their account yet is exactly who most needs the nudge to come back.
-  if (parts[0] === 'q' && parts[1] === 'notify') return toggleAlertRole(deps, i.userId);
+  if (parts[0] === 'q' && parts[1] === 'notify') return setAlertRole(deps, i.userId);
 
   const who = resolve(deps, i);
   if ('reply' in who) return who.reply;
@@ -215,7 +215,8 @@ function serverOfMatch(db: ControllerDeps['db'], matchId: number): number | null
 }
 
 /**
- * Toggle the opt-in queue-alert role.
+ * Turn the opt-in queue-alert role on or off for one member: the Notify me
+ * button (a toggle) and /alerts (on, off, or a toggle with no option).
  *
  * Reads the member's current roles rather than keeping our own record of who
  * opted in: Discord is the source of truth for that, someone can be given or
@@ -225,20 +226,28 @@ function serverOfMatch(db: ControllerDeps['db'], matchId: number): number | null
  * have been removed from a role they still hold, or the reverse, is worse than
  * asking them to try again.
  */
-async function toggleAlertRole(deps: ControllerDeps, userId: string): Promise<InteractionReply> {
+export async function setAlertRole(
+  deps: Pick<ControllerDeps, 'db' | 'roles'>, userId: string, want?: boolean,
+): Promise<InteractionReply> {
   const roleId = getSetting(deps.db, 'discord_pug_role_id');
   if (!roleId || !deps.roles) return say('Queue alerts are not set up on this server yet.');
 
   const has = await deps.roles.has(userId, roleId).catch(() => null);
   if (has === null) return say('Could not read your roles just now. Try that again in a moment.');
+  const target = want ?? !has;
+  if (target === has) {
+    return say(has
+      ? 'You already get queue alerts: you are pinged when the queue is close to popping.'
+      : 'You do not get queue alerts. Use /alerts on, or Notify me on the queue card, to turn them on.');
+  }
 
   try {
-    if (has) {
+    if (!target) {
       await deps.roles.remove(userId, roleId);
-      return say('You will no longer be pinged when the queue fills up. Press it again to turn alerts back on.');
+      return say('You will no longer be pinged when the queue fills up. Notify me on the queue card or /alerts on turns alerts back on.');
     }
     await deps.roles.add(userId, roleId);
-    return say('You will be pinged when the queue is close to popping. Press it again to stop.');
+    return say('You will be pinged when the queue is close to popping. Notify me on the queue card or /alerts off stops it.');
   } catch (err) {
     console.error('[discord] alert role toggle failed:', err);
     // Almost always the bot's role sitting below the target role in the guild's

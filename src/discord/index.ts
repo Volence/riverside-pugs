@@ -3,7 +3,8 @@ import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import type { Hub } from '../ws.js';
 import type { SidePublicView } from '../sideGames.js';
-import { handleButton, type ControllerDeps } from './controller.js';
+import { handleButton, setAlertRole, type ControllerDeps } from './controller.js';
+import { ALERTS_COMMAND } from './commands.js';
 import { DiscordSync, type VoiceHook } from './sync.js';
 import type { BotInteraction, BotTransport, InteractionReply, SlashCommandDef } from './transport.js';
 import type { GuildMembership } from './membership.js';
@@ -83,6 +84,12 @@ export async function startBot(deps: BotDeps): Promise<RunningBot | null> {
       const run = deps.messageCommands?.[i.name];
       if (run) return run(i);
       return { ephemeral: true, payload: { content: 'That command no longer does anything.', embeds: [], components: [] } };
+    }
+    // The alert role toggle lives with the button controller, which has the
+    // transport's role access; the other commands never need it.
+    if (i.name === ALERTS_COMMAND) {
+      const turn = i.options.turn;
+      return setAlertRole(controllerDeps, i.userId, turn === 'on' ? true : turn === 'off' ? false : undefined);
     }
     if (deps.commands) return deps.commands.handle(i);
     return { ephemeral: true, payload: { content: 'Unknown command.', embeds: [], components: [] } };

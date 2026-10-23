@@ -31,6 +31,9 @@ export const REPORT_LABELS: Record<ReportCategory, string> = {
   other: 'Something else',
 };
 
+/** The queue alert opt-in, `/alerts [on|off]`. */
+export const ALERTS_COMMAND = 'alerts';
+
 export const COMMAND_DEFS: SlashCommandDef[] = [
   {
     name: 'profile',
@@ -45,6 +48,16 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   },
   { name: 'queue', description: 'Who is in the queue right now' },
   { name: 'link', description: 'Link your Discord to your Steam account' },
+  {
+    // Handled in index.ts, beside the Notify me button, because it needs the
+    // transport's role access, which nothing else here does.
+    name: ALERTS_COMMAND,
+    description: 'Get pinged when the PUG queue is almost full',
+    options: [{
+      name: 'turn', description: 'On or off (default: switch it)', type: 'string',
+      choices: [{ name: 'On', value: 'on' }, { name: 'Off', value: 'off' }],
+    }],
+  },
   {
     name: 'report',
     description: 'Privately report someone, in a game or in the Discord',

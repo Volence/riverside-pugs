@@ -63,6 +63,31 @@ describe('startBot', () => {
     expect(r.payload.content).toBe('cmd queue');
     await bot!.stop();
   });
+
+  it('routes /alerts to the alert role toggle, with the transport\'s role access', async () => {
+    const s = setup(ENV);
+    const { setSetting } = await import('../src/settings.js');
+    const { COMMAND_DEFS } = await import('../src/discord/commands.js');
+    setSetting(s.db, 'discord_pug_role_id', '555000000000000001');
+    let handled = false;
+    const bot = await startBot({
+      ...s, connect: async () => s.t,
+      commands: {
+        defs: COMMAND_DEFS,
+        handle: async () => { handled = true; return { ephemeral: true, payload: { content: 'other', embeds: [], components: [] } }; },
+      },
+    });
+    expect(s.t.commands.map((c) => c.name)).toContain('alerts');
+    const run = (turn?: string) => s.t.handler!({
+      kind: 'command', name: 'alerts', userId: '901', userName: 'x', options: turn ? { turn } : {}, picked: {}, presserTimedOutUntil: null,
+    });
+    expect((await run('on')).payload.content).toMatch(/will be pinged/i);
+    expect(s.t.rolesOf.get('901')?.has('555000000000000001')).toBe(true);
+    expect((await run()).payload.content).toMatch(/no longer be pinged/i);
+    expect(s.t.rolesOf.get('901')?.has('555000000000000001')).toBe(false);
+    expect(handled).toBe(false);
+    await bot!.stop();
+  });
 });
 
 describe('startBot extras', () => {

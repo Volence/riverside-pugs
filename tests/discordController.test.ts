@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer, activatePlayer, linkDiscord, consumeLinkCode } from '../src/players.js';
 import { addServer } from '../src/serverPool.js';
-import { handleButton } from '../src/discord/controller.js';
+import { handleButton, setAlertRole } from '../src/discord/controller.js';
 import type { Scheduler } from '../src/lobby.js';
 import type { InteractionReply } from '../src/discord/transport.js';
 import { setSetting } from '../src/settings.js';
@@ -258,6 +258,18 @@ describe('queue alert opt-in toggle', () => {
     // Nearly always the bot's role sitting below the target role, which no
     // amount of retrying fixes.
     expect(body(r)).toMatch(/role above the alert role/i);
+  });
+
+  it('/alerts on and off set the role either way, and say so when there is nothing to change', async () => {
+    const deps = { db, roles };
+    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/will be pinged/i);
+    expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(true);
+    // Asking for what you already have changes nothing, and never toggles.
+    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/already get queue alerts/i);
+    expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(true);
+    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/no longer be pinged/i);
+    expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(false);
+    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/do not get queue alerts/i);
   });
 });
 
