@@ -65,3 +65,27 @@ describe('computeRecap', () => {
     expect(computeRecap(db, W).closest).toMatchObject({ matchId: m, a: 177, b: 178 });
   });
 });
+
+describe('computeRecap and bans', () => {
+  it('names nobody under a ban, while the week still counts their games', () => {
+    const ban = (id: string) => db.prepare(
+      "INSERT INTO bans (player_id, reason, created_by, created_at) VALUES (?, 'x', 'admin', '2026-09-01T00:00:00Z')",
+    ).run(id);
+    for (let i = 0; i < 5; i++) {
+      seedMatch(db, { endedAt: `2026-09-22 ${12 + i}:00:00`, winner: 'a', lines: [
+        { id: P[0], team: 'a', stats: { skeets: 20 } },
+        { id: P[1], team: 'a', stats: { skeets: 3 } },
+        { id: P[2], team: 'b', stats: { skeets: 1 } },
+      ] });
+    }
+    ban(P[0]);
+    const r = computeRecap(db, W);
+    expect(r.players).toBe(3);
+    const ids = JSON.stringify([r.highlights, r.totals.map((t) => t.leader), r.streaks, r.iron]);
+    expect(ids).not.toContain(P[0]);
+    expect(r.highlights.find((h) => h.key === 'skeets')!.player.steamid).toBe(P[1]);
+    const skeets = r.totals.find((t) => t.key === 'skeets')!;
+    expect(skeets.value).toBe(120);
+    expect(skeets.leader!.steamid).toBe(P[1]);
+  });
+});

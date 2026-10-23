@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { campaignDisplayName } from './campaignRegistry.js';
 import { WEEK_MATCHES, WEEK_START_HOUR, weekBounds, weeklyMinGames } from './weeklyAwards.js';
+import { hasActiveBan, notBannedSql } from './banState.js';
 
 /**
  * The numbers behind the weekly recap message, modelled on the owner's hand
@@ -37,8 +38,14 @@ const HIGHLIGHTS: { key: string; verb: string; label: string; fixed?: string; st
 
 const STREAKS_SHOWN = 4;
 
-export function computeRecap(db: DB, week: string): Recap {
+/** Players under a ban when the recap is computed are never named in it (no
+ *  highlight, total leader, streak or iron line), the same rule as the
+ *  awards. The week's counts still include their games. Frozen recaps keep
+ *  what they stored (weeklyStore.ts). */
+export function computeRecap(db: DB, week: string, now: Date = new Date()): Recap {
   const { from, to } = weekBounds(week);
+  const nowIso = now.toISOString();
+  const banned = (steamid: string) => hasActiveBan(db, steamid, now);
   const inWeek = `(${WEEK_MATCHES})`;
   const one = <T>(sql: string, ...args: unknown[]) => db.prepare(sql).get(from, to, ...args) as T | undefined;
   const many = <T>(sql: string, ...args: unknown[]) => db.prepare(sql).all(from, to, ...args) as T[];
@@ -66,11 +73,12 @@ export function computeRecap(db: DB, week: string): Recap {
       ? one<{ steamid: string; name: string; value: number; matchId: number }>(
         `SELECT mp.player_id AS steamid, p.name, mp.${h.fixed} AS value, mp.match_id AS matchId
          FROM match_players mp JOIN players p ON p.steamid = mp.player_id
-         WHERE mp.match_id IN ${inWeek} ORDER BY value DESC, mp.match_id LIMIT 1`)
+         WHERE mp.match_id IN ${inWeek} AND ${notBannedSql('mp.player_id')} ORDER BY value DESC, mp.match_id LIMIT 1`, nowIso)
       : one<{ steamid: string; name: string; value: number; matchId: number }>(
         `SELECT s.player_id AS steamid, p.name, s.value, s.match_id AS matchId
          FROM match_player_stats s JOIN players p ON p.steamid = s.player_id
-         WHERE s.match_id IN ${inWeek} AND s.stat = ? ORDER BY s.value DESC, s.match_id LIMIT 1`, h.stat);
+         WHERE s.match_id IN ${inWeek} AND s.stat = ? AND ${notBannedSql('s.player_id')}
+         ORDER BY s.value DESC, s.match_id LIMIT 1`, h.stat, nowIso);
     if (row && row.value > 0) {
       highlights.push({ key: h.key, verb: h.verb, label: h.label, player: { steamid: row.steamid, name: row.name }, value: row.value, matchId: row.matchId });
     }
@@ -89,8 +97,9 @@ export function computeRecap(db: DB, week: string): Recap {
 
   const total = (key: string, label: string, sql: string, ...args: unknown[]): WeekTotal => {
     const rows = many<{ steamid: string; name: string; value: number }>(sql, ...args);
+    // The week's total counts everyone; only the leader named skips a ban.
     const value = rows.reduce((s, r) => s + r.value, 0);
-    const top = rows[0];
+    const top = rows.find((r) => !banned(r.steamid));
     return { key, label, value, leader: top && top.value > 0 ? { steamid: top.steamid, name: top.name, value: top.value } : null };
   };
   const statTotal = (stats: string[]) =>
@@ -112,7 +121,7 @@ export function computeRecap(db: DB, week: string): Recap {
             COUNT(*) AS games
      FROM match_players mp JOIN matches m ON m.id = mp.match_id JOIN players p ON p.steamid = mp.player_id
      WHERE m.id IN ${inWeek} GROUP BY mp.player_id`,
-  );
+  ).filter((r) => !banned(r.steamid));
   const streaks = records
     .filter((r) => r.w + r.l >= min && r.w > r.l)
     .sort((a, b) => b.w / (b.w + b.l) - a.w / (a.w + a.l) || b.w - a.w || a.name.localeCompare(b.name))
