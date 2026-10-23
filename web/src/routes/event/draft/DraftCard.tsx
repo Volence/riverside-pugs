@@ -12,7 +12,8 @@ export function DraftCard({ card, note, chemistry, action }: {
   card: PlayerCardView; note?: string | null; chemistry?: PairChemistryView | null; action?: ComponentChildren;
 }) {
   const trend = trendText(card.trend);
-  // One block per side, the number first: a captain scans the figures, not the sentence.
+  // One block per side, the number first: a captain scans the figures, not
+  // the sentence. Figures are per game.
   const stat = (value: number, label: string) => (
     <span class="draftcard__stat"><span class="draftcard__num">{value}</span> <span class="muted">{label}</span></span>
   );
@@ -28,15 +29,15 @@ export function DraftCard({ card, note, chemistry, action }: {
           {trend && <span class="muted">{trend}</span>}
         </p>
       )}
-      <div class="draftcard__sides">
+      <div class="draftcard__sides" title="Averages a game">
         <div class="draftcard__side">
-          <span class="draftcard__sidelabel">Survivor, a game</span>
-          {stat(card.survivor.siDamage, 'SI damage')}
+          <span class="draftcard__sidelabel">Survivor</span>
+          {stat(card.survivor.siDamage, 'SI dmg')}
           {stat(card.survivor.commonKills, 'commons')}
         </div>
         <div class="draftcard__side">
-          <span class="draftcard__sidelabel">Infected, a game</span>
-          {stat(card.infected.damageAsSi, 'damage')}
+          <span class="draftcard__sidelabel">Infected</span>
+          {stat(card.infected.damageAsSi, 'dmg')}
           {stat(card.infected.dpsLanded, 'DPs')}
         </div>
       </div>
