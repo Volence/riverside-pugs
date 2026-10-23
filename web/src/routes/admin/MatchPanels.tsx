@@ -8,7 +8,6 @@ import { SlowToReadyTable } from './SlowToReady';
 import type { ConfirmChoice } from '../../components/Confirm';
 import type { AbandonRecord, MatchPause, MatchReadyup } from '../../api';
 import { RestoreRating, abandonOutcome, restoredText } from './RestoreRating';
-import { AbortPartyList } from '../../components/AbortPartyList';
 
 /**
  * The panels of the Live desk: open matches, the servers, the queue and the
@@ -304,63 +303,155 @@ export function AdminQueuePanel({ queue, lobbies = [], busy, run }: {
   );
 }
 
+type ResultsTab = 'results' | 'aborted' | 'voided' | 'slow';
+
 export function RecentResultsPanel({ data, busy, run, isAdmin = false }: { data: AdminOverview; busy: boolean; run: Run; isAdmin?: boolean }) {
   const [voiding, setVoiding] = useState<number | null>(null);
   const [reason, setReason] = useState('');
+  const [tab, setTab] = useState<ResultsTab>('results');
+  const aborted = data.aborted ?? [];
+  const slow = data.slowToReady ?? [];
+  // One panel, four views. Stacked, the aborted list and the slow-to-ready
+  // table pushed each other and the results a long scroll apart.
+  const tabs: [ResultsTab, string, number | null][] = [
+    ['results', 'Results', data.recent.length],
+    ['aborted', 'Aborted', aborted.length],
+    ['voided', 'Voided', data.voided.length],
+    ['slow', 'Slow to ready', null],
+  ];
   return (
     <Panel class="panel--table">
       <h3>Recent results</h3>
-      <p class="muted">Voiding removes a match from every stat and rebuilds the season's ratings without it. It cannot be undone from here.</p>
-      {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
-        <ul class="rres">
-          {data.recent.map((m) => (
-            <RecentRow key={m.id} m={m} busy={busy} run={run} isAdmin={isAdmin}
-              voiding={voiding === m.id} reason={reason} setReason={setReason}
-              onVoid={() => { setVoiding(m.id); setReason(''); }} onCancel={() => setVoiding(null)}
-              onVoided={() => { setVoiding(null); setReason(''); }} />
-          ))}
-        </ul>
-      )}
-      <SlowToReadyTable rows={data.slowToReady ?? []} />
-      {(data.aborted ?? []).length > 0 && (
+      <div class="tabs subtabs" role="tablist" aria-label="Recent results">
+        {tabs.filter(([k, , n]) => k === 'results' || k === 'slow' ? (k !== 'slow' || slow.length > 0) : (n ?? 0) > 0).map(([k, label, n]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k}
+            class={`tabs__tab${tab === k ? ' is-active' : ''}`} onClick={() => setTab(k)}>
+            {label}{n !== null && <span class="tabs__count">{n}</span>}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'results' && (
         <>
-          <h4>Aborted</h4>
+          <p class="muted">Voiding removes a match from every stat and rebuilds the season's ratings without it. It cannot be undone from here.</p>
+          {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
+            <ul class="rres">
+              {data.recent.map((m) => (
+                <RecentRow key={m.id} m={m} busy={busy} run={run} isAdmin={isAdmin}
+                  voiding={voiding === m.id} reason={reason} setReason={setReason}
+                  onVoid={() => { setVoiding(m.id); setReason(''); }} onCancel={() => setVoiding(null)}
+                  onVoided={() => { setVoiding(null); setReason(''); }} />
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {tab === 'aborted' && (
+        <>
           <p class="muted">
             Ended with no result, so nothing counted. The scoreline is how far they got; the
             roster, stats and replays are on the match page.
           </p>
-          <ul class="admin-list">
-            {data.aborted.map((m) => (
-              <li key={m.id}>
-                <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)} {m.teamAScore} - {m.teamBScore}
-                {m.abandonedBy && !(m.parties ?? []).length ? <> · left: {m.abandonedBy}</> : null}
-                {' '}<span class="muted">({fmtTime(m.endedAt)})</span>
-                {(m.noShows ?? 0) > 0 && (
-                  <>
-                    {' '}<button class="chip" type="button" disabled={busy}
-                      onClick={() => run(() => adminApi.clearMatchNoShows(m.id), {
-                        title: `Clear the ${m.noShows} no-show penalties from match #${m.id}?`,
-                        body: 'For no-shows that were not the players\' doing, such as our server or a Steam outage. Their queue timeouts are recomputed without them.',
-                        confirmLabel: 'Clear no-shows',
-                      })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
-                  </>
-                )}
-                {(m.abandons ?? []).map((a) => <AbandonLine key={a.steamid} a={a} busy={busy} run={run} isAdmin={isAdmin} />)}
-                <AbortPartyList parties={m.parties ?? []} />
-              </li>
-            ))}
+          <ul class="rres">
+            {aborted.map((m) => <AbortedRow key={m.id} m={m} busy={busy} run={run} isAdmin={isAdmin} />)}
           </ul>
         </>
       )}
-      {data.voided.length > 0 && (
-        <>
-          <h4>Voided</h4>
-          <ul class="admin-list">
-            {data.voided.map((v) => <li key={v.id}><a href={`/match/${v.id}`}>#{v.id}</a> {campaignName(v.campaign)}: {v.voidReason} <span class="muted">({fmtTime(v.voidedAt)})</span></li>)}
-          </ul>
-        </>
+
+      {tab === 'voided' && (
+        <ul class="rres">
+          {data.voided.map((v) => (
+            <li key={v.id} class="rres__row abrow" style={{ '--campaign': campaignTint(v.campaign) } as Record<string, string>}>
+              <div class="abrow__head">
+                <span class="rres__match">
+                  <a class="rres__id" href={`/match/${v.id}`}>#{v.id}</a>
+                  <span class="rres__camp">{campaignName(v.campaign)}</span>
+                </span>
+                <span class="abrow__why">{v.voidReason}</span>
+                <time class="rres__ended" title={fmtTime(v.voidedAt)}>{fmtAgo(v.voidedAt)}</time>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {tab === 'slow' && <SlowToReadyTable rows={slow} />}
     </Panel>
+  );
+}
+
+type AbortedMatch = AdminOverview['aborted'][number];
+
+/**
+ * One aborted match as a compact row: match, campaign tint, how far it got
+ * and when, then who it was about. A quitter's line carries Restore rating.
+ * Everyone who got the same thing for the same reason (eight "never
+ * connected" no-shows) shares one line of names instead of a line each.
+ */
+function AbortedRow({ m, busy, run, isAdmin }: { m: AbortedMatch; busy: boolean; run: Run; isAdmin: boolean }) {
+  const parties = m.parties ?? [];
+  const abandons = m.abandons ?? [];
+  const abandonOf = new Map(abandons.map((a) => [a.steamid, a]));
+  const groups: { key: string; what: string; outcome: string; people: typeof parties }[] = [];
+  for (const p of parties) {
+    if (abandonOf.has(p.steamid)) continue;
+    const key = `${p.what}|${p.outcome}`;
+    const g = groups.find((x) => x.key === key);
+    if (g) g.people.push(p); else groups.push({ key, what: p.what, outcome: p.outcome, people: [p] });
+  }
+  const quitters = parties.filter((p) => abandonOf.has(p.steamid));
+  const loose = abandons.filter((a) => !parties.some((p) => p.steamid === a.steamid));
+  const who = (p: (typeof parties)[number]) => (
+    <a href={`/player/${p.steamid}`}>{p.name}</a>
+  );
+  return (
+    <li class="rres__row abrow" style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
+      <div class="abrow__head">
+        <span class="rres__match">
+          <a class="rres__id" href={`/match/${m.id}`}>#{m.id}</a>
+          <span class="rres__camp">{campaignName(m.campaign)}</span>
+        </span>
+        <span class="rres__score">{m.teamAScore} - {m.teamBScore}</span>
+        {m.abandonedBy && parties.length === 0 && <span class="abrow__why">left: {m.abandonedBy}</span>}
+        <time class="rres__ended" title={m.endedAt ? fmtTime(m.endedAt) : undefined}>{m.endedAt ? fmtAgo(m.endedAt) : ''}</time>
+        {(m.noShows ?? 0) > 0 && (
+          <button class="chip abrow__act" type="button" disabled={busy}
+            onClick={() => run(() => adminApi.clearMatchNoShows(m.id), {
+              title: `Clear the ${m.noShows} no-show penalties from match #${m.id}?`,
+              body: 'For no-shows that were not the players\' doing, such as our server or a Steam outage. Their queue timeouts are recomputed without them.',
+              confirmLabel: 'Clear no-shows',
+            })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
+        )}
+      </div>
+      {(quitters.length > 0 || loose.length > 0 || groups.length > 0) && (
+        <ul class="abrow__people">
+          {quitters.map((p) => {
+            const a = abandonOf.get(p.steamid)!;
+            return (
+              <li key={p.steamid}>
+                <span class="abrow__tag abrow__tag--quit">abandoned</span>
+                <span>{who(p)}{p.team ? <span class="muted"> (Team {p.team.toUpperCase()})</span> : null}</span>
+                <span class="muted">{p.what}: {p.outcome}; {abandonOutcome(a)}, rated a loss{restoredText(a)}</span>
+                {!a.restoredAt && isAdmin && <RestoreRating matchId={a.matchId} steamid={a.steamid} who={a.name} busy={busy} run={run} />}
+              </li>
+            );
+          })}
+          {loose.map((a) => <li key={a.steamid}><AbandonLine a={a} busy={busy} run={run} isAdmin={isAdmin} /></li>)}
+          {groups.map((g) => (
+            <li key={g.key}>
+              <span class="abrow__tag">{g.what}</span>
+              <span>
+                {g.people.map((p, i) => (
+                  <span key={p.steamid}>{i > 0 ? ', ' : ''}{who(p)}{p.team ? <span class="muted"> ({p.team.toUpperCase()})</span> : null}</span>
+                ))}
+              </span>
+              <span class="muted">· {g.outcome}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

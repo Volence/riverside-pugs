@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { adminApi, type AdminCampaign, type AdminChapter, type AdminInstall } from '../../api';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
-import { chapterName } from '../../format';
+import { campaignTint, chapterName } from '../../format';
 import { useAction, type Run } from './useAction';
 
 /** These are hundreds-of-megabytes VPKs; nobody sizing free disk against an
@@ -32,7 +32,7 @@ function ChapterList({ chapters, playCount }: { chapters: AdminChapter[]; playCo
   const included = chapters.filter((ch) => ch.included === 1);
   if (included.length === 0) return <p class="muted">No chapters parsed.</p>;
   return (
-    <ol class="admin-list">
+    <ol class="admin-list camp-chapters">
       {included.map((ch, i) => (
         // Every chapter of a campaign shares its slug; ordinal is what is
         // actually unique per chapter.
@@ -56,8 +56,8 @@ function MapsToPlay(
     return <p class="muted">Chapters unknown, so this campaign plays its default.</p>;
   }
   return (
-    <label>
-      Plays{' '}
+    <label class="camp-field">
+      <span class="camp-field__label">Plays</span>
       <select
         aria-label="Maps to play"
         disabled={busy}
@@ -74,8 +74,7 @@ function MapsToPlay(
           </option>
         ))}
       </select>
-      {' '}
-      <span class="muted">Takes effect next match. Nothing is reinstalled.</span>
+      <span class="camp-field__hint">Takes effect next match. Nothing is reinstalled.</span>
     </label>
   );
 }
@@ -86,7 +85,7 @@ function PracticeOnly(
   { c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run },
 ) {
   return (
-    <label>
+    <label class="camp-check">
       <input
         type="checkbox"
         disabled={busy}
@@ -107,7 +106,7 @@ function NeedsL4d2Pack(
   { c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run },
 ) {
   return (
-    <label>
+    <label class="camp-check">
       <input
         type="checkbox"
         disabled={busy}
@@ -134,18 +133,31 @@ function playCountOf(c: AdminCampaign): number {
  *  refuses it, since an empty install list satisfies no server. */
 function InstallList({ installs, serverNames }: { installs: AdminInstall[]; serverNames: Map<number, string> }) {
   if (installs.length === 0) return <p class="muted">Not installed on any server yet.</p>;
+  // Six green chips that all say "installed" say one thing; a problem on one
+  // box is what needs the per-server row.
+  if (installs.every((i) => i.state === 'installed')) {
+    return (
+      <p class="camp-installed" title={installs.map((i) => serverNames.get(i.server_id) ?? `Server ${i.server_id}`).join(', ')}>
+        <span class="admin-status admin-status--active">installed</span> on {installs.length} server{installs.length === 1 ? '' : 's'}
+      </p>
+    );
+  }
   const tone = (state: AdminInstall['state']) => (state === 'installed' ? 'active' : state === 'failed' ? 'banned' : 'invited');
   return (
-    <ul class="admin-list adm-installs">
-      {installs.map((i) => (
-        <li key={i.server_id}>
-          <span class={`admin-status admin-status--${tone(i.state)}`}>
-            {serverNames.get(i.server_id) ?? `Server ${i.server_id}`}: {i.state}
-          </span>
-          {i.error && <p class="error">{i.error}</p>}
-        </li>
+    <>
+      <ul class="admin-list adm-installs">
+        {installs.map((i) => (
+          <li key={i.server_id}>
+            <span class={`admin-status admin-status--${tone(i.state)}`}>
+              {serverNames.get(i.server_id) ?? `Server ${i.server_id}`}: {i.state}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {installs.filter((i) => i.error).map((i) => (
+        <p key={i.server_id} class="error">{serverNames.get(i.server_id) ?? `Server ${i.server_id}`}: {i.error}</p>
       ))}
-    </ul>
+    </>
   );
 }
 
@@ -155,7 +167,7 @@ function InstallList({ installs, serverNames }: { installs: AdminInstall[]; serv
 function DraftCard({ c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run }) {
   const [name, setName] = useState(c.name);
   return (
-    <Panel>
+    <Panel class="camp-card camp-card--draft">
       <h3>{c.name} <span class="admin-tag">draft</span></h3>
       <ChapterList chapters={c.chapters} />
       <div class="admin-form">
@@ -177,35 +189,41 @@ function PublishedCard(
 ) {
   const ok = installedEverywhere(c, serverIds);
   return (
-    <Panel>
-      <div class="admin-row">
+    <Panel class="camp-card" style={{ '--campaign': campaignTint(c.slug) } as Record<string, string>}>
+      <header class="camp-card__head">
         <h3>{c.name}</h3>
         <span class="muted">{gb(c.size_bytes)}</span>
+      </header>
+      <div class="camp-card__body">
+        <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
+        <div class="camp-card__settings">
+          <MapsToPlay c={c} busy={busy} run={run} />
+          <PracticeOnly c={c} busy={busy} run={run} />
+          <NeedsL4d2Pack c={c} busy={busy} run={run} />
+        </div>
       </div>
-      <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
-      <MapsToPlay c={c} busy={busy} run={run} />
-      <PracticeOnly c={c} busy={busy} run={run} />
-      <NeedsL4d2Pack c={c} busy={busy} run={run} />
       <InstallList installs={c.installs} serverNames={serverNames} />
-      <div class="admin-row">
-        <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>
-          Reinstall
-        </button>
-        <button class="chip" disabled={busy}
-          onClick={() => run(
-            () => adminApi.deleteCampaign(c.slug),
-            `Delete ${c.name}? This removes the VPK from every server that has it.`,
-          )}>
-          Delete
-        </button>
-      </div>
       {/* Being installed everywhere is the only precondition now. There used to
           be a checkbox here as well, but once downloads stopped depending on it
           its only job was permitting the Settings tab to offer the campaign,
           which cost a click and read as if it did the pooling itself. */}
-      {!ok
-        ? <p class="muted">Not on every server yet, so it cannot be added to the vote. Players can still download it.</p>
-        : <p class="muted">Installed everywhere and downloadable. Add it to the vote on the Settings tab.</p>}
+      <footer class="camp-card__foot">
+        {!ok
+          ? <p class="muted">Not on every server yet, so it cannot be added to the vote. Players can still download it.</p>
+          : <p class="muted">Installed everywhere and downloadable. Add it to the vote on the Settings tab.</p>}
+        <div class="camp-card__acts">
+          <button class="chip" disabled={busy} onClick={() => run(() => adminApi.reinstallCampaign(c.slug))}>
+            Reinstall
+          </button>
+          <button class="chip camp-card__delete" disabled={busy}
+            onClick={() => run(
+              () => adminApi.deleteCampaign(c.slug),
+              `Delete ${c.name}? This removes the VPK from every server that has it.`,
+            )}>
+            Delete
+          </button>
+        </div>
+      </footer>
     </Panel>
   );
 }
@@ -215,10 +233,17 @@ function PublishedCard(
  *  a stock finale for exactly the reason they'd drop a custom one. */
 function StockCard({ c, busy, run }: { c: AdminCampaign; busy: boolean; run: Run }) {
   return (
-    <Panel>
-      <h3>{c.name} <span class="admin-tag">stock</span></h3>
-      <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
-      <MapsToPlay c={c} busy={busy} run={run} />
+    <Panel class="camp-card" style={{ '--campaign': campaignTint(c.slug) } as Record<string, string>}>
+      <header class="camp-card__head">
+        <h3>{c.name}</h3>
+        <span class="admin-tag">stock</span>
+      </header>
+      <div class="camp-card__body">
+        <ChapterList chapters={c.chapters} playCount={playCountOf(c)} />
+        <div class="camp-card__settings">
+          <MapsToPlay c={c} busy={busy} run={run} />
+        </div>
+      </div>
     </Panel>
   );
 }
@@ -273,12 +298,16 @@ export function AdminCampaigns() {
 
   return (
     <div class="stack">
-      <Panel>
-        <div class="admin-row">
-          <span class="muted">
-            {data.free === null ? 'Free disk space unknown.' : `${gb(data.free)} free`}
-          </span>
-          <input type="file" accept=".vpk" aria-label="Upload campaign" disabled={busy} onChange={onUpload} />
+      <Panel class="camp-upload">
+        <label class={`camp-drop${busy || uploading ? ' is-busy' : ''}`}>
+          <input class="sr-only" type="file" accept=".vpk" aria-label="Upload campaign" disabled={busy} onChange={onUpload} />
+          <span class="camp-drop__title">Upload a campaign</span>
+          <span class="camp-drop__hint">One .vpk. It is read into a draft you can rename before publishing it to every server.</span>
+          <span class="btn btn--ghost camp-drop__btn" aria-hidden="true">Choose a .vpk</span>
+        </label>
+        <div class="camp-disk">
+          <span class="camp-disk__n">{data.free === null ? '?' : gb(data.free)}</span>
+          <span class="camp-disk__label">{data.free === null ? 'free disk space unknown' : 'free for uploads'}</span>
         </div>
         {uploading && (
           <div class="upprog" role="status" aria-live="polite">
@@ -299,16 +328,34 @@ export function AdminCampaigns() {
         {error && <p class="error">{error}</p>}
       </Panel>
 
-      {/* The stock four always have a row (they need no upload to exist), so
-          this is keyed on custom campaigns specifically, not the raw list. */}
-      {drafts.length === 0 && published.length === 0
-        && <Panel><Empty>No custom campaigns uploaded yet.</Empty></Panel>}
+      {drafts.length > 0 && (
+        <section class="camp-group">
+          <h3 class="camp-group__title">Drafts <span class="camp-group__n">{drafts.length}</span></h3>
+          <div class="camp-grid">{drafts.map((c) => <DraftCard key={c.slug} c={c} busy={busy} run={run} />)}</div>
+        </section>
+      )}
 
-      {drafts.map((c) => <DraftCard key={c.slug} c={c} busy={busy} run={run} />)}
-      {published.map((c) => (
-        <PublishedCard key={c.slug} c={c} busy={busy} run={run} serverIds={serverIds} serverNames={serverNames} />
-      ))}
-      {stock.map((c) => <StockCard key={c.slug} c={c} busy={busy} run={run} />)}
+      <section class="camp-group">
+        <h3 class="camp-group__title">Custom campaigns <span class="camp-group__n">{published.length}</span></h3>
+        {/* The stock four always have a row (they need no upload to exist), so
+            this is keyed on custom campaigns specifically, not the raw list. */}
+        {drafts.length === 0 && published.length === 0
+          ? <Panel><Empty>No custom campaigns uploaded yet.</Empty></Panel>
+          : (
+            <div class="camp-grid">
+              {published.map((c) => (
+                <PublishedCard key={c.slug} c={c} busy={busy} run={run} serverIds={serverIds} serverNames={serverNames} />
+              ))}
+            </div>
+          )}
+      </section>
+
+      {stock.length > 0 && (
+        <section class="camp-group">
+          <h3 class="camp-group__title">Stock campaigns <span class="camp-group__n">{stock.length}</span></h3>
+          <div class="camp-grid">{stock.map((c) => <StockCard key={c.slug} c={c} busy={busy} run={run} />)}</div>
+        </section>
+      )}
     </div>
   );
 }
