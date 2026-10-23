@@ -118,10 +118,13 @@ function HideGame({ design, edit }: { design: HudDesign; edit: Edit }) {
         />
         <span>Hide the game's crosshair</span>
       </label>
-      <p class="muted hud__note">Hides the game's own crosshair so an image crosshair can replace it.</p>
-      {/* Probe Q16b (/home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/centre-bcef.png): never_draw on HudCrosshair takes its ability marker too. */}
+      <p class="muted hud__note">Hides the game's own infected crosshair so an image crosshair can replace it. The ability ring (tongue, vomit and pounce ready) still shows.</p>
+      {/* Probe XR (/home/volence/l4d/hud/probe-xhair-ring/ab-alpha.jpg): crosshair 0 stops the whole crosshair element, ring included; the survivor circle is drawn from the cl_crosshair_* cvars, which no HUD file reaches. */}
       {design.hideGameCrosshair && (
-        <p class="muted hud__note hud__warn">This also removes the ability marker on the infected side.</p>
+        <p class="muted hud__note hud__warn">
+          In game, keep <code>crosshair 1</code>: setting it to 0 hides the ability ring too. To hide the survivor crosshair,
+          use <code>cl_crosshair_alpha 0</code> instead (the game saves it).
+        </p>
       )}
       {design.crosshair === 'none' && design.hideGameCrosshair && (
         <p class="muted hud__note hud__warn">With no custom crosshair and the game's hidden, there will be no crosshair at all.</p>

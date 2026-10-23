@@ -275,13 +275,25 @@ describe('buildHud, layout', () => {
   });
 
   // Probe T2: never_draw on HudCrosshair hides the engine crosshair for both teams.
-  it('writes never_draw on HudCrosshair only when the player hides the game crosshair', () => {
+  it('hides the game crosshair by its icons, keeping the ability ring, and never by never_draw', () => {
+    // Probe XR (/home/volence/l4d/hud/probe-xhair-ring/ab-alpha.jpg): never_draw on HudCrosshair took the ability ring
+    // and left the survivor circle; PZ_crosshair_open on a clear texture hid the infected crosshair and kept the ring.
     const fonts = { regular: new Uint8Array(1), bold: new Uint8Array(1) };
     for (const preset of ['stock', 'modern'] as const) {
-      const on = kvFind(layoutOf(buildHud(design({ preset, hideGameCrosshair: true }), { fonts })), ['HudCrosshair'])!;
-      expect(kvGet(on, 'never_draw'), preset).toBe('1');
-      const off = kvFind(layoutOf(buildHud(design({ preset }), { fonts })), ['HudCrosshair'])!;
-      expect(kvGet(off, 'never_draw'), preset).toBeUndefined();
+      const files = buildHud(design({ preset, hideGameCrosshair: true }), { fonts });
+      expect(kvGet(kvFind(layoutOf(files), ['HudCrosshair'])!, 'never_draw'), preset).toBeUndefined();
+      const cells = kvFind(parseKv(text(files, 'scripts/hud_textures.txt')!)[0].value as KvNode[], ['TextureData'])!.value as KvNode[];
+      for (const entry of ['PZ_crosshair_open', 'crosshair_default']) {
+        const e = kvFind(cells, [entry])!;
+        expect(kvGet(e, 'file'), `${preset} ${entry}`).toBe('vgui/hud/hudeditor/clear');
+        // The cell keeps its 32 x 32: the ring is sized from it.
+        expect([kvGet(e, 'width'), kvGet(e, 'height')]).toEqual(['32', '32']);
+      }
+      expect(files.filter((f) => f.path === 'materials/vgui/hud/hudeditor/clear.vtf')).toHaveLength(1);
+      // Off, the icon keeps the game's own art (Modern ships the file for its other cells; stock ships none).
+      const off = text(buildHud(design({ preset }), { fonts }), 'scripts/hud_textures.txt');
+      if (preset === 'stock') expect(off).toBeUndefined();
+      else expect(kvGet(kvFind(parseKv(off!)[0].value as KvNode[], ['TextureData', 'PZ_crosshair_open'])!, 'file')).toBe('sprites/crosshairs');
     }
   });
 
@@ -2108,12 +2120,12 @@ describe('the ability marker: HudCrosshair\'s ability keys (plan Task 8)', () =>
   const text = (d: HudDesign) => new TextDecoder('latin1').decode(buildHud(d).find((f) => f.path === LAYOUT)!.data);
   /** The HudCrosshair block's text in the download: the block runs to the next top-level block. */
   const crosshairBlocks = (d: HudDesign) => [...text(d).matchAll(/\n\t"?HudCrosshair"?\s*\r?\n\t\{([\s\S]*?)\r?\n\t\}/g)].map((m) => m[1]);
-  it('writes the marker keys and never_draw into one HudCrosshair block', () => {
+  it('writes the marker keys into one HudCrosshair block, with no never_draw when the game crosshair is hidden', () => {
     const d = validateDesign({ v: 1, hideGameCrosshair: true,
       elements: { abilityMarker: { keys: { ability_size: 30, ability_ready_color: '0 255 0 255' } } } });
     const blocks = crosshairBlocks(d);
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatch(/"?never_draw"?\s+"1"/);
+    expect(blocks[0]).not.toMatch(/never_draw/);
     expect(blocks[0]).toMatch(/"ability_size"\s+"30"/);
     expect(blocks[0].match(/ability_ready_color/g)).toHaveLength(1);
     expect(blocks[0]).toMatch(/"ability_ready_color"\s+"0 255 0 255"/);

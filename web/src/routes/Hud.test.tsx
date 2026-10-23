@@ -1022,14 +1022,14 @@ describe('Hud page', () => {
     expect(box().checked).toBe(true);
   });
 
-  it('warns that hiding the game\'s crosshair removes the ability marker too (probe Q16b)', () => {
-    // /home/volence/l4d/hud/probe-phase2-infected/b10/shots/crops/centre-bcef.png: never_draw, no marker.
+  it('says hiding the game\'s crosshair keeps the ability ring, and to keep crosshair 1 (probe XR)', () => {
+    // /home/volence/l4d/hud/probe-xhair-ring/ab-alpha.jpg: the clear icon keeps the ring; crosshair 0 stops it.
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: 'Custom crosshair' }));
-    const warning = 'This also removes the ability marker on the infected side.';
-    expect(screen.queryByText(warning)).toBeNull();
+    const note = () => [...document.querySelectorAll('p')].find((p) => /keep crosshair 1: setting it to 0 hides the ability ring too/.test(p.textContent ?? ''));
+    expect(note()).toBeUndefined();
     fireEvent.click(screen.getByLabelText("Hide the game's crosshair"));
-    expect(screen.getByText(warning)).toBeTruthy();
+    expect(note()?.textContent).toMatch(/cl_crosshair_alpha 0/);
   });
 
   it('offers the ability marker\'s size in pixels and its colours, and says when the game shows it', () => {
