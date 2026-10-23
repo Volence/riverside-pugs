@@ -13,7 +13,8 @@ const ALLOWLIST: Record<string, string> = {
   'tank.incaps_caused': 'Survivor incaps per tank',
   'witch.crown_rate': 'Witches crowned',
   'witch.startle_rate': 'Witches startled',
-  'hunter.skeet_rate': 'Hunters skeeted',
+  // Every skeet event, team skeets too; plain "Skeets" means solo (owner, 2026-10-23).
+  'hunter.skeet_rate': 'Hunters skeeted (incl. team)',
   'hunter.damage_per_spawn': 'Hunter damage per spawn',
   'smoker.pull_rate': 'Smoker pulls per spawn',
   'boomer.boomed_per_spawn': 'Survivors boomed per boomer',

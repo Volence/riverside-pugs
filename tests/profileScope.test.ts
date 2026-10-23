@@ -180,3 +180,16 @@ describe('scope outside the site', () => {
     expect(desc).toMatch(/^\*\*Season 1:\*\* \*\*Placing 1\/5\*\* · 1W 0L \(100%\) · 1 matches/);
   });
 });
+
+// Owner 2026-10-23: "Skeets" is the solo stat wherever players compare
+// themselves; team skeets are their own stat and are not added in.
+describe('Skeets on the cast lineup card', () => {
+  it('counts solo skeets only', () => {
+    const m = play('a', 3);
+    db.prepare("INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (?, ?, 'team_skeets', 2)").run(m, ME);
+    const me = buildMatchView(db, m, { overrides: { a: {}, b: {} } })!.teams.a.players.find((p) => p.steamid === ME)!;
+    expect(me.career?.skeets).toBe(3);
+    // The box score keeps both stats, each under its own key.
+    expect(me.stats).toMatchObject({ skeets: 3, team_skeets: 2 });
+  });
+});

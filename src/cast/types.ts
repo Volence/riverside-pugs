@@ -267,7 +267,8 @@ export interface CastCareer {
   /** The season's name ("Season 1"), or "Career". */
   scope: string;
   matches: number; wins: number; losses: number;
-  /** skeets + team_skeets: every skeet, all weapons, counted once. */
+  /** Solo skeets (the `skeets` stat), as "Skeets" means everywhere players
+   *  compare themselves (owner, 2026-10-23). Team skeets are not added. */
   skeets: number;
   /** dps_landed: damage pounces. */
   dps: number;
@@ -275,12 +276,11 @@ export interface CastCareer {
   boomerRate: number | null;
 }
 
-/** The skeet total the overlays show: solo plus team skeets. The weapon
- *  subsets are breakdowns of these two and are never added on top (see the
- *  skeet ruleset in src/statKeys.ts). */
-export function skeetTotal(stats: Record<string, number>): number | null {
-  if (stats.skeets === undefined && stats.team_skeets === undefined) return null;
-  return (stats.skeets ?? 0) + (stats.team_skeets ?? 0);
+/** The skeet count the overlays show: solo skeets only, the `skeets` stat
+ *  (owner, 2026-10-23: "Skeets" means solo wherever players compare
+ *  themselves; team skeets are their own stat). Null when not recorded. */
+export function soloSkeets(stats: Record<string, number>): number | null {
+  return stats.skeets ?? null;
 }
 
 /** Boomer % as the site computes it (src/standings.ts): booms landed per

@@ -382,7 +382,7 @@ function CardBody({ k, community: c, player: p }: { k: CardKey; community: Wrapp
             </>
           )}
           {p.trophies.skeetTriples > 0 && (
-            <p class="line">{`${p.trophies.skeetTriples} skeet ${p.trophies.skeetTriples === 1 ? 'triple' : 'triples'}: three skeets inside 5 seconds.`}</p>
+            <p class="line">{`${p.trophies.skeetTriples} skeet ${p.trophies.skeetTriples === 1 ? 'triple' : 'triples'}: three skeets inside 5 seconds, team skeets included.`}</p>
           )}
           {chips.length > 0 && (
             <ul class="wrapped-chips wrapped-chips--quiet" aria-label="Season totals">
