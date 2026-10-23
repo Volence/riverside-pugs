@@ -1538,11 +1538,25 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .bar__value--neutral { color: var(--text); }
 .bar__detail { font-weight: 400; color: var(--text-muted); }
 .bar__track {
+  position: relative;
   height: 6px;
   border-radius: 3px;
   background: var(--surface-2);
   overflow: hidden;
 }
+.bar__mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text-muted);
+  opacity: 0.7;
+}
+.bar--dim { opacity: 0.6; }
+.bars__few { margin-top: var(--sp-3); }
+.bars__few > summary { cursor: pointer; color: var(--text-muted); font-size: var(--fs-dense); margin-bottom: var(--sp-3); }
+.bars__legend { margin: 0 0 var(--sp-3); font-size: var(--fs-dense); color: var(--text-muted); }
 .bar__fill { height: 100%; border-radius: 3px; transition: width 200ms ease; }
 .bar__fill--good { background: linear-gradient(90deg, var(--win), color-mix(in srgb, var(--win) 45%, transparent)); }
 .bar__fill--bad { background: linear-gradient(90deg, var(--loss), color-mix(in srgb, var(--loss) 45%, transparent)); }

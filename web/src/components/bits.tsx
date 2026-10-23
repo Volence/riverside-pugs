@@ -66,18 +66,22 @@ export function Sparkline({ values }: { values: number[] }) {
  * stale maximum cannot produce a bar that overflows its track.
  */
 export function BarRow(
-  { name, value, detail, fraction, tone = 'neutral', href }: {
+  { name, value, detail, fraction, tone = 'neutral', href, mark, dim = false }: {
     name: string;
     value: string;
     detail?: string;
     fraction: number;
     tone?: 'good' | 'bad' | 'neutral';
     href?: string;
+    /** A reference line across the track, as a fraction (0.5 marks an even split). */
+    mark?: number;
+    /** Faded, for a row whose sample is too small to read much into. */
+    dim?: boolean;
   },
 ) {
   const pct = Math.max(0, Math.min(1, Number.isFinite(fraction) ? fraction : 0)) * 100;
   return (
-    <div class="bar">
+    <div class={`bar${dim ? ' bar--dim' : ''}`}>
       <div class="bar__head">
         <span class="bar__name">{href ? <a href={href}>{name}</a> : name}</span>
         <span class={`bar__value bar__value--${tone}`}>
@@ -87,6 +91,7 @@ export function BarRow(
       </div>
       <div class="bar__track">
         <div class={`bar__fill bar__fill--${tone}`} style={{ width: `${pct}%` }} />
+        {mark !== undefined && <div class="bar__mark" style={{ left: `${Math.max(0, Math.min(1, mark)) * 100}%` }} aria-hidden="true" />}
       </div>
     </div>
   );
