@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import type { VoiceOps } from '../discord/transport.js';
-import { getBooking, sideName, sidesOf, voiceMembers, type Side } from './bookings.js';
+import { bookingHeading, getBooking, sideName, sidesOf, voiceMembers, type Side } from './bookings.js';
 
 /** Discord's limit on a channel or category name. */
 const NAME_MAX = 100;
@@ -19,7 +19,8 @@ type Granted = Record<Side, Set<string>>;
 
 /**
  * A booked scrim's private team voice (plan 4c, rulings 1 to 3): one category
- * named `Scrim: <side a> vs <side b>` with a voice channel per side, labelled
+ * named `Scrim: <side a> vs <side b>` (a tournament booking: the event's name,
+ * see bookingHeading) with a voice channel per side, labelled
  * by the side's name, that only that side's accepted people (and staff, through
  * the staff role) can see. Made when the booking is ready, kept in step with
  * who is accepted every minute, and removed at the end of the booking after
@@ -85,7 +86,7 @@ export class BookingVoice {
       const nameA = sideName(db, a);
       const nameB = sideName(db, bs);
       const made = await voice.createMatchChannels(
-        `Scrim: ${nameA} vs ${nameB}`.slice(0, NAME_MAX),
+        bookingHeading(db, b, nameA, nameB, NAME_MAX),
         { label: nameA.slice(0, NAME_MAX), userIds: want.a },
         { label: nameB.slice(0, NAME_MAX), userIds: want.b },
         getSetting(db, 'discord_staff_role_id') || null,

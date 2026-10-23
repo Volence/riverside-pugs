@@ -12,7 +12,7 @@ import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPane
 import { BookingsPanel } from './BookingsPanel';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
-import { chatFromUrl, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, funnelText, isLow, liveFromUrl, reasonText } from '../../liveBoard';
+import { BOOKING_REASON, chatFromUrl, liveStateLabel, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, funnelText, isLow, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
  *  the socket was reconnecting must not leave a countdown wrong for long. */
@@ -145,6 +145,7 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
   // are facts about the server, not about this admin, so they are said on the
   // card rather than discovered by pressing a button and reading a PUGERR.
   const blocked = m.leaveControl === 'old_plugin' ? OLD_PLUGIN_REASON
+    : m.bookingId != null ? BOOKING_REASON
     : !m.leaveTracking ? SELF_STARTED_REASON
     : null;
 
@@ -153,10 +154,10 @@ function MatchCard({ match: m, elapsedS, holdMaxMinutes, lowAlertSeconds, reload
       <header class="live-card__line">
         <h3><a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}</h3>
         {m.server && <button type="button" class="chip" onClick={() => onChat(m.server!.id)}>Chat</button>}
-        <span class="muted">{m.map ? mapName(m.map) : 'no map yet'}</span>
+        <span class="muted">{m.map ? mapName(m.map) : 'map not reported yet'}</span>
         {m.look && <LookTag look={m.look} />}
         <span class={`admin-status admin-status--${m.state === 'live' ? 'idle' : 'reserved'}`}>
-          {m.state === 'waiting' ? 'waiting for a server' : m.state}
+          {liveStateLabel(m.state, m.phase)}
         </span>
         <span class="mono">{m.teamAScore} - {m.teamBScore}</span>
         <span class="muted">{m.server ? m.server.name : 'no server'}</span>

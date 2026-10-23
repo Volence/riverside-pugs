@@ -233,6 +233,17 @@ describe('next and stay (plan 4b, Task 7)', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM booking_events WHERE booking_id = ? AND event = 'campaign_added'").get(id)).toEqual({ n: 2 });
   });
 
+  it('staff +1 campaign is refused on a tournament booking: the event runs it', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    ready(id);
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(id);
+    const r = await call('POST', `/api/admin/bookings/${id}/extend`, MOD, {});
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe('The event runs this tournament match. Use the event desk.');
+    expect(db.prepare('SELECT games_allowed FROM bookings WHERE id = ?').get(id)).toEqual({ games_allowed: 1 });
+  });
+
   it('refuses with the runner\'s own text when the caller does not manage a confirmed side', async () => {
     const id = await create();
     await call('POST', `/api/bookings/${id}/confirm`, P[1]);

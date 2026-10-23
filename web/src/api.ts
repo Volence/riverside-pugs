@@ -2617,6 +2617,8 @@ export interface AdminBookingRow {
   server: string | null; peak: { a: number; b: number }; endReason: string | null;
   /** Plan 2 Ruling 6: a side whose team (or pickup captain) carries the toxic flag. */
   toxic: { a: boolean; b: boolean };
+  /** A tournament booking's event (its desk runs the match); null for a scrim. */
+  eventId: number | null;
 }
 
 /** src/routes/adminBookings.ts: the scrim cap and PUG reserve (each per region), and the scrims holding a box per region (server priority Ruling 9). */
