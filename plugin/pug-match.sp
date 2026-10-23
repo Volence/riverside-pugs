@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.37"
+#define PLUGIN_VERSION "0.3.39"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -3281,18 +3281,8 @@ public Action Timer_LiveStats(Handle timer)
 
 	for (int i = 0; i < g_iRosterCount; i++)
 	{
-		int client = ClientOfSlot(i);
-		// hp is live entity state rather than a counter, so it is read at emit
-		// time. -1 means "not applicable": disconnected, or not a survivor.
-		int hp = -1;
-		if (client != -1 && GetClientTeam(client) == TEAM_SURVIVOR)
-			hp = IsPlayerAlive(client) ? GetClientHealth(client) : 0;
-
 		char line[768];
-		Format(line, sizeof(line),
-			"LIVESTAT steamid=%s hp=%d ck=%d sidmg=%d sikill=%d ff=%d rev=%d",
-			g_sRosterId[i], hp,
-			g_iStatCk[i], g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatFf[i], g_iStatRev[i]);
+		FormatCoreLive(i, line, sizeof(line));
 
 		// tank_damage / damage_as_si / tank_punches / boomer_spawns ride
 		// pug-match's own hooks,
@@ -3328,6 +3318,35 @@ rock_skeets=%d dps_landed=%d biles_landed=%d survivors_biled=%d",
 		EmitPug("%s", line);
 	}
 	return Plugin_Continue;
+}
+
+/** The LIVESTAT head for roster slot `i`: hp and the core five counters.
+ *  hp is live entity state rather than a counter, so it is read at emit time.
+ *  -1 means "not applicable": disconnected, or not a survivor. */
+void FormatCoreLive(int i, char[] line, int maxlen)
+{
+	int client = ClientOfSlot(i);
+	int hp = -1;
+	if (client != -1 && GetClientTeam(client) == TEAM_SURVIVOR)
+		hp = IsPlayerAlive(client) ? GetClientHealth(client) : 0;
+	Format(line, maxlen,
+		"LIVESTAT steamid=%s hp=%d ck=%d sidmg=%d sikill=%d ff=%d rev=%d",
+		g_sRosterId[i], hp,
+		g_iStatCk[i], g_iStatSiDmg[i], g_iStatSiKill[i], g_iStatFf[i], g_iStatRev[i]);
+}
+
+/** The core five for every rostered player, at map end. EmitSkillLive covers
+ *  the skill array but not these, which otherwise went out only on the 10 s
+ *  timer, so the backend's end-of-map snapshot (taken on MAP_RESULT) missed
+ *  up to the last ten seconds of commons, SI damage, kills, FF and revives. */
+void EmitCoreLive()
+{
+	for (int i = 0; i < g_iRosterCount; i++)
+	{
+		char line[256];
+		FormatCoreLive(i, line, sizeof(line));
+		EmitPug("%s", line);
+	}
 }
 
 // ---------- tank recap (caster studio) ----------
@@ -4737,8 +4756,10 @@ void FinalizeMap()
 	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
 	g_iMapScoreB[g_iMapCount] = g_iHalfScoreB;
 	g_iMapCount++;
-	// The full skill set for this map's live snapshot, before MAP_RESULT so the
-	// backend's end-of-map snapshot (taken on MAP_RESULT) already holds it.
+	// The core counters and the full skill set for this map's live snapshot,
+	// before MAP_RESULT so the backend's end-of-map snapshot (taken on
+	// MAP_RESULT) already holds them as they stood at the end of the map.
+	EmitCoreLive();
 	EmitSkillLive();
 	// No g_iHalf reset here any more. It was needed while the half was a
 	// counter that had to restart at each map; it is now read from
