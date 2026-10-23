@@ -63,6 +63,17 @@ export function MapDetail({ map }: { map: string }) {
               ? `${fmtClock(data.rounds.fastestSec)} to ${fmtClock(data.rounds.slowestSec)}`
               : undefined}
           />
+          {/* Only from Season 1, and only for a map whose number was set
+              from the last season's saferoom rate (see the Campaigns page). */}
+          {data.multiplier && (
+            <Figure
+              label="Multiplier"
+              value={data.multiplier.after.toFixed(2)}
+              sub={data.multiplier.saferoomRate === null
+                ? `was ${data.multiplier.before.toFixed(2)}`
+                : `was ${data.multiplier.before.toFixed(2)}, ${Math.round(data.multiplier.saferoomRate * 100)}% made it last season`}
+            />
+          )}
         </Figures>
       </PageHeader>
 

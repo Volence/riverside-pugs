@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, type MapIndexRow } from '../api';
+import { api, type MapIndexRow, type SeasonMultipliers } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, chapterName, fmtClock, mapName, survivalLabel } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
@@ -31,6 +31,7 @@ export function Maps() {
   if (!data) return <PageSkeleton variant="list" panels={2} />;
 
   const maps = data.maps;
+  const multipliers = data.multipliers ?? null;
 
   // Grouped by campaign because that is how people actually refer to them
   // ("Dead Air"), while the pages themselves are keyed by the engine map name.
@@ -123,63 +124,70 @@ export function Maps() {
           )}
 
           <div class="stack">
-            {shown.map(([campaign, rows]) => (
-              <Panel class="panel--table campaign-table" key={campaign} id={campaignAnchor(campaign)}>
-                <h3>
-                  {campaign === 'other' ? 'Other' : campaignName(campaign)}
-                  {pool.has(campaign) && <span class="ccamp__pool">In the vote</span>}
-                </h3>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Map</th>
-                        <th class="num">Played</th>
-                        <th class="num">Avg score</th>
-                        <th class="num">Survived</th>
-                        <th class="num">Fastest</th>
-                        <th class="num">Average</th>
-                        <th class="num">Slowest</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((m) => (
-                        <tr key={m.map}>
-                          <td><a href={`/map/${encodeURIComponent(m.map)}`}>{chapterName(m.display ?? null, mapName(m.map))}</a></td>
-                          <td class="num">{m.played}</td>
-                          {m.avgScore === null
-                            ? <td class="num muted">not recorded</td>
-                            : <td class="num">{m.avgScore}</td>}
-                          {/* Survival is null for every round played before
-                              the plugin reported it, which is not the same as
-                              nobody surviving. Say so rather than print 0%,
-                              and dim a sample too thin to state as a rate. */}
-                          {/* The sample size is PRINTED, not just a hover
-                              title. This column and "Played" have different
-                              denominators (played counts rounds with a usable
-                              clock, this counts rounds with a survival
-                              reading, and the second is much the smaller), so
-                              a bare percentage next to a bare count reads as
-                              a fraction of that count. It is not. */}
-                          {(() => {
-                            const s = survivalLabel(m.rounds.survivalPct, m.rounds.measured);
-                            return (
-                              <td class={`num${s.thin ? ' muted' : ''}`}>
-                                {s.value}
-                                {s.sub && <span class="map-survived__sub">{s.sub}</span>}
-                              </td>
-                            );
-                          })()}
-                          <RoundTime sec={m.rounds.fastestSec} />
-                          <RoundTime sec={m.rounds.avgSec} />
-                          <RoundTime sec={m.rounds.slowestSec} />
+            {multipliers && Object.keys(multipliers.maps).length > 0 && <MultiplierNote m={multipliers} />}
+            {shown.map(([campaign, rows]) => {
+              // The column only where a map in this campaign changed number.
+              const withMult = !!multipliers && rows.some((m) => multipliers.maps[m.map]);
+              return (
+                <Panel class="panel--table campaign-table" key={campaign} id={campaignAnchor(campaign)}>
+                  <h3>
+                    {campaign === 'other' ? 'Other' : campaignName(campaign)}
+                    {pool.has(campaign) && <span class="ccamp__pool">In the vote</span>}
+                  </h3>
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Map</th>
+                          <th class="num">Played</th>
+                          <th class="num">Avg score</th>
+                          <th class="num">Survived</th>
+                          <th class="num">Fastest</th>
+                          <th class="num">Average</th>
+                          <th class="num">Slowest</th>
+                          {withMult && <th class="num" title={`Score multiplier in ${multipliers!.season}`}>Multiplier</th>}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Panel>
-            ))}
+                      </thead>
+                      <tbody>
+                        {rows.map((m) => (
+                          <tr key={m.map}>
+                            <td><a href={`/map/${encodeURIComponent(m.map)}`}>{chapterName(m.display ?? null, mapName(m.map))}</a></td>
+                            <td class="num">{m.played}</td>
+                            {m.avgScore === null
+                              ? <td class="num muted">not recorded</td>
+                              : <td class="num">{m.avgScore}</td>}
+                            {/* Survival is null for every round played before
+                                the plugin reported it, which is not the same as
+                                nobody surviving. Say so rather than print 0%,
+                                and dim a sample too thin to state as a rate. */}
+                            {/* The sample size is PRINTED, not just a hover
+                                title. This column and "Played" have different
+                                denominators (played counts rounds with a usable
+                                clock, this counts rounds with a survival
+                                reading, and the second is much the smaller), so
+                                a bare percentage next to a bare count reads as
+                                a fraction of that count. It is not. */}
+                            {(() => {
+                              const s = survivalLabel(m.rounds.survivalPct, m.rounds.measured);
+                              return (
+                                <td class={`num${s.thin ? ' muted' : ''}`}>
+                                  {s.value}
+                                  {s.sub && <span class="map-survived__sub">{s.sub}</span>}
+                                </td>
+                              );
+                            })()}
+                            <RoundTime sec={m.rounds.fastestSec} />
+                            <RoundTime sec={m.rounds.avgSec} />
+                            <RoundTime sec={m.rounds.slowestSec} />
+                            {withMult && <MultiplierCell m={multipliers!} map={m.map} />}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Panel>
+              );
+            })}
           </div>
         </>
       )}
@@ -191,4 +199,38 @@ export function Maps() {
 function RoundTime({ sec }: { sec: number | null }) {
   if (sec === null) return <td class="num muted">n/a</td>;
   return <td class="num">{fmtClock(sec)}</td>;
+}
+
+const mult = (x: number) => x.toFixed(2);
+const pctOf = (x: number) => `${Math.round(x * 100)}%`;
+
+/** Why a map is worth what it is this season, in plain words. */
+function MultiplierNote({ m }: { m: SeasonMultipliers }) {
+  return (
+    <Panel class="multiplier-note">
+      <h3>Score multipliers in {m.season}</h3>
+      <p>
+        A survivor team's score on a map is multiplied by that map's multiplier. From {m.season} the
+        multiplier follows how often survivors reached the saferoom on the map in {m.basedOn}: the harder
+        the map, the more it is worth, so every map counts about the same in a match. Each campaign keeps
+        the same total as before, no map goes below {mult(m.min)} or above {mult(m.max)}, and only maps
+        with at least {m.minMatches} matches in {m.basedOn} changed. A mirrored map uses its original's
+        number. The numbers are worked out again at the start of every season.
+      </p>
+    </Panel>
+  );
+}
+
+/** The map's multiplier, with the old one and the saferoom rate that set it. */
+function MultiplierCell({ m, map }: { m: SeasonMultipliers; map: string }) {
+  const line = m.maps[map];
+  if (!line) return <td class="num muted">n/a</td>;
+  return (
+    <td class="num">
+      {mult(line.after)}
+      <span class="map-survived__sub">
+        was {mult(line.before)}{line.saferoomRate !== null && <>, {pctOf(line.saferoomRate)} made it in {m.basedOn}</>}
+      </span>
+    </td>
+  );
 }
