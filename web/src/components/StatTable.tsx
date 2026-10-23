@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { EndorseKind, LiveEvent, StatDef } from '../api';
-import { deriveLiveStats, labelFor, liveGroupStarts } from '../format';
+import { deriveLiveStats, labelFor, liveGroupStarts, statHelp } from '../format';
 import { PlayerLink } from './bits';
 import { TitleTag } from './TitleTag';
 import { markColumn, directionOf, type Mark } from '../outliers';
@@ -152,7 +152,7 @@ export function StatTable(
         <thead>
           <tr>
             <th class="live__pcol">Player</th>
-            {cols.map((k) => <th class={cls(k)} key={k}>{labelFor(k)}</th>)}
+            {cols.map((k) => <th class={cls(k)} key={k} title={statHelp(k)}>{labelFor(k)}</th>)}
           </tr>
         </thead>
         <tbody>

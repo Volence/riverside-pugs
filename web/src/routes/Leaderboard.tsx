@@ -2,7 +2,7 @@ import { Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { api, type LeaderboardRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders } from '../format';
+import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statHelp, statLeaders } from '../format';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { Headliner } from '../components/Headliner';
@@ -94,7 +94,7 @@ export function Leaderboard({ me }: { me: string | null }) {
       class={`num sortable${cls ? ` ${cls}` : ''}${sort.key === key ? ' is-sorted' : ''}`}
       key={key}
       onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))}
-      title={`Sort by ${label}`}
+      title={statHelp(key) ? `${statHelp(key)} Click to sort.` : `Sort by ${label}`}
     >
       {label}
       {sort.key === key && <span class="sortable__arrow">{sort.desc ? '▾' : '▴'}</span>}
