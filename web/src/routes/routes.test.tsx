@@ -87,11 +87,12 @@ describe('Leaderboard', () => {
       ],
     });
     render(<Leaderboard me="2" />);
-    // alice is also the top-rated headliner (1200 beats bob's 1100), so her
-    // name and rating each appear twice: the table row and the side card.
+    // alice and bob are both on the podium too, so each name appears twice:
+    // the podium card and the table row. The podium formats the rating.
     await waitFor(() => expect(screen.getAllByText('alice')).toHaveLength(2));
     expect(screen.getByText('Season 1')).toBeTruthy();
-    expect(screen.getAllByText('1200')).toHaveLength(2);
+    expect(screen.getAllByText('1200')).toHaveLength(1);
+    expect(document.querySelector('.lbpod__card--1 .lbpod__sr')?.textContent).toBe('1,200SR');
   });
 
   it('says so when nobody is rated yet', async () => {
@@ -116,7 +117,7 @@ describe('Leaderboard', () => {
     });
     const { container } = render(<Leaderboard me={null} />);
     await waitFor(() => expect(screen.getAllByText('alice')).toHaveLength(2));
-    // carol appears once: in the table, not as the headliner.
+    // carol appears once: in the table, not on the podium.
     expect(screen.getAllByText('carol')).toHaveLength(1);
     const names = [...container.querySelectorAll('tbody tr .lb__pcol')].map((c) => c.textContent);
     expect(names).toEqual(['alice', 'bob', 'carol']);
@@ -128,6 +129,25 @@ describe('Leaderboard', () => {
     const figure = screen.getByText('Matches rated').parentElement as HTMLElement;
     expect(figure.textContent).toMatch(/5/);
     expect(figure.textContent).not.toMatch(/4/);
+  });
+
+  it('puts the top three ranked players by SR on the podium, never a provisional one', async () => {
+    mockApi.leaderboard.mockResolvedValue({
+      season: { id: 1, name: 'Season 1' },
+      matchesRated: 9,
+      rows: [
+        { steamid: '9', name: 'zed', avatar: null, sr: 9000, wins: 1, losses: 0, games: 1, ranked: false },
+        { steamid: '1', name: 'alice', avatar: null, sr: 1200, wins: 3, losses: 1, games: 4, ranked: true },
+        { steamid: '4', name: 'dan', avatar: null, sr: 900, wins: 2, losses: 2, games: 4, ranked: true },
+        { steamid: '2', name: 'bob', avatar: null, sr: 1100, wins: 1, losses: 3, games: 4, ranked: true },
+        { steamid: '3', name: 'carol', avatar: null, sr: 1000, wins: 2, losses: 2, games: 4, ranked: true },
+      ],
+    });
+    const { container } = render(<Leaderboard me={null} />);
+    await waitFor(() => expect(container.querySelector('.lbpod')).toBeTruthy());
+    const podium = [...container.querySelectorAll('.lbpod__name')].map((a) => a.textContent);
+    expect(podium).toEqual(['alice', 'bob', 'carol']);
+    expect(container.querySelector('.lbpod__card--1 dd')?.textContent).toBe('3W 1L');
   });
 
   it('shows no top-rated card when nobody is ranked yet', async () => {
