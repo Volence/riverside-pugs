@@ -1601,6 +1601,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           (orchestrator as RealOrchestrator).assignMatchId(serverId, token, matchId),
         adminSteamIds: deps.config.adminSteamIds,
         notify,
+        adopted: () => hub.broadcast('refresh'),
       });
     }
   }
@@ -2226,6 +2227,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // and an aborted game's token stops being listened for.
     logPublicAddress: deps.config.logPublicAddress,
     unregisterToken: (token) => logListener?.unregister(token),
+    changed: () => hub.broadcast('refresh'),
     // A private voice channel per side (plan 4c). Read per call: the bot logs
     // in some seconds after this runs, and may never (no bot, dev mode).
     voice: new BookingVoice({ db: deps.db, voice: () => bot?.transport?.voice ?? null }),
