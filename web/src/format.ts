@@ -178,11 +178,12 @@ export const LIVE_STAT_ORDER = LIVE_STAT_GROUPS.flatMap((g) => g.keys);
  *  - `deadstops`, `tongue_cuts`: already documented above as not occurring
  *    here. They were removed from LIVE_STAT_GROUPS, but the old ordering
  *    re-appended every unrecognised key, so that exclusion never actually held.
- *  - `survivors_biled`: skill_detect reports it as 0 on this engine. Its
- *    `biles_landed` sibling comes from the same forward and does fire, so the
- *    count being zero is the vomit-hit counter never incrementing, not an
- *    absence of biles. `boomed_vomit` measures the same thing from our own hook
- *    and works, so nothing is lost by hiding this one.
+ *  - `survivors_biled`: 0 for every match before 2026-09-29, when the
+ *    vomit-hit count from skill_detect started arriving; populated since. Not
+ *    dead any more, but a column of it would read as zero for most of the
+ *    season. `boomed_vomit` counts the same thing (each survivor vomited on
+ *    directly) from our own player_now_it hook and is populated all season,
+ *    so nothing is lost by hiding this one.
  *  - `skeets_shotgun`: shotgun is the ONLY weapon class skill_detect's trie can
  *    tag on L4D1 once magnum, GL and the hunting rifle are gone, so this is
  *    every skeet bar the rare SMG or rifle one. That remainder is still
