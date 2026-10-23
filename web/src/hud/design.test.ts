@@ -239,7 +239,7 @@ describe('validateDesign, the teammate card children', () => {
     } }).teamColumn;
     expect(got).toEqual({
       Name: { color: '10 20 30 255', fontSize: 64 },
-      HealthNumber: { on: true, fontSize: 14 },
+      HealthNumber: { color: '10 20 30 255', on: true, fontSize: 14 },
       Head: { color: '1 2 3 4' },
       Items: { fontSize: 22, y: 20 },
       BackgroundImage: { x: 5, visible: false },

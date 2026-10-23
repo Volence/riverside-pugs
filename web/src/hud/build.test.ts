@@ -185,10 +185,20 @@ describe('buildHud, childPass', () => {
     expect(kvGet(copy, 'name')).toBe('Roboto Condensed');
   });
 
+  it('renames a coloured health number in the download, so the game cannot repaint it, and only then (probe R23)', () => {
+    // /home/volence/l4d/hud/probe-r23/runs/cards.jpg: a label not named HealthNumber showing %HealthNumber% kept magenta.
+    const card = (d: HudDesign) => parseKv(text(buildHud(d), 'resource/ui/hud/teammatepanel.res')!)[0].value as KvNode[];
+    const got = card(design({ children: kids({ HealthNumber: { on: true, color: '255 0 255 255' } }) }));
+    expect(kvFind(got, ['HealthNumber'])).toBeUndefined();
+    const n = kvFind(got, ['HudEdHealthNumber'])!;
+    expect([kvGet(n, 'fieldName'), kvGet(n, 'labelText'), kvGet(n, 'fgcolor_override')]).toEqual(['HudEdHealthNumber', '%HealthNumber%', '255 0 255 255']);
+    expect(kvFind(card(design({ children: kids({ HealthNumber: { on: true } }) })), ['HealthNumber'])).toBeDefined();
+    // The preview's tree keeps the name, so every editor lookup by name still finds it.
+    expect(kvFind(buildTrees(design({ children: kids({ HealthNumber: { on: true, color: '255 0 255 255' } }) }))('resource/ui/hud/teammatepanel.res'), ['HealthNumber'])).toBeDefined();
+  });
+
   it('fails naming the file and child for an edit the child cannot take', () => {
     // validateDesign strips these; this is the guard for a design that skipped it.
-    expect(() => buildHud(design({ children: kids({ HealthNumber: { on: true, color: '1 2 3 255' } }) })))
-      .toThrow(/teammatepanel\.res: HealthNumber takes no colour/);
     expect(() => buildHud(design({ children: kids({ Head: { fontSize: 20 } }) })))
       .toThrow(/teammatepanel\.res: Head takes no text size/);
     expect(() => buildHud(design({ children: kids({ Nope: { x: 1 } }) })))
