@@ -52,6 +52,21 @@ const SIGNATURE: readonly (readonly [key: string, label: string])[] = [
 ];
 /** Per-map bests, from match_live_map_stats keys. */
 const MAP_BEST_KEYS = ['sidmg', 'ck', 'skeets', 'damage_as_si', 'tank_damage'] as const;
+/**
+ * The first match whose numbers for REDEFINED_STATS mean what they mean now.
+ *
+ * On 2026-09-29, from match 324 on, these stats changed definition: pug-match
+ * 0.3.17 began counting a bile (biles_landed, survivors_biled) only when it
+ * actually hit someone (amount > 0), and the clear counters (clears,
+ * self_clears, insta_clears) changed meaning in the same batch of plugin
+ * updates (found by the 2026-10-23 stats audit). Before it the same keys counted something else, so adding
+ * the two eras together makes a season figure that is neither. Wrapped counts
+ * these keys only from this match on, and any per-match rate of them divides
+ * by the games played from this match on, not by the whole season's games.
+ * A season that starts after it (Season 1 on) is unaffected.
+ */
+export const REDEFINED_STATS_FROM_MATCH = 324;
+export const REDEFINED_STATS: ReadonlySet<string> = new Set(['biles_landed', 'survivors_biled', 'clears', 'self_clears', 'insta_clears']);
 /** Weekly awards nobody wants on a trophy shelf. */
 const SHAME_AWARDS = new Set(['slow_ready', 'friendly_fire', 'group_hug']);
 
@@ -229,6 +244,9 @@ export function computeWrapped(
   const seasonTotals: Record<string, number> = {};
   const matchSkeets = new Map<string, MatchRef>();
   for (const s of statRows) {
+    // Old-definition rows of a redefined stat count for nothing (see
+    // REDEFINED_STATS_FROM_MATCH).
+    if (REDEFINED_STATS.has(s.stat) && s.match_id < REDEFINED_STATS_FROM_MATCH) continue;
     const bag = statTotals.get(s.player_id) ?? statTotals.set(s.player_id, {}).get(s.player_id)!;
     bag[s.stat] = (bag[s.stat] ?? 0) + s.value;
     seasonTotals[s.stat] = (seasonTotals[s.stat] ?? 0) + s.value;
@@ -363,6 +381,7 @@ export function computeWrapped(
 
   // Percentile pool: everyone with the full deck, per-match rates.
   const gamesOf = (id: string) => byPlayer.get(id)?.length ?? 0;
+  const redefinedGamesOf = (id: string) => (byPlayer.get(id) ?? []).filter((r) => r.match_id >= REDEFINED_STATS_FROM_MATCH).length;
   const pool = [...byPlayer.keys()].filter((id) => gamesOf(id) >= fullMin);
   const fixedTotals = (id: string) => {
     const rows = byPlayer.get(id) ?? [];
@@ -379,6 +398,12 @@ export function computeWrapped(
     const f = fixedBy.get(id) as Record<string, number> | undefined;
     if (f && key in f) return f[key] / g;
     if (key === 'crowns') return crownsOf(statTotals.get(id)) / g;
+    // A redefined stat only counts from REDEFINED_STATS_FROM_MATCH, so its
+    // rate is over the games played from there on.
+    if (REDEFINED_STATS.has(key)) {
+      const since = redefinedGamesOf(id);
+      return since > 0 ? (statTotals.get(id)?.[key] ?? 0) / since : 0;
+    }
     return (statTotals.get(id)?.[key] ?? 0) / g;
   };
   const poolMetrics = new Map(SIGNATURE.map(([k]) => [k, pool.map((id) => metric(id, k))]));
