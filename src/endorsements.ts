@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { getSetting } from './settings.js';
-import { completedPug } from './matchKinds.js';
+import { completedPug, seasonFilter } from './matchKinds.js';
 import { notBannedSql } from './banState.js';
 
 /**
@@ -184,25 +184,33 @@ const emptyCounts = (): EndorseCounts => ({ caller: 0, clutch: 0, vibes: 0 });
 
 /** Counts and the title for one profile. Only endorsements whose match is
  *  still completed count, so voiding a match takes its endorsements with it. */
-export function endorsementSummary(db: DB, steamid: string): EndorsementSummary {
-  const counts = emptyCounts();
-  const rows = db.prepare(
-    `SELECT e.kind, COUNT(*) AS n
-     FROM endorsements e JOIN matches m ON m.id = e.match_id AND ${completedPug('m')}
-     WHERE e.to_id = ? GROUP BY e.kind`,
-  ).all(steamid) as { kind: EndorseKind; n: number }[];
-  for (const r of rows) counts[r.kind] = r.n;
-  const { games } = db.prepare(
-    `SELECT COUNT(*) AS games FROM match_players mp
-     JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}
-     WHERE mp.player_id = ?`,
-  ).get(steamid) as { games: number };
-  const total = counts.caller + counts.clutch + counts.vibes;
+export function endorsementSummary(db: DB, steamid: string, seasonId?: number | null): EndorsementSummary {
+  const tally = (season: number | null | undefined) => {
+    const counts = emptyCounts();
+    const rows = db.prepare(
+      `SELECT e.kind, COUNT(*) AS n
+       FROM endorsements e JOIN matches m ON m.id = e.match_id AND ${completedPug('m')}${seasonFilter('m', season)}
+       WHERE e.to_id = ? GROUP BY e.kind`,
+    ).all(steamid) as { kind: EndorseKind; n: number }[];
+    for (const r of rows) counts[r.kind] = r.n;
+    const { games } = db.prepare(
+      `SELECT COUNT(*) AS games FROM match_players mp
+       JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}${seasonFilter('m', season)}
+       WHERE mp.player_id = ?`,
+    ).get(steamid) as { games: number };
+    return { counts, games };
+  };
+  // Counts and the rate follow `seasonId` (one season, or the career when
+  // omitted). The title does not: it travels with the name on every roster
+  // and the leaderboard (allTitles), which read the career.
+  const scoped = tally(seasonId);
+  const career = seasonId === null || seasonId === undefined ? scoped : tally(null);
+  const total = scoped.counts.caller + scoped.counts.clutch + scoped.counts.vibes;
   return {
-    counts, total,
-    perMatch: games > 0 ? Math.round((total / games) * 100) / 100 : 0,
+    counts: scoped.counts, total,
+    perMatch: scoped.games > 0 ? Math.round((total / scoped.games) * 100) / 100 : 0,
     title: titleFromCounts(
-      counts, games, intSetting(db, 'endorse_title_min', 5), intSetting(db, 'endorse_title_min_games', 10),
+      career.counts, career.games, intSetting(db, 'endorse_title_min', 5), intSetting(db, 'endorse_title_min_games', 10),
     ),
   };
 }

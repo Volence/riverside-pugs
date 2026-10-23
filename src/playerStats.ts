@@ -2,7 +2,7 @@ import type { DB } from './db.js';
 import { mapStatsFor } from './liveView.js';
 import { campaignRegistry, resolveCampaignForMap } from './campaignRegistry.js';
 import { unrecordedOrdinals } from './roundStats.js';
-import { completedPug } from './matchKinds.js';
+import { completedPug, seasonFilter } from './matchKinds.js';
 
 /** Which of a match's maps have a real score. Same rule as the match page's
  *  `recorded` flag (roundStats.ts). An unrecorded map still counts as played
@@ -186,12 +186,13 @@ export interface MapBreakdownRow {
  * answers across every time it has been played, whatever position it held in
  * the campaign.
  */
-export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
+/** `seasonId` narrows it to one season; omitted, it is the whole career. */
+export function playerMapBreakdown(db: DB, steamid: string, seasonId?: number | null): MapBreakdownRow[] {
   const played = db
     .prepare(
       `SELECT m.id, mp.team, mp.joined_map AS joinedMap FROM match_players mp
        JOIN matches m ON m.id = mp.match_id
-       WHERE mp.player_id = ? AND ${completedPug('m')}`,
+       WHERE mp.player_id = ? AND ${completedPug('m')}${seasonFilter('m', seasonId)}`,
     )
     .all(steamid) as { id: number; team: 'a' | 'b'; joinedMap: number }[];
   if (played.length === 0) return [];

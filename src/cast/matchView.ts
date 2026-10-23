@@ -4,7 +4,7 @@ import { stopAfterMap } from '../stopPoint.js';
 import { phaseFor, roundInProgress, currentOrdinal } from '../liveView.js';
 import { playerSeasonState } from '../seasonRules.js';
 import { currentSeasonId } from '../players.js';
-import { completedPug } from '../matchKinds.js';
+import { completedPug, seasonFilter } from '../matchKinds.js';
 import { getSetting } from '../settings.js';
 import { sideRow, sideName } from '../bookings/bookings.js';
 import { activeMembers, getTeam } from '../teams/teams.js';
@@ -74,19 +74,42 @@ function career(db: DB, steamid: string, nowMs = Date.now()): CastPlayer['career
   return value;
 }
 
+/**
+ * The lineup card's PUG numbers (owner, 2026-10-23: say which scope).
+ *
+ * This season's, labelled with the season's name. A player with no PUG yet
+ * this season (every returning player on a season's first day) gets their
+ * career numbers instead, labelled Career, rather than a card of zeros. One
+ * match set either way, so the record, the match count and the stats agree:
+ * the old card summed W-L over every season's rating rows beside an all-time
+ * match count.
+ */
 function careerUncached(db: DB, steamid: string): CastPlayer['career'] {
-  const wl = db.prepare('SELECT COALESCE(SUM(wins), 0) AS w, COALESCE(SUM(losses), 0) AS l FROM player_ratings WHERE player_id = ?')
-    .get(steamid) as { w: number; l: number };
-  const played = db.prepare(
-    `SELECT COUNT(*) AS n FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE mp.player_id = ? AND ${completedPug('m')} AND m.voided_at IS NULL`,
-  ).get(steamid) as { n: number };
+  const season = db.prepare('SELECT id, name FROM seasons WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1').get() as { id: number; name: string };
+  const forScope = (seasonId: number | null) => {
+    const done = `${completedPug('m')} AND m.voided_at IS NULL${seasonFilter('m', seasonId)}`;
+    const wl = db.prepare(
+      `SELECT COUNT(*) AS n,
+              COALESCE(SUM(CASE WHEN m.winner = mp.team THEN 1 ELSE 0 END), 0) AS w,
+              COALESCE(SUM(CASE WHEN m.winner IN ('a', 'b') AND m.winner != mp.team THEN 1 ELSE 0 END), 0) AS l
+       FROM match_players mp JOIN matches m ON m.id = mp.match_id
+       WHERE mp.player_id = ? AND ${done}`,
+    ).get(steamid) as { n: number; w: number; l: number };
+    return { done, wl };
+  };
+  let scope = season.name;
+  let { done, wl } = forScope(season.id);
+  if (wl.n === 0) {
+    scope = 'Career';
+    ({ done, wl } = forScope(null));
+  }
   const sum = (stat: string): number => (db.prepare(
     `SELECT COALESCE(SUM(s.value), 0) AS v FROM match_player_stats s JOIN matches m ON m.id = s.match_id
-     WHERE s.player_id = ? AND s.stat = ? AND ${completedPug('m')} AND m.voided_at IS NULL`,
+     WHERE s.player_id = ? AND s.stat = ? AND ${done}`,
   ).get(steamid, stat) as { v: number }).v;
   return {
-    matches: played.n, wins: wl.w, losses: wl.l,
+    scope,
+    matches: wl.n, wins: wl.w, losses: wl.l,
     skeets: sum('skeets') + sum('team_skeets'), dps: sum('dps_landed'),
     boomerRate: boomerRate({ boomer_spawns: sum('boomer_spawns'), boom_successes: sum('boom_successes') }),
   };

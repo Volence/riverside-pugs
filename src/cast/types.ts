@@ -259,9 +259,13 @@ export interface CastPlayer {
 
 export type CastRole = 'captain' | 'cocaptain' | 'member';
 
-/** Career PUG numbers for the lineup cards (completed, unvoided PUGs),
- *  from the owner's stat set (2026-10-02): skeets, DPs, boomer %. */
+/** PUG numbers for the lineup cards (completed, unvoided PUGs), from the
+ *  owner's stat set (2026-10-02): skeets, DPs, boomer %. This season's, or
+ *  the career's for a player with no PUG this season yet; `scope` names
+ *  which, and the card shows it. */
 export interface CastCareer {
+  /** The season's name ("Season 1"), or "Career". */
+  scope: string;
   matches: number; wins: number; losses: number;
   /** skeets + team_skeets: every skeet, all weapons, counted once. */
   skeets: number;

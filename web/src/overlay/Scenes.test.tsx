@@ -237,7 +237,7 @@ describe('overlay basics', () => {
 describe('match stats and lineups', () => {
   const pl = (name: string, stats: Record<string, number>, career: Partial<CastPlayer['career']> = {}): CastPlayer => ({
     steamid: name, name, avatar: null, stats, sr: null, role: null,
-    career: { matches: 10, wins: 6, losses: 4, skeets: 0, dps: 0, boomerRate: null, ...career },
+    career: { scope: 'Season 1', matches: 10, wins: 6, losses: 4, skeets: 0, dps: 0, boomerRate: null, ...career },
   });
   const withPlayers = (a: CastPlayer[], b: CastPlayer[]): OverlayFeed => ({
     ...feed(), match: { ...match, teams: { a: { ...match.teams.a, players: a }, b: { ...match.teams.b, players: b } } },
