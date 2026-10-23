@@ -1296,6 +1296,19 @@ describe('StatTable comparison', () => {
     expect(screen.getAllByText('Team total')).toHaveLength(2);
   });
 
+  it('counts each quad once in the team total, not once per pinner', () => {
+    const quad = (n: number[]) => n.map((v, i) => ({ steamid: `q${v}-${i}`, name: `q${i}`, stats: { quad_caps: v, times_quadded: v } }));
+    // Team A landed two quads (all four pinners credited twice); team B one,
+    // with a bot as the fourth pinner.
+    render(
+      <StatTable teamA={quad([2, 2, 2, 2])} teamB={quad([1, 1, 1, 0])}
+                 cols={['quad_caps', 'times_quadded']} showTotals />,
+    );
+    const totals = screen.getAllByText('Team total').map((el) =>
+      [...el.closest('tr')!.querySelectorAll('td.num')].map((c) => c.textContent));
+    expect(totals).toEqual([['2', '2'], ['1', '1']]);
+  });
+
   it('omits total rows by default', () => {
     render(<StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets']} />);
     expect(screen.queryByText('Team total')).toBeNull();

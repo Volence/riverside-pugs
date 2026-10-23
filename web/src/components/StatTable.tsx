@@ -93,6 +93,14 @@ export function StatTable(
       if (rate === undefined) delete out.boomer_rate;
       else out.boomer_rate = rate;
     }
+    // QuadSettle in plugin/pug-match.sp credits each of a quad's four
+    // pinners with quad_caps and each of its four victims with times_quadded,
+    // so a summed column counts each quad four times. Rounded rather than
+    // floored: a player who is not on the roster (a bot) gets no credit, so a
+    // quad can leave three.
+    for (const k of ['quad_caps', 'times_quadded']) {
+      if (k in out) out[k] = Math.round(out[k]! / 4);
+    }
     return out;
   };
 
