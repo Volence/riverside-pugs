@@ -398,10 +398,10 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
       {before && data.lockedAt === null && <p class="muted">The event can start once the entry list is final. It starts by itself at the start time.</p>}
       {before && data.lockedAt !== null && (
         <>
-          <p class="muted">{data.seeded} teams are seeded. The event starts by itself at the start time{data.seeded < 2 ? ' once it has 2 teams' : ''}.</p>
+          <p class="muted">{data.seeded} teams are seeded. The event starts by itself at {whenText(data.startsAt)}{data.seeded < 2 ? ' once it has 2 teams' : ''}, and the first-round rooms open the moment it does.</p>
           {canEdit && data.seeded >= 2 && (
             <button class="btn btn--ghost" disabled={busy} onClick={() => run(async () => { await adminApi.startEvent(eventId); onChange?.(); }, {
-              title: 'Start the event now?', body: 'Stage 1 is drawn from the current seeds, and seeds can no longer change.',
+              title: 'Start the event now?', body: 'Stage 1 is drawn from the current seeds, seeds can no longer change, and every first-round room opens now with its ready clock running.',
             })}>Start the event now</button>
           )}
         </>
