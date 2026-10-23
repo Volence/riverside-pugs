@@ -239,6 +239,22 @@ export interface MatchSummary {
   /** Who abandoned it after it was already decided (it completed, the
    *  leading team winning); null otherwise. */
   abandonedBy?: string | null;
+  /** Both rosters, highest SI damage first, for the faces on the recent
+   *  matches list. Absent from an older server and on the match page. */
+  players?: { a: MatchListPlayer[]; b: MatchListPlayer[] };
+  /** A scrim or tournament game's team names and event; absent for a PUG. */
+  booked?: BookedSides;
+}
+
+export interface MatchListPlayer { steamid: string; name: string; avatar: string | null }
+
+/** Who a booked game was between, by match team (src/matchSides.ts). */
+export interface BookedSides {
+  kind: 'scrim' | 'tournament';
+  a: { name: string; tag: string | null };
+  b: { name: string; tag: string | null };
+  /** The tournament and the event match page it was played under; null for a scrim. */
+  event: { slug: string; name: string; matchId: number } | null;
 }
 
 export interface MatchPlayerStats {
@@ -452,6 +468,8 @@ export interface MatchDetail {
   /** An aborted match's why, and who never got in or walked with what it
    *  cost them. Staff only, absent for anyone else. */
   abortWho?: AbortWho;
+  /** A scrim or tournament game's team names and event; absent for a PUG. */
+  booked?: BookedSides;
   /** Per-round side attribution. An empty array means this match predates
    *  round capture, which is NOT the same as a match that had no rounds. */
   rounds: {

@@ -33,9 +33,13 @@ const { mockApi } = vi.hoisted(() => ({
 }));
 
 const mockChat = vi.hoisted(() => vi.fn());
+const mockEventsList = vi.hoisted(() => vi.fn(async () => ({ events: [] as unknown[] })));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, api: { ...actual.api, ...mockApi }, peopleApi: { ...actual.peopleApi, chat: mockChat } };
+  return {
+    ...actual, api: { ...actual.api, ...mockApi }, peopleApi: { ...actual.peopleApi, chat: mockChat },
+    eventsApi: { ...actual.eventsApi, list: mockEventsList },
+  };
 });
 
 const { Leaderboard } = await import('./Leaderboard');
@@ -172,11 +176,27 @@ describe('Matches', () => {
       ],
     });
     render(<Matches />);
-    // Appears twice now: in the summary tiles and in the table row.
+    // Appears twice now: in the summary tiles and in the row.
     await waitFor(() => expect(screen.getAllByText('Blood Harvest').length).toBeGreaterThan(0));
-    expect(screen.getByText('Team A')).toBeTruthy();
+    // The winning side is marked on the row; a PUG's sides are its players, not "Team A".
+    expect(screen.getByText('Won')).toBeTruthy();
+    expect(screen.queryByText('Team A')).toBeNull();
     // The tile row is derived from the same fetch, so it must render too.
     expect(screen.getByText('Matches')).toBeTruthy();
+  });
+
+  it("names a scrim or tournament game's teams and what it was part of", async () => {
+    mockApi.matches.mockResolvedValue({
+      matches: [{
+        id: 798, campaign: 'blood_harvest', endedAt: '2026-10-23T08:44:00', teamAScore: 1107, teamBScore: 925, winner: 'a',
+        players: { a: [], b: [] },
+        booked: { kind: 'tournament', a: { name: 'Bone Breakage', tag: 'BB' }, b: { name: 'Poop Packers', tag: null }, event: { slug: 'cup', name: 'The Cup', matchId: 1 } },
+      }],
+    });
+    render(<Matches />);
+    await waitFor(() => expect(screen.getByText('Bone Breakage')).toBeTruthy());
+    expect(screen.getByText('Poop Packers')).toBeTruthy();
+    expect(screen.getByText('The Cup')).toBeTruthy();
   });
 
   it('summarises with facts that outlive a single match, not per-match team labels', async () => {
@@ -2110,16 +2130,31 @@ describe('Live with nothing running', () => {
     });
     render(<Live me={null} />);
     await waitFor(() => expect(screen.getByText(/nothing being played/i)).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('Last match')).toBeTruthy());
-    expect(screen.getByText('5 of 8')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/^Last match/)).toBeTruthy());
+    expect(screen.getByText('5')).toBeTruthy();
+    expect(screen.getByText('Waiting for players.')).toBeTruthy();
     expect(screen.getByText('Dead Air')).toBeTruthy();
     expect(screen.getByText(/how to play/i)).toBeTruthy();
   });
 
-  it('says the queue is empty rather than showing 0 of 8', async () => {
+  it('says the queue is empty in words, and leaves out cards it has nothing for', async () => {
     render(<Live me={null} />);
-    await waitFor(() => expect(screen.getByText(/the queue is empty/i)).toBeTruthy());
-    expect(screen.queryByText('Last match')).toBeNull();
+    await waitFor(() => expect(screen.getByText(/join and it starts filling/i)).toBeTruthy());
+    expect(screen.queryByText(/^Last match/)).toBeNull();
+    expect(screen.queryByText('Next event')).toBeNull();
+  });
+
+  it('points at the next event that has not finished', async () => {
+    mockEventsList.mockResolvedValueOnce({
+      events: [
+        { slug: 'old', name: 'Old Cup', status: 'finished', entryKind: 'draft', official: true, startsAt: '2026-10-01T00:00:00Z', bannerKey: null, format: [], entries: 8 },
+        { slug: 'cup', name: 'Draft Cup', status: 'registration', entryKind: 'draft', official: true, startsAt: '2026-10-24T00:00:00Z', bannerKey: null, format: ['Single elimination'], entries: 31, statusLabel: 'Signups open' },
+      ],
+    });
+    render(<Live me={null} />);
+    await waitFor(() => expect(screen.getByText('Draft Cup')).toBeTruthy());
+    expect(screen.queryByText('Old Cup')).toBeNull();
+    expect(screen.getByText(/Signups open/)).toBeTruthy();
   });
 });
 

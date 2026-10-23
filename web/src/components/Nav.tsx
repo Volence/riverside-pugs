@@ -81,7 +81,9 @@ export function Nav(
   const myTeams = me?.teams ? me.myTeams ?? [] : [];
 
   return (
-    <header class="nav">
+    // nav--me: a signed-in bar carries Compete, the panel link and the account
+    // too, so it drops its links to a second row sooner (app.css).
+    <header class={me ? 'nav nav--me' : 'nav'}>
       <a class="nav__brand" href="/">Riverside</a>
       <nav class="nav__links">
         {links.map(([href, label, target]) => (

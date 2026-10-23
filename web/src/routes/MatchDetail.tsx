@@ -1,6 +1,6 @@
 import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
+import { api, type BookedSides, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, resultLabel, winnerLabel } from '../format';
 import { clearLatencyByPlayer } from '../clearLatency';
@@ -358,6 +358,31 @@ function OngoingMatch({ data }: { data: MatchOngoing }) {
   );
 }
 
+/** A team as the win chart's axis can fit it: its tag, else the name cut
+ *  to seven characters. */
+export function shortTeam(t: { name: string; tag: string | null }): string {
+  if (t.tag) return t.tag;
+  return t.name.length <= 7 ? t.name : `${t.name.slice(0, 6)}\u2026`;
+}
+
+/** What a scrim or tournament game was part of, above its scoreboard, with
+ *  the way back to the event match page the game was played under. */
+function BookedStrip({ booked }: { booked: BookedSides }) {
+  const ev = booked.event;
+  return (
+    <div class="mdbooked">
+      <span class={`mdbooked__kind mdbooked__kind--${booked.kind}`}>{booked.kind === 'tournament' ? 'Tournament' : 'Scrim'}</span>
+      <span class="mdbooked__what">
+        {ev ? <a href={`/event/${ev.slug}`}>{ev.name}</a> : 'Booked scrim'}
+        <span class="muted"> · {booked.a.name} vs {booked.b.name}</span>
+      </span>
+      {ev && (
+        <a class="btn btn--ghost btn--sm mdbooked__back" href={`/event/${ev.slug}/match/${ev.matchId}`}>Event match page</a>
+      )}
+    </div>
+  );
+}
+
 export function MatchDetail({ id, me, staff = false }: { id: string; me: string | null; staff?: boolean }) {
   const { data, error } = useFetch((s) => api.match(id, s), [id]);
 
@@ -399,12 +424,17 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
   // have no round data at all (their payload carries no survTeam), so they
   // always take the defaults too.
   const firstRound = [...rounds].sort((a, b) => a.ordinal - b.ordinal || a.half - b.half)[0];
+  // A scrim or tournament game goes by its teams' own names everywhere a PUG
+  // says Team A and Team B; the chart axis takes the tag, which fits its margin.
+  const booked = data.booked ?? null;
+  const teamName = { a: booked?.a.name ?? 'Team A', b: booked?.b.name ?? 'Team B' };
+  const teamShort = booked ? { a: shortTeam(booked.a), b: shortTeam(booked.b) } : teamName;
   const eyebrowA = firstRound?.reliable
-    ? `Team A · ${firstRound.survTeam === 'a' ? 'survivors' : 'infected'} first`
-    : undefined;
+    ? `${teamName.a} · ${firstRound.survTeam === 'a' ? 'survivors' : 'infected'} first`
+    : booked ? teamName.a : undefined;
   const eyebrowB = firstRound?.reliable
-    ? `Team B · ${firstRound.survTeam === 'b' ? 'survivors' : 'infected'} first`
-    : undefined;
+    ? `${teamName.b} · ${firstRound.survTeam === 'b' ? 'survivors' : 'infected'} first`
+    : booked ? teamName.b : undefined;
 
   // The two teams' stats, split into what each did as survivors versus as
   // infected. This is the whole point of the headline cards below: a raw team
@@ -514,7 +544,9 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
   );
   const outcome = voided ? `${winnerLabel(match.winner!)} · voided`
     : aborted ? 'Aborted'
-      : resultLabel(match.winner!, match.forfeitTeam, match.abandonedBy);
+      : booked && (match.winner === 'a' || match.winner === 'b') && !match.forfeitTeam && !match.abandonedBy
+        ? `${teamName[match.winner]} won`
+        : resultLabel(match.winner!, match.forfeitTeam, match.abandonedBy);
 
   // An admin integrity clip links here with `?ordinal=&half=&t=`, computed
   // once: it names the round the link was ABOUT, not whatever round is on
@@ -584,6 +616,8 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
         </Panel>
       )}
 
+      {booked && <BookedStrip booked={booked} />}
+
       <VersusHeader
         teamA={teamPlayers('a').map(versusName)}
         teamB={teamPlayers('b').map(versusName)}
@@ -602,7 +636,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
         {data.winLine && (
           <Panel>
             <h3>Win chance</h3>
-            <WinChart line={data.winLine} />
+            <WinChart line={data.winLine} names={teamName} short={teamShort} />
           </Panel>
         )}
         {data.forecast && <ForecastPanel f={data.forecast} winner={match.winner} />}

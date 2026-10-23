@@ -32,6 +32,10 @@ import { sessionsForMatch } from '../sourcetvSessions.js';
 import { abortCauseOf, abortParties } from '../matchAborts.js';
 import { isActiveStaff } from '../serverChat.js';
 import { matchWinLine } from '../winProb.js';
+import { bookedSidesFor } from '../matchSides.js';
+
+/** A face on the recent-matches list. */
+interface ListPlayer { steamid: string; name: string; avatar: string | null }
 
 export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
 
@@ -191,13 +195,38 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     const vis = visibleMatchesSql(v, 'm');
     const matches = db.prepare(
       `SELECT m.id, m.campaign, m.ended_at AS endedAt, m.team_a_score AS teamAScore, m.team_b_score AS teamBScore, m.winner,
-              m.forfeit_team AS forfeitTeam,
+              m.forfeit_team AS forfeitTeam, m.booking_id AS bookingId,
               (SELECT GROUP_CONCAT(n, ' and ') FROM (SELECT COALESCE(p.name, a.player_id) AS n FROM match_abandons a
                  LEFT JOIN players p ON p.steamid = a.player_id
                  WHERE a.match_id = m.id AND a.decided IS NOT NULL ORDER BY a.player_id)) AS abandonedBy
        FROM matches m WHERE m.state = 'completed' AND ${vis.sql} ORDER BY m.id DESC LIMIT ?`,
-    ).all(...vis.params, RECENT_MATCH_LIMIT);
-    return { matches };
+    ).all(...vis.params, RECENT_MATCH_LIMIT) as ({ id: number; bookingId: number | null } & Record<string, unknown>)[];
+    // Each row's two rosters, for the faces on the list: one query for the
+    // whole page rather than one per match.
+    const ids = matches.map((m) => m.id);
+    const rosters = new Map<number, { a: ListPlayer[]; b: ListPlayer[] }>();
+    if (ids.length > 0) {
+      const rows = db.prepare(
+        `SELECT mp.match_id AS matchId, mp.team, mp.player_id AS steamid, p.name, p.avatar
+           FROM match_players mp JOIN players p ON p.steamid = mp.player_id
+          WHERE mp.match_id IN (${ids.map(() => '?').join(',')}) ORDER BY mp.si_damage DESC`,
+      ).all(...ids) as { matchId: number; team: 'a' | 'b'; steamid: string; name: string; avatar: string | null }[];
+      for (const r of rows) {
+        const slot = rosters.get(r.matchId) ?? { a: [], b: [] };
+        (r.team === 'a' ? slot.a : slot.b).push({ steamid: r.steamid, name: r.name, avatar: r.avatar });
+        rosters.set(r.matchId, slot);
+      }
+    }
+    // A scrim or tournament game a viewer may see goes by its teams' names,
+    // not the PUG's Team A / Team B. Only rows with a booking behind them pay
+    // for the lookup.
+    return {
+      matches: matches.map(({ bookingId, ...m }) => {
+        const booked = bookingId !== null ? bookedSidesFor(db, m.id) : null;
+        const players = rosters.get(m.id) ?? { a: [], b: [] };
+        return booked ? { ...m, players, booked } : { ...m, players };
+      }),
+    };
   });
 
   app.get('/api/matches/:id', async (req, reply) => {
@@ -355,8 +384,11 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       req.log.warn({ err, matchId: id }, 'win line failed');
     }
 
+    const booked = bookedSidesFor(db, id);
     return {
       ongoing: false, match, maps, players, rounds, demos, events, statDefs: STAT_DEFS, winLine,
+      // Team names and the event for a scrim or tournament game; absent for a PUG.
+      ...(booked ? { booked } : {}),
       ...(forecast ? { forecast } : {}),
       ...(abortWho ? { abortWho } : {}),
       ...(sourcetv ? { sourcetv } : {}),

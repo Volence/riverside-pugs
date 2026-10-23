@@ -2,8 +2,6 @@ import { Route, Router, lazy } from 'preact-iso';
 import type { StateSnapshot } from './api';
 import type { Session } from './hooks/useLiveState';
 import { Redirect } from './components/Redirect';
-import { Panel } from './components/bits';
-import { PageHeader } from './components/PageHeader';
 import { Play } from './routes/Play';
 import { Leaderboard } from './routes/Leaderboard';
 import { Matches } from './routes/Matches';
@@ -57,22 +55,36 @@ const EventDraftPage = lazy(() => import('./routes/EventDraft'));
  *  URLs get pasted into Discord and a typo'd or voided id lands here. A bare
  *  "No such page." over an empty screen gave no way onward, so this offers the
  *  three places someone who mistyped a link was most likely heading. */
+/** Where a lost reader most likely meant to go, with a line on each. */
+const NOT_FOUND_WAYS: readonly (readonly [string, string, string])[] = [
+  ['/', 'Play', 'Join the queue or see who is in it.'],
+  ['/matches', 'Recent matches', 'Every finished game, newest first.'],
+  ['/leaderboard', 'Leaderboard', 'Ratings and the season standings.'],
+  ['/how-to-play', 'How to play', 'Set up, link your account, play your first game.'],
+];
+
 function NotFound() {
   return (
-    <div class="page page--list">
-      <PageHeader eyebrow="404" title="Page not found" />
-      <Panel>
-        <p class="muted">
-          That link does not point at anything. A match or player link can also
-          land here if the id was mistyped, or if the match was voided.
-        </p>
-        <nav class="notfound__links">
-          <a class="chip" href="/">Play</a>
-          <a class="chip" href="/matches">Recent matches</a>
-          <a class="chip" href="/leaderboard">Leaderboard</a>
-          <a class="chip" href="/how-to-play">How to play</a>
-        </nav>
-      </Panel>
+    <div class="page page--list notfound">
+      <div class="notfound__hero">
+        <span class="notfound__code" aria-hidden="true">404</span>
+        <div>
+          <p class="eyebrow">Page not found</p>
+          <h1 class="notfound__title">No safe room here</h1>
+          <p class="muted notfound__why">
+            That link does not point at anything. A match or player link can also
+            land here if the id was mistyped, or if the match was voided.
+          </p>
+        </div>
+      </div>
+      <nav class="notfound__ways" aria-label="Places to go instead">
+        {NOT_FOUND_WAYS.map(([href, label, line]) => (
+          <a key={href} class="notfound__way" href={href}>
+            <span class="notfound__label">{label}</span>
+            <span class="muted">{line}</span>
+          </a>
+        ))}
+      </nav>
     </div>
   );
 }
