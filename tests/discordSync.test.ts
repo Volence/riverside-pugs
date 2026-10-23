@@ -492,6 +492,13 @@ describe('queue-filling alert', () => {
     expect(ids).not.toContain('q:notify');
   });
 
+  it('labels the panel toggle as a standing on/off switch once a role is set', async () => {
+    setRole();
+    await build().start();
+    const b = t.byId(panelId())!.payload.components.flat().find((x) => x.kind === 'button' && x.customId === 'q:notify');
+    expect(b && b.label).toBe('Queue alerts (on/off)');
+  });
+
   it('treats a role id that is not a Discord id as off', async () => {
     setSetting(db, 'discord_pug_role_id', 'Queue Alerts');
     await build().start();

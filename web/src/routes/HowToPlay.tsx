@@ -47,7 +47,7 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'Can I get pinged when the queue is almost full?',
-    a: <>Yes. Press <strong>Notify me</strong> on the Discord queue panel, or type <code>/alerts on</code>, and you get the Queue Alerts role: the bot pings it when the queue is a couple of players short of popping, with a cooldown between pings so it never nags. The ping is edited to say so once the queue pops or empties, so an old one never sends you in for nothing. Press Notify me again, or <code>/alerts off</code>, to stop.</>,
+    a: <>Yes. It is a one-time opt-in that stays on until you turn it off: press <strong>Queue alerts (on/off)</strong> on the Discord queue panel, or type <code>/alerts on</code>, and you get the Queue Alerts role. From then on the bot pings it whenever the queue is a couple of players short of popping, with a cooldown between pings so it never nags. The ping is edited to say so once the queue pops or empties, so an old one never sends you in for nothing. Press the button again, or type <code>/alerts off</code>, to stop.</>,
   },
   {
     q: 'What bot commands are there?',

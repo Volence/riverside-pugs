@@ -215,7 +215,8 @@ function serverOfMatch(db: ControllerDeps['db'], matchId: number): number | null
 }
 
 /**
- * Turn the opt-in queue-alert role on or off for one member: the Notify me
+ * Turn the opt-in queue-alert role on or off for one member: the Queue alerts
+ * (on/off)
  * button (a toggle) and /alerts (on, off, or a toggle with no option).
  *
  * Reads the member's current roles rather than keeping our own record of who
@@ -237,17 +238,17 @@ export async function setAlertRole(
   const target = want ?? !has;
   if (target === has) {
     return say(has
-      ? 'You already get queue alerts: you are pinged when the queue is close to popping.'
-      : 'You do not get queue alerts. Use /alerts on, or Notify me on the queue card, to turn them on.');
+      ? 'Queue alerts are already ON for you: you are pinged whenever the queue is almost full. Use /alerts off to stop.'
+      : 'Queue alerts are already OFF for you. Use /alerts on, or Queue alerts (on/off) on the queue card, to turn them on.');
   }
 
   try {
     if (!target) {
       await deps.roles.remove(userId, roleId);
-      return say('You will no longer be pinged when the queue fills up. Notify me on the queue card or /alerts on turns alerts back on.');
+      return say('Queue alerts are now OFF: you will no longer be pinged when the queue is almost full. Click Queue alerts (on/off) again or use /alerts on to turn them back on.');
     }
     await deps.roles.add(userId, roleId);
-    return say('You will be pinged when the queue is close to popping. Notify me on the queue card or /alerts off stops it.');
+    return say('Queue alerts are now ON: you will be pinged whenever the queue is almost full, until you turn them off. Click Queue alerts (on/off) again or use /alerts off to stop.');
   } catch (err) {
     console.error('[discord] alert role toggle failed:', err);
     // Almost always the bot's role sitting below the target role in the guild's

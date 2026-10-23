@@ -16,3 +16,13 @@ describe('HowToPlay L4D2 campaigns', () => {
     expect(text).not.toMatch(/gameinfo\.txt|left4dead_dlc4|L4D2-Maps-for-L4D1/);
   });
 });
+
+describe('HowToPlay queue alerts', () => {
+  it('describes the alert as a standing opt-in, not a one-time request', () => {
+    const { container } = render(<HowToPlay session={{ kind: 'anonymous' }} />);
+    const text = container.textContent!;
+    expect(text).toContain('Queue alerts (on/off)');
+    expect(text).toMatch(/stays on until you turn it off/);
+    expect(text).not.toContain('Notify me');
+  });
+});
