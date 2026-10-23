@@ -220,4 +220,14 @@ describe('practice_leases kinds', () => {
     const cols = db.prepare('PRAGMA table_info(custom_campaigns)').all() as { name: string; dflt_value: string }[];
     expect(cols.find((c) => c.name === 'practice_only')?.dflt_value).toBe('0');
   });
+
+  it('indexes match_players by player and rating_history by player and season', () => {
+    const db = openDb(':memory:');
+    const plan = (sql: string) => (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as { detail: string }[])
+      .map((r) => r.detail).join('\n');
+    expect(plan("SELECT match_id FROM match_players WHERE player_id = 'x'")).toMatch(/idx_match_players_player/);
+    expect(plan("SELECT COUNT(*) FROM rating_history WHERE player_id = 'x' AND season_id = 1"))
+      .toMatch(/idx_rating_history_player_season/);
+    db.close();
+  });
 });
