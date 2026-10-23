@@ -89,10 +89,12 @@ describe('BalanceNotes', () => {
 
     const { container } = render(<BalanceNotes />);
 
-    await waitFor(() => expect(screen.getByText('Autumn balance patch')).toBeTruthy());
-    expect(screen.getByText('Launch patch')).toBeTruthy();
-    expect(screen.getByText('Winter tweak')).toBeTruthy();
-    const names = [...container.querySelectorAll('h3')].map((h) => h.textContent);
+    // The page index lists every patch by name at once; each panel's own
+    // heading arrives with its entry.
+    await waitFor(() => expect(container.querySelectorAll('article h3').length).toBe(3));
+    const index = [...container.querySelectorAll('.doc__toc a')].map((a) => a.textContent);
+    expect(index).toEqual(['Autumn balance patch', 'Launch patch', 'Winter tweak']);
+    const names = [...container.querySelectorAll('article h3')].map((h) => h.textContent);
     expect(names).toEqual(['Autumn balance patch', 'Launch patch', 'Winter tweak']);
 
     // The compared entry.

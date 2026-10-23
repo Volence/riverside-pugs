@@ -4532,3 +4532,146 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .mdbooked__kind--scrim { border-color: var(--border-strong); color: var(--text-muted); }
 .mdbooked__what { flex: 1 1 260px; min-width: 0; font-size: var(--fs-dense); }
 .mdbooked__what a { color: var(--text-bright); font-weight: 600; }
+/* ===== Docs pages (site touchup batch C, 2026-10-23): How to play, the
+   consistency help, custom campaigns, patch notes, appeal, Discord link.
+   One frame (DocLayout): a sticky "On this page" column beside the panels on
+   a desktop, a row of links above them on a phone. Steps read as numbered
+   cards, FAQ answers fold in cards. Scoped to doc*, patch-*, cc*, appeal*
+   and linkpair* so other passes do not collide. ===== */
+.doc { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.doc__body { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.doc__body > * { min-width: 0; }
+.doc__body > [id] { scroll-margin-top: var(--sp-6); }
+.doc__toc { padding: var(--sp-3) var(--sp-4); background: var(--surface); border: 1px solid var(--border); min-width: 0; }
+.doc__toclabel { margin: 0 0 var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+.doc__toc ol { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); }
+.doc__toc a { font-family: var(--font-label); letter-spacing: 0.04em; color: var(--text); text-decoration: none; }
+.doc__toc a:hover, .doc__toc a:focus-visible { color: var(--text-bright); }
+.doc__toc a[aria-current] { color: var(--accent); }
+@media (min-width: 1080px) {
+  .doc { grid-template-columns: 210px minmax(0, 1fr); gap: var(--sp-5); }
+  .doc.doc--solo { grid-template-columns: minmax(0, 1fr); }
+  .doc__toc { position: sticky; top: var(--sp-6); padding: 0; background: none; border: 0; }
+  .doc__toc ol { flex-direction: column; flex-wrap: nowrap; gap: 0; border-left: 1px solid var(--border); }
+  .doc__toc a { display: block; padding: 6px var(--sp-3); margin-left: -1px; border-left: 2px solid transparent; line-height: 1.3; }
+  .doc__toc a[aria-current] { color: var(--text-bright); border-left-color: var(--accent); }
+}
+
+/* Numbered steps as cards: the number in a small square, the step beside it. */
+.doc ol.howto, .doc ol.steps { list-style: none; padding: 0; margin: var(--sp-3) 0; display: flex; flex-direction: column; gap: var(--sp-2); counter-reset: docstep; }
+.doc ol.howto > li, .doc ol.steps > li {
+  counter-increment: docstep; position: relative; min-width: 0;
+  padding: var(--sp-3) var(--sp-4) var(--sp-3) calc(var(--sp-4) + 2.25rem);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.doc ol.howto > li::before, .doc ol.steps > li::before {
+  content: counter(docstep); position: absolute; left: var(--sp-3); top: var(--sp-3);
+  width: 1.6rem; height: 1.6rem; display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-label); font-size: 0.9rem; color: var(--text-bright); border: 1px solid var(--border-strong); background: var(--surface);
+}
+.doc ul.howto { padding-left: 1.1rem; }
+.doc ul.howto > li::marker { color: var(--accent); }
+/* Sub-headings inside a doc panel read as the site's small caps labels. */
+.doc .panel h4 { margin: var(--sp-4) 0 var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+
+/* FAQ: each question its own folding card. */
+.doc .faq { display: flex; flex-direction: column; gap: var(--sp-2); }
+.doc .faq details { border: 1px solid var(--border); background: var(--surface-2); padding: 0; }
+.doc .faq summary { list-style: none; display: flex; gap: var(--sp-2); align-items: baseline; padding: var(--sp-3) var(--sp-4); }
+.doc .faq summary::-webkit-details-marker { display: none; }
+.doc .faq summary::before { content: "+"; flex-shrink: 0; width: 1rem; color: var(--accent); font-family: var(--font-label); }
+.doc .faq details[open] summary::before { content: "\2212"; }
+.doc .faq details[open] { border-color: var(--border-strong); }
+.doc .faq details > p, .doc .faq .faq__answer { margin: 0; padding: 0 var(--sp-4) var(--sp-3) calc(var(--sp-4) + 1rem + var(--sp-2)); }
+.doc .faq summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* In-game commands: the command in a code column, what it does beside it. */
+.doc .howto-cmds { gap: 0; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); border-top: 1px solid var(--border); }
+.doc .howto-cmds dt, .doc .howto-cmds dd { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.doc .howto-cmds dt { padding-right: var(--sp-4); white-space: nowrap; }
+@media (max-width: 560px) {
+  .doc .howto-cmds { grid-template-columns: minmax(0, 1fr); }
+  .doc .howto-cmds dt { border-bottom: 0; padding-bottom: 0; white-space: normal; }
+}
+
+/* Fine / Not fine side by side. */
+.doc__split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+@media (min-width: 720px) { .doc__split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.doc__col { padding: var(--sp-3) var(--sp-4); background: var(--surface-2); border: 1px solid var(--border); border-top: 3px solid var(--border-strong); min-width: 0; }
+.doc__col--ok { border-top-color: var(--win); }
+.doc__col--no { border-top-color: var(--loss); }
+.doc .doc__col h4 { margin-top: 0; }
+.doc__col--ok h4 { color: var(--win); }
+.doc__col--no h4 { color: var(--loss); }
+.doc__col ul.howto { list-style: none; padding: 0; }
+/* A tick or a cross in the gutter; the line itself stays inline text, so
+   its links and code flow like any sentence. */
+.doc__col ul.howto > li { position: relative; padding-left: 1.5rem; }
+.doc__col ul.howto > li::before { position: absolute; left: 0; top: 0; }
+.doc__col--ok ul.howto > li::before { content: "\2713"; color: var(--win); }
+.doc__col--no ul.howto > li::before { content: "\2715"; color: var(--loss); }
+
+/* The consistency message, drawn like a message box. */
+.doc__dialog { margin: var(--sp-3) 0; max-width: 34rem; border: 1px solid var(--border-strong); background: var(--bg); }
+.doc__dialogbar { margin: 0; padding: var(--sp-1) var(--sp-3); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.doc__dialog blockquote { margin: 0; padding: var(--sp-3); color: var(--text-bright); overflow-wrap: anywhere; font-size: var(--fs-dense); }
+
+/* ---- Patch notes ---- */
+.patch-lede { margin: var(--sp-2) 0 0; max-width: 70ch; }
+.patch-lede__link { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin: var(--sp-4) 0 0; color: var(--text-muted); }
+.patch-head { display: flex; flex-direction: column; gap: var(--sp-1); padding-bottom: var(--sp-3); margin-bottom: var(--sp-4); border-bottom: 2px solid var(--rule); }
+.patch-head__no { margin: 0; font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+.patch-head h3 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(1.6rem, 3vw, 2.1rem); line-height: 1.05; text-transform: uppercase; color: var(--text-bright); }
+.patch-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-1) 0 0; }
+.patch-meta__date, .patch-meta__count { padding: 2px var(--sp-2); border: 1px solid var(--border-strong); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); font-variant-numeric: tabular-nums; }
+.patch-notes { white-space: normal; display: flex; flex-direction: column; gap: var(--sp-4); max-width: 75ch; }
+.patch-notes p { margin: 0; white-space: pre-line; }
+.patch-notes__block h5 { margin: 0 0 var(--sp-2); font-family: var(--font-label); font-size: 0.95rem; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-bright); }
+.patch-notes ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: var(--sp-1); }
+.patch-notes li::marker { color: var(--accent); }
+.patch-part { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.patch-part > h4 { margin: 0 0 var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+.patch-part > p { margin: 0; }
+.patch-part h5 { margin: var(--sp-3) 0 var(--sp-2); font-family: var(--font-label); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text); }
+
+/* ---- Custom campaigns ---- */
+.ccgroup + .ccgroup { margin-top: var(--sp-5); }
+.ccgroup__title { display: flex; align-items: baseline; gap: var(--sp-2); }
+.ccgroup__count { font-family: var(--font-label); color: var(--text-muted); letter-spacing: 0; }
+.ccgrid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: var(--sp-3); }
+.cccard {
+  display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  background: color-mix(in oklab, var(--campaign, var(--surface-2)) 8%, var(--surface-2));
+  border: 1px solid var(--border); border-top: 3px solid var(--campaign, var(--border-strong));
+}
+.cccard__head { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.cccard__name { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 1.35rem; line-height: 1.1; text-transform: uppercase; color: var(--text-bright); overflow-wrap: anywhere; }
+.cccard__chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.cccard__chips .ccamp__pool { margin-left: 0; font-size: var(--fs-label); }
+.ccamp__pool--needs { border-color: var(--border-strong); color: var(--text-muted); }
+.cccard__chapters { margin: 0; padding: 0; list-style: none; counter-reset: ccch; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-dense); }
+.cccard__chapters li { counter-increment: ccch; display: grid; grid-template-columns: 1.4rem minmax(0, 1fr); overflow-wrap: anywhere; }
+.cccard__chapters li::before { content: counter(ccch); font-family: var(--font-label); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.cccard .ccamp__needs { margin: 0; font-size: var(--fs-dense); }
+.cccard__notes { margin: 0; font-size: var(--fs-dense); }
+.cccard__foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
+.cccard__get { align-self: stretch; text-align: center; justify-content: center; }
+.cccard .ccamp__hash { margin: 0; font-size: 0.7rem; }
+
+/* ---- Appeal and Discord link ---- */
+.appeal__lead { margin: 0 0 var(--sp-4); font-size: 1.05rem; color: var(--text-bright); }
+.appeal__ways { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+@media (min-width: 600px) { .appeal__ways { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.appeal__way { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface-2); border: 1px solid var(--border); border-top: 3px solid var(--border-strong); min-width: 0; }
+.appeal__way p { margin: 0; }
+.appeal__way .btn { margin-top: auto; align-self: flex-start; }
+.linkpair { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-4); }
+.linkpair__acct { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-3) var(--sp-4); background: var(--surface-2); border: 1px solid var(--border); min-width: 0; overflow-wrap: anywhere; }
+.linkpair__acct .eyebrow { margin: 0 0 var(--sp-1); }
+.linkpair__acct strong { color: var(--text-bright); font-size: 1.1rem; }
+.linkpair__acct .mono { font-size: var(--fs-label); }
+.linkpair__join { align-self: center; justify-self: center; width: 2px; height: 1.25rem; background: var(--accent); }
+@media (min-width: 600px) {
+  .linkpair { grid-template-columns: minmax(0, 1fr) 2.5rem minmax(0, 1fr); align-items: stretch; }
+  .linkpair__join { width: 100%; height: 2px; }
+}

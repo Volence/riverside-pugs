@@ -2,8 +2,9 @@ import { api, type CustomCampaignRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignTint, chapterName } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
-import { PageHeader } from '../components/PageHeader';
-import { L4D2Pack } from './L4D2Pack';
+import { Figure, Figures, PageHeader } from '../components/PageHeader';
+import { DocLayout, type DocSection } from '../components/DocLayout';
+import { L4D2Pack, L4D2_PACK_SIZE } from './L4D2Pack';
 
 /** 300 MB, not 314572800. Nobody installing a campaign cares about bytes. */
 function fileSize(bytes: number): string {
@@ -20,29 +21,47 @@ function fileSize(bytes: number): string {
  */
 export function CustomCampaigns() {
   const { data, error } = useFetch((s) => api.customCampaigns(s), []);
+  const campaigns = data?.campaigns ?? null;
 
   // The L4D2 pack section needs no data, so it renders at once and a
   // /custom-campaigns#l4d2-pack link lands on it before the list has loaded.
   return (
     <div class="page page--list">
-      <PageHeader title="Custom campaigns" />
-      <div class="stack">
+      <PageHeader eyebrow="Downloads" title="Custom campaigns">
+        <Figures>
+          <Figure label="L4D2 campaigns" value={L4D2_PACK_SIZE} sub="every one, in one download" />
+          {campaigns && <Figure label="Custom campaigns" value={campaigns.length} sub="beyond the stock four" />}
+          {campaigns && <Figure label="In the vote" value={campaigns.filter((c) => c.inPool).length} sub="can come up in a match" />}
+        </Figures>
+      </PageHeader>
+      <DocLayout sections={SECTIONS}>
         <L4D2Pack />
         <CampaignList data={data} error={error} />
-      </div>
+      </DocLayout>
     </div>
   );
 }
+
+const SECTIONS: DocSection[] = [
+  { id: 'l4d2-pack', label: 'The L4D2 campaigns' },
+  { id: 'installing', label: 'Installing one' },
+  { id: 'campaigns', label: 'The campaigns' },
+];
 
 function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] } | null | undefined; error: unknown }) {
   if (error) return <Panel><Empty>Couldn't load custom campaigns.</Empty></Panel>;
   if (!data) return <PageSkeleton variant="list" panels={2} />;
 
   const campaigns = data.campaigns;
+  // The vote ones first: they are the ones a player can be dropped into.
+  const groups = [
+    { key: 'vote', title: 'In the match vote', list: campaigns.filter((c) => c.inPool) },
+    { key: 'rest', title: 'To play with', list: campaigns.filter((c) => !c.inPool) },
+  ].filter((g) => g.list.length > 0);
 
   return (
     <>
-      <Panel>
+      <Panel id="installing">
         <h3>Installing one</h3>
         <ol class="steps">
           <li>
@@ -70,46 +89,53 @@ function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] 
         </p>
       </Panel>
 
-      {campaigns.length === 0 ? (
-        <Panel><Empty>No custom campaigns are installed yet.</Empty></Panel>
-      ) : (
-        <div class="stack">
-          {campaigns.map((c: CustomCampaignRow) => (
-            // Panel doesn't forward a style prop onto its <section>, so the
-            // tint variable is set on this wrapper instead; .ccamp__head still
-            // reads it, since a custom property inherits to any descendant.
-            <div key={c.slug} style={{ '--campaign': campaignTint(c.slug) } as Record<string, string>}>
-              <Panel>
-                <div class="ccamp__head">
-                  <h3>
-                    {c.name}
-                    {c.inPool && <span class="ccamp__pool">In the vote</span>}
-                    {c.practiceOnly && <span class="ccamp__pool">Practice map</span>}
-                  </h3>
-                  <a class="btn" href={`/download/campaign/${encodeURIComponent(c.slug)}`}
-                     target="_blank" rel="noopener">
-                    Download {fileSize(c.zipBytes ?? c.sizeBytes)}
-                  </a>
-                </div>
-                <ol class="ccamp__chapters">
-                  {c.chapters.filter((ch) => ch.included).map((ch) => (
-                    <li key={ch.map}>{chapterName(ch.display, ch.map)}</li>
-                  ))}
-                </ol>
-                {c.needsL4d2Pack && (
-                  <p class="ccamp__needs">
-                    Also needs the <a href="#l4d2-pack">L4D2 campaigns pack</a> above. This one
-                    was converted from L4D2 and uses its models and textures from the pack, so
-                    without it you will see missing textures and error models.
-                  </p>
-                )}
-                {c.notes && <p>{c.notes}</p>}
-                <p class="muted mono ccamp__hash">{c.filename}{c.zipBytes != null && ' (zipped)'} · sha256 {c.sha256.slice(0, 16)}...</p>
-              </Panel>
-            </div>
-          ))}
-        </div>
-      )}
+      <Panel id="campaigns">
+        <h3>The campaigns</h3>
+        {campaigns.length === 0 ? (
+          <Empty>No custom campaigns are installed yet.</Empty>
+        ) : groups.map((g) => (
+          <section key={g.key} class="ccgroup">
+            <h4 class="ccgroup__title">{g.title} <span class="ccgroup__count">{g.list.length}</span></h4>
+            <ul class="ccgrid">
+              {g.list.map((c) => <CampaignCard key={c.slug} c={c} />)}
+            </ul>
+          </section>
+        ))}
+      </Panel>
     </>
+  );
+}
+
+function CampaignCard({ c }: { c: CustomCampaignRow }) {
+  const chapters = c.chapters.filter((ch) => ch.included);
+  return (
+    <li class="cccard" style={{ '--campaign': campaignTint(c.slug) } as Record<string, string>}>
+      <div class="cccard__head">
+        <h5 class="cccard__name">{c.name}</h5>
+        <div class="cccard__chips">
+          {c.inPool && <span class="ccamp__pool">In the vote</span>}
+          {c.practiceOnly && <span class="ccamp__pool">Practice map</span>}
+          {c.needsL4d2Pack && <span class="ccamp__pool ccamp__pool--needs">Needs L4D2 pack</span>}
+        </div>
+      </div>
+      <ol class="cccard__chapters">
+        {chapters.map((ch) => <li key={ch.map}>{chapterName(ch.display, ch.map)}</li>)}
+      </ol>
+      {c.needsL4d2Pack && (
+        <p class="ccamp__needs">
+          Also needs the <a href="#l4d2-pack">L4D2 campaigns pack</a> above. This one
+          was converted from L4D2 and uses its models and textures from the pack, so
+          without it you will see missing textures and error models.
+        </p>
+      )}
+      {c.notes && <p class="cccard__notes">{c.notes}</p>}
+      <div class="cccard__foot">
+        <a class="btn cccard__get" href={`/download/campaign/${encodeURIComponent(c.slug)}`}
+           target="_blank" rel="noopener">
+          Download {fileSize(c.zipBytes ?? c.sizeBytes)}
+        </a>
+        <p class="muted mono ccamp__hash">{c.filename}{c.zipBytes != null && ' (zipped)'} · sha256 {c.sha256.slice(0, 16)}...</p>
+      </div>
+    </li>
   );
 }

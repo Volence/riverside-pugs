@@ -22,17 +22,24 @@ export function Appeal() {
   return (
     <div class="page page--play">
       <PageHeader eyebrow="Riverside" title="Appeal a ban" />
-      <Panel>
+      <Panel class="appeal">
         {failed && <p class="error">Signing in with Discord did not work. Try again.</p>}
         {state.signedOut && (
           <>
-            <p>Sign in so we know whose ban this is.</p>
+            <p class="appeal__lead">Sign in so we know whose ban this is.</p>
             {/* Backend routes: target keeps preact-iso from swallowing the click (see Play.tsx SignIn). */}
-            <p>
-              <a class="btn" href="/auth/steam" target="_top" rel="noopener">Sign in through Steam</a>{' '}
-              <a class="btn" href="/auth/discord/appeal" target="_top" rel="noopener">Sign in with Discord</a>
-            </p>
-            <p class="muted">Banned from the Discord server? Use Sign in with Discord; it still works.</p>
+            <div class="appeal__ways">
+              <div class="appeal__way">
+                <p class="eyebrow">Steam</p>
+                <p>The account you play on.</p>
+                <a class="btn" href="/auth/steam" target="_top" rel="noopener">Sign in through Steam</a>
+              </div>
+              <div class="appeal__way">
+                <p class="eyebrow">Discord</p>
+                <p class="muted">Banned from the Discord server? Use Sign in with Discord; it still works.</p>
+                <a class="btn" href="/auth/discord/appeal" target="_top" rel="noopener">Sign in with Discord</a>
+              </div>
+            </div>
           </>
         )}
         {state.data && (
