@@ -528,9 +528,12 @@ export class Matchmaker {
       })();
 
       this.emit('lobbyCompleted', id, matchId);
+      // 'refresh' again once setup settles, live or not: the connect block in
+      // /api/state appears when the match goes live, and browsers no longer
+      // refetch on the spectator feed's 'live' (web/src/hooks/useLiveState.ts).
       this.deps.orchestrator.setupMatch(matchId).catch((err) => {
         console.error(`orchestrator failed for match ${matchId}:`, err);
-      });
+      }).finally(() => this.deps.broadcast('refresh'));
     } catch (err) {
       console.error(`lobby ${id} complete handler error:`, err);
     } finally {
