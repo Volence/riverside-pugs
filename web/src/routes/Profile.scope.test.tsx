@@ -121,6 +121,7 @@ describe('profile scope under the router', () => {
       <Go to="/player/2?season=1" />
       <Router>
         <Route path="/player/:steamid" component={Profile} />
+        <Route default component={() => null} />
       </Router>
     </LocationProvider>
   );
