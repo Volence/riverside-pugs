@@ -1336,9 +1336,10 @@ describe('StatTable comparison', () => {
   it('counts each quad once in the team total, not once per pinner', () => {
     const quad = (n: number[]) => n.map((v, i) => ({ steamid: `q${v}-${i}`, name: `q${i}`, stats: { quad_caps: v, times_quadded: v } }));
     // Team A landed two quads (all four pinners credited twice); team B one,
-    // with a bot as the fourth pinner.
+    // with three bots pinning beside its only rostered pinner, which sum / 4
+    // alone would round down to none.
     render(
-      <StatTable teamA={quad([2, 2, 2, 2])} teamB={quad([1, 1, 1, 0])}
+      <StatTable teamA={quad([2, 2, 2, 2])} teamB={quad([1, 0, 0, 0])}
                  cols={['quad_caps', 'times_quadded']} showTotals />,
     );
     const totals = screen.getAllByText('Team total').map((el) =>
