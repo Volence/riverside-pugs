@@ -3785,6 +3785,27 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .vetotile--banned .vetotile__name { text-decoration: line-through; }
 .vetotile--picked, .vetotile--decider { border-color: var(--accent); }
 .vetoboard__choice { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* Owner 2026-10-23: the step a team is on must be unmistakable. A ban is red,
+   a pick is green, so a captain cannot read one as the other. */
+.vetobanner { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-left-width: 4px; border-radius: var(--radius, 6px); background: var(--surface-2); }
+.vetobanner__title { font-size: 1.1em; }
+.vetobanner__detail { font-size: var(--fs-dense); color: var(--text-muted); }
+.vetobanner--ban { border-left-color: var(--loss); }
+.vetobanner--pick { border-left-color: var(--win); }
+.vetobanner--side, .vetobanner--order { border-left-color: var(--accent); }
+.vetobanner.is-mine.vetobanner--ban { background: color-mix(in srgb, var(--loss) 14%, var(--surface-2)); }
+.vetobanner.is-mine.vetobanner--pick { background: color-mix(in srgb, var(--win) 14%, var(--surface-2)); }
+.vetobanner.is-mine.vetobanner--side, .vetobanner.is-mine.vetobanner--order { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+.vetobanner.is-mine .vetobanner__title { font-size: 1.25em; }
+.vetobtn--ban { border-color: var(--loss); color: var(--loss); background: transparent; }
+.vetobtn--pick { border-color: var(--win); background: var(--win); color: var(--bg, #000); }
+.vetoshares { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-dense); }
+.vetoplan { margin: 0; padding-left: var(--sp-5, 1.5rem); display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 2px var(--sp-4); font-size: var(--fs-dense); }
+.vetoplan__step.is-done { color: var(--text-muted); text-decoration: line-through; }
+.vetoplan__step.is-now { font-weight: 700; color: var(--text-bright); }
+.vetoplan__step.is-now::marker { color: var(--accent); }
+.vetoplan__step--pick { color: var(--win); }
+.vetoplan__step--pick.is-done { color: var(--text-muted); }
 
 .lineups { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .lineup { margin: 0; min-width: 0; overflow-wrap: anywhere; }

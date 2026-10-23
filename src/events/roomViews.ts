@@ -11,7 +11,7 @@ import { matchLabel, phaseOf, playEntriesOf, type PlayEntry, type RoomPhase } fr
 import { roomPauses, type RoomPause } from './pauseViews.js';
 import { gameNumberOf, playOrder, seriesVerdict } from './seriesRules.js';
 import { vetoSummary } from './vetoConfig.js';
-import { isHumanStep, type VetoActionKind } from './veto.js';
+import { isHumanStep, vetoPlan, type PlanStep, type VetoActionKind } from './veto.js';
 import { openProposal, proposalsOf, schedulable, scheduleRules, type RescheduleRow, type RescheduleStatus } from './schedule.js';
 import { matchStandins, withStandins } from './standins.js';
 
@@ -69,6 +69,8 @@ export interface MatchRoomView {
   id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
   higher: 'a' | 'b' | null; deadline: string | null; serverNow: string; ready: { a: boolean; b: boolean };
   vetoSummary: string; pool: RoomCampaign[]; log: RoomLogLine[]; games: RoomGame[];
+  /** Every veto step in order, done / now / later (veto.ts vetoPlan); empty before the room opens. */
+  plan: PlanStep[];
   next: { kind: 'order' | 'ban' | 'pick' | 'side'; by: 'a' | 'b'; game: number | null; step: number } | { kind: 'wait'; game: number } | null;
   lineups: { a: RoomPlayer[] | null; b: RoomPlayer[] | null; aLocked: boolean; bLocked: boolean };
   holdReason: string | null;
@@ -210,6 +212,7 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
     id: m.id, eventSlug: ev.slug, eventName: ev.name, roundLabel: matchLabel(db, ev, m), a: entry(m.entry_a), b: entry(m.entry_b), phase: phaseOf(m),
     higher: m.room_higher, deadline: m.deadline, serverNow: now.toISOString(), ready: { a: m.ready_a_at !== null, b: m.ready_b_at !== null },
     vetoSummary: vetoSummary(settings.veto, settings.campaignPool.length), pool,
+    plan: st ? vetoPlan(R.vetoInput(db, m)) : [],
     log: vetoRows.map((r) => ({
       step: r.step, side: r.side, action: r.action, campaign: r.campaign, campaignName: r.campaign === null ? null : name(r.campaign), auto: r.auto === 1, at: r.at,
     })),

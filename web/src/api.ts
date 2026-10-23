@@ -2264,10 +2264,16 @@ export interface RoomSchedule {
   canPropose: boolean; canAnswer: boolean; canWithdraw: boolean;
 }
 /** a and b are null only while a bracket match still waits for its teams. */
+/** Mirrors src/events/veto.ts PlanStep. */
+export interface RoomPlanStep {
+  kind: 'order' | 'ban' | 'pick' | 'side' | 'wait'; by: 'a' | 'b' | null; game: number | null; state: 'done' | 'now' | 'later'; tentative: boolean;
+}
 export interface MatchRoomView {
   id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
   higher: 'a' | 'b' | null; deadline: string | null; serverNow: string; ready: { a: boolean; b: boolean };
   vetoSummary: string; pool: RoomCampaign[]; log: RoomLogLine[]; games: RoomGame[];
+  /** Every veto step in order (src/events/veto.ts vetoPlan). Optional for an older server. */
+  plan?: RoomPlanStep[];
   next: { kind: 'order' | 'ban' | 'pick' | 'side'; by: 'a' | 'b'; game: number | null; step: number } | { kind: 'wait'; game: number } | null;
   lineups: { a: RoomPlayer[] | null; b: RoomPlayer[] | null; aLocked: boolean; bLocked: boolean };
   holdReason: string | null;
