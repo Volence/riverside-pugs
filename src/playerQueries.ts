@@ -8,7 +8,7 @@ import { matchSrChange, playerSeasonState, publicStanding, rankView, seasonLadde
 import { playerPastSeasons } from './seasons.js';
 import { getPlayer, currentSeasonId, getProfileFields, socialLinks } from './players.js';
 import { STAT_DEFS, statDef } from './statKeys.js';
-import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
+import { playerStandings, RANKED_MIN_GAMES, standingMinGames } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
 import { chemistryFor } from './chemistry.js';
 import { allTitles, endorsementSummary } from './endorsements.js';
@@ -46,7 +46,7 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
   // client side without a request per column. Two queries for the whole
   // table rather than one per player.
   const fixed = db.prepare(
-    `SELECT mp.player_id AS steamid,
+    `SELECT mp.player_id AS steamid, COUNT(*) AS statGames,
             COALESCE(SUM(mp.si_damage),0)    AS sidmg,
             COALESCE(SUM(mp.si_kills),0)     AS sikill,
             COALESCE(SUM(mp.common_kills),0) AS ck,
@@ -65,9 +65,14 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
   ).all(seasonId) as { steamid: string; stat: string; total: number }[];
 
   const statsBy = new Map<string, Record<string, number>>();
+  // Completed PUGs this season, the denominator of every per-game figure on
+  // the board. Not `games` (rated games), which can count an abandon loss on
+  // a match that has no stats.
+  const statGamesBy = new Map<string, number>();
   for (const r of fixed) {
-    const { steamid, ...rest } = r as { steamid: string } & Record<string, number>;
+    const { steamid, statGames, ...rest } = r as { steamid: string; statGames: number } & Record<string, number>;
     statsBy.set(steamid, { ...rest });
+    statGamesBy.set(steamid, statGames);
   }
   for (const r of skill) {
     // self-visibility stats are never rankable and must not ride along on a
@@ -98,6 +103,9 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
 
   return {
     season: { ...season, placementGames: rules.placementGames, ranks: rules.ranks, finalMinGames: rules.finalMinGames, ended },
+    // Games before a per-game stat ranks on the board or its leader cards:
+    // the same gate as the profile's standing badges (standing_min_games).
+    statMinGames: standingMinGames(db),
     matchesRated,
     rows: rows
       // A soft-reset season seeds a row for every returning player; until they
@@ -120,6 +128,7 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
           finalRank: f ? f.final_rank : null,
           title: titles.get(r.steamid) ?? null,
           stats: statsBy.get(r.steamid) ?? {},
+          statGames: statGamesBy.get(r.steamid) ?? 0,
         };
       })
       .sort((x, y) => (y.sr ?? -1) - (x.sr ?? -1) || y.games - x.games),
