@@ -77,11 +77,19 @@ export function useLiveState(): {
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    // Set once the first socket has opened. Any later open is a reconnect
+    // (a web restart or a network blip), and whatever 'refresh' went out
+    // while the socket was down was missed, so refetch once on it.
+    let openedBefore = false;
 
     const connect = () => {
       if (closed) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => {
+        if (openedBefore) refreshRef.current();
+        openedBefore = true;
+      };
       ws.onmessage = (m) => {
         const name = eventName(m.data);
         // 'tickets' is for ticket pages, goes only to staff, and says nothing
