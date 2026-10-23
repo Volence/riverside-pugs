@@ -2,6 +2,7 @@ import type { DB } from './db.js';
 import { getSetting } from './settings.js';
 import { STAT_DEFS } from './statKeys.js';
 import { completedPug } from './matchKinds.js';
+import { notBannedSql } from './banState.js';
 
 /** Games before a player holds a rank. Under this they are listed as
  *  provisional: one lucky night at high sigma should not top the board. */
@@ -54,13 +55,19 @@ const FIXED_KEYS = ['sidmg', 'sikill', 'ck', 'rev'] as const;
  * the same set: someone who does not qualify for a badge does not count
  * towards anyone else's `of` either, so the denominator is always the number
  * of people the rank was actually taken against.
+ *
+ * A player under a ban right now is out of the field entirely, like the
+ * leaderboard (playerQueries.ts): they hold no badge and count towards
+ * nobody's `of`.
  */
-export function playerStandings(db: DB, seasonId: number, steamid: string): Record<string, Standing> {
+export function playerStandings(
+  db: DB, seasonId: number, steamid: string, now: Date = new Date(),
+): Record<string, Standing> {
   const ratings = db.prepare(
     `SELECT pr.player_id AS steamid, pr.wins, pr.losses,
             (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = pr.player_id AND rh.season_id = pr.season_id) AS games
-     FROM player_ratings pr WHERE pr.season_id = ?`,
-  ).all(seasonId) as { steamid: string; wins: number; losses: number; games: number }[];
+     FROM player_ratings pr WHERE pr.season_id = ? AND ${notBannedSql('pr.player_id')}`,
+  ).all(seasonId, now.toISOString()) as { steamid: string; wins: number; losses: number; games: number }[];
   const ranked = ratings.filter((r) => r.games >= standingMinGames(db));
   if (!ranked.some((r) => r.steamid === steamid)) return {};
 
