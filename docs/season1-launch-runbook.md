@@ -47,6 +47,11 @@ Seasons turns all of it on at once.
    Also check that with Season 0 current, `!rq` does nothing and no SR line is sent.
 2. Merge `season1` into master (other sessions commit to master: merge, do not rebase their work).
 3. Web: `deploy-web.sh` (see memory pug-deploy-verification for the gated deploy rules).
+   **Deadline if it carries season1-stats:** the weekly Damage as SI award switches to the net
+   figure from week `NET_SI_DAMAGE_FROM_WEEK` (2026-10-26, src/weeklyAwards.ts). That week
+   freezes Mon **11-02 12:00 UTC**, so this deploy must land before then. If it will not, bump
+   the constant to the first week that starts after the deploy, so no week changes its rule
+   halfway through or is frozen under the old one while the code says new.
 4. Plugin: pug-match 0.3.38 to all five pool servers between matches (it carries `pug-endnote.inc`).
    It stays silent until the site sends `sm_pug_requeue 1`, which it only does after the flip.
 5. Verify: the site still shows Season 0 everywhere, News is not in the nav, Patch notes still
