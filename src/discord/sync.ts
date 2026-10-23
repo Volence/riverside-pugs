@@ -11,10 +11,10 @@ import {
 } from './messageStore.js';
 import {
   renderCancelled, renderLobby, renderLobbyFailed, renderMatch, renderMatchAborted, renderPanel, renderQueueAlert,
-  renderResult, type MatchCardState, type MatchView, type PlayerView, type ResultPlayer,
+  renderQueueAlertClosed, renderResult, type MatchCardState, type MatchView, type PlayerView, type ResultPlayer,
 } from './presenter.js';
 import { getSetting } from '../settings.js';
-import { safeThresholds } from '../matchmaker.js';
+import { decideAlert, lastAlertAt, openAlerts, queueAlertConfig, type AlertClose } from './queueAlert.js';
 import { sideGamesEnabled, type SidePublicView } from '../sideGames.js';
 import { ABORT_REASON, abortParties, anyRequeued, type AbortCause } from '../matchAborts.js';
 
@@ -25,13 +25,6 @@ import { ABORT_REASON, abortParties, anyRequeued, type AbortCause } from '../mat
  *  Was 15; the owner cut it to 5 on 2026-09-30. */
 const ABORT_LINE_TTL_MIN = 5;
 
-/** Shortest gap between two queue alerts.
- *
- *  Not about rate limits. One filling queue can cross two thresholds a minute
- *  apart, and two pings for the same fill is what teaches people to mute the
- *  channel. The higher threshold is the more useful one, so it wins and the
- *  lower is dropped rather than queued. */
-const ALERT_COOLDOWN_MS = 10 * 60 * 1000;
 import type { BotTransport, MessagePayload } from './transport.js';
 import { matchWinLine } from '../winProb.js';
 
@@ -96,13 +89,14 @@ export class DiscordSync {
   /** Matches born from a lobby whose card was never posted (the whole lobby
    *  ran between two passes). The next pass posts their card. */
   private needCard = new Set<number>();
-  /** The highest threshold already announced for the CURRENT filling of the
-   *  queue, reset when it empties out again. Without it, one person leaving and
-   *  rejoining at 6/8 re-announces every time, which is how a useful ping
-   *  becomes a muted channel. */
-  private announced = 0;
-  /** When the last alert went out, for the cooldown. */
-  private lastAlertMs = 0;
+  /** A lobby started since the last pass. A whole ready check can in
+   *  principle run between two passes, and the open queue alert must still
+   *  be closed as "popped" rather than left inviting people in. */
+  private poppedSinceLastPass = false;
+  /** The count the open queue alert shows, by message id, so an unchanged
+   *  queue does not re-edit it every pass. Unknown after a restart, which
+   *  costs one harmless edit. */
+  private alertShows = new Map<string, number>();
 
   constructor(private deps: DiscordSyncDeps) {}
 
@@ -119,6 +113,7 @@ export class DiscordSync {
     this.deps.matchmaker.on({
       // Synchronous, so by the time any pass runs the card is already keyed by
       // the match it became.
+      lobbyStarted: () => { this.poppedSinceLastPass = true; },
       lobbyCompleted: (lobbyId, matchId) => {
         if (getMessage(db, 'match', lobbyId)) rekeyMessage(db, 'match', lobbyId, String(matchId));
         else this.needCard.add(matchId);
@@ -367,63 +362,78 @@ export class DiscordSync {
   }
 
   /**
-   * Announce that the queue is filling, at most once per threshold per fill.
+   * The "queue is almost full" alert: post it, keep it current, close it.
+   * The rules are decideAlert's (queueAlert.ts); this does the Discord side.
    *
-   * Three guards, and each exists for a different way this goes wrong:
-   *
-   * - `announced` stops the same threshold firing twice while the queue hovers
-   *   there. Somebody leaving and rejoining at 6/8 must not re-ping.
-   * - the reset at zero is what lets the NEXT fill announce again. Resetting on
-   *   any decrease instead would re-arm on ordinary churn.
-   * - the cooldown covers the case the other two cannot: two thresholds crossed
-   *   in quick succession, which is two pings a minute apart for one filling
-   *   queue. The higher one is worth more, so it wins and the lower is dropped.
-   *
-   * Returns whether a message was posted, so the caller knows to re-post the
-   * panel below it.
+   * Returns whether a message was posted in the queue channel, so the caller
+   * knows to re-post the panel below it. An alert in a channel of its own
+   * does not move the panel.
    */
   private async maybeAlert(count: number): Promise<boolean> {
-    const { db, channelId } = this.deps;
-    const roleId = getSetting(db, 'discord_pug_role_id');
-    if (!roleId) return false;
-
-    // An empty queue is a fresh start: re-arm every threshold.
-    if (count === 0) {
-      this.announced = 0;
+    const { db } = this.deps;
+    const popping = this.poppedSinceLastPass || this.deps.matchmaker.lobbies().length > 0;
+    this.poppedSinceLastPass = false;
+    const cfg = queueAlertConfig(db, this.deps.channelId);
+    const open = openAlerts(db);
+    // Older open alerts than the newest should not exist; close any found as
+    // the newest would be, so none is left inviting people in.
+    for (const stale of open.slice(1)) await this.closeAlert(stale, popping ? 'popped' : 'emptied', count);
+    const current = open[0] ?? null;
+    if (!cfg) {
+      // Turned off with an alert standing: close it rather than strand it.
+      if (current) await this.closeAlert(current, popping ? 'popped' : count === 0 ? 'emptied' : 'dropped', count);
       return false;
     }
-
-    const thresholds = safeThresholds(getSetting(db, 'discord_queue_thresholds'))
-      .filter((t) => t > 0 && t < QUEUE_SIZE)
-      .sort((a, b) => a - b);
-    // The highest threshold this queue has reached. Using the highest rather
-    // than an exact match means a pass that sees 4 -> 7 in one go announces 7,
-    // not nothing: the sync loop is periodic and does not see every join.
-    const reached = thresholds.filter((t) => count >= t).pop() ?? 0;
-    if (reached === 0 || reached <= this.announced) return false;
 
     const now = this.deps.now?.() ?? Date.now();
-    if (now - this.lastAlertMs < ALERT_COOLDOWN_MS) {
-      // Still mark it announced. The point of the cooldown is to drop this
-      // ping, not to hold it until the cooldown expires and fire it late.
-      this.announced = reached;
+    const decision = decideAlert({
+      count, popping, threshold: cfg.threshold, cooldownMs: cfg.cooldownMs, now,
+      lastAt: lastAlertAt(db),
+      open: current ? { count: this.alertShows.get(current.message_id) ?? null } : null,
+    });
+
+    if (decision.kind === 'close') {
+      await this.closeAlert(current!, decision.why, count);
       return false;
     }
-
-    const payload = renderQueueAlert({
-      count, size: QUEUE_SIZE, roleId, publicUrl: this.deps.publicUrl,
-    });
-    try {
-      const messageId = await this.deps.transport.send(channelId, payload);
-      saveMessage(db, { kind: 'alert', ref: String(now), channelId, messageId, state: 'done' });
-    } catch (err) {
-      // Never fatal, and deliberately still marked announced: a Discord outage
-      // must not turn into a retry on every pass for the rest of the evening.
-      console.error('[discord] queue alert failed:', err);
+    if (decision.kind === 'update') {
+      const result = await this.safeEdit(current!.channel_id, current!.message_id, renderQueueAlert({
+        count, size: QUEUE_SIZE, roleId: cfg.roleId, publicUrl: this.deps.publicUrl, ping: false,
+      }));
+      if (result === 'ok') this.alertShows.set(current!.message_id, count);
+      // Deleted by hand: it is gone, and re-posting it would ping again.
+      if (result === 'gone') setMessageState(db, 'alert', current!.ref, 'removed');
+      return false;
     }
-    this.announced = reached;
-    this.lastAlertMs = now;
-    return true;
+    if (decision.kind !== 'post') return false;
+
+    const ref = String(now);
+    try {
+      const messageId = await this.deps.transport.send(cfg.channelId, renderQueueAlert({
+        count, size: QUEUE_SIZE, roleId: cfg.roleId, publicUrl: this.deps.publicUrl,
+      }));
+      saveMessage(db, { kind: 'alert', ref, channelId: cfg.channelId, messageId, state: 'open' });
+      this.alertShows.set(messageId, count);
+      return cfg.channelId === this.deps.channelId;
+    } catch (err) {
+      // Never fatal, and recorded all the same: the cooldown counts from a
+      // failed attempt too, or a Discord outage would retry on every pass for
+      // the rest of the evening.
+      console.error('[discord] queue alert failed:', err);
+      saveMessage(db, { kind: 'alert', ref, channelId: cfg.channelId, messageId: '', state: 'failed' });
+      return false;
+    }
+  }
+
+  /** Edit an alert to say it is over, and why. State first, as in
+   *  closeLobbyCard: a failed edit must not leave it 'open' to be retried
+   *  forever. */
+  private async closeAlert(
+    a: { ref: string; channel_id: string; message_id: string }, why: AlertClose, count: number,
+  ): Promise<void> {
+    setMessageState(this.deps.db, 'alert', a.ref, why);
+    this.alertShows.delete(a.message_id);
+    await this.safeEdit(a.channel_id, a.message_id, renderQueueAlertClosed({ why, count, size: QUEUE_SIZE }));
   }
 
   /** Send when there is no stored message, edit when the payload changed,
