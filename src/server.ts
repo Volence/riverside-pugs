@@ -1230,7 +1230,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               // Owner ruling 2026-10-10: a decided match ends with the leader
               // winning, collected exactly as a MATCH_END would be.
               endDecided: (serverId, token, steamid) => orch.endDecidedAbandon(serverId, token, steamid),
-              finish: (matchId) => { void finishWithRetry(deps.db, orch, matchId, releaser); },
+              // 'refresh' once collection settles, like the MATCH_END path:
+              // the decided match leaving 'live' changes its roster's state.
+              finish: (matchId) => {
+                void finishWithRetry(deps.db, orch, matchId, releaser).finally(() => hub.broadcast('refresh'));
+              },
             },
             ev.token, ev.steamid,
           ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
