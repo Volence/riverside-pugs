@@ -620,7 +620,8 @@ export const FRUST_PANEL: PanelChildren = {
     FRUST_LINE('Warning2', 'Warning, second line'),
     { name: 'FrustrationBar', label: 'Bar', kind: 'other', role: 'content', box: 'wh', move: true, font: false, colour: false, gate: 'T1',
       keys: [{ key: 'east_aligned', label: 'Fill from the right', type: 'bool', gate: 'T1',
-        evidence: 'client.dll CFrustrationMeterBarPanel run: east_aligned; stock frustrationmeter.res FrustrationBar "east_aligned" "1"' }] },
+        evidence: 'client.dll CFrustrationMeterBarPanel run: east_aligned; stock frustrationmeter.res FrustrationBar "east_aligned" "1"; client.dylib CFrustrationMeterBarPanel::Paint 0x3a68e0 and DrawBar 0x3a5d90 (a bar at least as tall as wide fills from the bottom, west-aligned only)',
+        note: 'For a vertical bar, make it taller than wide and turn this off: it then fills from the bottom. The game always draws the bar white.' }] },
     FRUST_LINE('FrustrationLabel', 'Label'),
   ],
 };
