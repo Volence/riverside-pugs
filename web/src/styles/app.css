@@ -2607,13 +2607,6 @@ tbody tr.is-lifted td { opacity: 0.55; }
   .skel__bar { animation: none; }
 }
 
-/* 404: the ways onward, as a row of chips that wraps on a phone. */
-.notfound__links { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
-
-/* The Live page with nothing running: the queue line and the last result. */
-.nothinglive__queue { margin: var(--sp-3) 0 0; }
-.nothinglive__last { margin: 0 0 var(--sp-2); font-size: var(--fs-dense); }
-
 /* ---------- signed-out landing ---------- */
 
 /* Sections below the sign-in hero, showing a first-time visitor that matches
@@ -4415,3 +4408,127 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 
 /* Campaign cards: the install list and the actions wrap on a phone. */
 .page--admin .admin-list li { overflow-wrap: anywhere; }
+
+/* ---------- site touchup batch D: nav, recent matches, quiet Live, 404, booked match strip ---------- */
+
+/* Nav: a label never breaks inside itself ("Patch / notes"). Between a phone
+ * and a wide desktop the links tighten first, then drop to a second row under
+ * the brand and the account, instead of squeezing every label onto two lines. */
+.nav__links a { white-space: nowrap; }
+.nav__links { min-width: 0; }
+.nav__me { white-space: nowrap; }
+@media (max-width: 640px) {
+  .nav__links { gap: var(--sp-2) var(--sp-4); }
+}
+@media (max-width: 1520px) and (min-width: 641px) {
+  .nav, .nav__links { gap: var(--sp-4); }
+  .nav__links a { letter-spacing: 0.1em; }
+}
+@media (max-width: 1260px) and (min-width: 641px) {
+  .nav--me { flex-wrap: wrap; height: auto; min-height: 62px; row-gap: 0; padding-top: var(--sp-2); }
+  .nav--me .nav__brand { flex: 1; }
+  .nav--me .nav__links { order: 3; flex-basis: 100%; flex-wrap: wrap; row-gap: var(--sp-2); padding: var(--sp-2) 0 var(--sp-3); border-top: 1px solid var(--border); }
+}
+@media (max-width: 1000px) and (min-width: 641px) {
+  .nav:not(.nav--me) { flex-wrap: wrap; height: auto; min-height: 62px; row-gap: 0; padding-top: var(--sp-2); }
+  .nav:not(.nav--me) .nav__links { flex-basis: 100%; flex-wrap: wrap; row-gap: var(--sp-2); padding: var(--sp-2) 0 var(--sp-3); border-top: 1px solid var(--border); }
+}
+
+/* Recent matches: one row per game. Campaign and its tint on the left, the
+ * two sides and the score in the middle with the winner lit, when on the right. */
+.mlist { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
+.mlist__row { background: var(--surface); border: 1px solid var(--border); box-shadow: inset 4px 0 0 var(--campaign, var(--border-strong)); }
+.mlist__row:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.mlist__link {
+  display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2.2fr) minmax(84px, auto);
+  align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-5); color: var(--text);
+}
+.mlist__link:hover { text-decoration: none; }
+.mlist__what { display: grid; gap: 2px; min-width: 0; }
+.mlist__campaign { font-family: var(--font-label); font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-bright); }
+.mlist__meta { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-label); }
+.mlist__notes { color: var(--text-muted); }
+.mlist__result { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--sp-4); min-width: 0; }
+.mlist__side { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; opacity: 0.6; }
+.mlist__side--a { justify-content: flex-end; }
+.mlist__side--b { flex-direction: row-reverse; justify-content: flex-end; }
+.mlist__side.is-won { opacity: 1; }
+.mlist__faces { display: inline-flex; }
+.mlist__faces img, .mlist__face--none {
+  width: 24px; height: 24px; object-fit: cover; border: 1px solid var(--bg); margin-left: -4px;
+}
+.mlist__faces > :first-child { margin-left: 0; }
+.mlist__face--none {
+  display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2);
+  font-family: var(--font-label); font-size: 0.7rem; color: var(--text-muted);
+}
+.mlist__team { font-size: var(--fs-dense); color: var(--text-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mlist__team b { font-family: var(--font-label); font-weight: 500; letter-spacing: 0.08em; margin-right: var(--sp-2); color: var(--text-muted); }
+.mlist__won {
+  font-family: var(--font-label); font-size: 0.65rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--win); border: 1px solid currentColor; padding: 0 5px;
+}
+.mlist__score { font-family: var(--font-display); font-size: 1.5rem; letter-spacing: 0.02em; color: var(--text-muted); white-space: nowrap; }
+.mlist__score .is-won { color: var(--text-bright); }
+.mlist__dash { margin: 0 var(--sp-2); color: var(--border-strong); }
+.mlist__when { justify-self: end; font-size: var(--fs-dense); color: var(--text-muted); white-space: nowrap; }
+@media (max-width: 760px) {
+  .mlist__link { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4); }
+  .mlist__result { grid-column: 1 / -1; grid-row: 2; }
+  .mlist__when { grid-column: 2; grid-row: 1; }
+  .mlist__score { font-size: 1.25rem; }
+  .mlist__result { gap: var(--sp-2); }
+  .mlist__faces > :nth-child(n+3) { display: none; }
+  .mlist__won { display: none; }
+}
+
+/* Live with nothing running: three cards that each lead somewhere. */
+.quiet { display: grid; gap: var(--sp-4); }
+.quiet__lede { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-muted); }
+.quiet__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.quiet__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-4); }
+.quiet__card {
+  display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-5); min-width: 0;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  box-shadow: inset 0 3px 0 var(--campaign, var(--rule));
+}
+.quiet__card:hover { text-decoration: none; border-color: var(--border-strong); background: var(--surface-2); }
+.quiet__big { font-family: var(--font-display); font-size: 2.75rem; line-height: 1; color: var(--text-bright); }
+.quiet__big .is-won { color: var(--text-bright); }
+.quiet__big > span:not(.is-won):not(.quiet__of) { color: var(--text-muted); }
+.quiet__of { font-size: 1.25rem; color: var(--text-muted); }
+.quiet__name { font-family: var(--font-label); font-size: 1.25rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-bright); }
+.quiet__bar { display: block; height: 4px; background: var(--surface-2); }
+.quiet__bar > span { display: block; height: 100%; background: var(--win); }
+.quiet__line { font-size: var(--fs-dense); }
+.quiet__cta { margin-top: auto; padding-top: var(--sp-2); font-family: var(--font-label); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.16em; color: var(--accent); }
+.quiet__foot { margin: 0; font-size: var(--fs-dense); }
+
+/* 404: a big quiet numeral beside the explanation, then the ways onward. */
+.notfound { display: grid; gap: var(--sp-6); padding-top: var(--sp-6); }
+.notfound__hero { display: flex; align-items: center; gap: var(--sp-6); border-bottom: 2px solid var(--rule); padding-bottom: var(--sp-5); }
+.notfound__code { font-family: var(--font-display); font-size: 9rem; line-height: 0.85; color: transparent; -webkit-text-stroke: 2px var(--border-strong); }
+.notfound__title { font-size: var(--fs-title); margin: var(--sp-1) 0 var(--sp-3); color: var(--text-bright); }
+.notfound__why { margin: 0; max-width: 60ch; }
+.notfound__ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-3); }
+.notfound__way { display: grid; gap: var(--sp-1); padding: var(--sp-4); background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: var(--fs-dense); }
+.notfound__way:hover { text-decoration: none; border-color: var(--rule); background: var(--surface-2); }
+.notfound__label { font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); }
+@media (max-width: 640px) {
+  .notfound__hero { flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+  .notfound__code { font-size: 5.5rem; }
+}
+
+/* A scrim or tournament game's match page: what it was part of, and the way back. */
+.mdbooked {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3);
+  margin-bottom: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+  background: var(--surface); border: 1px solid var(--border);
+}
+.mdbooked__kind {
+  font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 2px var(--sp-2); border: 1px solid var(--rule); color: var(--accent);
+}
+.mdbooked__kind--scrim { border-color: var(--border-strong); color: var(--text-muted); }
+.mdbooked__what { flex: 1 1 260px; min-width: 0; font-size: var(--fs-dense); }
+.mdbooked__what a { color: var(--text-bright); font-weight: 600; }

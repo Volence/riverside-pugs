@@ -43,6 +43,15 @@ describe('winSummary', () => {
     ]);
   });
 
+  it("calls a scrim or tournament game's teams by name, with a plain apostrophe after an s", () => {
+    const line: WinLine = { points, turning: 8, winnerLow: { index: 6, p: 0.16 }, halves: 3898 };
+    expect(winSummary(line, { a: 'Poop Packers', b: 'Bone Breakage' })).toEqual([
+      "Comeback: Poop Packers won from 16%, after Poop Packers' survivor half on map 3 (The Crane).",
+      "Biggest swing: Poop Packers' survivor half on map 4 (The Crane), which took Poop Packers from 20% to 100%.",
+    ]);
+    expect(describePoint(pt(1, 1, 'b', 619, 46, 0.68), undefined, { a: 'Rats', b: 'Bats' })).toBe('Map 2 The Crane, Bats survivors scored 46');
+  });
+
   it('says wire to wire when the winner never trailed on the odds', () => {
     const line: WinLine = { points: [points[0], pt(0, 1, 'b', 0, 600, 0.2), pt(0, 2, 'a', 50, 600, 0)], turning: 1, winnerLow: { index: 0, p: 0.5 }, halves: 10 };
     expect(winSummary(line)[0]).toBe('Team B were ahead on the odds from the first half to the last.');
