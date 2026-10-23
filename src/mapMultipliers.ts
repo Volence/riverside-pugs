@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { completedPug } from './matchKinds.js';
 import { parseKeyValues, type KvNode } from './vpk.js';
 
 /**
@@ -12,7 +13,7 @@ import { parseKeyValues, type KvNode } from './vpk.js';
  * one map loses or gains by the clamp is shared over the campaign's other
  * maps in proportion), and rounded to 0.05. A harder map is worth more, so
  * every map carries about the same weight in a match. Only maps with at
- * least 50 completed matches are recalculated; the rest keep their numbers.
+ * least 50 completed PUGs are recalculated; the rest keep their numbers.
  * A mirrored map (l4d_vs_mX) plays and scores as its original l4d_vs_X: its
  * rounds count towards the original's rate and it takes the same number.
  *
@@ -23,7 +24,7 @@ import { parseKeyValues, type KvNode } from './vpk.js';
  */
 
 export interface MultiplierRules {
-  /** Completed matches a map needs in the previous season to be recalculated. */
+  /** Completed PUGs a map needs in the previous season to be recalculated. */
   minMatches: number;
   min: number;
   max: number;
@@ -185,12 +186,11 @@ export function versusLadder(text: string): LadderMap[] {
   });
 }
 
-/** Completed matches, rounds and saferoom arrivals per map in one season. A
+/** Completed PUGs, rounds and saferoom arrivals per map in one season. A
  *  round made it when any survivor was alive at its end (survivors_alive > 0,
- *  the same rule as the Survived column on the map pages). Every match kind,
- *  not just PUGs: scrims and tournament matches play the same maps under the
- *  same multipliers, and the owner's Season 1 table was taken this way (PUGs
- *  only would move Blood Harvest 2 from 1.15 to 1.20). */
+ *  the same rule as the Survived column on the map pages). PUGs only, voided
+ *  matches left out (owner 2026-10-23): scrims and tournament matches are
+ *  played by other line-ups under other stakes and stay out of PUG numbers. */
 export const SEASON_RATES_SQL = `
   SELECT mm.map AS map,
          COUNT(DISTINCT m.id) AS matches,
@@ -199,7 +199,7 @@ export const SEASON_RATES_SQL = `
   FROM matches m
   JOIN match_maps mm ON mm.match_id = m.id
   LEFT JOIN match_rounds r ON r.match_id = m.id AND r.ordinal = mm.ordinal
-  WHERE m.state = 'completed' AND m.season_id = ?
+  WHERE ${completedPug('m')} AND m.voided_at IS NULL AND m.season_id = ?
   GROUP BY mm.map`;
 
 /** What the site serves: the committed table for one season. */
