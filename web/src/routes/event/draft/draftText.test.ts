@@ -1,7 +1,7 @@
 // web/src/routes/event/draft/draftText.test.ts
 import { describe, it, expect } from 'vitest';
 import type { DraftPickView, PlayerCardView } from '../../../api';
-import { freshPicks, sortedPool, trendText } from './draftText';
+import { freshPicks, sortedPool, statText, trendShort, trendText } from './draftText';
 
 const pick = (pickNo: number, at: string, steamid = `p${pickNo}`): DraftPickView => ({ pickNo, round: 1, captain: 'c', steamid, name: steamid, auto: false, at });
 const card = (name: string, sr: number) => ({ steamid: name, name, sr } as PlayerCardView);
@@ -32,5 +32,16 @@ describe('trendText', () => {
     expect(trendText([1000, 1020, 1044])).toBe('+44 SR across the last 3 rated games');
     expect(trendText([1000, 980])).toBe('-20 SR across the last 2 rated games');
     expect(trendText([1000])).toBeNull();
+  });
+});
+
+describe('card figures', () => {
+  it('trendShort says the move and the span, or nothing with under two points', () => {
+    expect(trendShort([1000, 1020, 1044])).toBe('+44 SR, last 3');
+    expect(trendShort([1000, 980])).toBe('-20 SR, last 2');
+    expect(trendShort([1000])).toBeNull();
+  });
+  it('statText: whole numbers from 100, one decimal below, no trailing .0', () => {
+    expect([4168.4, 184.3, 99.96, 0.45, 2, 0].map(statText)).toEqual(['4168', '184', '100', '0.5', '2', '0']);
   });
 });

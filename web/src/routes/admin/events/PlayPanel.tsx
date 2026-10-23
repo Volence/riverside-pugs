@@ -329,18 +329,18 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
   const names = m.a && m.b ? `${m.a.name} vs ${m.b.name}` : '';
   const hasRoomTools = editable && (m.phase === 'waiting' && m.a !== null && m.b !== null || ROOM_LIVE.has(m.phase));
   return (
-    <li class="matchcard">
-      <div class="matchcard__head">
-        <span class="matchcard__teams"><strong>{m.a?.name ?? 'TBD'}</strong> <span class="muted">vs</span> <strong>{m.bye ? 'Bye' : m.b?.name ?? 'TBD'}</strong></span>
+    <li class="deskmatch">
+      <div class="deskmatch__head">
+        <span class="deskmatch__teams"><strong>{m.a?.name ?? 'TBD'}</strong> <span class="muted">vs</span> <strong>{m.bye ? 'Bye' : m.b?.name ?? 'TBD'}</strong></span>
         <span class="teamchip">{matchLabel(m)}</span>
         {(m.forfeit || (m.scoreA !== null && m.scoreB !== null)) && (
           <span class="muted">{m.forfeit ? `forfeit, ${(m.winner === 'a' ? m.a : m.b)?.name ?? ''} wins` : `${m.scoreA} : ${m.scoreB}`}</span>
         )}
-        {m.a && m.b && slug && <a class="btn btn--sm matchcard__room" href={`/event/${slug}/match/${m.id}`}>Open the room</a>}
+        {m.a && m.b && slug && <a class="btn btn--sm deskmatch__room" href={`/event/${slug}/match/${m.id}`}>Open the room</a>}
       </div>
       <DeskLine m={m} />
       {hasRoomTools && (
-        <div class="matchcard__bar">
+        <div class="deskmatch__bar">
           {editable && m.phase === 'waiting' && m.a && m.b && (
             // Opens the room ahead of its time (the clock opens it otherwise).
             <button class="btn btn--ghost btn--sm" aria-label={`Open room: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.openEventRoom(eventId, m.id))}>Open room now</button>
@@ -361,19 +361,19 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
         <HoldForm eventId={eventId} m={m} run={run} busy={busy} onDone={() => setHolding(false)} />
       )}
       {editable && OPEN.has(m.status) && (
-        <div class="matchcard__result">
-          <span class="matchcard__label">Enter a result by hand</span>
+        <div class="deskmatch__result">
+          <span class="deskmatch__label">Enter a result by hand</span>
           <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting={false} />
         </div>
       )}
       {correctable && !correcting && (
-        <div class="matchcard__bar">
+        <div class="deskmatch__bar">
           <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => setCorrecting(true)}>Correct</button>
         </div>
       )}
       {correctable && correcting && (
-        <div class="matchcard__result">
-          <span class="matchcard__label">Correct the result</span>
+        <div class="deskmatch__result">
+          <span class="deskmatch__label">Correct the result</span>
           <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting onSaved={() => setCorrecting(false)} />
         </div>
       )}
@@ -414,7 +414,7 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
           {s.rounds.map((r) => (
             <div key={`${r.group}-${r.round}`}>
               <span class="eyebrow">{groupPrefix(s, r)}{r.label}</span>
-              <ul class="matchcards">
+              <ul class="deskmatches">
                 {r.matches.map((m) => <MatchRow key={m.id} eventId={eventId} s={s} m={m} canEdit={canEdit} run={run} busy={busy} slug={slug} />)}
               </ul>
             </div>
