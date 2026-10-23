@@ -5435,3 +5435,50 @@ a.mapch__name:hover { color: var(--accent); }
 .pweek__award { display: inline-block; margin: 1px var(--sp-1) 1px 0; padding: 0 var(--sp-2); border: 1px solid var(--border); font-size: var(--fs-dense); color: var(--text); }
 .pweek__more { margin-top: var(--sp-3); }
 @media (max-width: 640px) { .pweek__opt { display: none; } }
+
+/* ===== Admin recent results (rres) =====
+   One compact row per finished match instead of a table whose ready-up column
+   made every row eight lines tall: tinted match cell, score with the winner
+   bright, odds, pause chips, one chip per ready-up (slow ones coloured) that
+   opens the "last to ready" detail, relative end time, Void on the right. */
+.rres { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.rres__row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.2fr) minmax(7rem, auto) minmax(8rem, 1fr) minmax(6rem, 0.8fr) minmax(12rem, 2.2fr) 5rem auto;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--campaign, var(--border-strong));
+  font-size: var(--fs-dense);
+}
+.rres__row > * { min-width: 0; }
+.rres__match { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
+.rres__id { font-family: var(--font-label); color: var(--text-bright); }
+.rres__camp { color: var(--text); }
+.rres__kind { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; padding: 0 var(--sp-1); border: 1px solid var(--rating); color: var(--rating); }
+.rres__kind--scrim { border-color: var(--border-strong); color: var(--text-muted); }
+.rres__score { display: flex; align-items: baseline; gap: var(--sp-1); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-muted); }
+.rres__side--won { color: var(--text-bright); font-weight: 600; }
+.rres__team { font-size: var(--fs-label); font-family: var(--font-label); letter-spacing: 0.06em; }
+.rres__dash { color: var(--text-muted); }
+.rres__pauses { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.rres__chip { padding: 0 var(--sp-1); border: 1px solid var(--border-strong); color: var(--text); white-space: nowrap; }
+.rres__readybtn { all: unset; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.rres__readybtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rres__rchip { padding: 0 var(--sp-1); border: 1px solid var(--border); background: var(--surface-2); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text); }
+.rres__rchip--slow { border-color: var(--rating); color: var(--rating); }
+.rres__rchip--bad { border-color: var(--loss); color: var(--loss); }
+.rres__more { color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; }
+.rres__ended { color: var(--text-muted); white-space: nowrap; }
+.rres__act { justify-self: end; }
+.rres__void { border-color: color-mix(in srgb, var(--loss) 60%, transparent); color: var(--loss); }
+.rres__detail { grid-column: 1 / -1; list-style: none; margin: 0; padding: var(--sp-2) 0 0; border-top: 1px solid var(--border); display: grid; gap: 2px; color: var(--text-muted); }
+.rres__dline--slow { color: var(--rating); }
+.rres__dline--bad { color: var(--loss); }
+@media (max-width: 1100px) {
+  .rres__row { grid-template-columns: 1fr auto; }
+  .rres__score, .rres__ended { justify-self: end; }
+  .rres__odds, .rres__pauses, .rres__ready { grid-column: 1 / -1; }
+}

@@ -66,7 +66,7 @@ describe('admin matches', () => {
     await app.inject({ method: 'POST', url: '/api/queue/join', cookies: authedCookie(app, db, IDS[3]) });
     const o = (await app.inject({ method: 'GET', url: '/api/admin/overview', cookies: admin })).json();
     expect(o.servers[0]).toMatchObject({ name: 's1', status: 'idle' });
-    expect(o.recent[0]).toMatchObject({ id: done });
+    expect(o.recent[0]).toMatchObject({ id: done, booked: null });
     expect(o.queue.map((p: { steamid: string }) => p.steamid)).toEqual([IDS[3]]);
     expect(o.open).toEqual([]);
     expect(JSON.stringify(o)).not.toContain('rcon');

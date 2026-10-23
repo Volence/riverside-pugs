@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { captureHealth } from '../integrityFlags.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { pausesFor, readyupsFor, slowToReady } from '../liveView.js';
+import { bookedSidesFor } from '../matchSides.js';
 import { archiveAborted } from '../matchArchive.js';
 import { matchForecast, recomputeSeasonRatings } from '../rating.js';
 import { getServer, PICK_ORDER_SQL } from '../serverPool.js';
@@ -80,6 +81,8 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
     ...m, forecast: matchForecast(db, m.id), pauses: pausesFor(db, m.id), readyups: readyupsFor(db, m.id),
     // A decided abandon completes, so it is here, with Restore rating per quitter.
     abandons: abandonsOf(db, m.id),
+    // A scrim or tournament game, so the row can say so and name the teams.
+    booked: bookedSidesFor(db, m.id),
   }));
   const voided = db.prepare(
     `SELECT id, campaign, voided_at AS voidedAt, void_reason AS voidReason
