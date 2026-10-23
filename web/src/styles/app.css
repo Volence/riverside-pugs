@@ -5227,3 +5227,60 @@ a.mapch__name:hover { color: var(--accent); }
 .mapface--none::before { content: attr(data-initial); }
 .mapmore { margin-top: var(--sp-2); }
 .mapdetail .lb .lb__pcol .lbname a { text-transform: none; font-family: var(--font-body); letter-spacing: normal; }
+
+/* UI round 3 · map pictures and replay control groups (ui3-maps-replay). */
+.mapbanner {
+  position: relative;
+  margin: 0 0 var(--sp-5);
+  height: 22rem;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--campaign, var(--border)) 45%, var(--border));
+  background: var(--surface-2);
+}
+.mapbanner {
+  background:
+    radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--campaign, var(--surface-2)) 30%, var(--bg)) 0%, var(--bg) 75%);
+}
+/* The whole map, never cropped: the black around it is the void outside the
+   level, so it sits on the campaign tint instead of filling the frame. */
+.mapbanner img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+.mapbanner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, transparent 70%, color-mix(in srgb, var(--bg) 70%, transparent) 100%);
+}
+.mapch__name { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.mapch__thumb {
+  flex: none;
+  width: 4.5rem;
+  height: 2.75rem;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+@media (max-width: 640px) {
+  .mapbanner { height: auto; aspect-ratio: var(--map-aspect, 1.6); max-height: 16rem; margin-bottom: var(--sp-4); }
+  .mapch__thumb { width: 3.5rem; height: 2.25rem; }
+}
+
+.replay__group { display: inline-flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.replay__group + .replay__group { padding-left: var(--sp-2); border-left: 1px solid var(--border); }
+.replay__glabel {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-right: var(--sp-1);
+}
+.replay__toolbar > .replay__glabel { min-width: 4.25rem; }
+.replay__filter > span { font-size: var(--fs-label); letter-spacing: 0.18em; }
+@media (max-width: 640px) {
+  .replay__group + .replay__group { padding-left: 0; border-left: 0; }
+  .replay__toolbar > .replay__glabel { flex-basis: 100%; min-width: 0; }
+}

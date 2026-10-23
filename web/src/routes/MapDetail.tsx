@@ -4,6 +4,7 @@ import { campaignName, campaignTint, chapterName, deriveLiveStats, fmtClock, lab
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { MAP_THUMBS, mapThumb } from '../../../src/mapThumbs';
 
 /** Games on a map before a win rate is worth drawing as a bar. */
 const MIN_GAMES = 5;
@@ -82,6 +83,21 @@ export function MapDetail({ map }: { map: string }) {
           />
         </Figures>
       </PageHeader>
+
+      {/* The map from above, cut down from the replay viewer's overview so
+          the header shows the ground the numbers below were played on. */}
+      {MAP_THUMBS[data.map] !== undefined && (
+        <figure class="mapbanner" style={{ '--map-aspect': String(MAP_THUMBS[data.map]) } as Record<string, string>}>
+          <img
+            src={mapThumb(data.map, 1280)!}
+            srcset={`${mapThumb(data.map, 640)} 640w, ${mapThumb(data.map, 1280)} 1280w`}
+            sizes="(max-width: 700px) 100vw, 1240px"
+            alt={`Overview of ${chapterName(data.display ?? null, mapName(data.map))} from above`}
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+      )}
 
       {chapters.length > 1 && (
         <nav class="mapchips" aria-label="Chapters in this campaign">

@@ -4,6 +4,7 @@ import { useFetch } from '../hooks/useFetch';
 import { campaignName, campaignTint, chapterName, fmtClock, mapName, survivalLabel } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { mapThumb } from '../../../src/mapThumbs';
 import { CampaignTiles } from '../components/CampaignTiles';
 
 /** The id of a campaign's table, which its tile links to. */
@@ -207,7 +208,10 @@ function ChapterRow({ m, n }: { m: MapIndexRow; n: number }) {
   return (
     <li class="mapch">
       <span class="mapch__num">{n}</span>
-      <a class="mapch__name" href={href}>{name}</a>
+      <a class="mapch__name" href={href}>
+        {mapThumb(m.map, 640) && <img class="mapch__thumb" src={mapThumb(m.map, 640)!} alt="" loading="lazy" decoding="async" />}
+        <span>{name}</span>
+      </a>
       <span class="mapch__fig mapch__played"><b>{m.played}</b><small>played</small></span>
       <span class="mapch__fig mapch__score">
         {m.avgScore === null ? <b class="muted">not recorded</b> : <b>{m.avgScore}</b>}

@@ -1213,6 +1213,16 @@ describe('MapDetail', () => {
     ],
   };
 
+  // The header shows the map from above, cut down from its overview.
+  it('shows the small overview picture in the header', async () => {
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(container.querySelector('.mapbanner img')).toBeTruthy());
+    const img = container.querySelector('.mapbanner img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toMatch(/l4d_vs_airport01_greenhouse\.thumb1280\.webp$/);
+    expect(img.getAttribute('srcset')).toMatch(/thumb640\.webp 640w/);
+  });
+
   // The bar is the win rate with a 50% line, not how often someone played,
   // and players with too few games to read a rate from are left out.
   it('draws the win rate as the bar and leaves out thin samples', async () => {
