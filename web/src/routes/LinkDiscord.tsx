@@ -69,7 +69,7 @@ export function LinkDiscord({ session, refresh }: { session: Session; refresh: (
 
   return (
     <div class="page page--play">
-      <Panel class="hero-panel">
+      <Panel class="hero-panel linkpage">
         <p class="eyebrow">Discord</p>
         <h1>Link your accounts</h1>
         {!code && <p class="error">This link is missing its code. Use the button the bot gave you.</p>}
@@ -88,14 +88,19 @@ export function LinkDiscord({ session, refresh }: { session: Session; refresh: (
         )}
         {me && pending && result.kind !== 'ok' && (
           <>
-            <p>
-              Discord account <strong>{pending.discordName}</strong>{' '}
-              <span class="muted">(id {pending.discordId})</span>
-            </p>
-            <p>
-              Steam account <strong>{me.name}</strong>{' '}
-              <span class="muted">({me.steamid})</span>
-            </p>
+            <div class="linkpair">
+              <div class="linkpair__acct">
+                <p class="eyebrow">Discord account</p>
+                <strong>{pending.discordName}</strong>
+                <span class="muted mono">id {pending.discordId}</span>
+              </div>
+              <span class="linkpair__join" aria-hidden="true" />
+              <div class="linkpair__acct">
+                <p class="eyebrow">Steam account</p>
+                <strong>{me.name}</strong>
+                <span class="muted mono">{me.steamid}</span>
+              </div>
+            </div>
             {other ? (
               <p class="error">
                 This Steam account is already linked to the Discord account {other.name}. Disconnect it on your

@@ -1,5 +1,6 @@
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { DocLayout } from '../components/DocLayout';
 import { SetupChecklist } from '../components/SetupChecklist';
 import type { Session } from '../hooks/useLiveState';
 
@@ -81,14 +82,9 @@ const SECTIONS: { id: string; label: string }[] = [
 export function HowToPlay({ session }: { session: Session }) {
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
   return (
-    <div class="page page--profile">
+    <div class="page page--list">
       <PageHeader eyebrow="Riverside" title="How to play" />
-      <div class="stack">
-        <nav class="panel howto-index" aria-label="On this page">
-          <ul>
-            {SECTIONS.map((sec) => <li key={sec.id}><a href={`#${sec.id}`}>{sec.label}</a></li>)}
-          </ul>
-        </nav>
+      <DocLayout sections={SECTIONS}>
         <Panel id="setup">
           <h3>Getting set up</h3>
           {session.kind !== 'loading' && <SetupChecklist me={me} />}
@@ -255,26 +251,32 @@ viewmodel_fov_override 70`}</code></pre>
             checks, LilAC and the input-timing flags. */}
         <Panel id="allowed">
           <h3>What's allowed</h3>
-          <h4>Fine</h4>
-          <ul class="howto">
-            <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
-            <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
-            <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
-            <li>The <a href="/custom-campaigns#l4d2-pack">L4D2 campaigns</a>.</li>
-          </ul>
-          <h4>Not fine</h4>
-          <ul class="howto">
-            <li>
-              Addons that change game files the servers check, like skins, no-trees packs and
-              silenced-weapon packs. You are dropped while loading;{' '}
-              <a href="/help/consistency">here is how to fix it</a>.
-            </li>
-            <li>Effect Detail on Low. The servers will not let you stay ready on it.</li>
-            <li>
-              Cheats, and macros or scripts that press buttons for you. The servers run
-              anticheat, and match data is reviewed for input no hand can make.
-            </li>
-          </ul>
+          <div class="doc__split">
+            <div class="doc__col doc__col--ok">
+              <h4>Fine</h4>
+              <ul class="howto">
+                <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
+                <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
+                <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
+                <li>The <a href="/custom-campaigns#l4d2-pack">L4D2 campaigns</a>.</li>
+              </ul>
+            </div>
+            <div class="doc__col doc__col--no">
+              <h4>Not fine</h4>
+              <ul class="howto">
+                <li>
+                  Addons that change game files the servers check, like skins, no-trees packs and
+                  silenced-weapon packs. You are dropped while loading;{' '}
+                  <a href="/help/consistency">here is how to fix it</a>.
+                </li>
+                <li>Effect Detail on Low. The servers will not let you stay ready on it.</li>
+                <li>
+                  Cheats, and macros or scripts that press buttons for you. The servers run
+                  anticheat, and match data is reviewed for input no hand can make.
+                </li>
+              </ul>
+            </div>
+          </div>
         </Panel>
         <Panel id="reporting">
           <h3>Reporting</h3>
@@ -376,7 +378,7 @@ viewmodel_fov_override 70`}</code></pre>
             ))}
           </div>
         </Panel>
-      </div>
+      </DocLayout>
     </div>
   );
 }

@@ -1,5 +1,16 @@
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { DocLayout, type DocSection } from '../components/DocLayout';
+
+const SECTIONS: DocSection[] = [
+  { id: 'dialog', label: 'What the dialog means' },
+  { id: 'usual', label: 'What it usually is' },
+  { id: 'remove', label: 'Remove the addon' },
+  { id: 'verify', label: 'Verify your game files' },
+  { id: 'keep', label: 'What you can keep' },
+  { id: 'grass', label: 'Grass settings' },
+  { id: 'stuck', label: 'Still stuck' },
+];
 
 /** Static. Linked from the bot's DM to a player whose connection dropped while
  *  loading in, and from the admin player page. Everything here has to make
@@ -7,18 +18,23 @@ import { PageHeader } from '../components/PageHeader';
  *  dialog with a file name on it and want to get into the match. */
 export function HelpConsistency() {
   return (
-    <div class="page page--profile">
+    <div class="page page--list">
       <PageHeader eyebrow="Help" title="Server is enforcing consistency" />
-      <div class="stack">
-        <Panel>
+      <DocLayout sections={SECTIONS}>
+        <Panel id="dialog">
           <h3>What the dialog means</h3>
           <p>
             If the game dropped you back to the menu while loading in, with a box that says
           </p>
-          <blockquote class="mono">
-            Server is enforcing consistency for this file:<br />
-            materials/models/infected/hunter/hunter_01.vmt
-          </blockquote>
+          {/* Drawn like the game's own message box, so a player can match it to
+              what they saw. The file name is an example. */}
+          <figure class="doc__dialog" aria-label="The game's message, with an example file name">
+            <p class="doc__dialogbar">The message</p>
+            <blockquote class="mono">
+              Server is enforcing consistency for this file:<br />
+              materials/models/infected/hunter/hunter_01.vmt
+            </blockquote>
+          </figure>
           <p>
             then your copy of that file is not the one the game shipped with. The server sends a
             checksum for a list of game files, your game compares each one against its own disk, and
@@ -32,7 +48,7 @@ export function HelpConsistency() {
           </p>
         </Panel>
 
-        <Panel>
+        <Panel id="usual">
           <h3>What it usually is</h3>
           <ol class="howto">
             <li>
@@ -60,7 +76,7 @@ export function HelpConsistency() {
           </p>
         </Panel>
 
-        <Panel>
+        <Panel id="remove">
           <h3>Remove the addon</h3>
           <ol class="howto">
             <li>Quit the game.</li>
@@ -83,7 +99,7 @@ export function HelpConsistency() {
           </ol>
         </Panel>
 
-        <Panel>
+        <Panel id="verify">
           <h3>Verify your game files</h3>
           <p>
             This is the fix when the file was edited in place, which is how most skins are installed,
@@ -100,7 +116,7 @@ export function HelpConsistency() {
           </ol>
         </Panel>
 
-        <Panel>
+        <Panel id="keep">
           <h3>What you can keep</h3>
           <p>
             Custom HUDs and custom crosshairs are never checked, so there is no need to remove
@@ -116,7 +132,7 @@ export function HelpConsistency() {
           </p>
         </Panel>
 
-        <Panel>
+        <Panel id="grass">
           <h3>Grass settings are not part of this</h3>
           <p>
             Turning detail grass down or off with <code>cl_detaildist</code> or{' '}
@@ -125,7 +141,7 @@ export function HelpConsistency() {
           </p>
         </Panel>
 
-        <Panel>
+        <Panel id="stuck">
           <h3>Still stuck</h3>
           <p>
             Tell an admin in the Riverside Discord which file the dialog named. If it names a file
@@ -133,7 +149,7 @@ export function HelpConsistency() {
             want to hear about it.
           </p>
         </Panel>
-      </div>
+      </DocLayout>
     </div>
   );
 }

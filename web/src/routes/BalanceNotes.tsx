@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { DocLayout } from '../components/DocLayout';
 import { PatchEntryView } from './balance/PatchEntryView';
 
 /** Fetches and renders one patch's full entry, independently of its
@@ -37,15 +38,15 @@ export function BalanceNotes() {
   return (
     <div class="page page--list">
       <PageHeader eyebrow="Balance" title="Patch notes">
-        <p>
+        <p class="patch-lede">
           Each balance patch, why it was made, and what the numbers measured afterwards. A change
           is only called a measured change when it is larger than normal game-to-game variation.
         </p>
-        <p>
+        <p class="patch-lede muted">
           A measured change is a difference between the games played before and after a patch. It
           can also come from who was playing and which maps were played, so read it next to the notes.
         </p>
-        <p><a href="/balance/values">Game values</a>: every balance setting as it is now, next to vanilla.</p>
+        <p class="patch-lede__link"><a class="btn btn--ghost btn--sm" href="/balance/values">Game values</a> <span>Every balance setting as it is now, next to vanilla.</span></p>
       </PageHeader>
 
       {error ? (
@@ -55,9 +56,9 @@ export function BalanceNotes() {
       ) : data.patches.length === 0 ? (
         <Empty>No patch notes yet.</Empty>
       ) : (
-        <div class="stack">
+        <DocLayout label="Patches" sections={data.patches.map((p) => ({ id: `patch-${p.id}`, label: p.name }))}>
           {data.patches.map((p) => <PatchPanel key={p.id} id={p.id} />)}
-        </div>
+        </DocLayout>
       )}
     </div>
   );
