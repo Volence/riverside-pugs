@@ -304,6 +304,22 @@ export interface FinishRetryOpts {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** Someone joined the Discord server. A linked player who was only invited
+ *  goes through the gate (and may become active), and either way their queue
+ *  block ("join the Riverside Discord") has just cleared, so browsers get a
+ *  'refresh'. Someone not linked to any player wakes nobody. */
+export async function onGuildMemberAdd(
+  db: DB, userId: string, gate: ((steamid: string) => Promise<unknown>) | null, broadcast: () => void,
+): Promise<void> {
+  const p = playerByDiscordId(db, userId);
+  if (!p) return;
+  try {
+    if (p.status === 'invited' && gate) await gate(p.steamid);
+  } finally {
+    broadcast();
+  }
+}
+
 /** Whether a Discord user joining voice is worth a 'refresh': only when they
  *  are linked to someone in a lobby right now, whose Ready button the voice
  *  gate may be holding. Everyone else's voice traffic wakes nobody. */
@@ -1917,8 +1933,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }
   // Someone who linked before joining the server is let in the moment they join.
   membership.onAdd((userId) => {
-    const p = playerByDiscordId(deps.db, userId);
-    if (p && p.status === 'invited' && discordApi) void applyGate(deps.db, discordApi, p.steamid);
+    void onGuildMemberAdd(
+      deps.db, userId,
+      discordApi ? (steamid) => applyGate(deps.db, discordApi, steamid) : null,
+      () => hub.broadcast('refresh'),
+    ).catch((err) => console.error('[discord] member add handling failed:', err));
   });
   // Someone who readied and then left voice has to press Ready again, so a
   // match never starts with a player outside voice. Only bites during a ready
