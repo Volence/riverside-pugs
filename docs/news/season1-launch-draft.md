@@ -17,6 +17,7 @@ Season 1, **Wrong Way**, starts **Tuesday, November 3** and runs through Monday,
 - **Ranks:** Bronze, Silver (1100), Gold (1600), Platinum (2100), Diamond (2700) and Master (3300), each with divisions III, II and I.
 - You rank up the moment you cross a line. You only drop once you are 50 SR below it, so one bad match will not bounce you.
 - The Top 10 badge and a final standing on the season ladder need 20 matches.
+- **Map score multipliers** now follow how often survivors reached the saferoom on each map in Season 0, instead of going up map by map. Harder maps are worth more and easier ones less, so every map counts about the same; each campaign adds up to the same total as before. The numbers are on the Campaigns page.
 - At the end of the season you keep a trophy on your profile for the highest rank you reached. Top 10 finishers get their place on it too, and Season 0's top 10 get theirs on launch day.
 
 ## Also new
