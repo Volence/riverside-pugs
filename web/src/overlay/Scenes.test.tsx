@@ -220,6 +220,16 @@ describe('overlay basics', () => {
     expect(none).toContain('Round results');
   });
 
+  it('round results count Biled from boomed_vomit, which is populated all season', () => {
+    const players: NonNullable<CastMatchView['lastRound']>['players'] = [
+      { steamid: '2', name: 'Boomer', team: 'b' as const, stats: { damage_as_si: 10, boomed_vomit: 37, survivors_biled: 0 } },
+    ];
+    const lastRound = { mapNumber: 1, map: 'l4d_vs_airport01_greenhouse', half: 1 as const, halves: [{ half: 1 as const, survTeam: 'a' as const, score: 400, alive: 4, seconds: 300 }], players };
+    const { container } = render(<Overlay which="results" feed={{ ...feed(), match: { ...match, lastRound } }} now={Date.now()} />);
+    expect(container.textContent).toContain('Biled');
+    expect(container.textContent).toContain('37');
+  });
+
   it('round results show the win chance from here only when the feed carries one', () => {
     const lastRound = { mapNumber: 2, map: 'l4d_vs_airport02_offices', half: 1 as const, halves: [{ half: 1 as const, survTeam: 'a' as const, score: 412, alive: 3, seconds: 371 }], players: [] };
     const withOdds = render(<Overlay which="results" feed={{ ...feed(), match: { ...match, lastRound, winChanceA: 0.735 } }} now={Date.now()} />).container.textContent ?? '';

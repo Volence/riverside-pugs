@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
 import { gamePhase, seasonRules, srUnder } from './seasonRules.js';
+import { notBannedSql } from './banState.js';
 import { settingNumber } from './settings.js';
 import type { EndorseKind } from './endorsements.js';
 
@@ -131,14 +132,18 @@ export const WEEK_MATCHES =
 
 interface PlayerGames { steamid: string; name: string; games: number }
 
-export function playerGames(db: DB, week: string): Map<string, PlayerGames> {
+/** Who played this week and how often: the field every award but the
+ *  endorsement ones is picked from. A player under a ban when the week is
+ *  computed is left out, so a banned player wins nothing new. Weeks already
+ *  frozen keep whatever they stored (weeklyStore.ts). */
+export function playerGames(db: DB, week: string, now: Date = new Date()): Map<string, PlayerGames> {
   const { from, to } = weekBounds(week);
   const rows = db.prepare(
     `SELECT mp.player_id AS steamid, p.name, COUNT(*) AS games
      FROM match_players mp JOIN players p ON p.steamid = mp.player_id
-     WHERE mp.match_id IN (${WEEK_MATCHES})
+     WHERE mp.match_id IN (${WEEK_MATCHES}) AND ${notBannedSql('mp.player_id')}
      GROUP BY mp.player_id`,
-  ).all(from, to) as PlayerGames[];
+  ).all(from, to, now.toISOString()) as PlayerGames[];
   return new Map(rows.map((r) => [r.steamid, r]));
 }
 
@@ -275,15 +280,15 @@ function computeSingles(db: DB, week: string, games: Map<string, PlayerGames>, m
  * at Monday noon, so a Sunday night match's endorsements would otherwise land
  * after its week was already frozen and never count anywhere.
  */
-function computeEndorsed(db: DB, week: string, games: Map<string, PlayerGames>): AwardResult[] {
+function computeEndorsed(db: DB, week: string, games: Map<string, PlayerGames>, now: Date): AwardResult[] {
   const { from, to } = weekBounds(week);
   const rows = db.prepare(
     `SELECT e.to_id AS steamid, p.name, e.kind, e.from_id
      FROM endorsements e
      JOIN matches m ON m.id = e.match_id AND ${completedPug('m')} AND m.voided_at IS NULL
      JOIN players p ON p.steamid = e.to_id
-     WHERE e.created_at >= ? AND e.created_at < ?`,
-  ).all(from, to) as { steamid: string; name: string; kind: EndorseKind; from_id: string }[];
+     WHERE e.created_at >= ? AND e.created_at < ? AND ${notBannedSql('e.to_id')}`,
+  ).all(from, to, now.toISOString()) as { steamid: string; name: string; kind: EndorseKind; from_id: string }[];
   const out: AwardResult[] = [];
   for (const a of ENDORSE_AWARDS) {
     const by = new Map<string, { name: string; count: number; givers: Set<string> }>();
@@ -305,8 +310,8 @@ function computeEndorsed(db: DB, week: string, games: Map<string, PlayerGames>):
   return out;
 }
 
-export function computeWeek(db: DB, week: string): AwardResult[] {
-  const games = playerGames(db, week);
+export function computeWeek(db: DB, week: string, now: Date = new Date()): AwardResult[] {
+  const games = playerGames(db, week, now);
   const min = weeklyMinGames(db);
   const out: AwardResult[] = [];
   for (const a of STAT_AWARDS) {
@@ -319,6 +324,6 @@ export function computeWeek(db: DB, week: string): AwardResult[] {
     if (tot.length) out.push({ ...base, kind: 'total', winners: tot.map((r) => winner(r.g, r.value)) });
   }
   out.push(...computeSingles(db, week, games, min));
-  out.push(...computeEndorsed(db, week, games));
+  out.push(...computeEndorsed(db, week, games, now));
   return out;
 }

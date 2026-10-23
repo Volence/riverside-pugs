@@ -91,7 +91,7 @@ export function Maps() {
       <PageHeader title="Campaigns">
         {maps.length > 0 && (
           <Figures>
-            <Figure label="Maps played" value={maps.filter((m) => m.played > 0).length} />
+            <Figure label="Maps" value={maps.filter((m) => m.played > 0).length} />
             <Figure label="Campaigns" value={[...groups.keys()].filter((k) => k !== 'other').length} />
             <Figure
               label="Most played"

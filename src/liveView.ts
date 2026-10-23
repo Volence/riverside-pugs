@@ -738,10 +738,12 @@ export function recordMapResult(db: DB, token: string, map: string, a: number, b
   const id = liveMatchIdOf(db, token);
   if (id === null) return;
   db.transaction(() => {
-    // Freeze the cumulative totals as they stand now. Up to one LIVESTAT
-    // interval (10s) of end-of-map activity can land in the next map's
-    // bucket; that is acceptable for a cosmetic split, and the authoritative
-    // per-player totals still come from the dump, untouched by any of this.
+    // Freeze the cumulative totals as they stand now. The plugin flushes the
+    // core counters and the full skill set just before MAP_RESULT
+    // (FinalizeMap, pug-match 0.3.39), so the snapshot is current. An older
+    // plugin flushed only the skill set, and up to one LIVESTAT interval (10s)
+    // of commons, SI damage and the rest landed in the next map's bucket. The
+    // authoritative per-player totals still come from the dump either way.
     const existing = db
       .prepare('SELECT ordinal FROM match_live_maps WHERE match_id = ? AND map = ?')
       .get(id, map) as { ordinal: number } | undefined;

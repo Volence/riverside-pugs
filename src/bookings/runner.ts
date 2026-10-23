@@ -218,6 +218,9 @@ export interface BookingRunnerDeps {
   logPublicAddress?: string;
   /** Stop listening for a match token (an aborted booking game). */
   unregisterToken?: (token: string) => void;
+  /** A live booking game was aborted or moved to another box, which changes
+   *  what /api/state shows its players (server.ts broadcasts 'refresh'). */
+  changed?: () => void;
   /** A booked scrim's private team voice (plan 4c). Absent, there is none.
    *  Every call is guarded (voiceStep): voice never blocks a booking. */
   voice?: BookingVoice;
@@ -906,6 +909,17 @@ export class BookingRunner {
     } catch (err) {
       console.error(`[booking] ${id}: unregistering the aborted game's token failed:`, err);
     }
+    // Every aborted game passes through here, so this is where its players'
+    // pages hear that the match is over.
+    this.changed(id);
+  }
+
+  private changed(id: number): void {
+    try {
+      this.deps.changed?.();
+    } catch (err) {
+      console.error(`[booking] ${id}: the changed hook failed:`, err);
+    }
   }
 
   /** Best effort: the plugin drops its match. At the end of a booking the
@@ -1272,6 +1286,8 @@ export class BookingRunner {
         continue;
       }
       console.log(`[booking] ${b.id} moves to ${s.name}`);
+      // The live game moved with it: its connect block now names another box.
+      this.changed(b.id);
       this.track(b.id, () => this.recover(b.id));
     }
     if (preempt) this.deps.preempt();
@@ -1857,6 +1873,7 @@ export class BookingRunner {
     if (!this.running(bookingId) || this.busy.has(bookingId)) return null;
     const old = beginMove(this.db, bookingId, new Date(this.now()));
     if (old === null) return null;
+    this.changed(bookingId);
     this.deps.release(old).catch((err) => {
       console.error(`[booking] ${bookingId}: giving back server ${old} after a move failed:`, err);
     });

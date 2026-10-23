@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { EndorseKind, LiveEvent, StatDef } from '../api';
-import { deriveLiveStats, labelFor, liveGroupStarts } from '../format';
+import { deriveLiveStats, labelFor, liveGroupStarts, statHelp } from '../format';
 import { PlayerLink } from './bits';
 import { TitleTag } from './TitleTag';
 import { markColumn, directionOf, type Mark } from '../outliers';
@@ -93,6 +93,18 @@ export function StatTable(
       if (rate === undefined) delete out.boomer_rate;
       else out.boomer_rate = rate;
     }
+    // QuadSettle in plugin/pug-match.sp credits each of a quad's four
+    // pinners with quad_caps and each of its four victims with times_quadded,
+    // so a summed column counts each quad four times. A player who is not on
+    // the roster (a bot) gets no credit, so a quad can leave fewer than four:
+    // the team had at least as many quads as its best-credited player (the
+    // rule weeklyRecap.ts uses), and sum / 4 covers players who each saw only
+    // some of them (a sub). The larger of the two.
+    for (const k of ['quad_caps', 'times_quadded']) {
+      if (!(k in out)) continue;
+      const most = Math.max(0, ...counted.map((p) => p.stats?.[k] ?? 0));
+      out[k] = Math.max(most, Math.round(out[k]! / 4));
+    }
     return out;
   };
 
@@ -144,7 +156,7 @@ export function StatTable(
         <thead>
           <tr>
             <th class="live__pcol">Player</th>
-            {cols.map((k) => <th class={cls(k)} key={k}>{labelFor(k)}</th>)}
+            {cols.map((k) => <th class={cls(k)} key={k} title={statHelp(k)}>{labelFor(k)}</th>)}
           </tr>
         </thead>
         <tbody>

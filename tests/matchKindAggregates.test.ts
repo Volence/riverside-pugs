@@ -154,3 +154,29 @@ describe('PUG aggregates ignore scrims and tournament matches', () => {
     }
   });
 });
+
+describe('rank badges leave banned players out', () => {
+  const ban = (id: string, expires: string | null = null, lifted: string | null = null) =>
+    db.prepare(
+      "INSERT INTO bans (player_id, reason, created_by, created_at, expires_at, lifted_at) VALUES (?, 'x', 'admin', '2026-09-01T00:00:00Z', ?, ?)",
+    ).run(id, expires, lifted);
+
+  it('drops an actively banned player from the field and from the "of" count', () => {
+    // ids[1] (160) and ids[2] (150) sit above id0 (140) on si damage.
+    const before = playerStandings(db, 1, ids[0]).sidmg;
+    expect(before).toEqual({ rank: 3, of: 8 });
+    ban(ids[1]);
+    expect(playerStandings(db, 1, ids[0]).sidmg).toEqual({ rank: 2, of: 7 });
+  });
+
+  it('gives a banned player no badges of their own', () => {
+    ban(ids[0]);
+    expect(playerStandings(db, 1, ids[0])).toEqual({});
+  });
+
+  it('counts a player whose ban was lifted or has expired', () => {
+    ban(ids[1], null, '2026-09-10T00:00:00Z');
+    ban(ids[2], '2026-09-02T00:00:00Z');
+    expect(playerStandings(db, 1, ids[0], new Date('2026-10-01T00:00:00Z')).sidmg).toEqual({ rank: 3, of: 8 });
+  });
+});

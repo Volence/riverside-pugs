@@ -419,6 +419,11 @@ export interface MatchSummary {
   players?: { a: MatchListPlayer[]; b: MatchListPlayer[] };
   /** A scrim or tournament game's team names and event; absent for a PUG. */
   booked?: BookedSides;
+  /** Each side's top-rated player going in (else the first rostered), so a
+   *  list of many matches can name a side: "alice's team". Null for a side
+   *  with nobody rostered. */
+  teamALead?: string | null;
+  teamBLead?: string | null;
 }
 
 export interface MatchListPlayer { steamid: string; name: string; avatar: string | null }
