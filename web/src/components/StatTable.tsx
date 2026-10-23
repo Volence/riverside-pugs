@@ -95,11 +95,15 @@ export function StatTable(
     }
     // QuadSettle in plugin/pug-match.sp credits each of a quad's four
     // pinners with quad_caps and each of its four victims with times_quadded,
-    // so a summed column counts each quad four times. Rounded rather than
-    // floored: a player who is not on the roster (a bot) gets no credit, so a
-    // quad can leave three.
+    // so a summed column counts each quad four times. A player who is not on
+    // the roster (a bot) gets no credit, so a quad can leave fewer than four:
+    // the team had at least as many quads as its best-credited player (the
+    // rule weeklyRecap.ts uses), and sum / 4 covers players who each saw only
+    // some of them (a sub). The larger of the two.
     for (const k of ['quad_caps', 'times_quadded']) {
-      if (k in out) out[k] = Math.round(out[k]! / 4);
+      if (!(k in out)) continue;
+      const most = Math.max(0, ...counted.map((p) => p.stats?.[k] ?? 0));
+      out[k] = Math.max(most, Math.round(out[k]! / 4));
     }
     return out;
   };
