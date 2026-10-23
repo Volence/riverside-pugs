@@ -46,8 +46,12 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>Make sure the Discord account you linked is the one in the Riverside server (check your profile: it shows the linked name). If you linked the wrong one, Disconnect it on your profile and link again; you cannot do that while you are queued, in a match or banned. Joining the server lets you in within a few seconds; press Check again.</>,
   },
   {
+    q: 'Can I get pinged when the queue is almost full?',
+    a: <>Yes. Press <strong>Notify me</strong> on the Discord queue panel, or type <code>/alerts on</code>, and you get the Queue Alerts role: the bot pings it when the queue is a couple of players short of popping, with a cooldown between pings so it never nags. The ping is edited to say so once the queue pops or empties, so an old one never sends you in for nothing. Press Notify me again, or <code>/alerts off</code>, to stop.</>,
+  },
+  {
     q: 'What bot commands are there?',
-    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code> and <code>/report</code>. The queue itself is the panel in Discord. When a match ends its result card has an <strong>Endorse</strong> button: you can endorse up to 2 players from it within 24 hours.</>,
+    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code>, <code>/alerts</code> and <code>/report</code>. The queue itself is the panel in Discord. When a match ends its result card has an <strong>Endorse</strong> button: you can endorse up to 2 players from it within 24 hours.</>,
   },
   {
     q: 'A match is stuck, or the server never came up.',
