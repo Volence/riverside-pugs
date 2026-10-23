@@ -62,7 +62,7 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
       : { title, body: 'Check it first: if this is the last match of the stage, the stage (or the whole event) finishes and its results can no longer be changed.' });
   };
   return (
-    <div class="inlinerow">
+    <div class="inlinerow resultform">
       <label>Winner
         <select aria-label="Winner" value={winner} onChange={(e) => setWinner((e.target as HTMLSelectElement).value as '' | 'a' | 'b')}>
           <option value="">Pick</option>
@@ -72,12 +72,16 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
       </label>
       {!forfeit && (
         <>
-          <input type="number" min={0} aria-label={`${a} score`} placeholder={a} value={scoreA} onInput={(e) => setScoreA((e.target as HTMLInputElement).value)} />
-          <input type="number" min={0} aria-label={`${b} score`} placeholder={b} value={scoreB} onInput={(e) => setScoreB((e.target as HTMLInputElement).value)} />
+          <label class="resultform__score">{a}
+            <input type="number" min={0} aria-label={`${a} score`} placeholder="score" value={scoreA} onInput={(e) => setScoreA((e.target as HTMLInputElement).value)} />
+          </label>
+          <label class="resultform__score">{b}
+            <input type="number" min={0} aria-label={`${b} score`} placeholder="score" value={scoreB} onInput={(e) => setScoreB((e.target as HTMLInputElement).value)} />
+          </label>
         </>
       )}
       <label><input type="checkbox" aria-label="Forfeit" checked={forfeit} onChange={(e) => setForfeit((e.target as HTMLInputElement).checked)} /> Forfeit</label>
-      <button class="btn btn--ghost" disabled={busy || !canSave} onClick={save}>Save result</button>
+      <button class="btn btn--ghost btn--sm" disabled={busy || !canSave} onClick={save}>Save result</button>
     </div>
   );
 }
@@ -323,36 +327,55 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
   const editable = canEdit && s.status === 'live' && m.a !== null && m.b !== null;
   const correctable = editable && CORRECTABLE.has(m.status) && !correctionRefused(s, m);
   const names = m.a && m.b ? `${m.a.name} vs ${m.b.name}` : '';
+  const hasRoomTools = editable && (m.phase === 'waiting' && m.a !== null && m.b !== null || ROOM_LIVE.has(m.phase));
   return (
-    <li>
-      <strong>{m.a?.name ?? 'TBD'}</strong> vs <strong>{m.bye ? 'Bye' : m.b?.name ?? 'TBD'}</strong>
-      <span class="muted"> · {matchLabel(m)}
-        {m.forfeit ? ` · forfeit, ${(m.winner === 'a' ? m.a : m.b)?.name ?? ''} wins` : m.scoreA !== null && m.scoreB !== null ? ` · ${m.scoreA} : ${m.scoreB}` : ''}
-      </span>
+    <li class="matchcard">
+      <div class="matchcard__head">
+        <span class="matchcard__teams"><strong>{m.a?.name ?? 'TBD'}</strong> <span class="muted">vs</span> <strong>{m.bye ? 'Bye' : m.b?.name ?? 'TBD'}</strong></span>
+        <span class="teamchip">{matchLabel(m)}</span>
+        {(m.forfeit || (m.scoreA !== null && m.scoreB !== null)) && (
+          <span class="muted">{m.forfeit ? `forfeit, ${(m.winner === 'a' ? m.a : m.b)?.name ?? ''} wins` : `${m.scoreA} : ${m.scoreB}`}</span>
+        )}
+        {m.a && m.b && slug && <a class="btn btn--sm matchcard__room" href={`/event/${slug}/match/${m.id}`}>Open the room</a>}
+      </div>
       <DeskLine m={m} />
-      {m.a && m.b && slug && <a class="btn btn--sm" href={`/event/${slug}/match/${m.id}`}>Open the room</a>}
-      {editable && OPEN.has(m.status) && <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting={false} />}
+      {hasRoomTools && (
+        <div class="matchcard__bar">
+          {editable && m.phase === 'waiting' && m.a && m.b && (
+            // Opens the room ahead of its time (the clock opens it otherwise).
+            <button class="btn btn--ghost btn--sm" aria-label={`Open room: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.openEventRoom(eventId, m.id))}>Open room now</button>
+          )}
+          {editable && ROOM_LIVE.has(m.phase) && (
+            <>
+              <button class="btn btn--ghost btn--sm" aria-label={`Reset room: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.resetEventRoom(eventId, m.id), BOOKED.has(m.phase)
+                ? { title: 'Reset the room?', body: 'This cancels the match\'s server booking and aborts any game on it.' }
+                : { title: 'Reset this match room?', body: 'Ready, veto and lineups are cleared and the room opens again.' })}>Reset room</button>
+              {m.phase !== 'hold' && !holding && (
+                <button class="btn btn--ghost btn--sm" aria-label={`Hold: ${names}`} disabled={busy} onClick={() => setHolding(true)}>Hold</button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {editable && ROOM_LIVE.has(m.phase) && m.phase !== 'hold' && holding && (
+        <HoldForm eventId={eventId} m={m} run={run} busy={busy} onDone={() => setHolding(false)} />
+      )}
+      {editable && OPEN.has(m.status) && (
+        <div class="matchcard__result">
+          <span class="matchcard__label">Enter a result by hand</span>
+          <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting={false} />
+        </div>
+      )}
       {correctable && !correcting && (
-        <button class="btn btn--ghost" disabled={busy} onClick={() => setCorrecting(true)}>Correct</button>
+        <div class="matchcard__bar">
+          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => setCorrecting(true)}>Correct</button>
+        </div>
       )}
       {correctable && correcting && (
-        <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting onSaved={() => setCorrecting(false)} />
-      )}
-      {editable && m.phase === 'waiting' && m.a && m.b && (
-        <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.openEventRoom(eventId, m.id))}>{`Open room: ${names}`}</button>
-      )}
-      {editable && ROOM_LIVE.has(m.phase) && (
-        <>
-          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.resetEventRoom(eventId, m.id), BOOKED.has(m.phase)
-            ? { title: 'Reset the room?', body: 'This cancels the match\'s server booking and aborts any game on it.' }
-            : { title: 'Reset this match room?', body: 'Ready, veto and lineups are cleared and the room opens again.' })}>{`Reset room: ${names}`}</button>
-          {m.phase !== 'hold' && !holding && (
-            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => setHolding(true)}>{`Hold: ${names}`}</button>
-          )}
-          {m.phase !== 'hold' && holding && (
-            <HoldForm eventId={eventId} m={m} run={run} busy={busy} onDone={() => setHolding(false)} />
-          )}
-        </>
+        <div class="matchcard__result">
+          <span class="matchcard__label">Correct the result</span>
+          <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting onSaved={() => setCorrecting(false)} />
+        </div>
       )}
       {editable && m.desk && (ROOM_LIVE.has(m.phase) || m.phase === 'waiting' || (finished(m) && m.desk.pauses.length > 0)) && <DeskTools eventId={eventId} m={m} run={run} busy={busy} />}
     </li>
@@ -391,7 +414,7 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
           {s.rounds.map((r) => (
             <div key={`${r.group}-${r.round}`}>
               <span class="eyebrow">{groupPrefix(s, r)}{r.label}</span>
-              <ul class="admin-list">
+              <ul class="matchcards">
                 {r.matches.map((m) => <MatchRow key={m.id} eventId={eventId} s={s} m={m} canEdit={canEdit} run={run} busy={busy} slug={slug} />)}
               </ul>
             </div>

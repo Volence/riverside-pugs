@@ -4062,3 +4062,23 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .matchcard--bye { opacity: 0.6; }
 /* "Pickup" and five-letter tags are wider than the 40px badge square. */
 .scrimside .teambadge--tag { width: auto; min-width: 40px; padding: 0 var(--sp-1); }
+
+/* The desk's Play panel (PlayPanel.tsx): one card per match, the teams and
+   status on top with Open the room on the right, the room tools in one bar,
+   the result form in its own labelled box. */
+.matchcards { list-style: none; margin: var(--sp-2) 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.matchcard { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; }
+.matchcard__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.matchcard__teams { overflow-wrap: anywhere; min-width: 0; }
+.matchcard__room { margin-left: auto; }
+.matchcard__bar { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.matchcard__result { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px dashed var(--border); border-radius: var(--radius, 6px); }
+.matchcard__label { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.matchcard .desk-line { margin: 0; }
+.resultform { align-items: end; }
+.resultform__score { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); min-width: 0; }
+.resultform__score input { width: 7rem; max-width: 100%; }
+@media (max-width: 480px) {
+  .matchcard { padding: var(--sp-3); }
+  .matchcard__room { margin-left: 0; }
+}
