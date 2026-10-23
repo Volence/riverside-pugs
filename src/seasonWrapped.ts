@@ -406,7 +406,12 @@ export function computeWrapped(
     }
     return (statTotals.get(id)?.[key] ?? 0) / g;
   };
-  const poolMetrics = new Map(SIGNATURE.map(([k]) => [k, pool.map((id) => metric(id, k))]));
+  // A redefined stat is compared only among players with the full-deck
+  // games from REDEFINED_STATS_FROM_MATCH on, the same gate the deck uses,
+  // so a rate over two late games cannot top it; its "of N" is that pool.
+  const redefinedPool = pool.filter((id) => redefinedGamesOf(id) >= fullMin);
+  const poolFor = (key: string) => (REDEFINED_STATS.has(key) ? redefinedPool : pool);
+  const poolMetrics = new Map(SIGNATURE.map(([k]) => [k, poolFor(k).map((id) => metric(id, k))]));
 
   const gamesSorted = [...byPlayer.keys()].map(gamesOf);
   const firstEverId = pm[0]?.id ?? null;
@@ -475,9 +480,11 @@ export function computeWrapped(
     let signature: WrappedPlayer['signature'] = null;
     if (tier === 'full') {
       signature = SIGNATURE.map(([key, label]) => {
-        const mine = metric(id, key);
+        // Outside a key's pool (too few games since match 324 for a
+        // redefined stat) there is no rank to claim: dropped below.
+        const mine = poolFor(key).includes(id) ? metric(id, key) : 0;
         const field = poolMetrics.get(key)!;
-        return { key, label, perMatch: Math.round(mine * 100) / 100, rank: 1 + field.filter((v) => v > mine).length, of: pool.length, mine };
+        return { key, label, perMatch: Math.round(mine * 100) / 100, rank: 1 + field.filter((v) => v > mine).length, of: poolFor(key).length, mine };
       }).filter((s) => s.mine > 0).sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key)).slice(0, 3)
         .map(({ mine: _m, ...s }) => s);
     }
