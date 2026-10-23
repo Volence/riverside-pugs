@@ -20,7 +20,7 @@ import { adminEntryViews, draftBench } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCaptainOffer, tellCaptainSet, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
+import { tellCaptainOffer, tellCaptainSet, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellPlayersSwapped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
 import { REPLACE_TEXT } from '../events/messages.js';
 import { addNote } from '../admin/players.js';
 import { deskOrder, signupFacts } from '../events/draftFacts.js';
@@ -629,6 +629,29 @@ export async function adminEventRoutes(
     tellCaptainSet(opts, ev.id, entry.id, r.value.from, r.value.to);
     // Open room pages of this entry refresh to show who runs it now.
     for (const m of roomMatches(ev.id)) if (m.entry_a === entry.id || m.entry_b === entry.id) opts.rooms?.pushChange(m.id);
+    return r.value;
+  });
+
+  /** Owner 2026-10-23: staff swap two starters between draft teams after the
+   *  teams are published and before the event goes live (entries.ts
+   *  swapDraftPlayers). After the commit: the admin audit and the DMs. */
+  app.post('/api/admin/events/:id/draft/swap-players', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const body = (req.body ?? {}) as { a?: unknown; b?: unknown };
+    const side = (v: unknown): { entryId: number; steamid: string } | null => {
+      const x = v as { entryId?: unknown; steamid?: unknown } | null;
+      return x && typeof x === 'object' && Number.isInteger(x.entryId) && typeof x.steamid === 'string' ? { entryId: x.entryId as number, steamid: x.steamid } : null;
+    };
+    const a = side(body.a);
+    const b = side(body.b);
+    if (!a || !b) return refuse(reply, 'bad_request');
+    const r = N.swapDraftPlayers(db, { eventId: ev.id, a, b, actor: me, now: new Date() });
+    if (!r.ok) return refuseWith(reply, r);
+    logAdmin(db, me, 'event_draft_swap_players', ev.id, { a, b });
+    tellPlayersSwapped(opts, ev.id, a, b);
     return r.value;
   });
 
