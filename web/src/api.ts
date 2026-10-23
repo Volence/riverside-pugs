@@ -224,6 +224,17 @@ export interface WeeklyRecap {
 
 export interface WeeklyData { week: string; live: boolean; minGames: number; awards: WeeklyAward[]; recap: WeeklyRecap }
 
+/** A player's place on one stat board for a week (src/weeklyPlayer.ts). Rank is
+ *  1 + how many have more, so ties share it; an average under the weekly
+ *  minimum carries a null rank. */
+export interface WeeklyStanding { value: number; rank: number | null; of: number; leader: number; gap: number }
+export interface WeeklyPlayerStat { key: string; label: string; group: AwardGroup; avg: WeeklyStanding | null; total: WeeklyStanding | null }
+export interface WeeklyPlayerWeek { week: string; games: number; minGames: number; qualifies: boolean; players: number; stats: WeeklyPlayerStat[] }
+export interface WeeklyHistoryRow {
+  week: string; live: boolean; games: number; skeets: number; siDamage: number; damageAsSi: number;
+  awards: { key: string; label: string; kind: 'avg' | 'total' | 'single' }[];
+}
+
 /** A player's history of weekly awards, shown on their profile. */
 export interface PlayerAward { award: string; label: string; count: number; weeks: string[] }
 
@@ -3276,6 +3287,10 @@ export const api = {
   endorseBoard: (signal?: AbortSignal, season?: number) =>
     get<EndorseBoard>(season === undefined ? '/api/leaderboard/endorsements' : `/api/leaderboard/endorsements?season=${season}`, signal),
   weekly: (signal?: AbortSignal, week?: string) => get<WeeklyData>(week ? `/api/weekly?week=${week}` : '/api/weekly', signal),
+  weeklyPlayer: (steamid: string, signal?: AbortSignal, week?: string) =>
+    get<WeeklyPlayerWeek>(`/api/weekly/player/${steamid}${week ? `?week=${week}` : ''}`, signal),
+  weeklyPlayerHistory: (steamid: string, signal?: AbortSignal) =>
+    get<{ weeks: WeeklyHistoryRow[] }>(`/api/weekly/player/${steamid}/history`, signal),
   weeklyWeeks: (signal?: AbortSignal) => get<{ current: string; weeks: string[] }>('/api/weekly/weeks', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),

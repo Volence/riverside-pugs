@@ -1,4 +1,4 @@
-import { api, type WeeklyAward, type WeeklyWinner } from '../api';
+import { api, type WeeklyAward, type WeeklyPlayerStat, type WeeklyPlayerWeek, type WeeklyStanding, type WeeklyWinner } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 
@@ -97,7 +97,70 @@ function untilText(at: number, now: number): string | null {
   return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h >= 1 ? `${h}h ${Math.floor((ms % 3_600_000) / 60_000)}m` : `${Math.max(1, Math.ceil(ms / 60_000))}m`;
 }
 
-export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: string | undefined) => void }) {
+/** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st. */
+export function ordinal(n: number): string {
+  const t = n % 100;
+  if (t >= 11 && t <= 13) return `${n}th`;
+  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`;
+}
+
+/** The viewer's own number on a card, formatted like the winner's. */
+function youValue(key: string, kind: 'avg' | 'total', v: number): string {
+  if (kind === 'total') return n0(v);
+  return DAMAGE.has(key) ? n0(v) : (Math.round(v * 10) / 10).toFixed(1);
+}
+
+/** "Close" means on the podium or within a tenth of the leader. */
+function closeness(s: WeeklyStanding): 'lead' | 'close' | null {
+  if (s.rank === 1 && s.value > 0) return 'lead';
+  if (s.rank === null || s.value <= 0) return null;
+  return s.rank <= 3 || (s.leader > 0 && s.value >= s.leader * 0.9) ? 'close' : null;
+}
+
+/** One "You" row under a card: the viewer's number, rank and gap to #1. */
+function YouRow({ statKey, kind, s }: { statKey: string; kind: 'avg' | 'total'; s: WeeklyStanding }) {
+  const near = closeness(s);
+  const unit = kind === 'avg' ? 'per game' : 'total';
+  const where = s.rank === null
+    ? 'not ranked yet'
+    : near === 'lead' ? `1st of ${s.of}, you lead`
+      : `${ordinal(s.rank)} of ${s.of}, ${youValue(statKey, kind, s.gap)} behind`;
+  return (
+    <div class={`wk__you${near ? ` wk__you--${near}` : ''}`}>
+      <span class="wk__youkind">{kind === 'avg' ? 'Your average' : 'Your total'}</span>
+      <span class="wk__youval"><span class="wk__num">{youValue(statKey, kind, s.value)}</span> <span class="wk__unit">{unit}</span></span>
+      <span class="wk__youwhere">{where}</span>
+    </div>
+  );
+}
+
+function YouLines({ stat }: { stat: WeeklyPlayerStat | undefined }) {
+  if (!stat || (!stat.avg && !stat.total)) return null;
+  return (
+    <div class="wk__yous" aria-label="Your numbers">
+      {stat.avg && <YouRow statKey={stat.key} kind="avg" s={stat.avg} />}
+      {stat.total && <YouRow statKey={stat.key} kind="total" s={stat.total} />}
+    </div>
+  );
+}
+
+/** The signed-in viewer's week at a glance, above the cards. */
+function YourWeek({ me }: { me: WeeklyPlayerWeek }) {
+  const short = me.minGames - me.games;
+  return (
+    <div class="wk__yourweek" aria-label="Your week">
+      <span class="wk__yourweek-title">Your week</span>
+      <span><strong class="num">{me.games}</strong> {me.games === 1 ? 'game' : 'games'}</span>
+      <span>{me.games === 0
+        ? 'Play a game this week to see where you stand.'
+        : short > 0
+          ? <>{short} more {short === 1 ? 'game' : 'games'} to qualify for averages</>
+          : <>Averages count from {me.minGames} games, you qualify</>}</span>
+    </div>
+  );
+}
+
+export function WeeklyBoard({ week, onWeek, me }: { week?: string; onWeek: (w: string | undefined) => void; me?: string | null }) {
   const { data: list } = useFetch((s) => api.weeklyWeeks(s).catch(() => ({ current: '', weeks: [] as string[] })), []);
   // The Discord post and profile chips link `?week=<that week's Monday>`.
   // Once that week is the live one again (a new week started), the linked
@@ -105,6 +168,11 @@ export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: strin
   // than asking the API for a week id that no longer means anything special.
   const effectiveWeek = list && week && week === list.current ? undefined : week;
   const { data, error } = useFetch((s) => api.weekly(s, effectiveWeek), [effectiveWeek]);
+  // The signed-in viewer's own standing on every board, for the "You" rows.
+  const { data: mine } = useFetch(
+    (s) => (me ? api.weeklyPlayer(me, s, effectiveWeek).catch(() => null) : Promise.resolve(null)),
+    [me, effectiveWeek],
+  );
 
   const picker = (
     <select
@@ -144,6 +212,7 @@ export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: strin
           );
         })()}
       </div>
+      {mine && <YourWeek me={mine} />}
       {data.awards.length === 0 && <Empty>No awards yet this week.</Empty>}
       {GROUPS.map(({ group, title }) => {
         const inGroup = data.awards.filter((a) => a.group === group);
@@ -159,6 +228,7 @@ export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: strin
                   <div class="weekly__card wk__card" key={k}>
                     <div class="weekly__label wk__title">{parts[0].label}</div>
                     {parts.map((a) => <Winners key={a.kind} a={a} />)}
+                    {mine && <YouLines stat={mine.stats.find((x) => x.key === k)} />}
                   </div>
                 );
               })}

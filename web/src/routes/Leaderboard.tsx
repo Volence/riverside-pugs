@@ -156,7 +156,7 @@ export function Leaderboard({ me }: { me: string | null }) {
       {board === 'season' && <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />}
 
       {weekly ? (
-        <WeeklyBoard week={week} onWeek={setWeek} />
+        <WeeklyBoard week={week} onWeek={setWeek} me={me} />
       ) : endorse ? (
         <EndorseBoard season={season} me={me} />
       ) : (
