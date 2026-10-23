@@ -13,9 +13,9 @@ export function NotesSection(
 
   return (
     <Panel class="file-section">
-      <h3 id="notes">Notes</h3>
+      <h3 id="notes">Notes <span class="file-count">{d.sections.notes.length}</span></h3>
       {can('note') && (
-        <form class="admin-form" onSubmit={(e) => {
+        <form class="file-inline" onSubmit={(e) => {
           e.preventDefault();
           void run(() => peopleApi.note(d.steamid, note.trim())).then(() => setNote(''));
         }}>
@@ -24,27 +24,29 @@ export function NotesSection(
           <button class="btn" type="submit" disabled={busy || !note.trim()}>Add note</button>
         </form>
       )}
-      {can('looked_at') && (
-        <div class="admin-form">
-          <input value={review} placeholder="What you found (optional)" aria-label="Review note"
-            onInput={(e) => setReview((e.target as HTMLInputElement).value)} />
-          <button class="chip" type="button" disabled={busy}
-            onClick={() => run(() => peopleApi.lookedAt(d.steamid, review.trim())).then(() => setReview(''))}>
-            Looked at this
-          </button>
-          <span class="muted">
-            Takes this file off Needs a look until something new arrives.
-          </span>
-        </div>
-      )}
       {d.sections.notes.length === 0 ? <p class="muted">No notes.</p> : (
-        <ul class="admin-list">
+        <ul class="file-notes">
           {d.sections.notes.map((n) => (
             <li key={n.id}>
-              <span class="muted">{n.authorName ?? n.authorId}, {fmtTime(n.createdAt)}:</span> {n.text}
+              <span class="file-notes__who">{n.authorName ?? n.authorId} · {fmtTime(n.createdAt)}</span>
+              <span>{n.text}</span>
             </li>
           ))}
         </ul>
+      )}
+      {can('looked_at') && (
+        <div class="file-looked">
+          <h4>Looked at this file</h4>
+          <p class="file-help">Takes this file off Needs a look until something new arrives.</p>
+          <div class="file-inline">
+            <input value={review} placeholder="What you found (optional)" aria-label="Review note"
+              onInput={(e) => setReview((e.target as HTMLInputElement).value)} />
+            <button class="chip" type="button" disabled={busy}
+              onClick={() => run(() => peopleApi.lookedAt(d.steamid, review.trim())).then(() => setReview(''))}>
+              Looked at this
+            </button>
+          </div>
+        </div>
       )}
     </Panel>
   );
