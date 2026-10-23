@@ -36,6 +36,9 @@ export interface SelfStartedDeps {
   resolveServerId: (source: string) => number | null;
   adminSteamIds?: string[];
   notify?: (msg: string) => void;
+  /** A match was adopted: the server broadcasts 'refresh' here, since its
+   *  roster now has a live match in /api/state. */
+  adopted?: (matchId: number) => void;
 }
 
 interface Pending {
@@ -459,6 +462,11 @@ export class SelfStartedMatches {
       this.deps.notify?.(
         `🎮 Match #${matchId} started in-game: ${campaign} with ${p.roster.size} players`,
       );
+    }
+    try {
+      this.deps.adopted?.(matchId);
+    } catch (err) {
+      console.error(`[selfStarted] adopted hook failed for match ${matchId}:`, err);
     }
     this.finish(token, p);
   }

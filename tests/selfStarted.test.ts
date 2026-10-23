@@ -28,16 +28,19 @@ let db: DB;
 let registered: string[];
 let setIds: Array<{ token: string; matchId: number }>;
 let adopter: SelfStartedMatches;
+let adopted: number[];
 
 function build(serverId: number | null = 1) {
   registered = [];
   setIds = [];
+  adopted = [];
   adopter = new SelfStartedMatches({
     db,
     listener: { register: (t: string) => registered.push(t) },
     setMatchId: async (token, matchId) => { setIds.push({ token, matchId }); },
     resolveServerId: () => serverId,
     adminSteamIds: [],
+    adopted: (id) => adopted.push(id),
   });
 }
 
@@ -68,6 +71,24 @@ async function burst(n = 2) {
 // Nothing in here refuses a roster wholesale: a roster line describes players
 // who are ON the server, and dropping one loses a real person's stats. What it
 // refuses is the one shape that cannot be legitimate, and it reports the rest.
+describe('SelfStartedMatches adoption hook', () => {
+  it('tells the server once a match is adopted, so browsers refresh', async () => {
+    await burst(2);
+    expect(adopted).toEqual([setIds[0]!.matchId]);
+  });
+
+  it('says nothing for a burst it refuses', async () => {
+    build(null);
+    const [a, b] = ids(2);
+    adopter.handle(create(TOKEN, 2));
+    adopter.handle(roster(a, 'a', 'Alice'));
+    adopter.handle(roster(b, 'b', 'Bob'));
+    adopter.handle(end(2));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(adopted).toEqual([]);
+  });
+});
+
 describe('SelfStartedMatches over-full teams', () => {
   const problems: string[] = [];
   let unsub: () => void;

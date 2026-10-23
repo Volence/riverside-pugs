@@ -1060,7 +1060,8 @@ describe('booked games (plan 4b)', () => {
 
   it('endFromGame aborts a live game, stops listening for it, sends sm_pug_abort, then ends and winds down', async () => {
     const unregistered: string[] = [];
-    const r = build({ unregisterToken: (t) => { unregistered.push(t); } });
+    let changes = 0;
+    const r = build({ unregisterToken: (t) => { unregistered.push(t); }, changed: () => { changes++; } });
     const id = await running(['no_mercy'], r);
     const live = insertGame(id, { state: 'live', token: 'tok-live' });
     expect(r.endFromGame(id, P[5])).toEqual({ ok: false, error: 'Only a captain or co-captain of that side can do that.' });
@@ -1069,6 +1070,8 @@ describe('booked games (plan 4b)', () => {
     await r.idle();
     expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(live)).toEqual({ state: 'aborted', abort_cause: 'booking_ended' });
     expect(unregistered).toEqual(['tok-live']);
+    // The players' pages hear the game is over.
+    expect(changes).toBe(1);
     const c = cmds();
     expect(c).toContain('sm_pug_abort tok-live');
     expect(c.indexOf('sm_pug_abort tok-live')).toBeLessThan(c.indexOf('say [Booking] This booked server is closing: a captain ended it.'));
@@ -2777,7 +2780,8 @@ describe('server priority (owner, 2026-10-07)', () => {
     });
 
     it('a match staff moved with no free box waits and bumps no scrim; a match whose box died still does (controller ruling)', async () => {
-      runner = build({ release: async (id) => { released.push(id); db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(id); return true; } });
+      let changes = 0;
+      runner = build({ release: async (id) => { released.push(id); db.prepare("UPDATE servers SET status = 'offline' WHERE id = ?").run(id); return true; }, changed: () => { changes++; } });
       const scrim = await heldScrim();
       db.prepare("UPDATE servers SET status = 'live' WHERE id = 1").run();
       const match = tournament();
@@ -2786,6 +2790,7 @@ describe('server priority (owner, 2026-10-07)', () => {
       expect(getBooking(db, match)).toMatchObject({ state: 'ready', server_id: 2 });
       dms = [];
       expect(await runner.moveBooking(match)).toBe(2);
+      expect(changes).toBe(1);
       runner.allocate();
       runner.allocate();
       await runner.idle();
