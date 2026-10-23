@@ -3893,7 +3893,7 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
   .sheethero__score { font-size: var(--fs-title); }
   .sheethero .sheetlogo { width: 44px; height: 44px; }
 }
-.sheetgames { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: var(--sp-3); }
+.sheetgames { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--sp-3); }
 .sheetgame {
   display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); min-width: 0;
   border: 1px solid var(--border); border-left: 4px solid var(--campaign, var(--rule)); background: var(--surface-2);
