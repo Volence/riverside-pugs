@@ -70,8 +70,7 @@ function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] 
           </li>
           <li>
             Find your game folder: right click <strong>Left 4 Dead</strong> in your Steam library,
-            then <strong>Manage</strong>, then <strong>Browse local files</strong>. That opens the
-            folder Steam actually installed it to, which beats guessing the path.
+            then <strong>Manage</strong>, then <strong>Browse local files</strong>.
           </li>
           <li>
             From there, open <code>left4dead</code>, then <code>addons</code>, and put the

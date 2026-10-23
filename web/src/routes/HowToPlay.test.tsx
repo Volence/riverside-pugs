@@ -26,3 +26,22 @@ describe('HowToPlay queue alerts', () => {
     expect(text).not.toContain('Notify me');
   });
 });
+
+// Content pass 2026-10-23: facts checked against settings and code.
+describe('HowToPlay facts', () => {
+  it('states the no-show ladder, the 7 minute no-show cancel and the abandon rating loss', () => {
+    const { container } = render(<HowToPlay session={{ kind: 'anonymous' }} />);
+    const text = container.textContent!;
+    expect(text).toContain('1 hour, then 3 hours, then a day');
+    expect(text).toContain('7 minutes after the server is ready');
+    expect(text).toContain('You lose rating');
+    expect(text).not.toMatch(/nobody's rating changes/);
+  });
+
+  it('lists the forfeit command and has the practice and events sections', () => {
+    const { container } = render(<HowToPlay session={{ kind: 'anonymous' }} />);
+    expect(container.textContent).toContain('!gg');
+    expect(container.querySelector('#practice')).toBeTruthy();
+    expect(container.querySelector('#events a[href="/events"]')).toBeTruthy();
+  });
+});
