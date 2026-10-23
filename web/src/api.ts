@@ -525,6 +525,8 @@ export interface MapIndexRow {
 export interface MapLeaderRow {
   steamid: string;
   name: string;
+  /** Optional: an older server sends none. */
+  avatar?: string | null;
   games: number;
   wins: number;
   losses: number;
@@ -546,6 +548,10 @@ export interface MapDetail {
   avgStats: Record<string, number>;
   rounds: RoundAggregate;
   players: MapLeaderRow[];
+  /** The chapter's own name, where the mission file gives one. */
+  display?: string | null;
+  /** The campaign's chapters in play order (optional: older servers). */
+  chapters?: { map: string; display: string | null }[];
 }
 
 export interface MapBreakdownRow {

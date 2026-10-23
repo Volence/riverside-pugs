@@ -273,6 +273,8 @@ export function playerMapBreakdown(db: DB, steamid: string): MapBreakdownRow[] {
 export interface MapLeaderRow {
   steamid: string;
   name: string;
+  /** Steam avatar URL, for the face beside the name. Null when never fetched. */
+  avatar: string | null;
   games: number;
   wins: number;
   losses: number;
@@ -308,6 +310,12 @@ export interface MapDetail {
   /** How long a round here takes and how often survivors live through it. */
   rounds: RoundAggregate;
   players: MapLeaderRow[];
+  /** The chapter's own name from its mission file, where we have one (see
+   *  MapIndexRow.display). */
+  display: string | null;
+  /** Every chapter of this map's campaign in play order, so the page can show
+   *  where this one sits and link its neighbours. Empty when unplaced. */
+  chapters: { map: string; display: string | null }[];
 }
 
 /**
@@ -334,7 +342,7 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
   const teamOf = db.prepare(
     'SELECT player_id, team, joined_map AS joinedMap FROM match_players WHERE match_id = ?',
   );
-  const nameOf = db.prepare('SELECT name FROM players WHERE steamid = ?');
+  const nameOf = db.prepare('SELECT name, avatar FROM players WHERE steamid = ?');
 
   const recorded = recordedFor(db);
   const acc = new Map<string, MapLeaderRow>();
@@ -358,9 +366,9 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
       if (!playedMap(p.joinedMap, r.ordinal)) continue;
       let row = acc.get(p.player_id);
       if (!row) {
-        const n = nameOf.get(p.player_id) as { name: string } | undefined;
+        const n = nameOf.get(p.player_id) as { name: string; avatar: string | null } | undefined;
         row = {
-          steamid: p.player_id, name: n?.name ?? p.player_id,
+          steamid: p.player_id, name: n?.name ?? p.player_id, avatar: n?.avatar ?? null,
           games: 0, wins: 0, losses: 0, stats: {}, avgStats: {},
         };
         acc.set(p.player_id, row);
@@ -390,9 +398,14 @@ export function mapDetail(db: DB, map: string): MapDetail | null {
     for (const [k, v] of Object.entries(row.stats)) pooled[k] = (pooled[k] ?? 0) + v;
   }
 
+  const campaign = resolveCampaignForMap(db, map);
+  const displays = chapterDisplays(db);
+  const entry = campaign ? campaignRegistry(db).get(campaign) : undefined;
   return {
     map,
-    campaign: resolveCampaignForMap(db, map),
+    campaign,
+    display: displays.get(map.toLowerCase()) ?? null,
+    chapters: (entry?.maps ?? []).map((m) => ({ map: m, display: displays.get(m.toLowerCase()) ?? null })),
     played: rows.length,
     // Divided by 2 * recorded playings: each playing contributes two survivor
     // scores, one per team, and both are samples of the same quantity.

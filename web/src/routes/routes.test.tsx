@@ -1206,12 +1206,49 @@ describe('MapDetail', () => {
     avgStats: { ck: 6.7, tank_damage: 150 },
     rounds: { attempts: 6, fastestSec: 120, avgSec: 210, slowestSec: 300, survivalPct: 50 },
     players: [
-      { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0,
+      { steamid: '1', name: 'alice', games: 6, wins: 6, losses: 0,
         stats: { ck: 30, tank_damage: 900 }, avgStats: { ck: 10, tank_damage: 300 } },
-      { steamid: '2', name: 'bob', games: 3, wins: 0, losses: 3,
+      { steamid: '2', name: 'bob', games: 6, wins: 0, losses: 6,
         stats: { ck: 10 }, avgStats: { ck: 3.3 } },
     ],
   };
+
+  // The bar is the win rate with a 50% line, not how often someone played,
+  // and players with too few games to read a rate from are left out.
+  it('draws the win rate as the bar and leaves out thin samples', async () => {
+    mockApi.map.mockResolvedValue({
+      ...mapData,
+      players: [
+        ...mapData.players,
+        { steamid: '3', name: 'carl', games: 2, wins: 2, losses: 0, stats: {}, avgStats: {} },
+      ],
+    });
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+    const bars = [...container.querySelectorAll('.bars .bar')];
+    expect(bars).toHaveLength(2);
+    expect((bars[0]!.querySelector('.bar__fill') as HTMLElement).style.width).toBe('100%');
+    expect(bars[0]!.querySelector('.bar__mark')).toBeTruthy();
+    expect(screen.getByText(/1 with fewer than 5 games not shown/)).toBeTruthy();
+  });
+
+  it('places the chapter in its campaign and links the others', async () => {
+    mockApi.map.mockResolvedValue({
+      ...mapData,
+      campaign: 'dead_air',
+      chapters: [
+        { map: 'l4d_vs_airport01_greenhouse', display: null },
+        { map: 'l4d_vs_airport02_offices', display: null },
+      ],
+    });
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+    expect(screen.getByText(/Chapter 1 of 2/)).toBeTruthy();
+    const chips = [...container.querySelectorAll('.mapchip')];
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.getAttribute('aria-current')).toBe('page');
+    expect(chips[1]!.getAttribute('href')).toBe('/map/l4d_vs_airport02_offices');
+  });
 
   it('shows the map summary and a win-rate bar per player', async () => {
     mockApi.map.mockResolvedValue(mapData);
@@ -1633,6 +1670,24 @@ describe('Maps', () => {
     expect(screen.getByText('200')).toBeTruthy();
     expect(screen.getByText('not recorded')).toBeTruthy();
     expect(screen.queryByText(/null/)).toBeNull();
+  });
+
+  // Survival is drawn as a bar only when the sample is big enough to rate,
+  // and a chapter nobody has played collapses to one line.
+  it('draws survival as a bar and collapses an unplayed chapter', async () => {
+    mockApi.maps.mockResolvedValue({
+      pool: [],
+      maps: [
+        { map: 'l4d_vs_airport01_greenhouse', campaign: 'dead_air', played: 40, avgScore: 300,
+          rounds: { attempts: 80, fastestSec: 60, avgSec: 200, slowestSec: 400, survivalPct: 35, measured: 80 } },
+        { map: 'l4d_vs_airport05_runway', campaign: 'dead_air', played: 0, avgScore: null,
+          rounds: { attempts: 0, fastestSec: null, avgSec: null, slowestSec: null, survivalPct: null, measured: 0 } },
+      ],
+    });
+    const { container } = render(<Maps />);
+    await waitFor(() => expect(container.querySelector('.mapch__fill')).toBeTruthy());
+    expect((container.querySelector('.mapch__fill') as HTMLElement).style.width).toBe('35%');
+    expect(container.querySelector('.mapch.is-unplayed')!.textContent).toContain('Not played yet');
   });
 
   // 27 campaigns made the page a wall. The ones in the vote come first and the

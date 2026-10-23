@@ -1,9 +1,12 @@
 import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, survivalLabel } from '../format';
+import { campaignName, campaignTint, chapterName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, survivalLabel } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
+
+/** Games on a map before a win rate is worth drawing as a bar. */
+const MIN_GAMES = 5;
 
 export function MapDetail({ map }: { map: string }) {
   const { data, error } = useFetch((s) => api.map(map, s), [map]);
@@ -11,6 +14,7 @@ export function MapDetail({ map }: { map: string }) {
   // Averages first: a total mostly reports who has played the most, while
   // what someone usually gets on a map is the number that compares.
   const [mode, setMode] = useState<'avg' | 'total'>('avg');
+  const [showAll, setShowAll] = useState(false);
 
   if (error) {
     return (
@@ -34,9 +38,22 @@ export function MapDetail({ map }: { map: string }) {
     Array.from(new Set(players.flatMap((p) => Object.keys(p.stats)))),
   );
 
+  // Where this chapter sits in its campaign: "Death Toll · Chapter 2 of 5".
+  const chapters = data.chapters ?? [];
+  const at = chapters.findIndex((c) => c.map.toLowerCase() === data.map.toLowerCase());
+  const eyebrow = data.campaign
+    ? `${campaignName(data.campaign)}${at >= 0 ? ` · Chapter ${at + 1} of ${chapters.length}` : ''}`
+    : 'Map';
+  const face = (p: MapLeaderRow, cls: string) => (p.avatar
+    ? <img class={cls} src={p.avatar} alt="" width={20} height={20} loading="lazy" />
+    : <span class={`${cls} ${cls}--none`} aria-hidden="true" data-initial={p.name.slice(0, 1).toUpperCase()} />);
+  // The bars list everyone with enough games to read a rate from, the most
+  // played first; the rest fold away, as on the profile's by-map bars.
+  const LIST = 15;
+
   return (
-    <div class="page page--list">
-      <PageHeader eyebrow={data.campaign ? campaignName(data.campaign) : 'Map'} title={mapName(data.map)}>
+    <div class="page page--list mapdetail" style={data.campaign ? { '--campaign': campaignTint(data.campaign) } as Record<string, string> : undefined}>
+      <PageHeader eyebrow={eyebrow} title={chapterName(data.display ?? null, mapName(data.map))}>
         <Figures>
           <Figure label="Played" value={data.played} />
           {/* Null when no playing of this map has a real score: say so
@@ -66,6 +83,22 @@ export function MapDetail({ map }: { map: string }) {
         </Figures>
       </PageHeader>
 
+      {chapters.length > 1 && (
+        <nav class="mapchips" aria-label="Chapters in this campaign">
+          {chapters.map((c, i) => (
+            <a
+              key={c.map}
+              class={`mapchip${i === at ? ' is-current' : ''}`}
+              href={`/map/${encodeURIComponent(c.map)}`}
+              aria-current={i === at ? 'page' : undefined}
+            >
+              <span class="mapchip__n">{i + 1}</span>
+              {chapterName(c.display, mapName(c.map))}
+            </a>
+          ))}
+        </nav>
+      )}
+
       <Panel>
         <h3>Compare</h3>
         <Tabs
@@ -75,24 +108,37 @@ export function MapDetail({ map }: { map: string }) {
         />
         {(() => {
           if (tab === 'winrate') {
-            const maxGames = Math.max(...players.map((p) => p.games));
+            // Bar length is the win rate with a line at 50%, so length and
+            // colour say the same thing. Players with only a few games here
+            // would put 0% and 100% rows everywhere, so they fold away.
+            const rated = players.filter((p) => p.wins + p.losses >= MIN_GAMES)
+              .sort((a, b) => b.games - a.games || b.wins - a.wins);
+            const few = players.length - rated.length;
+            const list = showAll ? rated : rated.slice(0, LIST);
             return (
-              <Bars>
-                {players.map((p) => {
-                  const decided = p.wins + p.losses;
-                  const wr = decided > 0 ? Math.round((p.wins / decided) * 100) : null;
+              <Bars label={`Win rate here, most played first${few > 0 ? ` (${few} with fewer than ${MIN_GAMES} games not shown)` : ''}`}>
+                {list.map((p) => {
+                  const wr = Math.round((p.wins / (p.wins + p.losses)) * 100);
                   return (
                     <BarRow
                       key={p.steamid}
+                      icon={face(p, 'mapface')}
                       name={p.name}
                       href={`/player/${encodeURIComponent(p.steamid)}`}
-                      value={wr === null ? 'n/a' : `${wr}%`}
+                      value={`${wr}%`}
                       detail={`(${p.wins}W ${p.losses}L)`}
-                      fraction={p.games / maxGames}
-                      tone={wr === null ? 'neutral' : wr >= 50 ? 'good' : 'bad'}
+                      fraction={wr / 100}
+                      mark={0.5}
+                      tone={wr >= 50 ? 'good' : 'bad'}
                     />
                   );
                 })}
+                {rated.length === 0 && <p class="muted">Nobody has {MIN_GAMES} games here yet.</p>}
+                {rated.length > LIST && (
+                  <button class="chip mapmore" type="button" onClick={() => setShowAll(!showAll)}>
+                    {showAll ? 'Show fewer' : `Show all ${rated.length}`}
+                  </button>
+                )}
               </Bars>
             );
           }
@@ -101,11 +147,13 @@ export function MapDetail({ map }: { map: string }) {
           const vals = players.map((p) => p.stats[tab] ?? 0);
           const max = Math.max(...vals, 1);
           const ranked = [...players].sort((a, b) => (b.stats[tab] ?? 0) - (a.stats[tab] ?? 0));
+          const shownRanked = showAll ? ranked : ranked.slice(0, LIST);
           return (
-            <Bars>
-              {ranked.map((p) => (
+            <Bars label={`${labelFor(tab)} here, total`}>
+              {shownRanked.map((p) => (
                 <BarRow
                   key={p.steamid}
+                  icon={face(p, 'mapface')}
                   name={p.name}
                   href={`/player/${encodeURIComponent(p.steamid)}`}
                   value={p.stats[tab] === undefined ? 'n/a' : String(p.stats[tab])}
@@ -113,6 +161,11 @@ export function MapDetail({ map }: { map: string }) {
                   tone="neutral"
                 />
               ))}
+              {ranked.length > LIST && (
+                <button class="chip mapmore" type="button" onClick={() => setShowAll(!showAll)}>
+                  {showAll ? 'Show fewer' : `Show all ${ranked.length}`}
+                </button>
+              )}
             </Bars>
           );
         })()}
@@ -146,7 +199,9 @@ export function MapDetail({ map }: { map: string }) {
                 const decided = p.wins + p.losses;
                 return (
                   <tr key={p.steamid}>
-                    <td class="lb__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /></td>
+                    <td class="lb__pcol">
+                      <span class="lbname">{face(p, 'lbname__face')}<PlayerLink steamid={p.steamid} name={p.name} /></span>
+                    </td>
                     <td class="num">{p.games}</td>
                     <td class="num">{p.wins}</td>
                     <td class="num">{p.losses}</td>
