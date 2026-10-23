@@ -4348,3 +4348,36 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .evcard__link.eventrow, .evcard__band { min-width: 0; max-width: 100%; }
 .evcard__band { contain: inline-size; }
 .evcard__link.eventrow { align-items: stretch; flex-wrap: nowrap; }
+
+/* Site touchup batch A: player profile (prof*, profaward*). A hero band (the
+   rating card beside its chart), the stat tiles across, then a two column
+   body: events and matches on the left, the smaller facts down the right. */
+.page--profile.prof { max-width: 1240px; }
+.prof .stack > .panel, .prof__hero > .panel, .prof__main > .panel, .prof__aside > .panel { margin: 0; }
+.prof__hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--sp-5); align-items: stretch; }
+.prof__hero > * { min-width: 0; }
+.prof__trend { display: flex; flex-direction: column; }
+.prof__trend .spark { flex: 1 1 auto; min-height: 120px; }
+.prof__trendfacts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); margin: var(--sp-4) 0 0; padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+.prof__trendfacts div { min-width: 0; }
+.prof__trendfacts dt { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
+.prof__trendfacts dd { margin: var(--sp-1) 0 0; font-family: var(--font-display); font-size: var(--fs-h3); line-height: 1.1; color: var(--text-bright); }
+.prof__cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--sp-5); align-items: start; }
+.prof__main, .prof__aside { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.prof__aside .totals { font-size: var(--fs-dense); }
+.prof__when-short { display: none; }
+.profawards__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.profaward { display: inline-flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3); background: var(--surface-2); border: 1px solid var(--border); border-left: 2px solid var(--rating); font-size: var(--fs-dense); color: var(--text-bright); }
+.profaward__count { font-family: var(--font-display); color: var(--rating); letter-spacing: 0.02em; }
+.profawards__more { margin-top: var(--sp-3); }
+@media (max-width: 960px) {
+  .prof__hero, .prof__cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .prof__trendfacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .prof__matches .prof__when { display: none; }
+  .prof__when-short { display: block; font-size: var(--fs-label); }
+  .prof__matches th, .prof__matches td { padding-left: var(--sp-2); padding-right: var(--sp-2); }
+  .prof__matches td.num { white-space: nowrap; }
+  .prof .headliner__stats { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--sp-3); }
+}

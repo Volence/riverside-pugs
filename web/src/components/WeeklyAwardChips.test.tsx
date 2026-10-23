@@ -14,7 +14,8 @@ describe('WeeklyAwardChips', () => {
   it('shows at most four chips with counts, then expands the rest', () => {
     const awards = [a('skeets', 'Skeets', 3), a('crowns', 'Witch crowns', 2), a('revives', 'Revives', 1), a('wins', 'Most wins', 1), a('rocks', 'Tank rocks landed', 1), a('booms', 'Booms landed', 1)];
     render(<WeeklyAwardChips awards={awards} />);
-    expect(screen.getByText('Skeets x3')).toBeTruthy();
+    expect(screen.getByText('Skeets')).toBeTruthy();
+    expect(screen.getByText('x3')).toBeTruthy();
     expect(screen.getByText('Revives')).toBeTruthy();
     expect(screen.queryByText('Tank rocks landed')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '+2 more' }));
