@@ -136,7 +136,7 @@ function InstallList({ installs, serverNames }: { installs: AdminInstall[]; serv
   if (installs.length === 0) return <p class="muted">Not installed on any server yet.</p>;
   const tone = (state: AdminInstall['state']) => (state === 'installed' ? 'active' : state === 'failed' ? 'banned' : 'invited');
   return (
-    <ul class="admin-list">
+    <ul class="admin-list adm-installs">
       {installs.map((i) => (
         <li key={i.server_id}>
           <span class={`admin-status admin-status--${tone(i.state)}`}>

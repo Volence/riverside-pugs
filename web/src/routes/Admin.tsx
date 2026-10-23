@@ -3,7 +3,7 @@ import { useLocation } from 'preact-iso';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
-import { BALANCE_TABS, PEOPLE_TABS, SETUP_TABS, deskItems, legacyRedirect, parseAdminPath, ticketUrl } from './admin/adminRoutes';
+import { BALANCE_TABS, PEOPLE_TABS, SETUP_TABS, deskItems, legacyRedirect, sectionHeading, parseAdminPath, ticketUrl } from './admin/adminRoutes';
 import { AdminLive } from './admin/AdminLive';
 import { AdminTickets } from './admin/AdminTickets';
 import { AdminCalls } from './admin/AdminCalls';
@@ -108,14 +108,23 @@ export function Admin({ session }: { session: Session }) {
   // keeps a highlight while you are inside one.
   const activeSection = r.section === 'file' ? 'search' : r.section === 'ticket' ? 'tickets' : r.section === 'appeal' ? 'appeals' : r.section;
 
+  const desks = deskItems(isAdmin);
+  const heading = sectionHeading(r.desk, r.section);
+  const deskLabel = desks.find((d) => d.key === r.desk)?.label;
+
   return (
     <div class="page page--admin">
-      <PageHeader eyebrow="Riverside" title={isAdmin ? 'Admin' : 'Moderation'} />
-      <LinkTabs items={deskItems(isAdmin)} active={r.desk} label="Desks"
-        stripClass="tabs" itemClass="tabs__tab" activeClass="is-active" />
+      <PageHeader
+        eyebrow={`${isAdmin ? 'Admin' : 'Moderation'}${deskLabel ? ` · ${deskLabel}` : ''}`}
+        title={heading.title}
+        aside={<LinkTabs items={desks} active={r.desk} label="Desks"
+          stripClass="tabs admhead__desks" itemClass="tabs__tab" activeClass="is-active" />}
+      >
+        {heading.intro && <p class="admhead__intro">{heading.intro}</p>}
+      </PageHeader>
       {sections.length > 0 && (
         <LinkTabs items={sections} active={activeSection} label={`${r.desk} sections`}
-          stripClass="admin-sections" itemClass="chip" activeClass="is-on" />
+          stripClass="admin-sections admhead__sections" itemClass="chip" activeClass="is-on" />
       )}
       <div class="admin-body">
         {r.desk === 'live' && <AdminLive isAdmin={isAdmin} />}
