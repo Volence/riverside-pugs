@@ -487,6 +487,26 @@ describe('map round aggregates', () => {
     expect(mapDetail(db, 'airport01')!.rounds.survivalPct).toBe(100);
   });
 
+  it('takes fastest only from rounds the survivors lived through', () => {
+    // A 40-second wipe is the quickest death, not the quickest clear, and a
+    // round with no survival reading is unknown, so neither is the record.
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }, { map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 40, alive: 0 });
+    seedHalf(1, 0, 2, { seconds: 60, alive: null });
+    seedHalf(1, 1, 1, { seconds: 200, alive: 3 });
+    seedHalf(1, 1, 2, { seconds: 250, alive: 1 });
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds).toMatchObject({ fastestSec: 200, slowestSec: 250, attempts: 4 });
+  });
+
+  it('has no fastest when no measured round was survived', () => {
+    seedMatch(db, 1, [{ map: 'airport01', a: 1, b: 0 }], {});
+    seedHalf(1, 0, 1, { seconds: 40, alive: 0 });
+    seedHalf(1, 0, 2, { seconds: 60, alive: null });
+    const d = mapDetail(db, 'airport01')!;
+    expect(d.rounds).toMatchObject({ fastestSec: null, slowestSec: 60, attempts: 2 });
+  });
+
   it('ignores an unreliable round entirely', () => {
     // Same rule the scores already use: a round the plugin could not attribute
     // is not an observation.

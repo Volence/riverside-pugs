@@ -1172,7 +1172,7 @@ describe('MapDetail', () => {
     (within(strip).getByText('Tank damage') as HTMLElement).click();
     await waitFor(() => expect(
       [...container.querySelectorAll('.bar__value')].map((e) => e.textContent),
-    ).toEqual(['900', 'n/a']));
+    ).toEqual(['300', 'n/a']));
   });
 
   it('says "not recorded" for the average when no playing of the map has a real score', async () => {
@@ -1208,6 +1208,40 @@ describe('MapDetail', () => {
     (within(strip).getByText('Totals') as HTMLElement).click();
     const body = container.querySelector('.lb tbody') as HTMLElement;
     await waitFor(() => expect(within(body).getByText('30')).toBeTruthy());
+  });
+
+  it('sizes the win-rate bars by win rate and holds back players under three maps', async () => {
+    mockApi.map.mockResolvedValue({
+      ...mapData,
+      players: [
+        { steamid: '3', name: 'carol', games: 1, wins: 1, losses: 0, stats: {}, avgStats: {} },
+        { steamid: '2', name: 'bob', games: 8, wins: 2, losses: 6, stats: {}, avgStats: {} },
+        { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0, stats: {}, avgStats: {} },
+      ],
+    });
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+    const bars = [...container.querySelectorAll('.bars .bar')];
+    expect(bars.map((b) => b.querySelector('.bar__name')?.textContent)).toEqual(['alice', 'bob', 'carol']);
+    const widths = bars.map((b) => (b.querySelector('.bar__fill') as HTMLElement).style.width);
+    expect(widths).toEqual(['100%', '25%', '0%']);
+    // carol's 1-0 is not a 100% win rate.
+    expect(bars[2].querySelector('.bar__value')?.textContent).toMatch(/^n\/a/);
+  });
+
+  it('makes the stat bars follow the Per map / Totals choice', async () => {
+    mockApi.map.mockResolvedValue(mapData);
+    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
+    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
+    const tabs = container.querySelectorAll('.tabs');
+    (within(tabs[0] as HTMLElement).getByText('Tank damage') as HTMLElement).click();
+    await waitFor(() => expect(
+      [...container.querySelectorAll('.bar__value')].map((e) => e.textContent),
+    ).toEqual(['300', 'n/a']));
+    (within(tabs[1] as HTMLElement).getByText('Totals') as HTMLElement).click();
+    await waitFor(() => expect(
+      [...container.querySelectorAll('.bar__value')].map((e) => e.textContent),
+    ).toEqual(['900', 'n/a']));
   });
 
   it('carries the map baseline as a footer row', async () => {
