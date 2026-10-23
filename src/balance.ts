@@ -23,7 +23,20 @@ function combos(n: number, k: number): number[][] {
   return out;
 }
 
-export function balanceTeams(players: RatedPlayer[], opts: { groups?: [string, string][] } = {}): BalanceResult {
+/** One way to split the players, with team A's rating odds (openskill
+ *  predictWin, the same forecast the balancer has always used). */
+export interface Split {
+  teamA: string[];
+  teamB: string[];
+  pWinA: number;
+}
+
+/**
+ * Every split that keeps each group (duo) together, in the order the
+ * balancer has always walked them: player 0 always on team A, the rest of A
+ * chosen from indices 1..n-1 in lexicographic order.
+ */
+export function validSplits(players: RatedPlayer[], opts: { groups?: [string, string][] } = {}): Split[] {
   const n = players.length;
   if (n !== 4 && n !== 6 && n !== 8) throw new Error(`balanceTeams needs 4, 6 or 8 players, got ${n}`);
   const ratings = players.map((p) => rating({ mu: p.mu, sigma: p.sigma }));
@@ -35,22 +48,28 @@ export function balanceTeams(players: RatedPlayer[], opts: { groups?: [string, s
     .map(([x, y]) => [index.get(x), index.get(y)])
     .filter((g): g is [number, number] => g[0] !== undefined && g[1] !== undefined);
 
-  let best: BalanceResult | null = null;
-  // player 0 always on team A; choose the rest of A from indices 1..n-1, in
-  // the same lexicographic order the old fixed 8-player loops used, so the
-  // 8-player answer (ties included) is unchanged.
+  const out: Split[] = [];
   for (const rest of combos(n, n / 2 - 1)) {
     const aIdx = [0, ...rest];
     if (groups.some(([x, y]) => aIdx.includes(x) !== aIdx.includes(y))) continue;
     const bIdx = all.filter((x) => !aIdx.includes(x));
     const [pA] = predictWin([aIdx.map((x) => ratings[x]), bIdx.map((x) => ratings[x])]);
-    if (!best || Math.abs(pA - 0.5) < Math.abs(best.pWinA - 0.5)) {
-      best = {
-        teamA: aIdx.map((x) => players[x].steamid),
-        teamB: bIdx.map((x) => players[x].steamid),
-        pWinA: pA,
-      };
-    }
+    out.push({
+      teamA: aIdx.map((x) => players[x].steamid),
+      teamB: bIdx.map((x) => players[x].steamid),
+      pWinA: pA,
+    });
+  }
+  return out;
+}
+
+export function balanceTeams(players: RatedPlayer[], opts: { groups?: [string, string][] } = {}): BalanceResult {
+  let best: BalanceResult | null = null;
+  // The first split closest to even wins (strict <), in the same
+  // lexicographic order the old fixed 8-player loops used, so the 8-player
+  // answer (ties included) is unchanged.
+  for (const s of validSplits(players, opts)) {
+    if (!best || Math.abs(s.pWinA - 0.5) < Math.abs(best.pWinA - 0.5)) best = s;
   }
   if (!best) throw new Error('balanceTeams: no split keeps every group together');
   return best;

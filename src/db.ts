@@ -1556,6 +1556,15 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Mu the team balancer subtracts for a player's first PUG (newcomerPrior.ts).
   // 0 is off; the 2026-10-09 audit's fit suggests 8-10, a cautious start is 6.
   newcomer_balance_offset: '0',
+  // Stat-aware tie-break on team balance (src/statBalance.ts). Off until the
+  // Season 1 flip; gate is the stat favourite's odds in percent at which it
+  // runs, tolerance how many points of rating odds it may give up.
+  balance_stats_enabled: '0',
+  balance_stats_gate_pct: '60',
+  balance_stats_tolerance_pts: '5',
+  // Every Nth match id where the gate fires keeps the rating-best teams, as
+  // a holdout to measure the tie-break against. 0 turns the holdout off.
+  balance_stats_holdout_every: '4',
   // Matches in a week before a player's averages, win rate, SR climb or a
   // shame award count for the weekly awards. Five, not three: at three the
   // week of 2026-09-21 gave an average to a four-game player.
@@ -3034,6 +3043,37 @@ export function openDb(path: string): DB {
   // same number after the settings change.
   ensureColumn(db, 'match_players', 'duo_partner', 'TEXT');
   ensureColumn(db, 'match_players', 'duo_bonus', 'REAL');
+  db.exec(`
+    -- Stat-aware team balance (src/statBalance.ts): one row per queue match at
+    -- team creation, whether balance_stats_enabled was on or not. Teams are
+    -- JSON arrays of SteamIDs; *_rating_a is the rating forecast for team A
+    -- (openskill), *_stat_a the stat-aware odds. players_json holds each
+    -- player's mu, sigma, balance mu, prior games, raw and shrunk SI damage
+    -- per game and S. The result is joined from matches.
+    CREATE TABLE IF NOT EXISTS match_balance_log (
+      match_id        INTEGER PRIMARY KEY REFERENCES matches(id),
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      enabled         INTEGER NOT NULL,
+      gate            REAL NOT NULL,
+      tolerance       REAL NOT NULL,
+      over_gate       INTEGER NOT NULL,
+      gate_fired      INTEGER NOT NULL,
+      -- Gate fired but the match is a holdout (id % balance_stats_holdout_every
+      -- = 0): the rating-best split played, as the A/B control.
+      holdout         INTEGER NOT NULL DEFAULT 0,
+      stat_avg        REAL NOT NULL,
+      best_team_a     TEXT NOT NULL,
+      best_team_b     TEXT NOT NULL,
+      best_rating_a   REAL NOT NULL,
+      best_stat_a     REAL NOT NULL,
+      chosen_team_a   TEXT NOT NULL,
+      chosen_team_b   TEXT NOT NULL,
+      chosen_rating_a REAL NOT NULL,
+      chosen_stat_a   REAL NOT NULL,
+      moved           INTEGER NOT NULL,
+      players_json    TEXT NOT NULL
+    );
+  `);
 
   seed(db);
   return db;

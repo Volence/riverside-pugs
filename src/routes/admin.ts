@@ -5,6 +5,7 @@ import type { Matchmaker } from '../matchmaker.js';
 import { makeRequireAdmin, makeRequireMod } from './guards.js';
 import { queueActivity } from '../queueActivity.js';
 import { lookStats } from '../mapLooks.js';
+import { balanceLogSummary, recentBalanceLog, statBalanceConfig } from '../statBalance.js';
 import type { ServerReleaser } from '../serverRelease.js';
 import { getServer, listServers, serversMissingDlc4, setEnabled, setHasDlc4, setRestartAfterMatch, moveServer, type ServerRow } from '../serverPool.js';
 import { serverHasDlc4 } from '../dlc4.js';
@@ -997,6 +998,13 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     const days = Number.isFinite(asked) && asked >= 1 ? Math.min(365, Math.floor(asked)) : 30;
     const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
     return { days, since, rows: lookStats(db, since) };
+  });
+
+  // Stat-aware team balance (src/statBalance.ts): the switch as it stands,
+  // the running summary and the newest logged queue matches.
+  app.get('/api/admin/balance/teams', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    return { config: statBalanceConfig(db), summary: balanceLogSummary(db), rows: recentBalanceLog(db, 50) };
   });
 
   app.get('/api/admin/balance/metric', async (req, reply) => {

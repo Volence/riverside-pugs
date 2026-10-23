@@ -2,7 +2,8 @@ import { serverPasswordFor } from './matchToken.js';
 import type { DB } from './db.js';
 import { Queue, QUEUE_SIZE } from './queue.js';
 import { Lobby, realScheduler, type Scheduler, type LobbySnapshot, type LobbyPhase, type PersistedLobby } from './lobby.js';
-import { balanceTeams } from './balance.js';
+import { balanceTeams, type RatedPlayer } from './balance.js';
+import { averageSiDamage, chooseTeams, isHoldout, logBalance, statBalanceConfig, statLines, type StatBalanceDecision, type StatLine } from './statBalance.js';
 import { balanceMu } from './newcomerPrior.js';
 import { duoBonusMu } from './duoBonus.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
@@ -693,19 +694,41 @@ export class Matchmaker {
         bonus.set(x, { partner: y, mu: b });
         bonus.set(y, { partner: x, mu: b });
       }
-      const { teamA, teamB } = balanceTeams(
-        result.players.map((steamid) => {
-          const r = ratings.get(steamid)!;
-          return { steamid, mu: (mus.get(steamid) ?? r.mu) + (bonus.get(steamid)?.mu ?? 0), sigma: r.sigma };
-        }),
-        { groups },
-      );
+      const rated: RatedPlayer[] = result.players.map((steamid) => {
+        const r = ratings.get(steamid)!;
+        return { steamid, mu: (mus.get(steamid) ?? r.mu) + (bonus.get(steamid)?.mu ?? 0), sigma: r.sigma };
+      });
+      // Stat-aware tie-break (src/statBalance.ts). The rating-best split is
+      // computed first, exactly as before; with balance_stats_enabled off it
+      // is what plays. Any failure in the stat side falls back to it, so a
+      // bad stat query can never stop a pop. The teams are picked once the
+      // match row exists, because the holdout is decided by match id.
+      let statIn: { cfg: ReturnType<typeof statBalanceConfig>; avg: number; lines: Map<string, StatLine> } | null = null;
+      try {
+        const cfg = statBalanceConfig(this.db);
+        const avg = averageSiDamage(this.db);
+        statIn = { cfg, avg, lines: statLines(this.db, result.players, avg) };
+      } catch (err) {
+        console.error('[matchmaker] stat balance inputs failed, using the rating split:', err);
+      }
+      let decision: StatBalanceDecision | null = null;
       const season = currentSeasonId(this.db);
       const matchId = this.db.transaction(() => {
         const insertMatch = this.db.prepare(
           "INSERT INTO matches (season_id, state, campaign, origin) VALUES (?, 'configuring', ?, 'queue')",
         );
         const id = Number(insertMatch.run(season, result.campaign).lastInsertRowid);
+        let teamA: string[];
+        let teamB: string[];
+        try {
+          if (!statIn) throw new Error('no stat inputs');
+          decision = chooseTeams(rated, new Map([...statIn.lines].map(([p, l]) => [p, l.s])), statIn.cfg,
+            { groups, holdout: isHoldout(id, statIn.cfg) });
+          ({ teamA, teamB } = decision.chosen);
+        } catch (err) {
+          if (statIn) console.error('[matchmaker] stat balance failed, using the rating split:', err);
+          ({ teamA, teamB } = balanceTeams(rated, { groups }));
+        }
         const insertMp = this.db.prepare(
           'INSERT INTO match_players (match_id, player_id, team, duo_partner, duo_bonus) VALUES (?, ?, ?, ?, ?)',
         );
@@ -715,6 +738,25 @@ export class Matchmaker {
         for (const p of teamB) ins(p, 'b');
         return id;
       })();
+      const statLog = statIn && decision ? { ...statIn, decision: decision as StatBalanceDecision } : null;
+
+      if (statLog) {
+        // Every queue match is logged, on or off; a failed write never
+        // blocks the match that was just made.
+        try {
+          const { cfg, avg, lines, decision } = statLog;
+          logBalance(this.db, matchId, cfg, avg, decision, rated.map((p) => {
+            const r = ratings.get(p.steamid)!;
+            const l = lines.get(p.steamid)!;
+            return {
+              steamid: p.steamid, mu: r.mu, sigma: r.sigma, balanceMu: p.mu,
+              games: l.games, rawPerGame: l.rawPerGame, shrunkPerGame: l.shrunkPerGame, s: l.s,
+            };
+          }));
+        } catch (err) {
+          console.error(`[matchmaker] could not log balance for match ${matchId}:`, err);
+        }
+      }
 
       this.emit('lobbyCompleted', id, matchId);
       // 'refresh' again once setup settles, live or not: the connect block in

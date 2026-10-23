@@ -73,12 +73,25 @@ Seasons turns all of it on at once.
    `Riverside PUGs · Season 1: Wrong Way` / `<city>` / `The end of the world is just the beginning.`
 8. Newcomer balance offset: owner's toggle, Admin > Settings > Queue > First-match balance offset
    (`newcomer_balance_offset`, suggested 6).
+   Stat-aware team balance (owner approved 2026-10-23, branch `season1-balance`): Admin > Setup >
+   Settings > Queue > Stat-aware team balance ON (`balance_stats_enabled` 1). Leave the gate at 60%
+   and the tolerance at 5 points. To turn it off, set the same switch off: the next pop uses the
+   rating-best teams exactly as before (nothing is stored on players, so there is nothing to undo).
+   Every queue match is logged on or off, in Admin > Balance > Teams.
+   With it on, a quarter of the matches where it would change teams (match ids divisible by
+   `balance_stats_holdout_every`, 4) keep the rating-best teams as a holdout for the A/B check.
 9. Check: theme and banner show, leaderboard says placing for everyone, a first match plays and
    rates, the SR line arrives in game, the rank-up animation plays after a placement completes.
 
 ## After launch
 
 - ~11-10: revisit win-chance accuracy and the newcomer offset (memory pug-win-chance).
+- ~11-17 (two weeks after the flip): Admin > Balance > Teams. "Gate fired, tie-break: stat favourite
+  of the chosen teams" should win about 50%, and no more than about 55%, while the holdout line (rating-best
+  teams, same gate) should stay well above it (S0: about 70%); the gate should fire on roughly half
+  of matches (the backtest: 47%; the stat favourite won 72% of those before). If the chosen favourite
+  still wins 60%+ over 40+ decided fired matches, look at raising the tolerance; if fewer than ~30%
+  fire, the gate may be too high.
 - Watch the first week of placements: anyone landing far from where they finished Season 0.
 - Optional: Discord roles for final rank at season end; a Season 0 Top 10 post in Discord.
 
