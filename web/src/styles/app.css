@@ -4138,3 +4138,9 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
   .deskmatch { padding: var(--sp-3); }
   .deskmatch__room { margin-left: 0; }
 }
+
+/* Folded panels on draft night: the finished veto in a match room and the
+   desk's per-pairing win forecasts. */
+.room__vetodone > summary, .maketeams__forecasts > summary { cursor: pointer; color: var(--text-muted); font-size: var(--fs-dense); }
+.room__vetodone[open] > summary, .maketeams__forecasts[open] > summary { margin-bottom: var(--sp-2); }
+.teamchip--name { text-transform: none; letter-spacing: normal; font-family: inherit; }

@@ -48,7 +48,8 @@ function entryLines(ev: EventView): string[] {
 }
 
 function NameChips({ names }: { names: string[] }) {
-  return <p class="eventpool">{names.map((n, i) => <span key={`${i}:${n}`} class="teamchip">{n}</span>)}</p>;
+  // Player names keep their own case: upper-casing turned "P $tache" into "P STACHE" and made look-alike names harder to tell apart.
+  return <p class="eventpool">{names.map((n, i) => <span key={`${i}:${n}`} class="teamchip teamchip--name">{n}</span>)}</p>;
 }
 
 /** The public draft section (drafts plan D1 Ruling 9): the clock line, then
@@ -72,7 +73,7 @@ function DraftSection({ ev, draft, session }: { ev: EventView; draft: EventDraft
       {cut ? (
         <>
           <p class="inlinerow">
-            <a class="btn btn--ghost" href={`/event/${ev.slug}/draft`}>Draft room</a>
+            <a class={`btn${ev.status === 'registration' ? '' : ' btn--ghost'}`} href={`/event/${ev.slug}/draft`}>Draft room</a>
             <span class="muted">Player cards, captains' pick lists and the live draft.</span>
           </p>
           {([['Captains', cut.captains], ['Pool', cut.pool], ['Bench', cut.bench]] as const).map(([label, names]) => (
