@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyVeto, autoAction, coin, isHumanStep, vetoState, type Side, type VetoAction, type VetoInput } from '../src/events/veto.js';
-import { presetConfig, type VetoConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig, type VetoConfig } from '../src/events/vetoConfig.js';
 
 const POOL = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7'];
 const act = (side: Side, action: VetoAction['action'], campaign: string | null = null): VetoAction => ({ side, action, campaign, auto: false });
@@ -8,7 +8,7 @@ const input = (config: VetoConfig, actions: VetoAction[], over: Partial<VetoInpu
   ({ config, pool: POOL, higher: 'a', seed: 0, actions, winners: [], ...over });
 
 describe('ban to one (Bo1)', () => {
-  const cfg = presetConfig('ban_to_one', 7);
+  const cfg = legacyPresetConfig('ban_to_one', 7);
 
   it('asks the higher seed for first or second, then alternates bans down to one, then the non-banner picks sides', () => {
     let st = vetoState(input(cfg, []));
@@ -48,7 +48,7 @@ describe('ban to one (Bo1)', () => {
 });
 
 describe('ban to three, loser picks (Bo3, the owner\'s format)', () => {
-  const cfg = presetConfig('loser_picks', 7);
+  const cfg = legacyPresetConfig('loser_picks', 7);
   const opening = (): VetoAction[] => [act('a', 'first'), act('a', 'ban', 'c1'), act('b', 'ban', 'c2'), act('a', 'ban', 'c3'), act('b', 'ban', 'c4')];
 
   it('bans down to three, the higher seed picks game 1, the other team picks its sides, then waits for game 1', () => {
@@ -90,7 +90,7 @@ describe('ban to three, loser picks (Bo3, the owner\'s format)', () => {
 
 describe('pick and ban (Bo3, B B P P B B decider)', () => {
   it('runs the classic order with the late bans before the decider', () => {
-    const cfg = presetConfig('pick_ban', 7);
+    const cfg = legacyPresetConfig('pick_ban', 7);
     const actions = [act('a', 'first'), act('a', 'ban', 'c1'), act('b', 'ban', 'c2')];
     let st = vetoState(input(cfg, actions));
     expect(st.next).toEqual({ kind: 'pick', by: 'a', game: 1 });
@@ -112,7 +112,7 @@ describe('pick and ban (Bo3, B B P P B B decider)', () => {
 
 describe('home and away (Bo2 total score)', () => {
   it('has no bans: the team that goes first picks game 1, the other picks game 2', () => {
-    const cfg = presetConfig('home_away', 4);
+    const cfg = legacyPresetConfig('home_away', 4);
     const inp = (actions: VetoAction[]) => ({ ...input(cfg, actions), pool: POOL.slice(0, 4) });
     const actions = [act('a', 'second')];
     expect(vetoState(inp(actions)).next).toEqual({ kind: 'pick', by: 'b', game: 1 });
@@ -122,7 +122,7 @@ describe('home and away (Bo2 total score)', () => {
     expect(st.next).toEqual({ kind: 'done' });
   });
   it('gives a decider\'s sides to the team that did not make the last pick when nobody banned (pool of 2)', () => {
-    const cfg = presetConfig('home_away', 2);
+    const cfg = legacyPresetConfig('home_away', 2);
     const inp = (actions: VetoAction[]) => ({ ...input(cfg, actions), pool: POOL.slice(0, 2) });
     const actions = [act('a', 'first'), act('a', 'pick', 'c1'), act('b', 'survivors')];
     const st = vetoState(inp(actions));
@@ -146,7 +146,7 @@ describe('coin sides and fixed pickers', () => {
 
 describe('order step only when something uses it', () => {
   it('asks no order question for a Bo1 ban to one on a pool of 1, even with firstPick first', () => {
-    const cfg = presetConfig('ban_to_one', 1);
+    const cfg = legacyPresetConfig('ban_to_one', 1);
     expect(cfg.firstPick).toBe('first');
     const st = vetoState({ ...input(cfg, []), pool: ['c1'] });
     expect(st.first).toBeNull();
@@ -155,7 +155,7 @@ describe('order step only when something uses it', () => {
 });
 
 describe('autoAction', () => {
-  const cfg = presetConfig('loser_picks', 7);
+  const cfg = legacyPresetConfig('loser_picks', 7);
   it('goes first, bans the least wanted, picks the most wanted, and takes the saved side', () => {
     let st = vetoState(input(cfg, []));
     expect(autoAction(st, POOL, { campaigns: [], side: null })).toEqual({ side: 'a', action: 'first', campaign: null, auto: true });

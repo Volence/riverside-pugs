@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as N from '../src/events/entries.js';
 import * as R from '../src/events/room.js';
 import * as ST from '../src/events/standins.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { A, OUTSIDER } from './entryFixture.js';
 import { POOL7 } from './roomFixture.js';
 import { driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
@@ -13,7 +13,7 @@ describe('a stand-in during a booked series', () => {
   let s: SeriesFixture;
   afterEach(() => { vi.restoreAllMocks(); s?.close(); });
   const setup = async () => {
-    s = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
+    s = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
     benchOn(s.db, s.eventId, OUTSIDER);
     await s.tick();
     s.goLive(s.gameOf(1).match_id!);

@@ -43,4 +43,9 @@ describe('LineupPanel', () => {
     expect(screen.getByText('Pick your four (3 of 4)')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Lock lineup' }) as HTMLButtonElement).disabled).toBe(true);
   });
+  it('ticks all four when the team is exactly four and no default four is set', () => {
+    render(<LineupPanel v={v({ me: { side: 'a', manager: true, playable: players.slice(0, 4), defaultFour: [] } })} busy={false} onLock={async () => {}} />);
+    expect(screen.getByText('Pick your four (4 of 4)')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Lock lineup' }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });

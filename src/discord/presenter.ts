@@ -62,7 +62,7 @@ export interface PanelView {
   /** A lobby is running, so the panel can say a game is being set up. */
   phase: 'ready_check' | 'map_vote' | 'done' | 'failed' | null;
   /** The opt-in alert role, when one is configured. Drives whether the panel
-   *  offers a Notify me toggle at all. */
+   *  offers the Queue alerts (on/off) toggle at all. */
   alertRoleId?: string;
   /** A side game currently up, or null. The card is shared by everyone,
    *  so this cannot say who is opted in, only that a game is up. */
@@ -108,9 +108,12 @@ export function renderPanel(v: PanelView): MessagePayload {
           ? [{ kind: 'button' as const, customId: 'q:side', label: 'Side games', style: 'secondary' as const }]
           : []),
         // Only when an alert role is configured. Offering a toggle that silently
-        // does nothing is worse than not offering it.
+        // does nothing is worse than not offering it. The card is shared, so
+        // the label cannot know the presser's state: it names a standing
+        // on/off switch (the owner read "Notify me" as a one-time request,
+        // 2026-10-23), and the reply says which state they are now in.
         ...(v.alertRoleId
-          ? [{ kind: 'button' as const, customId: 'q:notify', label: 'Notify me', style: 'secondary' as const }]
+          ? [{ kind: 'button' as const, customId: 'q:notify', label: 'Queue alerts (on/off)', style: 'secondary' as const }]
           : []),
       ],
       [
@@ -140,23 +143,50 @@ export interface QueueAlertView {
   size: number;
   roleId: string;
   publicUrl: string;
+  /** False for an edit of a standing alert: the text keeps the role tag but
+   *  the payload pings nobody, whatever Discord would make of it. */
+  ping?: boolean;
 }
 
 export function renderQueueAlert(v: QueueAlertView): MessagePayload {
-  const need = Math.max(0, v.size - v.count);
+  // Never "0 more": a held pop (a duo that does not fit) still wants one.
+  const need = Math.max(1, v.size - v.count);
   return {
-    content: `<@&${v.roleId}> **${v.count}/${v.size}** in the queue`
-      + (need === 1 ? ', one more and it pops.' : `, ${need} more needed.`),
+    content: `<@&${v.roleId}> **${v.count}/${v.size}** in the PUG queue`
+      + (need === 1 ? ', one more and it pops.' : `, ${need} more needed.`)
+      + ' Join from the button below or on the website.',
     embeds: [],
     components: [[
       { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
-      link(`${v.publicUrl}/`, 'Website'),
+      link(`${v.publicUrl}/`, 'Play on the website'),
     ]],
     // The role is the only thing this message may ping. Nothing else in it is
     // user-controlled text, but the allowlist stays explicit either way.
     mentionUserIds: [],
-    mentionRoleIds: [v.roleId],
+    mentionRoleIds: v.ping === false ? [] : [v.roleId],
   };
+}
+
+export interface QueueAlertClosedView {
+  why: 'popped' | 'emptied' | 'dropped' | 'off';
+  count: number;
+  size: number;
+}
+
+/**
+ * What a queue alert is edited to once it is no longer worth answering, so
+ * somebody scrolling up an hour later does not jump into a queue that popped
+ * or emptied long ago. No role tag and no buttons: it is a record now.
+ */
+export function renderQueueAlertClosed(v: QueueAlertClosedView): MessagePayload {
+  const content = v.why === 'popped'
+    ? '**Queue popped: match started.** This alert is over; the next one goes out when the queue fills again.'
+    : v.why === 'emptied'
+      ? '**Queue emptied.** This alert is over; the next one goes out when the queue fills again.'
+      : v.why === 'off'
+        ? '**Queue alerts turned off.** This alert is over.'
+      : `**Queue dropped to ${v.count}/${v.size}.** It is not close to popping any more; the next alert goes out when it fills again.`;
+  return { content, embeds: [], components: [], mentionUserIds: [], mentionRoleIds: [] };
 }
 
 // ---------- lobby (ready check, vote) ----------

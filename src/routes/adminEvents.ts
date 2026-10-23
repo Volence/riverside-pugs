@@ -15,12 +15,12 @@ import * as R from '../events/room.js';
 import * as S from '../events/schedule.js';
 import * as V from '../events/validate.js';
 import { recordResultFlow, settleEvent, startEventFlow } from '../events/flow.js';
-import { stageSummary } from '../events/format.js';
+import { eventStatusLabel, stageSummary } from '../events/format.js';
 import { adminEntryViews, draftBench } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
-import { tellCaptainOffer, tellCaptainSet, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
+import { tellCaptainOffer, tellCaptainSet, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellPlayersSwapped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
 import { REPLACE_TEXT } from '../events/messages.js';
 import { addNote } from '../admin/players.js';
 import { deskOrder, signupFacts } from '../events/draftFacts.js';
@@ -33,6 +33,8 @@ import { higherSide, openMatchRoom, type RoomClock } from '../events/roomClock.j
 
 export interface AdminEventRow {
   id: number; slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; startsAt: string; stages: number; updatedAt: string;
+  /** The status chip's words (events/format.ts eventStatusLabel). */
+  statusLabel: string;
 }
 export interface AdminEventStage {
   id: number; ordinal: number; summary: string; settings: V.StageSettings; rulesSnapshotted: boolean;
@@ -46,6 +48,8 @@ export interface AdminEventDetail {
   cancelReason: string | null; createdAt: string; updatedAt: string;
   /** Draft-kind events: when the cut and the teams were published (null before, and on a team event). */
   cutAt: string | null; teamsMadeAt: string | null;
+  /** The status chip's words (events/format.ts eventStatusLabel). */
+  statusLabel: string;
   stages: AdminEventStage[];
   log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
 }
@@ -60,7 +64,7 @@ export interface AdminEventOptions {
 export function adminEventDetail(db: DB, ev: E.EventRow): AdminEventDetail {
   return {
     id: ev.id, slug: ev.slug, status: ev.status, fields: E.fieldsOf(ev), bannerKey: ev.banner_key, cancelReason: ev.cancel_reason,
-    createdAt: ev.created_at, updatedAt: ev.updated_at, cutAt: ev.cut_at, teamsMadeAt: ev.teams_made_at,
+    createdAt: ev.created_at, updatedAt: ev.updated_at, cutAt: ev.cut_at, teamsMadeAt: ev.teams_made_at, statusLabel: eventStatusLabel(ev),
     stages: E.stagesOf(db, ev.id).map((s) => {
       const settings = E.stageSettingsOf(s);
       const ms = P.matchesOf(db, s.id);
@@ -134,6 +138,7 @@ export async function adminEventRoutes(
     ).all() as (E.EventRow & { stage_count: number })[];
     const events: AdminEventRow[] = rows.map((e) => ({
       id: e.id, slug: e.slug, name: e.name, status: e.status, entryKind: e.entry_kind, startsAt: e.starts_at, stages: e.stage_count, updatedAt: e.updated_at,
+      statusLabel: eventStatusLabel(e),
     }));
     return { events };
   });
@@ -624,6 +629,29 @@ export async function adminEventRoutes(
     tellCaptainSet(opts, ev.id, entry.id, r.value.from, r.value.to);
     // Open room pages of this entry refresh to show who runs it now.
     for (const m of roomMatches(ev.id)) if (m.entry_a === entry.id || m.entry_b === entry.id) opts.rooms?.pushChange(m.id);
+    return r.value;
+  });
+
+  /** Owner 2026-10-23: staff swap two starters between draft teams after the
+   *  teams are published and before the event goes live (entries.ts
+   *  swapDraftPlayers). After the commit: the admin audit and the DMs. */
+  app.post('/api/admin/events/:id/draft/swap-players', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const body = (req.body ?? {}) as { a?: unknown; b?: unknown };
+    const side = (v: unknown): { entryId: number; steamid: string } | null => {
+      const x = v as { entryId?: unknown; steamid?: unknown } | null;
+      return x && typeof x === 'object' && Number.isInteger(x.entryId) && typeof x.steamid === 'string' ? { entryId: x.entryId as number, steamid: x.steamid } : null;
+    };
+    const a = side(body.a);
+    const b = side(body.b);
+    if (!a || !b) return refuse(reply, 'bad_request');
+    const r = N.swapDraftPlayers(db, { eventId: ev.id, a, b, actor: me, now: new Date() });
+    if (!r.ok) return refuseWith(reply, r);
+    logAdmin(db, me, 'event_draft_swap_players', ev.id, { a, b });
+    tellPlayersSwapped(opts, ev.id, a, b);
     return r.value;
   });
 

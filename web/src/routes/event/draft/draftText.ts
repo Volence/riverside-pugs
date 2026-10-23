@@ -36,3 +36,21 @@ export function trendText(trend: number[]): string | null {
   const d = trend[trend.length - 1]! - trend[0]!;
   return `${d >= 0 ? '+' : ''}${d} SR across the last ${trend.length} rated games`;
 }
+
+/** The card's short trend, as "+411 SR, last 10"; null with under two points. */
+export function trendShort(trend: number[]): string | null {
+  if (trend.length < 2) return null;
+  const d = trend[trend.length - 1]! - trend[0]!;
+  return `${d >= 0 ? '+' : ''}${d} SR, last ${trend.length}`;
+}
+
+/** A per-game average for a card cell: whole numbers from 100 up, one
+ *  decimal below that (and no trailing ".0"), so a column of figures stays
+ *  short enough for a narrow card. */
+export function statText(n: number): string {
+  if (Math.abs(n) >= 100) return String(Math.round(n));
+  const r = Math.round(n * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+
+export type PoolView = 'cards' | 'list';

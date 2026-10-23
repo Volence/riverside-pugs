@@ -3,6 +3,7 @@ import { useLocation } from 'preact-iso';
 import { ApiError, bookingsApi, teamsApi, type BookingOptions, type BookingSummary, type NotifyPref, type ScrimReliability } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { GatePanel } from '../components/GatePanel';
 import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { estimateLine, estimateSlot, localLabel, playMinutes, toUtcIso } from '../bookingTime';
@@ -92,65 +93,68 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
   };
 
   return (
-    <form class="bookform" onSubmit={submit}>
-      <label class="teamfield">Your side
-        <select aria-label="Your side" value={teamId === null ? '' : String(teamId)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setTeamId(v ? Number(v) : null); }}>
-          {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
-          <option value="">A pickup group (just me for now)</option>
-        </select>
-      </label>
-      <fieldset class="bookform__fieldset">
-        <legend class="teamsub">Against</legend>
-        <label><input type="radio" name="against" checked={against === 'team'} onChange={() => setAgainst('team')} /> A team</label>
-        <label><input type="radio" name="against" checked={against === 'player'} onChange={() => setAgainst('player')} /> A player and their group</label>
-        {against === 'team'
-          ? <select aria-label="Opponent team" value={oppTeam === null ? '' : String(oppTeam)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setOppTeam(v ? Number(v) : null); }}>
-              <option value="">Pick a team</option>
-              {options.teams.filter((t) => t.id !== teamId).map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
-            </select>
-          : <div class="bookform__search">
-              {oppPlayer
-                ? <span class="inlinerow">{oppPlayer.name}<button type="button" class="btn btn--ghost btn--sm" onClick={() => setOppPlayer(null)}>Change</button></span>
-                : <>
-                    <input aria-label="Find a player" value={q} placeholder="Player name" onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
-                    <ul>{found.map((p) => <li key={p.steamid}><button type="button" class="btn btn--ghost btn--sm" onClick={() => { setOppPlayer(p); setQ(''); }}>{p.name}</button></li>)}</ul>
-                  </>}
-            </div>}
-      </fieldset>
-      <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
-      <fieldset class="bookform__fieldset">
+    <form class="bookform bkform" onSubmit={submit}>
+      <div class="bkform__fields">
+        <label class="teamfield">Your side
+          <select aria-label="Your side" value={teamId === null ? '' : String(teamId)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setTeamId(v ? Number(v) : null); }}>
+            {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
+            <option value="">A pickup group (just me for now)</option>
+          </select>
+        </label>
+        <fieldset class="bookform__fieldset">
+          <legend class="teamsub">Against</legend>
+          <label><input type="radio" name="against" checked={against === 'team'} onChange={() => setAgainst('team')} /> A team</label>
+          <label><input type="radio" name="against" checked={against === 'player'} onChange={() => setAgainst('player')} /> A player and their group</label>
+          {against === 'team'
+            ? <select aria-label="Opponent team" value={oppTeam === null ? '' : String(oppTeam)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setOppTeam(v ? Number(v) : null); }}>
+                <option value="">Pick a team</option>
+                {options.teams.filter((t) => t.id !== teamId).map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
+              </select>
+            : <div class="bookform__search">
+                {oppPlayer
+                  ? <span class="inlinerow">{oppPlayer.name}<button type="button" class="btn btn--ghost btn--sm" onClick={() => setOppPlayer(null)}>Change</button></span>
+                  : <>
+                      <input aria-label="Find a player" value={q} placeholder="Player name" onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
+                      <ul>{found.map((p) => <li key={p.steamid}><button type="button" class="btn btn--ghost btn--sm" onClick={() => { setOppPlayer(p); setQ(''); }}>{p.name}</button></li>)}</ul>
+                    </>}
+              </div>}
+        </fieldset>
+        <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
+        {options.rulesets.length > 1 && (
+          <div class="bookform__pick">
+            <label class="teamfield">Rules
+              <select aria-label="Rules" value={rulesetId === undefined ? '' : String(rulesetId)} onChange={(e) => setRulesetId(Number((e.target as HTMLSelectElement).value))}>
+                {options.rulesets.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+              </select>
+            </label>
+            <p class="muted">Match rules: pauses, side choice, no-show grace.</p>
+            {summary && <p class="muted">{summary}</p>}
+          </div>
+        )}
+        {options.gameConfigs.length > 1 && (
+          <div class="bookform__pick">
+            <label class="teamfield">Game config
+              <select aria-label="Game config" value={gameConfig} onChange={(e) => setGameConfig((e.target as HTMLSelectElement).value)}>
+                {options.gameConfigs.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+              </select>
+            </label>
+            <p class="muted">What the server runs (the cfg it loads).</p>
+          </div>
+        )}
+        <button class="btn" type="submit" disabled={busy || playlist.length === 0}>Book the server</button>
+      </div>
+      <fieldset class="bookform__fieldset bkform__camps">
         <legend class="teamsub">Campaigns (up to {options.limits.playlistMax}, in play order)</legend>
         {options.campaigns.map((c) => (
-          <label key={c.slug}>
+          <label key={c.slug} class={`bkcamp${playlist.includes(c.slug) ? ' bkcamp--on' : ''}`}>
             <input type="checkbox" aria-label={c.name} checked={playlist.includes(c.slug)} disabled={!playlist.includes(c.slug) && playlist.length >= options.limits.playlistMax} onChange={() => toggle(c.slug)} />
-            {c.name}
-            <span class="muted"> · about {c.minutes} min{playlist.includes(c.slug) ? ` · #${playlist.indexOf(c.slug) + 1}` : ''}</span>
+            <span class="bkcamp__name">{c.name}</span>
+            <span class="bkcamp__min muted">about {c.minutes} min</span>
+            {playlist.includes(c.slug) && <span class="bkcamp__order" aria-label={`number ${playlist.indexOf(c.slug) + 1} in play order`}>#{playlist.indexOf(c.slug) + 1}</span>}
           </label>
         ))}
         {playlist.length > 0 && <p class="muted">{estimateLine(playMinutes(options.estimate, playlist), estimate, playlist.length)}</p>}
       </fieldset>
-      {options.rulesets.length > 1 && (
-        <div class="bookform__pick">
-          <label class="teamfield">Rules
-            <select aria-label="Rules" value={rulesetId === undefined ? '' : String(rulesetId)} onChange={(e) => setRulesetId(Number((e.target as HTMLSelectElement).value))}>
-              {options.rulesets.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
-            </select>
-          </label>
-          <p class="muted">Match rules: pauses, side choice, no-show grace.</p>
-          {summary && <p class="muted">{summary}</p>}
-        </div>
-      )}
-      {options.gameConfigs.length > 1 && (
-        <div class="bookform__pick">
-          <label class="teamfield">Game config
-            <select aria-label="Game config" value={gameConfig} onChange={(e) => setGameConfig((e.target as HTMLSelectElement).value)}>
-              {options.gameConfigs.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
-            </select>
-          </label>
-          <p class="muted">What the server runs (the cfg it loads).</p>
-        </div>
-      )}
-      <button class="btn" type="submit" disabled={busy || playlist.length === 0}>Book the server</button>
     </form>
   );
 }
@@ -180,7 +184,26 @@ export function Bookings({ session }: { session: Session }) {
   };
 
   if (!signedIn || closed) {
-    return <main class="page page--profile bookingpage"><PageHeader title="Bookings" /><Empty>{closed ? 'Booked servers are not open yet.' : 'Sign in to book a server.'}</Empty></main>;
+    return (
+      <main class="page page--profile bookingpage">
+        <PageHeader eyebrow="Competitive" title="Bookings" />
+        {closed
+          ? <GatePanel title="Not open yet" lead="Booked servers are not open yet." links={[{ href: '/events', label: 'See events' }]} />
+          : (
+            <GatePanel
+              title="Book a Riverside server"
+              lead="Sign in to book a server for your team or a pickup group."
+              points={[
+                'Pick a time and the campaigns, and the server is set up for you with the match config.',
+                'Your players get the connect line and password in Discord.',
+                'Scrims you arrange on the board are booked here too.',
+              ]}
+              signInNext="/bookings"
+              links={[{ href: '/events', label: 'See events' }]}
+            />
+          )}
+      </main>
+    );
   }
   return (
     <main class="page page--profile bookingpage">

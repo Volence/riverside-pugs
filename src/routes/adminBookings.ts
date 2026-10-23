@@ -13,6 +13,9 @@ export interface AdminBookingRow {
   server: string | null; peak: { a: number; b: number }; endReason: string | null;
   /** Plan 2 Ruling 6: a side whose team (or pickup captain) carries the toxic flag. */
   toxic: { a: boolean; b: boolean };
+  /** A tournament booking's event, so the row can point at the event desk
+   *  (its tools run the match there, not Cancel/+1/End here). */
+  eventId: number | null;
 }
 
 /** Server priority (Ruling 9): the scrim cap and the PUG reserve, both per
@@ -49,6 +52,9 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
         server: b.server_id !== null ? getServer(db, b.server_id)?.name ?? null : null,
         peak: { a: a.peak_present, b: s.peak_present }, endReason: b.end_reason,
         toxic: { a: toxicFlag(db, party(a), nowMs), b: toxicFlag(db, party(s), nowMs) },
+        eventId: b.purpose === 'tournament'
+          ? (db.prepare('SELECT event_id FROM event_matches WHERE booking_id = ? ORDER BY id DESC LIMIT 1').get(b.id) as { event_id: number } | undefined)?.event_id ?? null
+          : null,
       };
     });
     const limits = bookingLimits(db);
@@ -89,6 +95,11 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
     const me = requireStaff(req, reply);
     if (!me) return;
     const id = idOf(req.params);
+    // A tournament match plays the campaigns its veto picked; the event runs
+    // it, so a +1 here would only move a booked end tournaments never use.
+    if (B.getBooking(db, id)?.purpose === 'tournament') {
+      return reply.code(409).send({ error: 'The event runs this tournament match. Use the event desk.' });
+    }
     const r = B.addCampaign(db, { bookingId: id, by: me, staff: true, campaign: ((req.body ?? {}) as { campaign?: unknown }).campaign });
     if (!r.ok) return refuse(reply, r.error);
     logAdmin(db, me, 'booking_extend', id, { endsAt: r.value.endsAt, gamesAllowed: r.value.gamesAllowed, campaign: r.value.campaign });

@@ -18,6 +18,19 @@ import { openPeople, steamMembersOf } from './evaderPeople.js';
  * builds everyone; every check after that rebuilds the handful who played.
  */
 
+/**
+ * How the cached histograms were binned. A row from an older scheme is
+ * rebuilt on the next check whatever its date.
+ *
+ *   1  ticks, read as 100 tick (to 2026-10-20). A burst from a 128 tick
+ *      server was binned in its own ticks, 28% long, and one with a hold over
+ *      30 was dropped whole.
+ *   2  10 ms bins at the rate each burst was recorded at (addHolds). Every
+ *      100 tick history bins exactly as under 1, so only players with a burst
+ *      at another rate change; the rest rebuild to the same counts.
+ */
+export const FINGERPRINT_BINNING = 2;
+
 /** The base classes, as a WHERE fragment. Literal constants, no parameters. */
 export const BASE_BURST_SQL = `holds IS NOT NULL
   AND kind IN (${BASE_KINDS.map((k) => `'${k}'`).join(', ')})
@@ -25,7 +38,7 @@ export const BASE_BURST_SQL = `holds IS NOT NULL
 
 export function playerFingerprint(db: DB, steamid: string): Fingerprint {
   return fingerprintOf(
-    db.prepare(`SELECT kind, weapon, holds FROM input_bursts WHERE steamid = ? AND ${BASE_BURST_SQL}`)
+    db.prepare(`SELECT kind, weapon, holds, tickrate FROM input_bursts WHERE steamid = ? AND ${BASE_BURST_SQL}`)
       .iterate(steamid) as IterableIterator<BurstHoldRow>,
   );
 }
@@ -34,7 +47,7 @@ export function playerFingerprint(db: DB, steamid: string): Fingerprint {
 export function memberMatchFingerprints(db: DB, steamids: readonly string[]): Fingerprint[] {
   if (steamids.length === 0) return [];
   const rows = db.prepare(
-    `SELECT steamid, match_id AS matchId, kind, weapon, holds FROM input_bursts
+    `SELECT steamid, match_id AS matchId, kind, weapon, holds, tickrate FROM input_bursts
       WHERE match_id IS NOT NULL AND steamid IN (${steamids.map(() => '?').join(', ')}) AND ${BASE_BURST_SQL}
       ORDER BY steamid, match_id`,
   ).all(...steamids) as (BurstHoldRow & { steamid: string; matchId: number })[];
@@ -47,7 +60,7 @@ export function memberMatchFingerprints(db: DB, steamids: readonly string[]): Fi
   return [...groups.values()].map((g) => fingerprintOf(g));
 }
 
-interface CacheRow { subject: string; classes_json: string; holds: number; built_at: string }
+interface CacheRow { subject: string; classes_json: string; holds: number; built_at: string; binning: number }
 
 export interface FingerprintWorld {
   /** Every fingerprinted player and every open person's pool. */
@@ -64,18 +77,18 @@ export function fingerprintWorld(db: DB, now = new Date()): FingerprintWorld {
       .all() as { steamid: string; last: string }[]).map((r) => [r.steamid, r.last]),
   );
   const cache = new Map(
-    (db.prepare('SELECT subject, classes_json, holds, built_at FROM fingerprint_cache').all() as CacheRow[])
+    (db.prepare('SELECT subject, classes_json, holds, built_at, binning FROM fingerprint_cache').all() as CacheRow[])
       .map((r) => [r.subject, r]),
   );
   const write = db.prepare(
-    `INSERT INTO fingerprint_cache (subject, classes_json, holds, built_at) VALUES (?, ?, ?, ?)
+    `INSERT INTO fingerprint_cache (subject, classes_json, holds, built_at, binning) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(subject) DO UPDATE SET classes_json = excluded.classes_json, holds = excluded.holds,
-       built_at = excluded.built_at`,
+       built_at = excluded.built_at, binning = excluded.binning`,
   );
   let rebuilt = 0;
   const store = (subject: string, fp: Fingerprint): void => {
-    const row = { subject, classes_json: JSON.stringify(fp), holds: holdTotal(fp), built_at: at };
-    write.run(row.subject, row.classes_json, row.holds, row.built_at);
+    const row = { subject, classes_json: JSON.stringify(fp), holds: holdTotal(fp), built_at: at, binning: FINGERPRINT_BINNING };
+    write.run(row.subject, row.classes_json, row.holds, row.built_at, row.binning);
     cache.set(subject, row);
     rebuilt += 1;
   };
@@ -85,13 +98,13 @@ export function fingerprintWorld(db: DB, now = new Date()): FingerprintWorld {
   db.transaction(() => {
     for (const [steamid, played] of last) {
       const c = cache.get(`steam:${steamid}`);
-      if (!c || c.built_at < played) store(`steam:${steamid}`, playerFingerprint(db, steamid));
+      if (!c || c.binning !== FINGERPRINT_BINNING || c.built_at < played) store(`steam:${steamid}`, playerFingerprint(db, steamid));
     }
     for (const p of people) {
       const subject = `person:${p.id}`;
       const c = cache.get(subject);
       const played = p.members.map((m) => last.get(m) ?? '').sort().pop() ?? '';
-      if (!c || c.built_at === '' || c.built_at < played) store(subject, pooled(p.members.map((m) => fpOf(`steam:${m}`))));
+      if (!c || c.binning !== FINGERPRINT_BINNING || c.built_at === '' || c.built_at < played) store(subject, pooled(p.members.map((m) => fpOf(`steam:${m}`))));
     }
   })();
 

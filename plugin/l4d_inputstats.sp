@@ -24,11 +24,15 @@
 #include <sdktools>
 #include "pug-logauth.inc"
 
-#define PLUGIN_VERSION "0.4.0"
+#define PLUGIN_VERSION "0.5.0"
 
-/** A burst closes after this much silence. 30 ticks at 100 tick = 300ms.
- *  Measured, not guessed: a human sample containing one 31-second idle gap had
- *  its coefficient of variation dragged to 6.85, hiding everything.
+/** A burst closes after this much silence: 300 ms, which is 30 ticks at 100
+ *  tick and 38 at 128 (g_iBurstGap, set from the tick interval; 0.4.0 and
+ *  earlier had 30 fixed, so at 128 a burst closed after 234 ms). Measured, not
+ *  guessed: a human sample containing one 31-second idle gap had its
+ *  coefficient of variation dragged to 6.85, hiding everything. It is also the
+ *  cap on an interval or a hold on the wire ("30 or more" at 100 tick), so
+ *  src/inputStats.ts burstMaxTicks computes the same number the same way.
  *
  *  Counted in USERCMDS, like every interval here. A client sends one usercmd
  *  per tick, so for a healthy connection the two are the same number. They
@@ -38,17 +42,30 @@
  *  players with the worst connections. cmdnum counts the commands the client
  *  actually generated, survives loss (it skips, the hook does not fire for a
  *  command that never arrived) and is the clock the button samples are on. */
-#define BURST_GAP_TICKS 30
+int g_iBurstGap = 30;
+/** The largest g_iBurstGap ever gets: 38, the value at 128 tick, encodes as
+ *  'U'. Past it the alphabet would reach '[' and '\', so a server above 128
+ *  tick (which the web refuses anyway) still never sends one. */
+#define MAX_BURST_GAP 38
+
+/** The server's tick rate, sent as `rate=` on burst and stall lines (0.5.0)
+ *  so the web reads every tick count at the rate it was recorded at. */
+int g_iTickRate = 100;
 
 /** A stall shorter than this is ordinary choke and not worth a line; longer
- *  than STALL_MAX_TICKS is a hitch, a load or a pause, not a cheat setting. */
-#define STALL_MIN_TICKS 8
-#define STALL_MAX_TICKS 100
+ *  than g_iStallMax is a hitch, a load or a pause, not a cheat setting. 80 ms
+ *  and one second: 8 and 100 ticks at 100 tick, 10 and 128 at 128. Same
+ *  rounding as ticksAtLeast and ticksAtMost in src/inputStats.ts, so the
+ *  lines start exactly where the web's fakelag window does. */
+int g_iStallMin = 8;
+int g_iStallMax = 100;
 /** Stall lines per player per round, so a dying connection cannot flood. */
 #define STALL_BUDGET 200
 
 /** Must match the newest `v` src/logParse.ts accepts. 2: intervals in
- *  usercmds, `ct` really is the client tickcount, `sp` added. */
+ *  usercmds, `ct` really is the client tickcount, `sp` added. Still 2 with
+ *  `rate=` added in 0.5.0: a parser that does not know the key ignores it, and
+ *  at 100 tick nothing else on the line changed. */
 #define WIRE_VERSION 2
 
 /** Matches MAX_INTERVALS in src/inputStats.ts. A burst longer than this stops
@@ -141,8 +158,9 @@ int g_iAtkTicks[MAXPLAYERS + 1][MAX_INTERVALS];
  * apart, and unlike a signature this cannot be backfilled: what was not
  * captured is gone, which is why it is captured now, before it is needed.
  *
- * 1..30 like an interval, so it encodes the same way. 30 means "30 or more",
- * and a press still down when its burst is emitted records the time so far.
+ * 1..30 like an interval (1..38 at 128 tick), so it encodes the same way. The
+ * cap means "that or more", and a press still down when its burst is emitted
+ * records the time so far.
  */
 int g_iAtkHolds[MAXPLAYERS + 1][MAX_HOLDS];
 /** Where the press that is down right now goes when it is released: its index
@@ -247,6 +265,7 @@ public void OnPluginStart()
 	g_cvBots = CreateConVar("l4d_inputstats_bots", "0",
 		"TEST ONLY: also capture bots, so the pipeline can be exercised without a player.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	ReadTickRate();
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
 	HookEvent("round_end", Event_RoundEnd, EventHookMode_PostNoCopy);
 	HookEvent("player_death", Event_PlayerDeath);
@@ -256,6 +275,31 @@ public void OnPluginStart()
 	RegAdminCmd("sm_inputstats_emit", Cmd_Emit, ADMFLAG_ROOT,
 		"DEBUG BUILD: sm_inputstats_emit <fire|pounce|bhop> <intervals> | sikill | sikill_left - ship a synthetic line through the real encode and emit path.");
 #endif
+}
+
+/** The rate is fixed for the life of the process (-tickrate), but reading it
+ *  again on each map costs nothing and survives a late load. */
+public void OnMapStart()
+{
+	ReadTickRate();
+}
+
+/**
+ * Every tick count this plugin sends is at the server's rate, and the
+ * thresholds that are really times scale with it. Integer arithmetic, the
+ * same as the web's, so both sides land on the same tick:
+ *   burst gap  300 ms  (rate * 3 + 5) / 10          30 at 100, 38 at 128
+ *   stall min   80 ms  (75 * rate + 1000) / 1000      8 at 100, 10 at 128
+ *   stall max    1 s   1005 * rate / 1000           100 at 100, 128 at 128
+ */
+void ReadTickRate()
+{
+	g_iTickRate = RoundToNearest(1.0 / GetTickInterval());
+	g_iBurstGap = (g_iTickRate * 3 + 5) / 10;
+	if (g_iBurstGap > MAX_BURST_GAP) g_iBurstGap = MAX_BURST_GAP;
+	if (g_iBurstGap < 1) g_iBurstGap = 1;
+	g_iStallMin = (75 * g_iTickRate + 1000) / 1000;
+	g_iStallMax = 1005 * g_iTickRate / 1000;
 }
 
 #if defined DEBUG
@@ -439,7 +483,7 @@ void TrackStall(int client, int tick, int seq)
 	if (tick != g_iStTick[client]) {
 		if (g_bStOpen[client]) EmitStall(client);
 		int gap = tick - g_iStTick[client] - 1;
-		if (g_iStTick[client] > 0 && gap >= STALL_MIN_TICKS && gap <= STALL_MAX_TICKS && seq > g_iStSeq[client]) {
+		if (g_iStTick[client] > 0 && gap >= g_iStallMin && gap <= g_iStallMax && seq > g_iStSeq[client]) {
 			g_bStOpen[client] = true;
 			g_iStGap[client] = gap;
 			g_iStMissed[client] = seq - g_iStSeq[client] - 1;
@@ -641,9 +685,9 @@ void EmitStall(int client)
 		if (!GetClientAuthId(client, AuthId_Steam2, id, sizeof(id))) return;
 	}
 	g_iStallsThisRound[client]++;
-	PugLog("L4DM id=%s k=stall st=%d gap=%d miss=%d cmds=%d team=%d cls=%d lunge=%d v=%d",
+	PugLog("L4DM id=%s k=stall st=%d gap=%d miss=%d cmds=%d team=%d cls=%d lunge=%d rate=%d v=%d",
 		id, g_iStTick[client], g_iStGap[client], g_iStMissed[client], g_iStCmds[client],
-		g_iStTeam[client], g_iStClass[client], g_iStLunging[client], WIRE_VERSION);
+		g_iStTeam[client], g_iStClass[client], g_iStLunging[client], g_iTickRate, WIRE_VERSION);
 }
 
 /**
@@ -712,7 +756,7 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 	// Release edges first, so a press let go on this usercmd has its hold
 	// written before anything below decides to emit the burst it belongs to.
 	if (!(buttons & IN_ATTACK) && (prev & IN_ATTACK)) CloseAttackHold(client);
-	if (g_bHopPending[client] && (!(buttons & IN_JUMP) || seq - g_iHopDownSeq[client] >= BURST_GAP_TICKS)) {
+	if (g_bHopPending[client] && (!(buttons & IN_JUMP) || seq - g_iHopDownSeq[client] >= g_iBurstGap)) {
 		FlushHop(client);
 	}
 
@@ -772,7 +816,7 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
 	// --- +jump press edges, the bhop anchor ---------------------------------
 	if ((buttons & IN_JUMP) && !(prev & IN_JUMP) && g_bGroundTimed[client] && ground && !onLadder) {
 		int onGround = seq - g_iGroundStartSeq[client];
-		if (onGround >= 0 && onGround <= BURST_GAP_TICKS) {
+		if (onGround >= 0 && onGround <= g_iBurstGap) {
 			// Emitted when the jump button comes back up: see FlushHop.
 			g_bHopPending[client] = true;
 			g_iHopGround[client] = onGround;
@@ -788,13 +832,14 @@ public void OnPlayerRunCmdPre(int client, int buttons, int impulse, const float 
  *  runs BACKWARDS is a new connection's numbering, never the same burst. */
 bool GapPassed(int seq, int last)
 {
-	return seq - last > BURST_GAP_TICKS || seq < last;
+	return seq - last > g_iBurstGap || seq < last;
 }
 
-/** A usercmd count as a wire value: 1..30, where 30 means "30 or more". */
+/** A usercmd count as a wire value: 1..g_iBurstGap, where the cap means "that
+ *  or more" (30 at 100 tick, 38 at 128). */
 int Clamp(int v)
 {
-	return v < 1 ? 1 : (v > BURST_GAP_TICKS ? BURST_GAP_TICKS : v);
+	return v < 1 ? 1 : (v > g_iBurstGap ? g_iBurstGap : v);
 }
 
 /**
@@ -894,17 +939,18 @@ void FlushHop(int client)
 	EmitBurst(client, KIND_BHOP, "", 1, g_iHopGround[client], 0, 0, d, h);
 }
 
-/** One printable character per interval. A burst closes at BURST_GAP_TICKS, so
- *  every interval is 1..30 by construction and the encoding is total: there is
- *  no value it cannot represent, and nothing it produces can contain a space or
- *  a quote: base 48 gives '0'..'M', digits and letters only. Mirrors
+/** One printable character per interval. A burst closes at g_iBurstGap, so
+ *  every interval is 1..g_iBurstGap by construction and the encoding is total:
+ *  there is no value it cannot represent, and nothing it produces can contain
+ *  a space or a quote: base 48 gives '0'..'M' at 100 tick and '0'..'U' at 128,
+ *  digits, letters and :;<=>?@ only. Mirrors
  *  encodeIntervals in src/inputStats.ts, which documents why not base 33. */
 void Encode(const int[] ticks, int n, char[] out, int maxlen)
 {
 	int w = 0;
 	for (int i = 0; i < n && w < maxlen - 1; i++) {
 		int t = ticks[i];
-		if (t < 1 || t > BURST_GAP_TICKS) continue;
+		if (t < 1 || t > g_iBurstGap) continue;
 		out[w++] = view_as<char>(ENC_BASE + t - 1);
 	}
 	out[w] = '\0';
@@ -962,8 +1008,9 @@ void EmitBurst(int client, int kind, const char[] weapon, int n, int groundTicks
  * The ONE place the wire format exists, so the test path cannot drift from the
  * real one. The two long series go last.
  *
- * Longest possible line: about 120 bytes of fixed keys with every counter at
- * its widest and a 31 character weapon, plus 256 for d and 257 for h, is under
+ * Longest possible line: about 130 bytes of fixed keys (rate= added 9) with
+ * every counter at its widest and a 31 character weapon, plus 256 for d and
+ * 257 for h, is under
  * 650, and under 680 with the engine's stamp in front, or 720 signed (PugLog
  * adds at most 40). That is inside PugLog's 976 usable bytes, LogToGame's 1024
  * byte buffer and one UDP log datagram, with room. If
@@ -972,7 +1019,7 @@ void EmitBurst(int client, int kind, const char[] weapon, int n, int groundTicks
 void EmitLine(const char[] id, const char[] kind, const char[] weapon, int n, int groundTicks,
 	int airPresses, int serverTick, int clientTick, int serverSpan, const char[] d, const char[] h)
 {
-	PugLog("L4DM id=%s k=%s w=%s n=%d g=%d a=%d st=%d ct=%d sp=%d v=%d d=%s h=%s",
+	PugLog("L4DM id=%s k=%s w=%s n=%d g=%d a=%d st=%d ct=%d sp=%d rate=%d v=%d d=%s h=%s",
 		id, kind, weapon, n, groundTicks, airPresses, serverTick, clientTick, serverSpan,
-		WIRE_VERSION, d, h);
+		g_iTickRate, WIRE_VERSION, d, h);
 }

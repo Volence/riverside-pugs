@@ -19,6 +19,9 @@ export interface CustomCampaignRow {
   zip_bytes: number | null;
   /** 1: installs and downloads, never offered for the PUG pool. */
   practice_only: number;
+  /** 1: uses L4D2 files from our L4D2 pack rather than shipping its own
+   *  copies (every l4d2to1 conversion), so players need the pack too. */
+  needs_l4d2_pack: number;
 }
 
 export interface ChapterRow {
@@ -95,6 +98,10 @@ export function listCampaigns(
 
 export function setPracticeOnly(db: DB, slug: string, practiceOnly: boolean): boolean {
   return db.prepare('UPDATE custom_campaigns SET practice_only = ? WHERE slug = ?').run(practiceOnly ? 1 : 0, slug).changes > 0;
+}
+
+export function setNeedsL4d2Pack(db: DB, slug: string, needs: boolean): boolean {
+  return db.prepare('UPDATE custom_campaigns SET needs_l4d2_pack = ? WHERE slug = ?').run(needs ? 1 : 0, slug).changes > 0;
 }
 
 export function chaptersOf(db: DB, slug: string): ChapterRow[] {

@@ -38,19 +38,38 @@ export const PRESET_MIN_POOL: Record<VetoPreset, number> = { ban_to_one: 1, home
 /** The most campaigns a pool holds (validate.ts POOL_MAX). */
 const POOL_LIMIT = 12;
 
+/** The owner's standard (2026-10-23), for stages made from now on: the
+ *  higher seed bans first and picks game 1, the loser of each game picks the
+ *  next, and the team that did not pick chooses sides. */
 const DEFAULTS: VetoConfig = {
+  games: 1, banTo: 1, firstBan: 'higher', firstPick: 'higher', laterPicks: 'loser', lateBans: 0, sides: 'non_picker',
+};
+/** The defaults before 2026-10-23. Only a stage stored without veto_json
+ *  (made before plan T3a) still reads its preset from these, so a stage
+ *  already made never changes under it. */
+const LEGACY_DEFAULTS: VetoConfig = {
   games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker',
 };
 
-export function presetConfig(p: VetoPreset, poolSize: number): VetoConfig {
+function presetFrom(base: VetoConfig, p: VetoPreset, poolSize: number): VetoConfig {
   switch (p) {
-    case 'ban_to_one': return { ...DEFAULTS };
-    case 'home_away': return { ...DEFAULTS, games: 2, banTo: poolSize };
+    case 'ban_to_one': return { ...base };
+    // Two games have no loser pick (checkVeto): each team picks one.
+    case 'home_away': return { ...base, games: 2, banTo: poolSize, laterPicks: 'alternate' };
     // B B P P B B, then the decider: two opening bans, a pick each, then
-    // late bans until one campaign is left.
-    case 'pick_ban': return { ...DEFAULTS, games: 3, banTo: Math.max(3, poolSize - 2), lateBans: Math.max(0, poolSize - 5) };
-    case 'loser_picks': return { ...DEFAULTS, games: 3, banTo: 3, firstPick: 'higher', laterPicks: 'loser' };
+    // late bans until one campaign is left. Late bans need alternate picks.
+    case 'pick_ban': return { ...base, games: 3, banTo: Math.max(3, poolSize - 2), lateBans: Math.max(0, poolSize - 5), laterPicks: 'alternate' };
+    case 'loser_picks': return { ...base, games: 3, banTo: 3, firstPick: 'higher', laterPicks: 'loser' };
   }
+}
+
+export function presetConfig(p: VetoPreset, poolSize: number): VetoConfig {
+  return presetFrom(DEFAULTS, p, poolSize);
+}
+
+/** A pre-T3a stage's preset as it was made (events.ts stageSettingsOf). */
+export function legacyPresetConfig(p: VetoPreset, poolSize: number): VetoConfig {
+  return presetFrom(LEGACY_DEFAULTS, p, poolSize);
 }
 
 /** A Bo1 has no later picks and no late bans, so they read as the defaults

@@ -70,7 +70,7 @@ export function DraftRoomControls({ eventId, slug, canEdit, onChange }: { eventI
           <div class="inlinerow">
             <button class="btn" disabled={busy || unsaved} onClick={() => act('start', {
               title: 'Start the live draft?',
-              body: 'Every captain gets a DM with the room link and the first clock starts now. A captain who is not in the room is picked for after 5 seconds.',
+              body: 'Every captain gets a DM with the room link and the first clock starts now. Each pick has the full pick clock; a captain who has not picked when it runs out gets an auto-pick, in the room or not.',
             })}>Start draft</button>
             {unsaved && <span class="muted">Save the settings first: Start uses the saved ones.</span>}
             <button class="btn btn--ghost btn--sm" disabled={busy}

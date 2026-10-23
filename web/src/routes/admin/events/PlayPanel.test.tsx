@@ -142,8 +142,9 @@ describe('PlayPanel', () => {
   it('names each team in its score box', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play());
     render(<PlayPanel eventId={9} canEdit />);
-    expect((await screen.findByLabelText('Rats score')).getAttribute('placeholder')).toBe('Rats');
-    expect(screen.getByLabelText('Bats score').getAttribute('placeholder')).toBe('Bats');
+    // The team's name is the visible label over its box, not a placeholder that vanishes on typing.
+    expect((await screen.findByLabelText('Rats score')).closest('label')!.textContent).toContain('Rats');
+    expect(screen.getByLabelText('Bats score').closest('label')!.textContent).toContain('Bats');
   });
 
   it('hides Correct where the server would refuse it: a paired-as-it-goes round with a later round, and a forfeit against an out team', async () => {

@@ -62,12 +62,14 @@ export function ensureEvaderSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS evader_members_person ON evader_members (person_id);
     -- Fingerprints built from input_bursts (src/fingerprintData.ts). subject is
     -- steam:<id> (whole history) or person:<id> (pooled members). built_at ''
-    -- means stale: rebuilt on the next check.
+    -- means stale: rebuilt on the next check, as is a row binned by an older
+    -- scheme (binning < FINGERPRINT_BINNING).
     CREATE TABLE IF NOT EXISTS fingerprint_cache (
       subject      TEXT PRIMARY KEY,
       classes_json TEXT NOT NULL,
       holds        INTEGER NOT NULL,
-      built_at     TEXT NOT NULL
+      built_at     TEXT NOT NULL,
+      binning      INTEGER NOT NULL DEFAULT 1
     );
     -- One row per (candidate, person, level) that fired (src/fingerprintCheck.ts).
     -- A candidate is told about again only when the level goes up.
@@ -94,6 +96,11 @@ export function ensureEvaderSchema(db: DB): void {
       PRIMARY KEY (steamid, person_id)
     );
   `);
+  // 1 = tick bins, every row before rate-aware bins (2026-10-20).
+  const cacheCols = db.prepare('PRAGMA table_info(fingerprint_cache)').all() as { name: string }[];
+  if (!cacheCols.some((c) => c.name === 'binning')) {
+    db.exec('ALTER TABLE fingerprint_cache ADD COLUMN binning INTEGER NOT NULL DEFAULT 1');
+  }
   // People are never deleted, so an empty table with open flags means the
   // migration has not happened yet (first boot, or an earlier one was cut short).
   const none = (db.prepare('SELECT COUNT(*) AS n FROM evader_people').get() as { n: number }).n === 0;

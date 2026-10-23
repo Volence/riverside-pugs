@@ -5,14 +5,14 @@ import { PageHeader } from '../components/PageHeader';
 import { useHubEvent } from '../hooks/useHubEvent';
 import type { Session } from '../hooks/useLiveState';
 import { whenText } from '../eventFormat';
-import { PHASE_TEXT, clockText, holdText, logText, resultLine } from './event/room/roomText';
+import { PHASE_TEXT, clockText, holdText, logText } from './event/room/roomText';
 import { VetoBoard } from './event/room/VetoBoard';
 import { LineupPanel } from './event/room/LineupPanel';
 import { ServerPanel } from './event/room/ServerPanel';
-import { SeriesPanel } from './event/room/SeriesPanel';
 import { ConfirmPanel } from './event/room/ConfirmPanel';
 import { SchedulePanel } from './event/room/SchedulePanel';
 import { PausePanel } from './event/room/PausePanel';
+import { GameCards, LineupColumns, MatchHero, useGameStats } from './event/room/MatchSheet';
 
 /** Phases the page refetches in every 10 s. A result can close a room
  *  (server, hold) and a reset can reopen one (waiting) with no push. */
@@ -40,6 +40,7 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
   const [busy, setBusy] = useState(false);
   const [offset, setOffset] = useState(0);
   const [now, setNow] = useState(Date.now());
+  const gameStats = useGameStats(v);
 
   const load = () => eventsApi.room(slug, matchId).then((x) => {
     setV(x);
@@ -100,19 +101,37 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
   const myReady = me ? v.ready[me.side] : true;
   const showVeto = v.phase === 'veto' || v.pool.some((c) => c.state !== 'open');
   const showLineups = v.phase === 'lineup' || v.phase === 'server' || v.lineups.aLocked || v.lineups.bLocked;
+  // While lineups are open they are the one thing to do, so they lead the
+  // page instead of sitting under the finished veto.
+  const lineupFirst = v.phase === 'lineup';
+  const board = <VetoBoard v={v} busy={busy} onAct={(step, action, campaign) => { void run(() => eventsApi.veto(slug, matchId, step, action, campaign)); }} />;
+  // While lineups are open the picker is the panel; once both are set (or
+  // the match moved on) the two fours show as profile-linked columns.
+  const lineups = v.a && v.b && (
+    <Panel>
+      <h3>Lineups</h3>
+      {v.phase === 'lineup'
+        ? <LineupPanel v={v} busy={busy} onLock={async (ids) => { await run(() => eventsApi.lineup(slug, matchId, ids)); }} />
+        : <LineupColumns v={v} stats={gameStats} />}
+    </Panel>
+  );
+  const done = v.phase === 'done';
+  const when = v.finishedAt ? whenText(v.finishedAt) : v.schedule?.scheduledAt ? whenText(v.schedule.scheduledAt) : null;
   return (
     <main class="page page--profile room">
       <PageHeader
-        title={<><Team name={v.a?.name ?? 'TBD'} logoKey={v.a?.logoKey} /> vs <Team name={v.b?.name ?? 'TBD'} logoKey={v.b?.logoKey} /></>}
+        eyebrow={`${v.eventName} · ${v.roundLabel}`}
+        title={`${v.a?.name ?? 'TBD'} vs ${v.b?.name ?? 'TBD'}`}
         aside={<span class={`teamchip roomphase roomphase--${v.phase}`}>{PHASE_TEXT[v.phase]}</span>}
       >
         <p class="room__sub">
-          <a href={`/event/${v.eventSlug}`}>{v.eventName}</a> · {v.roundLabel}
-          {v.schedule?.scheduledAt && <span> · {whenText(v.schedule.scheduledAt)}</span>}
+          <a href={`/event/${v.eventSlug}`}>Back to {v.eventName}</a>
           {left !== null && <span class="room__clock"> · {clockText(left)} left</span>}
         </p>
       </PageHeader>
+      {v.a && v.b && <MatchHero v={v} when={when} />}
       {problem && <p class="error" role="alert">{problem}</p>}
+      {lineupFirst && lineups}
       {v.schedule && (v.phase === 'waiting' || v.phase === 'hold' || v.schedule.log.length > 0) && (
         <Panel>
           <h3>Schedule</h3>
@@ -148,13 +167,36 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
               </li>
             ))}
           </ul>
+          <p class="muted">{me?.manager
+            ? 'Press Ready once your team is here. A team that is not ready when the clock runs out forfeits; if neither is, staff decide.'
+            : 'Each captain presses Ready here. A team that is not ready when the clock runs out forfeits; if neither is, staff decide.'}</p>
           {me?.manager && !myReady && <button class="btn" type="button" disabled={busy} onClick={() => run(() => eventsApi.ready(slug, matchId))}>Ready</button>}
         </Panel>
       )}
+      {done && v.games.length > 0 && (
+        <Panel>
+          <h3>{v.games.length === 1 ? 'Game' : 'Games'}</h3>
+          <GameCards v={v} />
+        </Panel>
+      )}
+      {done && showLineups && lineups}
       {showVeto && v.a && v.b && (
         <Panel>
           <h3>Veto</h3>
-          <VetoBoard v={v} busy={busy} onAct={(step, action, campaign) => { void run(() => eventsApi.veto(slug, matchId, step, action, campaign)); }} />
+          {v.phase === 'veto' ? board : (
+            // Done: the campaign and sides are in the Series panel, so the
+            // full board folds away instead of filling a phone screen.
+            <details class="room__vetodone">
+              <summary>Show the bans and picks</summary>
+              {board}
+              {done && v.log.length > 0 && (
+                <>
+                  <h4 class="room__logtitle">Veto log</h4>
+                  <ol class="room__log">{v.log.map((l) => <li key={l.step}>{logText(v, l)}</li>)}</ol>
+                </>
+              )}
+            </details>
+          )}
         </Panel>
       )}
       {!v.series && v.games.length > 0 && (
@@ -167,18 +209,13 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
           </ul>
         </Panel>
       )}
-      {v.series && (
+      {v.series && !done && (
         <Panel>
           <h3>Series</h3>
-          <SeriesPanel v={v} />
+          <GameCards v={v} />
         </Panel>
       )}
-      {showLineups && v.a && v.b && (
-        <Panel>
-          <h3>Lineups</h3>
-          <LineupPanel v={v} busy={busy} onLock={async (ids) => { await run(() => eventsApi.lineup(slug, matchId, ids)); }} />
-        </Panel>
-      )}
+      {showLineups && !lineupFirst && !done && lineups}
       {v.phase === 'confirming' && (
         <Panel>
           <h3>Result</h3>
@@ -197,20 +234,19 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
           {v.dispute && <p>{`Disputed by ${v.dispute.byName} for ${v.dispute.side === 'a' ? v.a?.name ?? 'TBD' : v.b?.name ?? 'TBD'}: ${v.dispute.reason}`}</p>}
         </Panel>
       )}
-      {v.phase === 'done' && (
+      {done && !v.a && (
         <Panel>
           <h3>Result</h3>
-          <p>{v.result
-            ? (v.result.forfeit
-              ? `Forfeit win for ${v.result.winner === 'a' ? v.a?.name : v.b?.name}.`
-              : v.series?.over
-                ? resultLine(v)
-                : `${v.result.winner === 'a' ? v.a?.name : v.b?.name} won ${v.result.scoreA} to ${v.result.scoreB}.`)
-            : 'This match is finished.'}
-          </p>
+          <p>This match is finished.</p>
         </Panel>
       )}
-      {v.log.length > 0 && (
+      {done && v.result?.forfeit && v.games.length === 0 && (
+        <Panel>
+          <h3>Result</h3>
+          <p>{`Forfeit win for ${v.result.winner === 'a' ? v.a?.name : v.b?.name}.`}</p>
+        </Panel>
+      )}
+      {v.log.length > 0 && !done && (
         <Panel>
           <h3>Veto log</h3>
           <ol class="room__log">{v.log.map((l) => <li key={l.step}>{logText(v, l)}</li>)}</ol>

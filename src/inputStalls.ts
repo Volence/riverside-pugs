@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { rateOf, ticksAtLeast, ticksAtMost } from './inputStats.js';
 
 /**
  * Stalls and the `fakelag` signature.
@@ -24,6 +25,14 @@ import type { DB } from './db.js';
  * puts a large share of the stalls exactly there.
  *
  * Evidence for review, never a verdict, like every input signature.
+ *
+ * The gap window is TIME, 80 to 200 ms (the 100 tick values below), so at 128
+ * tick it is 10 to 26 ticks (ticksAtLeast / ticksAtMost in src/inputStats.ts):
+ * left at 8 to 20, a 110 ms hold still lands inside, but a hold near either end
+ * would be judged on 62 to 156 ms instead. That also covers a cheat that
+ * chokes a fixed COUNT of commands rather than a fixed time: 11 commands at
+ * 128 tick is a gap of about 11, inside 10 to 26. The count and the share are
+ * counts, the same at any rate; `missed` and `lunging` are not timings.
  */
 
 export const FAKELAG_MIN_GAP = 8;
@@ -45,9 +54,15 @@ export interface StallInput {
   team: number;
   cls: number;
   lunging: number;
+  /** The server's tick rate, from plugin 0.5.0's `rate=`; absent or null is 100. */
+  tickrate?: number | null;
 }
 
-interface StallRow { id: number; gap: number; missed: number; team: number; cls: number; lunging: number; at: string }
+interface StallRow {
+  id: number; gap: number; missed: number; team: number; cls: number; lunging: number; at: string;
+  /** Null or absent: 100, as every row before plugin 0.5.0. */
+  tickrate?: number | null;
+}
 
 export interface FakelagResult { hunterStalls: number; lunging: number; completing: StallRow }
 
@@ -57,7 +72,8 @@ export function fakelag(stalls: readonly StallRow[]): FakelagResult | null {
   let completing: StallRow | null = null;
   for (const s of stalls) {
     if (s.team !== INFECTED || s.cls !== HUNTER || s.missed !== 0) continue;
-    if (s.gap < FAKELAG_MIN_GAP || s.gap > FAKELAG_MAX_GAP) continue;
+    const rate = rateOf(s.tickrate);
+    if (s.gap < ticksAtLeast(FAKELAG_MIN_GAP, rate) || s.gap > ticksAtMost(FAKELAG_MAX_GAP, rate)) continue;
     hunterStalls++;
     if (s.lunging === 1) lunging++;
     if (!completing && lunging >= FAKELAG_MIN_LUNGING && lunging >= FAKELAG_MIN_SHARE * hunterStalls) completing = s;
@@ -73,9 +89,10 @@ export function fakelagNote(r: Pick<FakelagResult, 'hunterStalls' | 'lunging'>):
 /** Store one stall; returns the note when this stall CREATED the detection. */
 export function recordInputStall(db: DB, s: StallInput, now = new Date()): { id: number; created: string | null } {
   const info = db.prepare(
-    `INSERT INTO input_stalls (match_id, server_id, steamid, server_tick, gap, missed, cmds, team, cls, lunging, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(s.matchId, s.serverId, s.steamid, s.serverTick, s.gap, s.missed, s.cmds, s.team, s.cls, s.lunging, now.toISOString());
+    `INSERT INTO input_stalls (match_id, server_id, steamid, server_tick, gap, missed, cmds, team, cls, lunging, at, tickrate)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(s.matchId, s.serverId, s.steamid, s.serverTick, s.gap, s.missed, s.cmds, s.team, s.cls, s.lunging, now.toISOString(),
+        s.tickrate ?? null);
   const id = Number(info.lastInsertRowid);
   // Only a hunter's stall moves the count or the share.
   if (s.matchId === null || s.team !== INFECTED || s.cls !== HUNTER) return { id, created: null };
@@ -86,7 +103,7 @@ export function recordInputStall(db: DB, s: StallInput, now = new Date()): { id:
  *  Returns the note when the row was created by this call. */
 export function evaluateStalls(db: DB, matchId: number, steamid: string): string | null {
   const rows = db.prepare(
-    'SELECT id, gap, missed, team, cls, lunging, at FROM input_stalls WHERE match_id = ? AND steamid = ? ORDER BY id',
+    'SELECT id, gap, missed, team, cls, lunging, at, tickrate FROM input_stalls WHERE match_id = ? AND steamid = ? ORDER BY id',
   ).all(matchId, steamid) as StallRow[];
   const r = fakelag(rows);
   if (!r) {

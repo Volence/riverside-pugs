@@ -29,28 +29,30 @@ export function wholePercent(p: number): number {
 
 /** What a point was, in words: "Map 2 Offices, Team B survivors scored 640".
  *  `prev` is the point before it, which the half's own score is the step from. */
-export function describePoint(pt: WinPoint, prev?: WinPoint): string {
+export function describePoint(pt: WinPoint, prev?: WinPoint, names: Record<Team, string> = TEAM_NAME): string {
   if (pt.ordinal === null || pt.survTeam === null) return 'Before the first half';
   const map = pt.map ? ` ${mapName(pt.map)}` : '';
   const total = pt.survTeam === 'a' ? pt.scoreA : pt.scoreB;
   const before = prev ? (pt.survTeam === 'a' ? prev.scoreA : prev.scoreB) : 0;
-  return `Map ${pt.ordinal + 1}${map}, ${TEAM_NAME[pt.survTeam]} survivors scored ${total - before}`;
+  return `Map ${pt.ordinal + 1}${map}, ${names[pt.survTeam]} survivors scored ${total - before}`;
 }
 
-/** The one or two sentences above the chart. Pure, so it is tested without a DOM. */
-export function winSummary(line: WinLine): string[] {
+/** The one or two sentences above the chart. Pure, so it is tested without a DOM.
+ *  `names` are what the two teams are called: Team A and Team B for a PUG,
+ *  the teams' own names for a scrim or tournament game. */
+export function winSummary(line: WinLine, names: Record<Team, string> = TEAM_NAME): string[] {
   const out: string[] = [];
   const pts = line.points;
   const last = pts[pts.length - 1];
   const chanceOf = (t: Team, p: number) => (t === 'a' ? p : 1 - p);
   if ((line.halvesLeft ?? 0) > 0) {
     const left = line.halvesLeft!;
-    out.push(`Right now: Team A ${fmtChance(last.pA)}, Team B ${fmtChance(1 - last.pA)}, with ${left} survivor ${left === 1 ? 'half' : 'halves'} left to play.`);
+    out.push(`Right now: ${names.a} ${fmtChance(last.pA)}, ${names.b} ${fmtChance(1 - last.pA)}, with ${left} survivor ${left === 1 ? 'half' : 'halves'} left to play.`);
     if (line.turning !== null) {
       const before = pts[line.turning - 1];
       const at = pts[line.turning];
       const toward: Team = at.pA > before.pA ? 'a' : 'b';
-      out.push(`Biggest swing so far: ${describeShort(at)}, which took ${TEAM_NAME[toward]} from ${
+      out.push(`Biggest swing so far: ${describeShort(at, names)}, which took ${names[toward]} from ${
         fmtChance(chanceOf(toward, before.pA))} to ${fmtChance(chanceOf(toward, at.pA))}.`);
     }
     return out;
@@ -59,12 +61,12 @@ export function winSummary(line: WinLine): string[] {
   if (winner && line.winnerLow) {
     const low = line.winnerLow.p;
     if (low < 0.25) {
-      out.push(`Comeback: ${TEAM_NAME[winner]} won from ${fmtChance(low)}, after ${
-        line.winnerLow.index === 0 ? 'the start' : describeShort(pts[line.winnerLow.index])}.`);
+      out.push(`Comeback: ${names[winner]} won from ${fmtChance(low)}, after ${
+        line.winnerLow.index === 0 ? 'the start' : describeShort(pts[line.winnerLow.index], names)}.`);
     } else if (line.winnerLow.index === 0) {
-      out.push(`${TEAM_NAME[winner]} were ahead on the odds from the first half to the last.`);
+      out.push(`${names[winner]} were ahead on the odds from the first half to the last.`);
     } else {
-      out.push(`${TEAM_NAME[winner]} won; their chance never fell below ${fmtChance(low)}.`);
+      out.push(`${names[winner]} won; their chance never fell below ${fmtChance(low)}.`);
     }
   } else if (!winner) {
     out.push('A draw.');
@@ -75,22 +77,30 @@ export function winSummary(line: WinLine): string[] {
     // Told from the side the swing went toward: "took Team B from 38% to 71%".
     const toward: Team = at.pA > before.pA ? 'a' : 'b';
     const exact = line.turning === pts.length - 1;
-    out.push(`Biggest swing: ${describeShort(at)}, which took ${TEAM_NAME[toward]} from ${
+    out.push(`Biggest swing: ${describeShort(at, names)}, which took ${names[toward]} from ${
       fmtChance(chanceOf(toward, before.pA))} to ${fmtChance(chanceOf(toward, at.pA), exact)}.`);
   }
   return out;
 }
 
-function describeShort(pt: WinPoint): string {
+/** "Team B's", "Poop Packers'". */
+function possessive(name: string): string {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
+function describeShort(pt: WinPoint, names: Record<Team, string>): string {
   if (pt.ordinal === null || pt.survTeam === null) return 'the start';
   const map = pt.map ? ` (${mapName(pt.map)})` : '';
-  return `${TEAM_NAME[pt.survTeam]}'s survivor half on map ${pt.ordinal + 1}${map}`;
+  return `${possessive(names[pt.survTeam])} survivor half on map ${pt.ordinal + 1}${map}`;
 }
 
 const H = 220;
 const PAD = { top: 14, right: 12, bottom: 34, left: 64 };
 
-export function WinChart({ line }: { line: WinLine }) {
+/** `names` call the teams by name (a scrim or tournament game); the axis
+ *  uses `short`, which has to fit the 64 px left margin. Both default to Team
+ *  A and Team B. */
+export function WinChart({ line, names = TEAM_NAME, short = names }: { line: WinLine; names?: Record<Team, string>; short?: Record<Team, string> }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(720);
   const [hover, setHover] = useState<number | null>(null);
@@ -141,7 +151,7 @@ export function WinChart({ line }: { line: WinLine }) {
 
   const turning = line.turning;
   const low = line.winnerLow && line.winnerLow.p < 0.25 && line.winnerLow.index > 0 ? line.winnerLow : null;
-  const summary = winSummary(line);
+  const summary = winSummary(line, names);
   const hovered = hover === null ? null : pts[hover];
 
   return (
@@ -167,10 +177,10 @@ export function WinChart({ line }: { line: WinLine }) {
           <line class="winchart__edge" x1={PAD.left} x2={width - PAD.right} y1={y(1)} y2={y(1)} />
           <line class="winchart__edge" x1={PAD.left} x2={width - PAD.right} y1={y(0)} y2={y(0)} />
           <rect class="winchart__swatch winchart__swatch--a" x={6} y={y(1) - 4} width={8} height={8} />
-          <text class="winchart__axis" x={18} y={y(1) + 4}>Team A</text>
+          <text class="winchart__axis" x={18} y={y(1) + 4}>{short.a}</text>
           <text class="winchart__axis" x={18} y={mid + 4}>50%</text>
           <rect class="winchart__swatch winchart__swatch--b" x={6} y={y(0) - 4} width={8} height={8} />
-          <text class="winchart__axis" x={18} y={y(0) + 4}>Team B</text>
+          <text class="winchart__axis" x={18} y={y(0) + 4}>{short.b}</text>
 
           <path class="winchart__fill winchart__fill--a" d={areaPath} clip-path={`url(#${clip}-above)`} />
           <path class="winchart__fill winchart__fill--b" d={areaPath} clip-path={`url(#${clip}-below)`} />
@@ -192,7 +202,7 @@ export function WinChart({ line }: { line: WinLine }) {
           {low && low.index !== turning && (
             <text class="winchart__note" x={x(low.index)} text-anchor={low.index > n / 2 ? 'end' : 'start'}
                   dx={low.index > n / 2 ? -10 : 10} y={noteY(pts[low.index].pA)}>
-              {pts[n - 1].pA >= 0.5 ? 'Team A' : 'Team B'} at {fmtChance(low.p)}
+              {pts[n - 1].pA >= 0.5 ? names.a : names.b} at {fmtChance(low.p)}
             </text>
           )}
           {!finished && (
@@ -214,11 +224,11 @@ export function WinChart({ line }: { line: WinLine }) {
             left: `${Math.min(Math.max(x(hover), 110), width - 110)}px`,
             top: `${hovered.pA > 0.5 ? y(hovered.pA) + 14 : y(hovered.pA) - 70}px`,
           }}>
-            <div class="winchart__tiphead">{describePoint(hovered, pts[hover - 1])}</div>
+            <div class="winchart__tiphead">{describePoint(hovered, pts[hover - 1], names)}</div>
             <div>Score {hovered.scoreA} - {hovered.scoreB}</div>
             <div>
-              Team A {fmtChance(hovered.pA, finished && hover === n - 1)}
-              {' · '}Team B {fmtChance(1 - hovered.pA, finished && hover === n - 1)}
+              {names.a} {fmtChance(hovered.pA, finished && hover === n - 1)}
+              {' · '}{names.b} {fmtChance(1 - hovered.pA, finished && hover === n - 1)}
             </div>
           </div>
         )}
@@ -227,11 +237,11 @@ export function WinChart({ line }: { line: WinLine }) {
         <summary>Every half as a table</summary>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>After</th><th>Score</th><th>Team A</th><th>Team B</th></tr></thead>
+            <thead><tr><th>After</th><th>Score</th><th>{names.a}</th><th>{names.b}</th></tr></thead>
             <tbody>
               {pts.map((pt, i) => (
                 <tr key={i}>
-                  <td>{describePoint(pt, pts[i - 1])}</td>
+                  <td>{describePoint(pt, pts[i - 1], names)}</td>
                   <td class="num">{pt.scoreA} - {pt.scoreB}</td>
                   <td class="num">{fmtChance(pt.pA, finished && i === n - 1)}</td>
                   <td class="num">{fmtChance(1 - pt.pA, finished && i === n - 1)}</td>

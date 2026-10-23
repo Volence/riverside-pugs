@@ -29,6 +29,7 @@ describe('players on public draft teams (plan D2c)', () => {
       expect(e.players).toHaveLength(4);
       expect(e.players).toEqual(want);
       expect(e.players![0]).toBe(`d${P.indexOf(row.captain_steamid!)}`);
+      expect(e.playerLinks).toEqual(N.rosterOf(f.db, e.id).starters.map((s) => ({ steamid: s, name: `d${P.indexOf(s)}` })));
     }
   });
 
@@ -45,7 +46,7 @@ describe('players on public draft teams (plan D2c)', () => {
   it('gives team-event entries no players', () => {
     const f = eventFixture('registration');
     const v = eventView(f.db, E.getEvent(f.db, f.eventId)!);
-    for (const e of v.entries) expect(e).not.toHaveProperty('players');
+    for (const e of v.entries) { expect(e).not.toHaveProperty('players'); expect(e).not.toHaveProperty('playerLinks'); }
     expect(JSON.stringify(v)).not.toContain('"players"');
   });
 

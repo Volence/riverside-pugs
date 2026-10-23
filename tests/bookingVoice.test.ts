@@ -77,6 +77,14 @@ describe('BookingVoice.ensure', () => {
     expect(events).toEqual([]);
   });
 
+  it('names a tournament booking\'s category for the tournament, not a scrim', async () => {
+    const id = book();
+    // No event match points at it here, so the generic tournament heading.
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(id);
+    await voice.ensure(id);
+    expect(t.channels.get(row(id)!.category_id)).toMatchObject({ name: "Tournament: p0's group vs p1's group" });
+  });
+
   it('makes nothing a second time', async () => {
     const id = book();
     await voice.ensure(id);

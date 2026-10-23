@@ -1,4 +1,4 @@
-import type { MatchRoomView, RoomGame, RoomLogLine, RoomPhase } from '../../../api';
+import type { MatchRoomView, RoomGame, RoomLogLine, RoomPhase, RoomPlanStep } from '../../../api';
 
 /** The phase chip's label (plan T3a, plan T3b). */
 export const PHASE_TEXT: Record<RoomPhase, string> = {
@@ -110,4 +110,80 @@ export const HOLD_TEXT: Record<string, string> = {
  *  what staff typed, as is. */
 export function holdText(reason: string): string {
   return HOLD_TEXT[reason] ?? reason;
+}
+
+/** The veto banner (owner 2026-10-23: testers thought they were still
+ *  banning when it was their pick). For the team whose turn it is it says
+ *  "Your turn" and the verb in capitals; for everyone else whose turn it is. */
+export function turnBanner(v: MatchRoomView): { tone: 'ban' | 'pick' | 'side' | 'order' | 'wait'; title: string; detail: string } | null {
+  const n = v.next;
+  if (!n) return null;
+  if (n.kind === 'wait') return { tone: 'wait', title: `Game ${n.game} is picked after game ${n.game - 1}`, detail: `The loser of game ${n.game - 1} picks it.` };
+  const mine = v.me?.side === n.by && v.me.manager;
+  const who = team(v, n.by);
+  switch (n.kind) {
+    case 'ban': return mine
+      ? { tone: 'ban', title: 'Your turn: BAN a campaign', detail: 'The campaign you ban is out. You are not picking yet.' }
+      : { tone: 'ban', title: `${who} is banning a campaign`, detail: 'Wait for your turn.' };
+    case 'pick': return mine
+      ? { tone: 'pick', title: `Your turn: PICK the campaign you will play${n.game && n.game > 1 ? ` in game ${n.game}` : ''}`, detail: 'This is not a ban: the campaign you press is the one that gets played.' }
+      : { tone: 'pick', title: `${who} is picking the campaign${n.game && n.game > 1 ? ` for game ${n.game}` : ''}`, detail: 'Wait for your turn.' };
+    case 'side': return mine
+      ? { tone: 'side', title: `Your turn: choose your side for game ${n.game}`, detail: 'Survivors first or infected first.' }
+      : { tone: 'side', title: `${who} is choosing sides for game ${n.game}`, detail: 'Wait for your turn.' };
+    case 'order': return mine
+      ? { tone: 'order', title: 'Your turn: go first or second', detail: orderTrade(v) }
+      : { tone: 'order', title: `${who} is choosing to go first or second`, detail: 'Wait for your turn.' };
+    default: return null;
+  }
+}
+
+/** What going first or second gives the higher seed, from the plan (whose
+ *  steps after an open order are listed as if they go first). */
+export function orderTrade(v: MatchRoomView): string {
+  const plan = v.plan ?? [];
+  const higher = v.higher;
+  if (!higher) return '';
+  const after = plan.filter((p) => p.tentative && p.by !== null && p.kind !== 'wait');
+  const gets = (mineIfFirst: boolean): string => {
+    const own = after.filter((p) => (p.by === higher) === mineIfFirst);
+    const bans = own.map((p) => after.filter((x) => x.kind === 'ban').indexOf(p) + 1).filter((i) => i > 0);
+    const parts: string[] = [];
+    if (bans.length > 0) parts.push(`${bans.length === 1 ? 'ban' : 'bans'} ${bans.join(', ')}`);
+    if (own.some((p) => p.kind === 'pick' && p.game === 1)) parts.push('the pick of game 1');
+    if (own.some((p) => p.kind === 'side' && p.game === 1)) parts.push('the side choice for game 1');
+    return parts.length > 0 ? parts.join(', ') : 'nothing more in this veto';
+  };
+  return `Go first and you get ${gets(true)}. Go second and you get ${gets(false)}.`;
+}
+
+/** One line of the step list: what the step is and who takes it. */
+export function planLine(v: MatchRoomView, p: RoomPlanStep, banNo: number): string {
+  const who = p.by === null ? '' : p.tentative && v.higher
+    ? (p.by === v.higher ? 'the team that goes first' : 'the team that goes second')
+    : team(v, p.by);
+  switch (p.kind) {
+    case 'order': return `${who} chooses to go first or second`;
+    case 'ban': return `Ban ${banNo}: ${who}`;
+    case 'pick': return `PICK${p.game && p.game > 1 ? ` game ${p.game}` : ' the campaign'}: ${who}`;
+    case 'side': return `Sides for game ${p.game}: ${who}`;
+    case 'wait': return `Game ${p.game}: the loser of game ${(p.game ?? 2) - 1} picks, the other team chooses sides`;
+  }
+}
+
+/** Each team's share of the veto, in a sentence per team: its bans, the
+ *  game 1 pick, the side choice. "You" for the viewer's own team. */
+export function shareLines(v: MatchRoomView): { side: 'a' | 'b'; text: string }[] {
+  const plan = (v.plan ?? []).filter((p) => p.by !== null && !p.tentative);
+  if (plan.length === 0) return [];
+  return (['a', 'b'] as const).map((side) => {
+    const own = plan.filter((p) => p.by === side);
+    const bans = own.filter((p) => p.kind === 'ban').length;
+    const parts: string[] = [];
+    if (bans > 0) parts.push(`${bans} ${bans === 1 ? 'ban' : 'bans'}`);
+    if (own.some((p) => p.kind === 'pick' && p.game === 1)) parts.push('picks the campaign');
+    if (own.some((p) => p.kind === 'side' && p.game === 1)) parts.push('chooses sides');
+    const you = v.me?.side === side;
+    return { side, text: `${you ? `You (${team(v, side)})` : team(v, side)}: ${parts.length > 0 ? parts.join(', ') : 'no veto steps'}` };
+  });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { chatFromUrl, countdown, countUp, funnelText, isLow, liveFromUrl, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
+import { chatFromUrl, countdown, countUp, funnelText, isLow, liveFromUrl, liveStateLabel, reasonText, OLD_PLUGIN_REASON } from './liveBoard';
 
 describe('countdown', () => {
   it('runs down from what the server said, by whole seconds since it said it', () => {
@@ -96,5 +96,16 @@ describe('funnelText', () => {
   it('names a missing or doubtful L4D2 pack', () => {
     expect(funnelText({ stage: 'dropped', pack: 'missing' }, null)).toBe('L4D2 map pack missing');
     expect(funnelText({ stage: 'loading', pack: 'suspect' }, null)).toBe('loading the map, may lack the L4D2 map pack');
+  });
+});
+
+describe('liveStateLabel', () => {
+  it('names the phase a live match is really in', () => {
+    expect(liveStateLabel('waiting', null)).toBe('waiting for a server');
+    expect(liveStateLabel('live', 'readyup')).toBe('ready-up');
+    expect(liveStateLabel('live', 'loading')).toBe('loading');
+    expect(liveStateLabel('live', 'live')).toBe('live');
+    expect(liveStateLabel('paused', 'paused')).toBe('paused');
+    expect(liveStateLabel('configuring', null)).toBe('configuring');
   });
 });

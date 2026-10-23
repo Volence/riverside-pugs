@@ -55,10 +55,10 @@ describe('starting the room', () => {
     expect(must(start(g, ALL, () => 0)).order).toEqual([...CAPTAINS.slice(1), CAPTAINS[0]]);
   });
 
-  it('gives an absent first captain 5 seconds', () => {
+  it('gives an absent first captain the full pick clock (owner 2026-10-23: no 5 s auto-pick)', () => {
     const f = liveDraft();
     must(start(f, NONE));
-    expect(state(f).room.deadline_at).toBe(iso(at(5)));
+    expect(state(f).room.deadline_at).toBe(iso(at(75)));
   });
 
   it('refuses outside live mode, a second start and a changed pool, writing nothing', () => {
@@ -141,10 +141,10 @@ describe('picks', () => {
     expect(teams.map((t) => t.players.length)).toEqual([3, 3, 3, 3, 3]);
   });
 
-  it('gives an absent next picker 5 seconds', () => {
+  it('gives an absent next picker the full pick clock', () => {
     const f = startedDraft();
     must(DR.makePick(f.db, { eventId: f.eventId, steamid: CAPTAINS[0]!, player: POOL[0]!, pickNo: 1, now: at(3), present: (s) => s !== CAPTAINS[1] }));
-    expect(state(f).room.deadline_at).toBe(iso(at(8)));
+    expect(state(f).room.deadline_at).toBe(iso(at(78)));
   });
 });
 

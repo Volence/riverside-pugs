@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import type { AdminEventDetail, AdminEventOptions, AdminEventStage, EventFields, VetoConfig } from '../../../api';
 
 const BAN_TO_ONE: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' };
+/** The owner's standard for new stages (2026-10-23). */
+const NEW_STAGE_VETO: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher', firstPick: 'higher', laterPicks: 'loser', lateBans: 0, sides: 'non_picker' };
 
 const { mockAdmin, mockConfirm } = vi.hoisted(() => ({
   mockAdmin: {
@@ -110,7 +112,7 @@ describe('EventEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save stage' }));
     await waitFor(() => expect(mockAdmin.addStage).toHaveBeenCalledWith(3, {
       type: 'swiss', config: { rounds: 5 }, rulesetId: 2, gameConfig: 'standard', campaignPool: ['no_mercy', 'dead_air', 'death_toll'],
-      vetoType: 'ban_to_one', veto: BAN_TO_ONE, chapters: null, scheduling: 'rolling', advanceCount: 4,
+      vetoType: 'ban_to_one', veto: NEW_STAGE_VETO, chapters: null, scheduling: 'rolling', advanceCount: 4,
     }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save stage' })).toBeNull());
   });

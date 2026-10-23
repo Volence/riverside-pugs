@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import type { AdminEntryView } from '../../../api';
 
 const { mockAdmin } = vi.hoisted(() => ({
-  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn(), setEntryIdentity: vi.fn(), replaceEntryPlayer: vi.fn(), setEntryCaptain: vi.fn() },
+  mockAdmin: { eventEntries: vi.fn(), openEventCheckin: vi.fn(), lockEventEntries: vi.fn(), reorderEventSeeds: vi.fn(), disqualifyEventEntry: vi.fn(), restoreEventEntry: vi.fn(), setEventEntryRoster: vi.fn(), setEntryIdentity: vi.fn(), replaceEntryPlayer: vi.fn(), setEntryCaptain: vi.fn(), swapDraftPlayers: vi.fn() },
 }));
 const { mockPeople } = vi.hoisted(() => ({ mockPeople: { people: vi.fn() } }));
 vi.mock('../../../api', async (importOriginal) => {
@@ -38,6 +38,40 @@ describe('EntriesPanel', () => {
     expect(screen.getAllByText(/Discord is not linked/)).toHaveLength(2);
     expect(screen.getByText(/Waitlist 1/)).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('never shows an empty tag as []', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [draftEntry()] });
+    render(<EntriesPanel eventId={9} status="registration" checkin={false} draft canEdit={false} />);
+    expect(await screen.findByText('Team c0')).toBeTruthy();
+    expect(screen.queryByText('[]')).toBeNull();
+    expect(screen.getByText(/captain c0/)).toBeTruthy();
+  });
+
+  it('swaps two players between draft teams before the event is live: pick one, then Swap with on the other team', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [
+      draftEntry(),
+      draftEntry({ id: 2, name: 'Team d0', seed: 2, captainSteamid: 'd0', roster: ['d0', 't1', 't2', 't3'].map((x) => ({ steamid: x, name: x, avatar: null, role: 'starter' as const, problems: [] })) }),
+    ] });
+    mockAdmin.swapDraftPlayers.mockResolvedValue({});
+    render(<EntriesPanel eventId={9} status="registration" checkin={false} draft canEdit />);
+    await screen.findByText('Team d0');
+    // Captains are never offered.
+    expect(screen.queryByRole('button', { name: 'Swap c0 to another team' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap s1 to another team' }));
+    // Only the other team's non-captain starters take the swap.
+    expect(screen.queryByRole('button', { name: 'Swap s1 with s2' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Swap s1 with d0' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap s1 with t2' }));
+    await waitFor(() => expect(mockAdmin.swapDraftPlayers).toHaveBeenCalledWith(9, { entryId: 1, steamid: 's1' }, { entryId: 2, steamid: 't2' }));
+    expect(confirm).toHaveBeenCalled();
+  });
+
+  it('offers no swap once the event is live', async () => {
+    mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [draftEntry(), draftEntry({ id: 2, name: 'Team d0', captainSteamid: 'd0' })] });
+    render(<EntriesPanel eventId={9} status="live" checkin={false} draft canEdit />);
+    await screen.findByText('Team d0');
+    expect(screen.queryByRole('button', { name: /to another team/ })).toBeNull();
   });
 
   it('shows no check-in anywhere for a draft event entry', async () => {

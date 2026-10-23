@@ -126,7 +126,8 @@ describe('stages', () => {
       value: {
         type: 'swiss', config: { rounds: 4 }, rulesetId: 2, gameConfig: 'standard', campaignPool: CTX.defaultPool,
         vetoType: 'ban_to_one',
-        veto: { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' },
+        // The owner's standard for new stages (2026-10-23); later picks mean nothing in a Bo1.
+        veto: { games: 1, banTo: 1, firstBan: 'higher', firstPick: 'higher', laterPicks: 'loser', lateBans: 0, sides: 'non_picker' },
         chapters: null, scheduling: 'rolling', advanceCount: null,
       },
     });
@@ -199,7 +200,7 @@ describe('stages', () => {
     const legacy = V.parseStage(stage({ campaignPool: pool7, vetoType: 'pick_ban' }), CTX);
     expect(legacy.ok && legacy.value.veto).toMatchObject({ games: 3, banTo: 5, lateBans: 2 });
     const preset = V.parseStage(stage({ campaignPool: pool7, vetoType: 'loser_picks' }), CTX);
-    expect(preset.ok && preset.value.veto).toEqual(knobs);
+    expect(preset.ok && preset.value.veto).toEqual({ ...knobs, firstBan: 'higher' });
   });
 
   it('refuses a veto the pool cannot run (plan T3a)', () => {

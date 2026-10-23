@@ -11,7 +11,7 @@ import * as N from '../src/events/entries.js';
 import * as R from '../src/events/room.js';
 import { eventView } from '../src/events/views.js';
 import { EVENT_ERRORS } from '../src/events/validate.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { P, cutDraft, type DraftFixture } from './draftFixture.js';
 import { A, B as BATS, OUTSIDER, entryFixture, rosterA } from './entryFixture.js';
@@ -150,7 +150,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   });
 
   it('between games: the lineup, the booking and the next game\'s burst use the new player, and the team\'s subs are untouched', async () => {
-    s = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
+    s = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
     await s.tick();
     const g1 = s.gameOf(1);
     s.goLive(g1.match_id!);
@@ -192,7 +192,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   });
 
   it('during a game between chapters: the box takes the sub first, then the game roster carries the new player', async () => {
-    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     await s.tick();
     const g1 = s.gameOf(1).match_id!;
     s.goLive(g1);
@@ -211,7 +211,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   });
 
   it('mid-chapter: refused with replace_in_game and the server\'s reason, and nothing is written', async () => {
-    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     await s.tick();
     s.goLive(s.gameOf(1).match_id!);
     s.box.subOk = false;
@@ -226,7 +226,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   });
 
   it('no answer from the box: it may have taken the sub, so the reverse sub is sent, staff are told, and the replace is refused with nothing written', async () => {
-    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     await s.tick();
     s.goLive(s.gameOf(1).match_id!);
     const token = s.liveGameToken();
@@ -249,7 +249,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   });
 
   it('no answer from the box and no answer to the reverse sub either: staff are told the site cannot confirm the server\'s state', async () => {
-    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     await s.tick();
     s.goLive(s.gameOf(1).match_id!);
     const token = s.liveGameToken();
@@ -269,7 +269,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   });
 
   it('no answer from the box and the reverse sub refused: the same could-not-confirm wording', async () => {
-    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     await s.tick();
     s.goLive(s.gameOf(1).match_id!);
     const token = s.liveGameToken();
@@ -285,7 +285,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   });
 
   it('a room state refusal unrelated to the box is replace_not_possible with the room\'s reason, and nothing is written', async () => {
-    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     await s.tick();
     s.db.prepare("UPDATE event_matches SET status = 'veto' WHERE id = ?").run(s.matchId);
     const before = snapshot(s);
@@ -299,7 +299,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
 
   for (const undo of ['undone', 'refused', 'no_answer'] as const) {
     it(`the box took it but the site then refused: the box is asked to undo it (${undo}), staff are told, nothing is written`, async () => {
-      s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+      s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
       await s.tick();
       s.goLive(s.gameOf(1).match_id!);
       const token = s.liveGameToken();
@@ -332,7 +332,7 @@ describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', ()
   }
 
   it('refuses without the series engine when a game is on a box, and writes nothing', async () => {
-    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    s = await seriesFixture({ drive: (f) => { asDraft(f); driveLoserPicks(f); }, pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     await s.tick();
     s.goLive(s.gameOf(1).match_id!);
     const before = snapshot(s);

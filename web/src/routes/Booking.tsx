@@ -3,7 +3,8 @@ import { useLocation } from 'preact-iso';
 import { adminApi, bookingsApi, scrimsApi, teamsApi, type BookingOptions, type BookingRole, type BookingSide, type BookingView, type ReviewTag } from '../api';
 import { Empty, PageSkeleton, Panel } from '../components/bits';
 import { ConnectPanel } from '../components/ConnectPanel';
-import { PageHeader } from '../components/PageHeader';
+import { Figure, PageHeader } from '../components/PageHeader';
+import { TeamBadge } from '../components/TeamBadge';
 import type { Session } from '../hooks/useLiveState';
 import { campaignsLabel, localLabel } from '../bookingTime';
 import { campaignName, gameStateLabel } from '../format';
@@ -18,6 +19,11 @@ const STATE_LINE: Record<BookingView['state'], string> = {
   ended: 'Over.', cancelled: 'Cancelled.', no_show: 'Ended: a side did not show.',
 };
 const ROLE_LABEL: Record<BookingRole, string> = { player: 'Player', ringer: 'Ringer', spectator: 'Spectator' };
+/** The header's one-word status. */
+const STATE_SHORT: Record<BookingView['state'], string> = {
+  scheduled: 'Booked', held: 'Taking server', setup: 'Setting up', ready: 'Ready', active: 'Playing',
+  ended: 'Over', cancelled: 'Cancelled', no_show: 'No-show',
+};
 
 function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone: (v: BookingView) => void }) {
   const [q, setQ] = useState('');
@@ -349,13 +355,19 @@ export function Booking({ id, session }: { id: string; session: Session }) {
 
   return (
     <main class="page page--profile bookingpage">
-      <PageHeader eyebrow="Booked server" title={`${a.name} vs ${b.name}`}>
+      <PageHeader eyebrow={tournament ? 'Tournament match' : 'Booked server'} title={`${a.name} vs ${b.name}`}>
         <p>{localLabel(v.startsAt)} to about {localLabel(v.endsAt)} · {campaignsLabel(v.gamesAllowed)}: {v.playlist.map((c) => c.name).join(', ')}</p>
+        <div class="figures">
+          <Figure label="Status" value={v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing' : STATE_SHORT[v.state]} />
+          <Figure label="Campaigns" value={`${Math.min(v.gamesPlayed, v.gamesAllowed)}/${v.gamesAllowed}`} sub="played" />
+          {v.series && v.series.counted > 0 && <Figure label="Series" value={`${v.series.wins.a} - ${v.series.wins.b}`} sub={`${a.name} vs ${b.name}`} />}
+          {v.server && <Figure label="Server" value={v.server.name} />}
+        </div>
       </PageHeader>
       {error && <p class="error" role="alert" ref={errRef}>{error}</p>}
       {lost && <p class="muted" role="status">Lost contact with the site, retrying.</p>}
-      <Panel>
-        <p>{v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
+      <Panel class={`bkstatus bkstatus--${v.state}`}>
+        <p class="bkstatus__line">{v.ending && !v.ended && v.state !== 'cancelled' && v.state !== 'no_show' ? 'Closing.' : STATE_LINE[v.state]}{v.cancel?.reason ? ` Reason: ${v.cancel.reason}` : ''}</p>
         {running && <p class="bookingcount">{countLine}</p>}
         {running && v.closeAt && <p class="warning">Closing soon. +1 campaign keeps the server for one more.</p>}
         {v.recovery && (
@@ -404,9 +416,14 @@ export function Booking({ id, session }: { id: string; session: Session }) {
           </p>
         )}
       </Panel>
+      <div class="bksides">
       {v.sides.map((s) => (
-        <Panel key={s.side}>
-          <h3>{s.name}{!s.confirmed && <> <span class="teamchip">Not confirmed</span></>}{s.noShow && <> <span class="teamchip teamchip--no_show">No-show</span></>}</h3>
+        <Panel key={s.side} class="bkside">
+          <h3 class="bkside__head">
+            {s.team && <TeamBadge tag={s.team.tag} logoKey={s.team.logoKey} size={32} />}
+            {s.team ? <a href={`/team/${s.team.slug}`}>{s.name}</a> : s.name}
+            {!s.confirmed && <> <span class="teamchip">Not confirmed</span></>}{s.noShow && <> <span class="teamchip teamchip--no_show">No-show</span></>}
+          </h3>
           {s.record && <RecordLine record={s.record} label="Record" />}
           {s.lateCancel && (
             <p class="bookinglate">
@@ -420,7 +437,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
           <ul class="bookingpeople">
             {s.people.map((p) => (
               <li key={p.steamid}>
-                <span>{p.name}</span>
+                <a class="bkperson" href={`/player/${p.steamid}`}>{p.name}</a>
                 <span class="muted"> · {ROLE_LABEL[p.role]}{p.status === 'invited' ? ' · invited' : ''}{p.steamid === s.captain.steamid ? ' · captain' : ''}</span>
                 {open && !tournament && v.viewer.manages.includes(s.side) && p.steamid !== s.captain.steamid && (
                   <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => sure(`Remove ${p.name}?`, 'They come off this booking and its server list.', 'Remove', () => act(() => bookingsApi.removePerson(v.id, p.steamid)))}>Remove</button>
@@ -431,6 +448,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
           {open && !tournament && s.confirmed && v.viewer.manages.includes(s.side) && <AddPerson id={v.id} side={s.side} onDone={setV} />}
         </Panel>
       ))}
+      </div>
       {v.games.length > 0 && (() => {
         // The viewer's own side first (side a for staff and outsiders), in
         // the series line and every row (owner, 2026-10-11).
@@ -443,7 +461,7 @@ export function Booking({ id, session }: { id: string; session: Session }) {
             {v.series && v.series.counted > 0 && (
               <p><strong>{seriesLine(nameOf(first), v.series.wins[first], v.series.wins[second], nameOf(second), v.series.draws)}</strong></p>
             )}
-            <ul class="bookinggames">
+            <ul class="bookinggames bkgames">
               {v.games.map((g) => {
                 const scores = g.sideA === 'b' ? { a: g.scoreB, b: g.scoreA } : { a: g.scoreA, b: g.scoreB };
                 const notCounted = notCountedLabel(g);

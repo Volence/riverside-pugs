@@ -1,4 +1,5 @@
 import { api, ApiError, modApi, communityApi } from '../api';
+import { ProfileEvents } from '../components/ProfileEvents';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
 import { campaignName, campaignTint, DEAD_STAT_KEYS, deriveLiveStats, fmtDate, labelFor, mapName, orderLiveStatKeys, qualifiedMapName, survivalNote, sortMapRows, type MapSort } from '../format';
@@ -24,6 +25,9 @@ import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../com
 import type { PastSeason, WrappedSeason } from '../api';
 import { loadWrappedSeasons } from '../wrapped';
 
+/** Maps with fewer games than this fold away on the by-map bars: a 0W 2L map says little. */
+const MAP_MIN_SAMPLE = 5;
+
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
 ) {
@@ -33,6 +37,10 @@ export function Profile(
   const [mapMode, setMapMode] = useState<'avg' | 'total'>('avg');
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [ticketPassed, setTicketPassed] = useState(false);
+  // Which measure orders the bars. Both answer "what should I work on", and
+  // they genuinely disagree: a map you win while dying constantly looks fine
+  // on one and terrible on the other.
+  const [mapSort, setMapSort] = useState<MapSort>('winrate');
 
   if (error) {
     return (
@@ -44,10 +52,6 @@ export function Profile(
   if (!data) return <PageSkeleton variant="profile" panels={3} />;
 
   const byMap = data.byMap ?? [];
-  // Which measure orders the bars. Both answer "what should I work on", and
-  // they genuinely disagree: a map you win while dying constantly looks fine
-  // on one and terrible on the other.
-  const [mapSort, setMapSort] = useState<MapSort>('winrate');
   const sortedMaps = sortMapRows(byMap, mapSort);
   // Only the stats that actually occur on some map, so a server without
   // skill_detect shows no permanently empty columns.
@@ -67,14 +71,16 @@ export function Profile(
 
   const season = data.season;
   const peak = season?.peakSr ?? (history.length ? Math.max(...history.map((h) => h.sr)) : null);
+  const low = history.length ? Math.min(...history.map((h) => h.sr)) : null;
   const lastDelta = matches.length ? matches[0].srDelta : null;
   // Best finish across finished seasons: the lowest final place.
   const best = (data.pastSeasons ?? []).filter((p) => p.finalRank !== null)
     .sort((a, b) => a.finalRank! - b.finalRank!)[0];
 
   return (
-    <div class="page page--profile">
+    <div class="page page--profile prof">
       <div class="stack">
+        <div class="prof__hero">
         <Headliner
           eyebrow={`Joined ${fmtDate(player.createdAt)}`}
           name={player.name}
@@ -110,6 +116,24 @@ export function Profile(
             { label: 'Forfeits', value: data.forfeits?.forfeits ?? 0 },
           ] : []}
         />
+        {season?.placing ? (
+          <Panel class="prof__trend">
+            <h3>Rating over time</h3>
+            <p class="muted">{`Placement: ${season.placing.played} of ${season.placing.of} games played. SR and rank show after the last one.`}</p>
+          </Panel>
+        ) : history.length > 1 && (
+          <Panel class="prof__trend">
+            <h3>Rating over time</h3>
+            <Sparkline values={history.map((h) => h.sr)} />
+            <dl class="prof__trendfacts">
+              <div><dt>Now</dt><dd class="num">{history[history.length - 1].sr}</dd></div>
+              <div><dt>Peak</dt><dd class="num">{peak}</dd></div>
+              <div><dt>Low</dt><dd class="num">{low}</dd></div>
+              <div><dt>Rated games</dt><dd class="num">{history.length}</dd></div>
+            </dl>
+          </Panel>
+        )}
+        </div>
 
         <SocialChips links={data.social} twitchName={player.twitchName} />
 
@@ -167,13 +191,6 @@ export function Profile(
 
         <Trophies past={data.pastSeasons ?? []} />
 
-        <Panel>
-          <h3>Rating over time</h3>
-          {season?.placing
-            ? <p class="muted">{`Placement: ${season.placing.played} of ${season.placing.of} games played. SR and rank show after the last one.`}</p>
-            : <Sparkline values={history.map((h) => h.sr)} />}
-        </Panel>
-
         <SeasonHistory past={data.pastSeasons ?? []} own={session?.kind === 'active' && session.me.steamid === steamid} />
 
         <ProfileFigures
@@ -181,56 +198,63 @@ export function Profile(
           standings={data.standings ?? {}} statDefs={data.statDefs}
         />
 
-        <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
+        <div class="prof__cols">
+          <div class="prof__main">
+            <ProfileEvents events={data.events} />
 
-        <ChemistryPanel chemistry={data.chemistry} />
-        <EndorsementCounts endorsements={data.endorsements} />
-        <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
-
-        <div class="profile-grid">
-          <Panel>
-            <h3>Lifetime</h3>
-            <dl class="totals">
-              <div><dt>Games</dt><dd class="num">{totals.games}</dd></div>
-              <div><dt>SI damage</dt><dd class="num">{totals.siDamage}</dd></div>
-              <div><dt>SI kills</dt><dd class="num">{totals.siKills}</dd></div>
-              <div><dt>Commons</dt><dd class="num">{totals.commonKills}</dd></div>
-              <div><dt>Friendly fire</dt><dd class="num">{totals.ffDealt}</dd></div>
-              <div><dt>Revives</dt><dd class="num">{totals.revives}</dd></div>
-            </dl>
-          </Panel>
-
-          <Panel class="panel--table">
-            <h3>Recent matches</h3>
-            {matches.length === 0 ? (
-              <Empty>None yet.</Empty>
-            ) : (
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th />
-                      <th>Campaign</th>
-                      <th class="num">Score</th>
-                      <th class="num">SR</th>
-                      <th class="num">Ended</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {matches.map((m) => (
-                      <tr key={m.id} style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
-                        <td><ResultChip result={m.result} /></td>
-                        <td class="campaign-cell"><a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a></td>
-                        <td class="num">{m.teamAScore} - {m.teamBScore}</td>
-                        <td class="num"><SrDelta value={m.srDelta} placement={m.placement} placedRank={m.placedRank} /></td>
-                        <td class="num muted">{fmtDate(m.endedAt)}</td>
+            <Panel class="panel--table prof__matches">
+              <h3>Recent matches</h3>
+              {matches.length === 0 ? (
+                <Empty>None yet.</Empty>
+              ) : (
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th><span class="sr-only">Result</span></th>
+                        <th>Campaign</th>
+                        <th class="num">Score</th>
+                        <th class="num">SR</th>
+                        <th class="num prof__when">Ended</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Panel>
+                    </thead>
+                    <tbody>
+                      {matches.map((m) => (
+                        <tr key={m.id} style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
+                          <td><ResultChip result={m.result} /></td>
+                          <td class="campaign-cell">
+                            <a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a>
+                            <span class="prof__when-short muted">{shortDate(m.endedAt)}</span>
+                          </td>
+                          <td class="num">{m.teamAScore} - {m.teamBScore}</td>
+                          <td class="num"><SrDelta value={m.srDelta} placement={m.placement} placedRank={m.placedRank} /></td>
+                          <td class="num muted prof__when">{fmtDate(m.endedAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          <aside class="prof__aside" aria-label="About this player">
+            <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
+            <ChemistryPanel chemistry={data.chemistry} />
+            <EndorsementCounts endorsements={data.endorsements} />
+            <Panel>
+              <h3>Lifetime</h3>
+              <dl class="totals">
+                <div><dt>Games</dt><dd class="num">{totals.games}</dd></div>
+                <div><dt>SI damage</dt><dd class="num">{totals.siDamage}</dd></div>
+                <div><dt>SI kills</dt><dd class="num">{totals.siKills}</dd></div>
+                <div><dt>Commons</dt><dd class="num">{totals.commonKills}</dd></div>
+                <div><dt>Friendly fire</dt><dd class="num">{totals.ffDealt}</dd></div>
+                <div><dt>Revives</dt><dd class="num">{totals.revives}</dd></div>
+              </dl>
+            </Panel>
+            <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
+          </aside>
         </div>
 
         {byMap.length > 0 && (
@@ -241,21 +265,22 @@ export function Profile(
               match you lost still counts as a map win.
             </p>
 
-            {/* Ordered weakest first by the server: the reason to read this is
-                to find the maps you lose on, so they belong at the top rather
-                than buried in a list ordered by how often you drew each map.
-                Bar length is still how often you played it, colour whether you
-                tend to win it. */}
+            {/* Weakest first: the reason to read this is to find the maps you
+                lose (or die) on. The bar is the rate itself with a line at 50%,
+                so its length and colour say the same thing. Maps with only a
+                handful of games would otherwise crowd the top with 0% and 100%
+                rows that mean nothing, so they fold away below. */}
             <Tabs
               active={mapSort}
               onSelect={(k) => setMapSort(k as MapSort)}
               tabs={[{ key: 'winrate', label: 'Win rate' }, { key: 'survival', label: 'Survival' }]}
             />
-            <Bars label={mapSort === 'survival' ? 'Maps you die on most' : 'Maps you lose most'}>
-              {sortedMaps.map((r) => {
+            {(() => {
+              const sampleOf = (r: typeof byMap[number]): number =>
+                mapSort === 'survival' ? r.survivalMeasured ?? 0 : r.wins + r.losses;
+              const row = (r: typeof byMap[number], few: boolean) => {
                 const decided = r.wins + r.losses;
                 const wr = decided > 0 ? Math.round((r.wins / decided) * 100) : null;
-                const maxGames = Math.max(...byMap.map((x) => x.games));
                 const sMeasured = r.survivalMeasured ?? 0;
                 const sPct = sMeasured > 0 ? Math.round(((r.survived ?? 0) / sMeasured) * 100) : null;
                 const lead = mapSort === 'survival' ? sPct : wr;
@@ -268,12 +293,31 @@ export function Profile(
                     detail={mapSort === 'survival'
                       ? `(survived ${r.survived ?? 0} of ${sMeasured})  ${wr === null ? 'n/a' : `${wr}%`} win rate`
                       : `(${r.wins}W ${r.losses}L)${survivalNote(r)}`}
-                    fraction={r.games / maxGames}
-                    tone={lead === null ? 'neutral' : lead >= 50 ? 'good' : 'bad'}
+                    fraction={(lead ?? 0) / 100}
+                    mark={0.5}
+                    dim={few}
+                    tone={lead === null || few ? 'neutral' : lead >= 50 ? 'good' : 'bad'}
                   />
                 );
-              })}
-            </Bars>
+              };
+              const enough = sortedMaps.filter((r) => sampleOf(r) >= MAP_MIN_SAMPLE);
+              const few = sortedMaps.filter((r) => sampleOf(r) < MAP_MIN_SAMPLE);
+              return (
+                <Bars label={mapSort === 'survival' ? 'Maps you die on most' : 'Maps you lose most'}>
+                  <p class="bars__legend">
+                    The bar is your {mapSort === 'survival' ? 'survival' : 'win'} rate on the map; the line marks 50%.
+                  </p>
+                  {enough.map((r) => row(r, false))}
+                  {enough.length === 0 && <p class="muted">No map has {MAP_MIN_SAMPLE} games yet.</p>}
+                  {few.length > 0 && (
+                    <details class="bars__few">
+                      <summary>{few.length} {few.length === 1 ? 'map' : 'maps'} with fewer than {MAP_MIN_SAMPLE} games</summary>
+                      {few.map((r) => row(r, true))}
+                    </details>
+                  )}
+                </Bars>
+              );
+            })()}
 
             <Tabs
               active={mapMode}
@@ -425,6 +469,13 @@ function ProfileFigures(
       )}
     </Panel>
   );
+}
+
+/** "Oct 23" for the phone column, where the full timestamp does not fit. */
+function shortDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`);
+  return Number.isNaN(d.getTime()) ? fmtDate(iso).slice(5, 10) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 /** Labels for the standings that are not registry stats. */

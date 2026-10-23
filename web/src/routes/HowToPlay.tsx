@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api } from '../api';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { DocLayout } from '../components/DocLayout';
 import { SetupChecklist } from '../components/SetupChecklist';
 import type { Session } from '../hooks/useLiveState';
 
@@ -17,15 +18,15 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'How do matches work?',
-    a: <>When 8 players are queued it pops: everyone has two minutes to press Ready (on the site or the bot's card in Discord), then there is a 30 second campaign vote. Teams are split so each side has as close to an even chance as the ratings allow, a server is set up, and you get the connect line. A match is normally a full campaign minus the finale, both teams playing each map as survivors and infected, and the bot moves each team into its own voice channel.</>,
+    a: <>At 8 players the queue pops. Everyone has two minutes to press Ready, then there is a 30 second campaign vote. Teams are balanced by rating, a server is set up, and you get the connect line. A match is a full campaign minus the finale, each team playing every map as survivors and as infected.</>,
   },
   {
     q: 'Do I need to change any settings?',
-    a: <>One thing: your rates. Riverside runs at 100 tick and an L4D1 client ignores rates the server tries to set for it, so they have to be set on your machine or your hit registration is worse than everyone else's. Download <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> and drop it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. It runs on its own every time the game starts. The rates are at the top; everything below them is preference you can change.</>,
+    a: <>One thing: your rates. Riverside runs at 128 tick and an L4D1 client ignores rates the server tries to set for it, so they have to be set on your machine or your hit registration is worse than everyone else's. Download <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> and drop it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. It runs on its own every time the game starts. The rates are at the top; everything below them is preference you can change.</>,
   },
   {
     q: 'What launch options should I use?',
-    a: <>The one that matters is <code>-lv</code>: without it, hittables drift out of line with their own hitboxes, so the car you are swinging at is not where the game thinks it is. Steam → right-click Left 4 Dead → Properties → Launch Options: <code>-lv -novid -forcenovsync -mat_queue_mode 2 -useforcedmparms -noforcemaccel -noforcemspd -refresh 60</code>, with the refresh rate changed to your monitor's. Full explanation under <strong>Your config</strong> above.</>,
+    a: <>At least <code>-lv</code>, which keeps hittables in line with their hitboxes. The full line is under <a href="#config">Your config</a>.</>,
   },
   {
     q: 'How do I connect to the server?',
@@ -33,11 +34,11 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'What happens if I miss a ready check or do not show up?',
-    a: <>You get a queue timeout. Missing a ready check, or never connecting to a match that gets cancelled for no-shows, costs 1 minute for each of the first three, then 5 minutes, then 15 minutes for each one after that. Offenses older than a week stop counting. If it was a genuine accident, ask an admin to clear it.</>,
+    a: <>You get a queue timeout. A missed ready check costs 1 minute for each of the first three, then 5 minutes, then 15 minutes for each one after that. Not connecting to a match costs more: 1 hour, then 3 hours, then a day. The two are counted separately, and offenses older than a week stop counting. If it was a genuine accident, ask an admin to clear it.</>,
   },
   {
     q: 'What happens if I disconnect during a match?',
-    a: <>The game pauses and you get 7 minutes to reconnect. That 7 minutes is for the <strong>whole match</strong>, not each disconnect, so every time you drop it keeps counting down from where it was. When everyone is back the game unpauses on its own after a 10 second countdown. If you run out, the match ends as an abandon: nobody's rating changes, and you are banned from the queue and the Riverside servers for a day (3 days for a second abandon within a month, then a week). If you crashed, tell an admin straight away: they can put your clock on hold or give you more time.</>,
+    a: <>The game pauses and you get 7 minutes to reconnect. That 7 minutes is for the <strong>whole match</strong>, not each disconnect, so every time you drop it keeps counting down from where it was. When everyone is back the game unpauses on its own after a 10 second countdown. If you run out, it is an abandon. You lose rating and are banned from the queue and the Riverside servers for a day (3 days for a second abandon within a month, then a week). If the match was already decided (the other team was far enough ahead to accept a <code>!gg</code>), the result stands and everyone else is rated as normal; otherwise the match ends with no rating change for the other seven. If you crashed, tell an admin straight away: they can put your clock on hold or give you more time.</>,
   },
   {
     q: 'I left the queue on purpose. Is that a penalty?',
@@ -48,12 +49,20 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>Make sure the Discord account you linked is the one in the Riverside server (check your profile: it shows the linked name). If you linked the wrong one, Disconnect it on your profile and link again; you cannot do that while you are queued, in a match or banned. Joining the server lets you in within a few seconds; press Check again.</>,
   },
   {
+    q: 'Can I get pinged when the queue is almost full?',
+    a: <>Yes. Press <strong>Queue alerts (on/off)</strong> on the Discord queue panel, or type <code>/alerts on</code>. You get the Queue Alerts role, which stays on until you turn it off, and the bot pings it when the queue is a couple of players short of popping, at most once every 45 minutes. Old pings are edited once the queue pops or empties. <code>/alerts off</code> stops them.</>,
+  },
+  {
     q: 'What bot commands are there?',
-    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code> and <code>/report</code>. The queue itself is the panel in Discord. When a match ends its result card has an <strong>Endorse</strong> button: you can endorse up to 2 players from it within 24 hours.</>,
+    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code>, <code>/alerts</code> and <code>/report</code>. The queue itself is the panel in Discord. When a match ends its result card has an <strong>Endorse</strong> button: you can endorse up to 2 players from it within 24 hours.</>,
   },
   {
     q: 'A match is stuck, or the server never came up.',
-    a: <>If anyone has still not connected 10 minutes after the server is ready, the match is cancelled. Only the players who never connected get a no-show; everyone else goes free. A match with no round played 30 minutes after the server is ready is cancelled with no penalties at all. If something else is wrong, tell an admin in Discord: they can abort a match and free the server.</>,
+    a: <>If anyone has still not connected 7 minutes after the server is ready, the match is cancelled. Only the players who never connected get a no-show; everyone else goes free. A match with no round played 30 minutes after the server is ready is cancelled with no penalties at all. If something else is wrong, tell an admin in Discord: they can abort a match and free the server.</>,
+  },
+  {
+    q: 'I was banned. Can I appeal?',
+    a: <>Bans of an hour or longer can be appealed on the <a href="/appeal">Appeal</a> page. Sign in with Steam or Discord, say what happened, and staff answer you there. You get two appeals per ban.</>,
   },
   {
     q: 'I was dropped while loading with "Server is enforcing consistency for this file".',
@@ -77,6 +86,8 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: 'allowed', label: "What's allowed" },
   { id: 'reporting', label: 'Reporting' },
   { id: 'watching', label: 'Watching and replays' },
+  { id: 'practice', label: 'Practice' },
+  { id: 'events', label: 'Events and tournaments' },
   { id: 'map-pack', label: 'L4D2 campaigns' },
   { id: 'faq', label: 'FAQ' },
 ];
@@ -92,14 +103,9 @@ export function HowToPlay({ session }: { session: Session }) {
   // Where it always sat, right after connecting.
   const faq = [...FAQ.slice(0, 5), { q: 'How does SR work?', a: ranked ? SR_RANKED : SR_LEGACY }, ...FAQ.slice(5)];
   return (
-    <div class="page page--profile">
+    <div class="page page--list">
       <PageHeader eyebrow="Riverside" title="How to play" />
-      <div class="stack">
-        <nav class="panel howto-index" aria-label="On this page">
-          <ul>
-            {SECTIONS.map((sec) => <li key={sec.id}><a href={`#${sec.id}`}>{sec.label}</a></li>)}
-          </ul>
-        </nav>
+      <DocLayout sections={SECTIONS}>
         <Panel id="setup">
           <h3>Getting set up</h3>
           {session.kind !== 'loading' && <SetupChecklist me={me} />}
@@ -112,7 +118,7 @@ export function HowToPlay({ session }: { session: Session }) {
         <Panel id="config">
           <h3>Your config</h3>
           <p>
-            Riverside runs at 100 tick. L4D1 clients ignore rates the server tries to set for
+            Riverside runs at 128 tick. L4D1 clients ignore rates the server tries to set for
             them, so unless you set your own, your hit registration is worse than everyone
             else's and the server cannot fix it for you.
           </p>
@@ -128,7 +134,7 @@ export function HowToPlay({ session }: { session: Session }) {
             <li>
               Restart L4D. It runs by itself, nothing to type. Check it took by holding
               TAB in a game: the net graph appears, and <code>cl_updaterate</code> in the
-              console reads 100.
+              console reads 128.
             </li>
           </ol>
           <p class="muted">
@@ -246,7 +252,9 @@ viewmodel_fov_override 70`}</code></pre>
             <dt><code>!ready</code> / <code>!unready</code></dt>
             <dd>Ready up, or take it back, before a round starts. F1 and F2 work too.</dd>
             <dt><code>!pause</code> / <code>!unpause</code></dt>
-            <dd>Pause the game. Both teams type <code>!unpause</code> (or <code>!ready</code>) to resume after a countdown.</dd>
+            <dd>Pause the game. Each team gets 3 pauses per campaign, and a pause ends by itself after 2 minutes. Both teams type <code>!unpause</code> (or <code>!ready</code>) to resume sooner.</dd>
+            <dt><code>!gg</code> / <code>!ff</code></dt>
+            <dd>Forfeit, once your team is too far behind to come back. Everyone on the team has 30 seconds to agree. It counts as a normal loss.</dd>
             <dt><code>!boss</code></dt>
             <dd>Where the tank and witch spawn this map, as a percentage of the way through, and who gets the tank.</dd>
             <dt><code>!scores</code> / <code>!bonus</code></dt>
@@ -266,26 +274,34 @@ viewmodel_fov_override 70`}</code></pre>
             checks, LilAC and the input-timing flags. */}
         <Panel id="allowed">
           <h3>What's allowed</h3>
-          <h4>Fine</h4>
-          <ul class="howto">
-            <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
-            <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
-            <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
-            <li>The <a href="/custom-campaigns#l4d2-pack">L4D2 campaigns</a>.</li>
-          </ul>
-          <h4>Not fine</h4>
-          <ul class="howto">
-            <li>
-              Addons that change game files the servers check, like skins, no-trees packs and
-              silenced-weapon packs. You are dropped while loading;{' '}
-              <a href="/help/consistency">here is how to fix it</a>.
-            </li>
-            <li>Effect Detail on Low. The servers will not let you stay ready on it.</li>
-            <li>
-              Cheats, and macros or scripts that press buttons for you. The servers run
-              anticheat, and match data is reviewed for input no hand can make.
-            </li>
-          </ul>
+          <div class="doc__split">
+            <div class="doc__col doc__col--ok">
+              <h4>Fine</h4>
+              <ul class="howto">
+                <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
+                <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
+                <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
+                <li>The <a href="/custom-campaigns#l4d2-pack">L4D2 campaigns</a>.</li>
+                <li>Scroll-wheel binds for jump or attack.</li>
+              </ul>
+            </div>
+            <div class="doc__col doc__col--no">
+              <h4>Not fine</h4>
+              <ul class="howto">
+                <li>
+                  Addons that change game files the servers check, like skins, no-trees packs and
+                  silenced-weapon packs. You are dropped while loading;{' '}
+                  <a href="/help/consistency">here is how to fix it</a>.
+                </li>
+                <li>Effect Detail on Low. The servers will not let you stay ready on it.</li>
+                <li>Any language but English in voice or chat. Riverside is an English-speaking community.</li>
+                <li>
+                  Cheats, and macros or scripts that press buttons for you. The servers run
+                  anticheat, and match data is reviewed for input no hand can make.
+                </li>
+              </ul>
+            </div>
+          </div>
         </Panel>
         <Panel id="reporting">
           <h3>Reporting</h3>
@@ -321,10 +337,7 @@ viewmodel_fov_override 70`}</code></pre>
         </Panel>
         <Panel id="watching">
           <h3>Watching and replays</h3>
-          <p>
-            Every match is recorded, and there are a few ways to watch one back or while it
-            happens. The quickest way to get better is to watch yourself.
-          </p>
+          <p>Every match is recorded. The quickest way to get better is to watch yourself.</p>
           <h4>Live</h4>
           <ul class="howto">
             <li>
@@ -346,11 +359,9 @@ viewmodel_fov_override 70`}</code></pre>
           <ul class="howto">
             <li>
               <strong>The replay viewer</strong> is on every match page. It redraws each round
-              on an overhead map: every player, common and witch, with markers on the timeline
-              for pounces, skeets, clears, incaps, deaths and more. Pick yourself in the follow
-              row and the timeline only shows your events, so you can jump straight to each of
-              your deaths or pins and see where everyone was just before it. <strong>Stats</strong>{' '}
-              shows the box score at that moment, and <strong>Key</strong> explains the symbols.
+              on an overhead map, with timeline markers for pounces, skeets, clears, incaps and
+              deaths. Pick yourself in the follow row to see only your events and jump to each
+              death or pin. <strong>Key</strong> explains the symbols.
             </li>
             <li>
               <strong>Demos</strong>: each map has a download on the match page. A demo lets you
@@ -366,14 +377,50 @@ viewmodel_fov_override 70`}</code></pre>
             </li>
           </ul>
         </Panel>
+        <Panel id="practice">
+          <h3>Practice</h3>
+          <ul class="howto">
+            <li>
+              <strong>Practice servers</strong> on <a href="/">Play</a>: start a Practice Park
+              (spawn infected, practise skeets, crowns and rocks) or Hunter Training, alone or with
+              friends. They close themselves when everyone leaves.
+            </li>
+            <li>
+              <strong>Drill this</strong> in the replay viewer sets a practice server up exactly as
+              the round was at that moment, so you can play a fight again until you get it right.
+            </li>
+          </ul>
+        </Panel>
+        <Panel id="events">
+          <h3>Events and tournaments</h3>
+          <p>
+            Tournaments are listed on <a href="/events">Events</a>. In a draft tournament you sign
+            up on your own, say whether you would captain, and captains pick their teams (or staff
+            balance them by rating) on draft night. Tournament games never change your SR.
+          </p>
+          <ul class="howto">
+            <li>
+              When your match is ready, its <strong>match room</strong> opens on the site and you
+              get a Discord DM. Your captain readies the team, does the map veto and sets the
+              lineup there; then everyone gets the connect line.
+            </li>
+            <li>
+              Extra commands on a tournament server: <code>!sub</code> (captains swap a player),{' '}
+              <code>!tech</code> (a technical pause) and <code>!admin</code> (calls staff and
+              freezes the game until they lift it).
+            </li>
+            <li>Finished tournament games, with their stats, show on each player's profile.</li>
+          </ul>
+        </Panel>
         <Panel id="map-pack">
           <h3>L4D2 campaigns</h3>
           <p>
-            Dead Center, Dark Carnival, Swamp Fever, Hard Rain, The Parish, Passifice (The Passing
-            and The Sacrifice), Cold Stream and The Last Stand can come up in a match, and they are not part of a normal
-            install. Install them once from the{' '}
+            Some campaigns in the match vote, and in events, are L4D2 maps ported to L4D1: Hard
+            Rain right now, plus custom campaigns like Carried Off and Detour Ahead that use the
+            same files. They are not part of a normal install. Install the pack once from the{' '}
             <a href="/custom-campaigns#l4d2-pack">Custom campaigns</a> page: twelve add-on files
-            that go in your <code>addons</code> folder.
+            for your <code>addons</code> folder. That page also shows which campaigns are in the
+            vote.
           </p>
         </Panel>
         <Panel id="faq">
@@ -387,7 +434,7 @@ viewmodel_fov_override 70`}</code></pre>
             ))}
           </div>
         </Panel>
-      </div>
+      </DocLayout>
     </div>
   );
 }

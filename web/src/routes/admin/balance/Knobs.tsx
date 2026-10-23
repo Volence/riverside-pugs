@@ -114,10 +114,12 @@ export function Knobs() {
           <h3>Preview</h3>
           {preview.errors.map((e) => <p class="error" key={e}>{e}</p>)}
           {preview.diff.length === 0 ? <p class="muted">No knob changes from what the servers should be running now.</p> : (
-            <table class="admin-table">
-              <thead><tr><th>Knob</th><th>Now</th><th>New</th></tr></thead>
-              <tbody>{preview.diff.map((d) => <tr key={d.cvar}><td>{d.label}</td><td>{d.from}</td><td>{d.to}</td></tr>)}</tbody>
-            </table>
+            <div class="table-wrap">
+              <table class="admin-table">
+                <thead><tr><th>Knob</th><th>Now</th><th>New</th></tr></thead>
+                <tbody>{preview.diff.map((d) => <tr key={d.cvar}><td>{d.label}</td><td>{d.from}</td><td>{d.to}</td></tr>)}</tbody>
+              </table>
+            </div>
           )}
           {preview.warnings.map((w) => <p class="admin-warn" key={w}>{w}</p>)}
           {preview.groupsChanged.length > 1 && (

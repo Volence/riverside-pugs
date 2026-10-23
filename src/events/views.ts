@@ -8,7 +8,7 @@ import * as D from './drafts.js';
 import * as N from './entries.js';
 import * as R from './entryRules.js';
 import type * as V from './validate.js';
-import { STAGE_LABEL, chaptersLabel, rulesLines, stageSummary } from './format.js';
+import { STAGE_LABEL, chaptersLabel, eventStatusLabel, rulesLines, stageSummary } from './format.js';
 import { vetoSummary } from './vetoConfig.js';
 import { stagePlayViews, type StagePlayView } from './playViews.js';
 import * as P from './play.js';
@@ -18,14 +18,20 @@ import * as P from './play.js';
 export interface EventListItem {
   slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; official: boolean; startsAt: string; bannerKey: string | null;
   format: string[]; entries: number;
+  /** The status chip's words (format.ts eventStatusLabel): a draft's own phase while it is in registration. */
+  statusLabel: string;
 }
 export interface EventStageView {
   ordinal: number; type: V.StageType; summary: string; veto: string; chapters: string; scheduling: V.Scheduling;
   rulesetName: string | null; rules: string[]; gameConfig: string; campaigns: { slug: string; name: string }[];
+  /** Rounds staff gave a start time (plan T4 round schedule), earliest round first; the event page's timeline reads it. */
+  roundTimes: { round: number; at: string }[];
 }
 export interface EventEntryView { id: number; name: string; tag: string; logoKey: string | null; seed: number | null; status: string; waitlist: number | null; placement: number | null;
   /** Draft entries only (plan D2c Ruling 3): the current starters' display names, captain first. Never SR. */
-  players?: string[] }
+  players?: string[];
+  /** The same starters with their SteamIDs, so the event page can link each to a profile. */
+  playerLinks?: { steamid: string; name: string }[] }
 export interface EventView {
   slug: string; name: string; status: V.EventStatus; entryKind: V.EntryKind; official: boolean; organizerName: string | null;
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
@@ -36,6 +42,8 @@ export interface EventView {
   /** Draft-kind events only (plan D1 Ruling 9): the signup count and names in
    *  signup order. Never SR, notes or captain preference. */
   draft: EventDraftView | null;
+  /** The status chip's words (format.ts eventStatusLabel). */
+  statusLabel: string;
 }
 export interface EventDraftView {
   signupsCloseAt: string; draftAt: string; signups: number; names: string[];
@@ -63,6 +71,7 @@ export function eventListItems(db: DB, o: { staff: boolean }): EventListItem[] {
     bannerKey: e.banner_key,
     format: E.stagesOf(db, e.id).map((s) => STAGE_LABEL[s.type]),
     entries: entryCount(db, e),
+    statusLabel: eventStatusLabel(e),
   }));
 }
 
@@ -92,7 +101,10 @@ function entryViews(db: DB, ev: E.EventRow): EventEntryView[] {
       id: e.id, name: e.name, tag: e.tag, logoKey: e.logo_key, seed: ev.locked_at !== null ? e.seed : null, status: e.status,
       waitlist: w >= 0 ? w + 1 : null, placement: e.placement,
     };
-    if (ev.entry_kind === 'draft') view.players = N.rosterOf(db, e.id).starters.map((s) => getPlayer(db, s)?.name ?? s);
+    if (ev.entry_kind === 'draft') {
+      view.playerLinks = N.rosterOf(db, e.id).starters.map((s) => ({ steamid: s, name: getPlayer(db, s)?.name ?? s }));
+      view.players = view.playerLinks.map((p) => p.name);
+    }
     return view;
   });
 }
@@ -116,6 +128,7 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
         rules: rules ? rulesLines(rules) : [],
         gameConfig: (configLabel.get(st.gameConfig) as { label: string } | undefined)?.label ?? st.gameConfig,
         campaigns: st.campaignPool.map((slug) => ({ slug, name: campaignDisplayName(db, slug) })),
+        roundTimes: E.scheduleOf(s).flatMap((r) => (r.at ? [{ round: r.round, at: r.at }] : [])),
       };
     }),
     entries: entryViews(db, ev),
@@ -126,6 +139,7 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
       ? (() => { const t = R.checkinTimes(ev.starts_at, f.checkin); return { checkinOpensAt: t.opensAt, checkinClosesAt: t.closesAt }; })()
       : { checkinOpensAt: null, checkinClosesAt: null }),
     draft: draftView(db, ev, f),
+    statusLabel: eventStatusLabel(ev),
   };
 }
 

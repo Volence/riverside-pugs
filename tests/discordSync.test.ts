@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
@@ -7,6 +7,7 @@ import { DiscordSync } from '../src/discord/sync.js';
 import { getMessage, saveMessage } from '../src/discord/messageStore.js';
 import { setSetting } from '../src/settings.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
+import type { MessagePayload } from '../src/discord/transport.js';
 import type { Scheduler } from '../src/lobby.js';
 import { noteMatchAborted } from '../src/matchAborts.js';
 import { recordPenalty } from '../src/penalties.js';
@@ -452,138 +453,362 @@ describe('Side games button', () => {
 });
 
 describe('queue-filling alert', () => {
-  const ROLE = '55501';
+  const ROLE = '555000000000000001';
+  const ALERT_CH = '555000000000000099';
   const setRole = (id = ROLE) => setSetting(db, 'discord_pug_role_id', id);
-  /** Messages that ping the alert role. */
-  const alerts = () => t.live().filter((m) => (m.payload.mentionRoleIds ?? []).includes(ROLE));
-  const fill = async (n: number) => {
-    for (let i = 0; i < n; i++) mm.join(IDS[i]);
+  /** Every message sent that pings the role, as it was when sent (an edit
+   *  replaces a fake message's payload, so the live list cannot tell). */
+  let pings: { channelId: string; id: string; payload: MessagePayload }[];
+  const alertMsg = () => t.byId(pings[pings.length - 1].id)!;
+  const alertRows = () => db.prepare("SELECT ref, state, channel_id FROM discord_messages WHERE kind = 'alert' ORDER BY id")
+    .all() as { ref: string; state: string; channel_id: string }[];
+  const queueTo = async (n: number) => {
+    for (let i = 0; i < IDS.length; i++) {
+      if (i < n) mm.join(IDS[i]);
+      else mm.leave(IDS[i]);
+    }
     await sync.pass();
   };
+  const MIN = 60 * 1000;
 
-  beforeEach(() => { setSetting(db, 'discord_queue_thresholds', JSON.stringify([4, 6])); });
+  beforeEach(() => {
+    pings = [];
+    const send = t.send.bind(t);
+    t.send = async (channelId, payload) => {
+      const id = await send(channelId, payload);
+      if ((payload.mentionRoleIds ?? []).length) pings.push({ channelId, id, payload: structuredClone(payload) });
+      return id;
+    };
+  });
 
   it('says nothing at all when no role is configured', async () => {
     await build().start();
-    await fill(6);
-    expect(alerts()).toHaveLength(0);
+    await queueTo(7);
+    expect(pings).toHaveLength(0);
+    expect(alertRows()).toHaveLength(0);
     // And the panel offers no toggle that would do nothing.
-    const panel = t.live().find((m) => m.payload.components.length > 0)!;
+    const panel = t.byId(panelId())!;
     const ids = panel.payload.components.flat().map((b) => ('customId' in b ? b.customId : ''));
     expect(ids).not.toContain('q:notify');
   });
 
-  it('pings the role once the queue reaches a threshold', async () => {
+  it('labels the panel toggle as a standing on/off switch once a role is set', async () => {
     setRole();
     await build().start();
-    await fill(4);
+    const b = t.byId(panelId())!.payload.components.flat().find((x) => x.kind === 'button' && x.customId === 'q:notify');
+    expect(b && b.label).toBe('Queue alerts (on/off)');
+  });
 
-    expect(alerts()).toHaveLength(1);
-    const a = alerts()[0];
-    expect(a.payload.content).toContain(`<@&${ROLE}>`);
-    expect(a.payload.content).toContain('4/8');
+  it('treats a role id that is not a Discord id as off, button included', async () => {
+    setSetting(db, 'discord_pug_role_id', 'Queue Alerts');
+    await build().start();
+    await queueTo(6);
+    expect(pings).toHaveLength(0);
+    const ids = t.byId(panelId())!.payload.components.flat().map((b) => ('customId' in b ? b.customId : ''));
+    expect(ids).not.toContain('q:notify');
+  });
+
+  it('pings only the role at 6 of 8, with the count, what is needed and a way in', async () => {
+    setRole();
+    await build().start();
+    await queueTo(5);
+    expect(pings).toHaveLength(0);
+    await queueTo(6);
+
+    expect(pings).toHaveLength(1);
+    const a = pings[0].payload;
+    expect(a.content).toContain(`<@&${ROLE}>`);
+    expect(a.content).toContain('6/8');
+    expect(a.content).toContain('2 more needed');
     // Only the role. A queue alert must never mass-ping people by name.
-    expect(a.payload.mentionUserIds).toEqual([]);
+    expect(a.mentionRoleIds).toEqual([ROLE]);
+    expect(a.mentionUserIds).toEqual([]);
+    const buttons = a.components.flat();
+    expect(buttons.some((b) => b.kind === 'button' && b.customId === 'q:join')).toBe(true);
+    expect(buttons.some((b) => b.kind === 'link' && b.url === 'https://pug.test/')).toBe(true);
+    expect(pings[0].channelId).toBe(CH);
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
   });
 
-  it('does not re-announce the same threshold while the queue hovers there', async () => {
+  it('follows the threshold setting', async () => {
     setRole();
+    setSetting(db, 'queue_alert_threshold', '4');
     await build().start();
-    await fill(4);
-    expect(alerts()).toHaveLength(1);
-
-    // Somebody leaves and comes back: the classic way a useful ping becomes a
-    // muted channel.
-    mm.leave(IDS[3]);
-    await sync.pass();
-    mm.join(IDS[3]);
-    await sync.pass();
-
-    expect(alerts()).toHaveLength(1);
+    await queueTo(4);
+    expect(pings).toHaveLength(1);
   });
 
-  it('announces the highest threshold reached, even if a pass skips one', async () => {
+  it('keeps one alert while the queue hovers, edited to the current count without pinging', async () => {
     setRole();
     await build().start();
-    // The sync loop is periodic and does not see every join, so a pass can go
-    // straight from empty to 6.
-    await fill(6);
-    expect(alerts()).toHaveLength(1);
-    expect(alerts()[0].payload.content).toContain('6/8');
+    await queueTo(6);
+    await queueTo(5);
+    await queueTo(6);
+    await queueTo(7);
+    expect(pings).toHaveLength(1);
+    const now = alertMsg().payload;
+    expect(now.content).toContain('7/8');
+    expect(now.content).toContain('one more and it pops');
+    // An edit never pings anyway; the allowlist says so too.
+    expect(now.mentionRoleIds).toEqual([]);
   });
 
-  it('drops a second threshold inside the cooldown rather than firing twice', async () => {
+  it('leaves the alert alone during the ready check and closes it as "Match started" once the pop is a match', async () => {
     setRole();
     await build().start();
-    await fill(4);
-    expect(alerts()).toHaveLength(1);
+    await queueTo(6);
+    const before = structuredClone(alertMsg().payload);
+    await queueTo(8);
+    expect(mm.lobbies()).toHaveLength(1);
+    // The ready check could still fail: nothing is closed or edited yet.
+    expect(alertMsg().payload).toEqual(before);
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
 
-    for (let i = 4; i < 6; i++) mm.join(IDS[i]);
+    for (const id of IDS) mm.ready(id);
     await sync.pass();
-    expect(alerts()).toHaveLength(1);
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    await sync.pass();
+    expect(mm.lobbies()).toHaveLength(0);
+
+    expect(pings).toHaveLength(1);
+    const closed = alertMsg().payload;
+    expect(closed.content).toMatch(/Queue popped: match started/);
+    expect(closed.content).not.toContain(`<@&${ROLE}>`);
+    expect(closed.components).toEqual([]);
+    expect(alertRows().map((r) => r.state)).toEqual(['popped']);
   });
 
-  it('announces a higher threshold once the cooldown has passed', async () => {
+  it('a failed ready check keeps the alert open, edited back to the live count, with no new ping', async () => {
     setRole();
     await build().start();
-    await fill(4);
-    clock += 11 * 60 * 1000;
-    for (let i = 4; i < 6; i++) mm.join(IDS[i]);
+    await queueTo(6);
+    await queueTo(8);
+    // Seven ready, one does not: the seven go back to the front of the queue.
+    for (const id of IDS.slice(0, 7)) mm.ready(id);
+    sched.fireAll();
+    expect(mm.lobbies()).toHaveLength(0);
+    expect(mm.publicQueue().count).toBe(7);
     await sync.pass();
 
-    expect(alerts()).toHaveLength(2);
-    expect(alerts()[1].payload.content).toContain('6/8');
+    expect(pings).toHaveLength(1);
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+    const now = alertMsg().payload;
+    expect(now.content).toContain('7/8');
+    expect(now.content).toContain(`<@&${ROLE}>`);
+    expect(now.mentionRoleIds).toEqual([]);
   });
 
-  it('re-arms only once the queue has actually emptied', async () => {
+  it('does not ping while a ready check is running, even past the threshold and the cooldown', async () => {
     setRole();
     await build().start();
-    await fill(4);
-    clock += 11 * 60 * 1000;
-
-    // Down to 1, which is churn, not a new fill.
-    for (let i = 1; i < 4; i++) mm.leave(IDS[i]);
+    await queueTo(8);
+    expect(mm.lobbies()).toHaveLength(1);
+    // Six more people queue behind the pop.
+    const more = Array.from({ length: 6 }, (_, i) => `7656119800000010${i}`);
+    more.forEach((id, i) => {
+      upsertPlayer(db, { steamid: id, name: `x${i}`, avatar: null }, []);
+      activatePlayer(db, id);
+      mm.join(id);
+    });
+    clock += 120 * MIN;
     await sync.pass();
-    for (let i = 1; i < 4; i++) mm.join(IDS[i]);
-    await sync.pass();
-    expect(alerts()).toHaveLength(1);
-
-    // Empty: the next fill is a new one and may announce again.
-    for (let i = 0; i < 4; i++) mm.leave(IDS[i]);
-    await sync.pass();
-    await fill(4);
-    expect(alerts()).toHaveLength(2);
+    expect(mm.publicQueue().count).toBe(6);
+    expect(pings).toHaveLength(0);
   });
 
-  it('never announces a full queue, which pops on its own', async () => {
+  it('closes as popped when the whole lobby became a match between two passes', async () => {
     setRole();
-    setSetting(db, 'discord_queue_thresholds', JSON.stringify([4, 8]));
     await build().start();
-    await fill(4);
-    const before = alerts().length;
-    clock += 11 * 60 * 1000;
-    for (let i = 4; i < 8; i++) mm.join(IDS[i]);
+    await queueTo(6);
+    for (let i = 6; i < 8; i++) mm.join(IDS[i]);
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    expect(mm.lobbies()).toHaveLength(0);
     await sync.pass();
-    // 8 is the queue size: it pops into a lobby and everyone gets a real ping.
-    expect(alerts()).toHaveLength(before);
+    expect(alertMsg().payload.content).toMatch(/Queue popped/);
   });
 
-  it('keeps the panel as the last message after an alert', async () => {
+  it('a pop that failed between two passes is not a match', async () => {
     setRole();
     await build().start();
-    await fill(4);
-    const live = t.live();
+    await queueTo(6);
+    for (let i = 6; i < 8; i++) mm.join(IDS[i]);
+    for (const id of IDS.slice(0, 6)) mm.ready(id);
+    sched.fireAll();
+    await sync.pass();
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+    expect(alertMsg().payload.content).toContain('6/8');
+  });
+
+  it('closes the alert as "Queue emptied" when everyone leaves', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    await queueTo(0);
+    expect(alertMsg().payload.content).toMatch(/Queue emptied/);
+    expect(alertRows().map((r) => r.state)).toEqual(['emptied']);
+  });
+
+  it('leaves the alert open through ordinary churn and closes it once the queue falls well back', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    await queueTo(4);
+    expect(alertRows().map((r) => r.state)).toEqual(['open']);
+    await queueTo(3);
+    expect(alertMsg().payload.content).toMatch(/Queue dropped to 3\/8/);
+    expect(alertRows().map((r) => r.state)).toEqual(['dropped']);
+  });
+
+  it('waits out the cooldown before pinging for the next fill', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    await queueTo(0);
+    clock += 30 * MIN;
+    await queueTo(6);
+    expect(pings).toHaveLength(1);
+    await queueTo(0);
+    clock += 16 * MIN;
+    await queueTo(6);
+    expect(pings).toHaveLength(2);
+  });
+
+  it('follows the cooldown setting', async () => {
+    setRole();
+    setSetting(db, 'queue_alert_cooldown_minutes', '5');
+    await build().start();
+    await queueTo(6);
+    await queueTo(0);
+    clock += 6 * MIN;
+    await queueTo(6);
+    expect(pings).toHaveLength(2);
+  });
+
+  it('remembers the cooldown and the open alert across a restart', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    await queueTo(0);
+    sync.stop();
+
+    clock += 10 * MIN;
+    await build().start();
+    await queueTo(6);
+    expect(pings).toHaveLength(1);
+
+    // An alert left open by the old process is still closed by the new one.
+    await queueTo(0);
+    clock += 60 * MIN;
+    await queueTo(6);
+    expect(pings).toHaveLength(2);
+    sync.stop();
+    await build().start();
+    await queueTo(8);
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    await sync.pass();
+    expect(alertMsg().payload.content).toMatch(/Queue popped/);
+  });
+
+  it('posts in the alert channel when one is set, and leaves the panel where it is', async () => {
+    setRole();
+    setSetting(db, 'discord_queue_alert_channel_id', ALERT_CH);
+    await build().start();
+    const panel = panelId();
+    await queueTo(6);
+    expect(pings[0].channelId).toBe(ALERT_CH);
+    expect(panelId()).toBe(panel);
+  });
+
+  it('keeps the panel as the last message after an alert in the queue channel', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    const live = t.live().filter((m) => m.channelId === CH);
     expect(live[live.length - 1].id).toBe(panelId());
+  });
+
+  it('closes a standing alert when alerts are turned off', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    setSetting(db, 'discord_pug_role_id', '');
+    await sync.pass();
+    expect(alertRows().map((r) => r.state)).toEqual(['off']);
+    const closed = alertMsg().payload.content!;
+    expect(closed).toMatch(/Queue alerts turned off/);
+    // Neutral: the queue itself did nothing.
+    expect(closed).not.toMatch(/dropped|emptied|popped/i);
+    expect(closed).not.toContain(`<@&${ROLE}>`);
   });
 
   it('a Discord failure does not retry on every pass for the rest of the evening', async () => {
     setRole();
     await build().start();
     t.failSends = 1;
-    await fill(4);
-    // The send threw; the threshold is still marked done.
+    await queueTo(6);
     await sync.pass();
-    await sync.pass();
-    expect(alerts()).toHaveLength(0);
+    await queueTo(7);
+    expect(pings).toHaveLength(0);
+    expect(alertRows().map((r) => r.state)).toEqual(['failed']);
+  });
+
+  it('a post whose first save throws is still recorded open, with its id, and closed later', async () => {
+    setRole();
+    await build().start();
+    const prepare = db.prepare.bind(db);
+    let throwOnce = true;
+    db.prepare = ((sql: string) => {
+      if (throwOnce && sql.includes('INSERT INTO discord_messages')) {
+        throwOnce = false;
+        throw new Error('database is locked');
+      }
+      return prepare(sql);
+    }) as typeof db.prepare;
+    await queueTo(6);
+    db.prepare = prepare as typeof db.prepare;
+
+    expect(pings).toHaveLength(1);
+    const row = db.prepare("SELECT message_id, state FROM discord_messages WHERE kind = 'alert'").get() as { message_id: string; state: string };
+    expect(row).toEqual({ message_id: pings[0].id, state: 'open' });
+    await queueTo(0);
+    expect(alertMsg().payload.content).toMatch(/Queue emptied/);
+  });
+
+  it('a save that keeps failing after a post is logged, and the pass carries on to the panel', async () => {
+    setRole();
+    await build().start();
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((msg: unknown) => { errors.push(String(msg)); });
+    const prepare = db.prepare.bind(db);
+    let failures = 2; // the alert's save, then the fallback save
+    db.prepare = ((sql: string) => {
+      if (failures > 0 && pings.length > 0 && sql.includes('INSERT INTO discord_messages')) {
+        failures--;
+        throw new Error('database is locked');
+      }
+      return prepare(sql);
+    }) as typeof db.prepare;
+    await queueTo(6);
+    db.prepare = prepare as typeof db.prepare;
+    spy.mockRestore();
+
+    expect(failures).toBe(0);
+    expect(errors).toContain('[discord] recording the queue alert failed:');
+    expect(errors).not.toContain('[discord] sync pass failed:');
+    // The panel still went up below the alert.
+    expect(JSON.stringify(t.byId(panelId())!.payload)).toContain('6/8');
+  });
+
+  it('a hand-deleted alert is not re-posted (that would ping again)', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    alertMsg().deleted = true;
+    await queueTo(7);
+    expect(pings).toHaveLength(1);
+    expect(alertRows().map((r) => r.state)).toEqual(['removed']);
   });
 });

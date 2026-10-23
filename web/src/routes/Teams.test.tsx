@@ -28,13 +28,28 @@ describe('Teams', () => {
       canCreate: true,
     });
     render(<Teams session={signedIn} />);
-    expect(await screen.findByText('Riverside Rats', { selector: 'a.teamrow .teamrow__name' })).toBeTruthy();
-    expect(screen.getByText('Captain cap · 5 / 8 players · ready for events')).toBeTruthy();
-    expect(screen.getByText('Captain hoot · 2 / 8 players · 2 more to enter events')).toBeTruthy();
-    expect(screen.getByText('Needs players')).toBeTruthy();
+    const rats = await screen.findByText('Riverside Rats', { selector: 'a.tmcard__link .tmcard__name' });
+    expect(rats.closest('a')!.getAttribute('href')).toBe('/team/rats');
+    const ratsCard = rats.closest('.tmcard') as HTMLElement;
+    expect(ratsCard.textContent).toContain('Captain cap');
+    expect(ratsCard.textContent).toContain('Ready for events');
+    const owls = screen.getByText('Owls', { selector: '.tmcard__name' }).closest('.tmcard') as HTMLElement;
+    expect(owls.textContent).toContain('2 more to enter');
+    expect(owls.textContent).toContain('Needs players');
     expect(screen.getByText(/cap invited you/)).toBeTruthy();
-    expect(screen.getByText('Mice', { selector: '.teamrow__name' })).toBeTruthy();
-    expect(screen.getByText('3 / 8 players · 1 more to enter events')).toBeTruthy();
+    const mice = screen.getByText('Mice', { selector: '.tmcard__name' }).closest('.tmcard') as HTMLElement;
+    expect(mice.textContent).toContain('1 more to enter');
+    expect(mice.textContent).toContain('Captain');
+  });
+
+  it('shows the roster as faces, captain first, with +N for the rest', async () => {
+    const roster = Array.from({ length: 7 }, (_, i) => ({ steamid: String(i), name: `p${i}`, avatar: i === 0 ? 'https://example.test/a.png' : null }));
+    mockTeams.list.mockResolvedValue({ teams: [{ slug: 'rats', name: 'Riverside Rats', tag: 'RR', logoKey: null, members: 7, captainName: 'p0', roster }] });
+    mockTeams.mine.mockResolvedValue({ teams: [], invites: [], canCreate: false });
+    render(<Teams session={signedIn} />);
+    const faces = await screen.findByLabelText(/^7 players: p0, p1/);
+    expect(faces.querySelectorAll('.tmfaces__face').length).toBe(6);
+    expect(faces.textContent).toContain('+2');
   });
 
   it('the start form waits behind a button for someone already on a team, and opens at once for someone on none', async () => {

@@ -91,6 +91,10 @@ between two fingerprints is the mean over shared classes of the total-variation 
 histograms, counting only classes where the candidate has >= 15 holds and the reference has >= 30.
 At least 2 shared classes are required.
 
+Since 2026-10-20 the bins are time, 10 ms wide from 20 to 200 ms, so a hand reads the same at any
+tick rate: at 100 tick each bin is one tick (2 to 20, exactly as calibrated), and a 128 tick hold is
+spread over the bins its 7.8 ms window covers (`addHolds` in src/fingerprint.ts says why).
+
 Survivor classes (jump, crouch, melee shove, reload holds) are added ONLY if the build measures that
 they lower the honest false-match rate below the 3% baseline. The measurement goes in the PR.
 

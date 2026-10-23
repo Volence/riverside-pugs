@@ -3,7 +3,7 @@ import { getCampaignPool } from '../settings.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
 import { parseRules, rulesForKind } from '../rulesets.js';
 import { isPug } from '../rulesetStore.js';
-import { presetConfig, type VetoConfig } from './vetoConfig.js';
+import { legacyPresetConfig, type VetoConfig } from './vetoConfig.js';
 import * as V from './validate.js';
 
 /**
@@ -98,7 +98,7 @@ export function stageSettingsOf(s: StageRow): V.StageSettings {
   }
   const pool = JSON.parse(s.campaign_pool_json) as string[];
   // Stages made before plan T3a have no veto_json: their veto_type names a preset.
-  const veto: VetoConfig = s.veto_json ? JSON.parse(s.veto_json) as VetoConfig : presetConfig(s.veto_type, pool.length);
+  const veto: VetoConfig = s.veto_json ? JSON.parse(s.veto_json) as VetoConfig : legacyPresetConfig(s.veto_type, pool.length);
   return {
     type: s.type, config, rulesetId: s.ruleset_id, gameConfig: s.game_config,
     campaignPool: pool, vetoType: s.veto_type, veto, chapters: s.chapters,

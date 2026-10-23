@@ -14,16 +14,19 @@ export function WeeklyAwardChips({ awards }: { awards: PlayerAward[] }) {
   const shown = open ? awards : awards.slice(0, MAX_CHIPS);
   const hidden = awards.length - shown.length;
   return (
-    <div class="weekly-chips" aria-label="Weekly awards">
-      <span class="weekly-chips__title">Weekly awards</span>
-      {shown.map((a) => (
-        <span class="weekly-chips__chip" key={a.award} title={`Weeks of ${a.weeks.map(weekName).join(', ')}`}>
-          {a.count > 1 ? `${a.label} x${a.count}` : a.label}
-        </span>
-      ))}
+    <section class="panel profawards" aria-label="Weekly awards">
+      <h3>Weekly awards</h3>
+      <ul class="profawards__list">
+        {shown.map((a) => (
+          <li class="profaward" key={a.award} title={`Weeks of ${a.weeks.map(weekName).join(', ')}`}>
+            <span class="profaward__label">{a.label}</span>
+            {a.count > 1 && <span class="profaward__count num" aria-label={`${a.count} weeks`}>x{a.count}</span>}
+          </li>
+        ))}
+      </ul>
       {hidden > 0 && (
-        <button type="button" class="weekly-chips__more" onClick={() => setOpen(true)}>+{hidden} more</button>
+        <button type="button" class="btn btn--ghost btn--sm profawards__more" onClick={() => setOpen(true)}>+{hidden} more</button>
       )}
-    </div>
+    </section>
   );
 }

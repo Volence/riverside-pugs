@@ -85,14 +85,19 @@ export function DraftTeamsPanel({ eventId, slug = '', canEdit, status, startsAt,
         <div class="maketeams__fair">
           <p>{`Spread: ${Math.round(fair.spread)} SR between the strongest and weakest team`}</p>
           {fair.forecasts.length > 0 && (
-            <table class="admin-table">
-              <tbody>
-                {fair.forecasts.map((f) => {
-                  const pct = Math.round(f.winA * 100);
-                  return <tr key={`${f.a}-${f.b}`}><td>{`${fair.teams[f.a]!.captainName} vs ${fair.teams[f.b]!.captainName}: ${pct}% / ${100 - pct}%`}</td></tr>;
-                })}
-              </tbody>
-            </table>
+            <details class="maketeams__forecasts" open={fair.forecasts.length <= 3}>
+              <summary>{`Win forecast for each pairing (${fair.forecasts.length})`}</summary>
+              <div class="table-wrap">
+                <table class="admin-table">
+                  <tbody>
+                    {fair.forecasts.map((f) => {
+                      const pct = Math.round(f.winA * 100);
+                      return <tr key={`${f.a}-${f.b}`}><td>{`${fair.teams[f.a]!.captainName} vs ${fair.teams[f.b]!.captainName}: ${pct}% / ${100 - pct}%`}</td></tr>;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           )}
           <p class="muted">Unrated players count at the default SR here; the win forecast treats them as an unknown rating, so the two can disagree.</p>
         </div>

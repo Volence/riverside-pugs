@@ -53,10 +53,27 @@ describe('EventDraftPage', () => {
     expect(screen.getByLabelText('Time left').textContent).toMatch(/^1:1[45]$/);
     expect(screen.getByText('Pick 1 of 6 · Round 1')).toBeTruthy();
     expect(cardNames()).toEqual(['Cy', 'Bob', 'Di']);
-    expect(screen.getAllByText('+30 SR across the last 2 rated games')).toHaveLength(3);
+    expect(screen.getAllByText('+30 SR, last 2')).toHaveLength(3);
+    expect(screen.getAllByTitle('+30 SR across the last 2 rated games')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: /^Pick / })).toBeNull();
     expect(hub.names).toEqual(['draft:4']);
     expect(mockEvents.draftHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it('switches the pool to one row per player and back; a captain on the clock picks from a row', async () => {
+    try { localStorage.removeItem('draftPoolView'); } catch { /* none */ }
+    mockEvents.draftRoom.mockResolvedValue(view({ me: { role: 'captain', team: 'c1', onClock: true, list: [], chemistry: null }, notes: { p2: 'infected main' } }));
+    render(<EventDraftPage slug="night" session={session} />);
+    await screen.findByText('You are on the clock');
+    fireEvent.click(screen.getByRole('button', { name: 'List' }));
+    const rows = screen.getAllByRole('row').slice(1);
+    expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual(['Cy', 'Bob', 'Di']);
+    expect(screen.getByTitle('infected main')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'List' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Pick Di' }));
+    await waitFor(() => expect(mockEvents.draftPick).toHaveBeenCalledWith('night', 'p3', 1));
+    fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
+    expect(cardNames()).toEqual(['Cy', 'Bob', 'Di']);
   });
 
   it('lets the captain on the clock pick, beats, and chimes once when the turn starts', async () => {

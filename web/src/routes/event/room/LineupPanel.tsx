@@ -14,7 +14,12 @@ export function LineupPanel({ v, busy, onLock }: { v: MatchRoomView; busy: boole
   const myLocked = me ? (me.side === 'a' ? v.lineups.aLocked : v.lineups.bLocked) : true;
   const picking = v.phase === 'lineup' && me?.manager === true && !myLocked;
   // The saved default four counts only for players still on the roster.
-  const [chosen, setChosen] = useState<string[]>(() => (me?.defaultFour ?? []).filter((s) => me!.playable.some((p) => p.steamid === s)));
+  // A team of exactly four (every draft team without a sub) starts with all
+  // four ticked, so the captain only presses Lock.
+  const [chosen, setChosen] = useState<string[]>(() => {
+    const four = (me?.defaultFour ?? []).filter((s) => me!.playable.some((p) => p.steamid === s));
+    return four.length === 0 && me?.playable.length === 4 ? me.playable.map((p) => p.steamid) : four;
+  });
   const toggle = (s: string) => setChosen((c) => (c.includes(s) ? c.filter((x) => x !== s) : [...c, s]));
   const myName = (me?.side === 'b' ? v.b?.name : v.a?.name) ?? 'TBD';
   // Sent in roster order, not click order, so locking the same four always

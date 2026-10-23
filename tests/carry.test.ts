@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 import * as R from '../src/events/room.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { restoreSnapshot, resumeLines } from '../src/bookings/restore.js';
 import { carryEntries, carryFor } from '../src/events/carry.js';
 import { POOL7, TIMERS } from './roomFixture.js';
@@ -40,7 +40,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   afterEach(() => { vi.restoreAllMocks(); f?.close(); });
 
   it('game 2 of a best of 2 that carries starts with game 1 in pug-team order, pushes sm_pug_carry after sm_pug_match and says so', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     carryOn(f);
     const { g1, g2 } = await toGame2(f);
     expect(JSON.parse(f.db.prepare('SELECT rules_json FROM matches WHERE id = ?').pluck().get(g2) as string).series.carryScore).toBe(true);
@@ -61,7 +61,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   });
 
   it('game 2 start line with two 40-character team names keeps its ready-up instruction', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     carryOn(f);
     f.db.prepare("UPDATE event_entries SET name = ? WHERE name = 'Rats'").run('R'.repeat(40));
     f.db.prepare("UPDATE event_entries SET name = ? WHERE name = 'Bats'").run('B'.repeat(40));
@@ -72,7 +72,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   });
 
   it('orients by game 2\'s booking_side_a: Bats surviving first are pug team a', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: (r) => driveHomeAway(r, 'survivors') });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: (r) => driveHomeAway(r, 'survivors') });
     carryOn(f);
     const { g2 } = await toGame2(f);
     expect(sideAOf(f, g2)).toBe('b');
@@ -85,7 +85,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   });
 
   it('carries nothing when the ruleset does not carry the score', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     const { g2 } = await toGame2(f);
     expect(carryFor(f.db, g2)).toBeNull();
     expect(carryEntries(f.db, g2)).toBeNull();
@@ -94,7 +94,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   });
 
   it('a tiebreak never carries', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     carryOn(f);
     const { g2 } = await toGame2(f);
     f.goLive(g2);
@@ -110,7 +110,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   });
 
   it('a best of 3 never carries', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     carryOn(f);
     await f.tick();
     const g1 = f.gameOf(1).match_id!;
@@ -131,7 +131,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   });
 
   it('carries nothing when game 1 has no scores', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     carryOn(f);
     const { g2 } = await toGame2(f);
     f.db.prepare('UPDATE event_games SET score_a = NULL, score_b = NULL WHERE event_match_id = ? AND ordinal = 1').run(f.matchId);
@@ -140,7 +140,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
   });
 
   it('a PUG match or an unknown id carries nothing and does not throw', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     const pug = Number(f.db.prepare("INSERT INTO matches (season_id, state, campaign, origin) VALUES ((SELECT id FROM seasons LIMIT 1), 'live', 'no_mercy', 'queue')").run().lastInsertRowid);
     expect(carryFor(f.db, pug)).toBeNull();
     expect(carryFor(f.db, 999999)).toBeNull();
@@ -181,7 +181,7 @@ describe('crash recovery and chapter replay of a carried game 2 (plan T6)', () =
   });
 
   const liveGame2 = async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     carryOn(f);
     const { g2 } = await toGame2(f);
     f.goLive(g2);

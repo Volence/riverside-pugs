@@ -1,5 +1,7 @@
 import type { MatchRules } from '../rulesets.js';
 import type { StageConfig, StageConfigs, StageType } from './validate.js';
+import type * as V from './validate.js';
+import type * as E from './events.js';
 
 /** What the event page and the desk say about a stage and its rules. */
 
@@ -102,4 +104,25 @@ export function groupLabel(type: StageType, grp: number): string {
   if (type === 'single_elim') return grp === 2 ? 'Third place' : 'Bracket';
   if (type === 'double_elim') return grp === 1 ? 'Upper bracket' : grp === 2 ? 'Lower bracket' : 'Grand final';
   return 'Rounds';
+}
+
+/** Event statuses as people read them (mirrors web/src/eventFormat.ts STATUS_LABEL). */
+const STATUS_TEXT: Record<V.EventStatus, string> = {
+  draft: 'Draft', announced: 'Announced', registration: 'Registration open', checkin: 'Check-in',
+  live: 'Live', finished: 'Finished', cancelled: 'Cancelled',
+};
+
+/** The status chip's words. A draft-kind event stays in 'registration'
+ *  through its whole draft night, so before it goes live the chip follows
+ *  the draft instead: Signups open, Signups closed (locked, or past the
+ *  close time before the next minute tick locks it), Draft night (the cut is
+ *  published) and Teams set. */
+export function eventStatusLabel(ev: Pick<E.EventRow, 'status' | 'entry_kind' | 'draft_json' | 'locked_at' | 'cut_at' | 'teams_made_at'>, nowMs: number = Date.now()): string {
+  if (ev.entry_kind !== 'draft' || (ev.status !== 'registration' && ev.status !== 'checkin')) return STATUS_TEXT[ev.status];
+  if (ev.teams_made_at !== null) return 'Teams set';
+  if (ev.cut_at !== null) return 'Draft night';
+  let closeAt: string | null = null;
+  try { closeAt = ev.draft_json ? (JSON.parse(ev.draft_json) as { signupsCloseAt?: string }).signupsCloseAt ?? null : null; } catch { closeAt = null; }
+  if (ev.locked_at !== null || (closeAt !== null && Date.parse(closeAt) <= nowMs)) return 'Signups closed';
+  return 'Signups open';
 }

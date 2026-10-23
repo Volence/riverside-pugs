@@ -54,8 +54,8 @@ const run = (
 const text = (r: Awaited<ReturnType<typeof run>>) => JSON.stringify(r.payload);
 
 describe('slash commands', () => {
-  it('defines profile, leaderboard, matches, queue and link', () => {
-    expect(COMMAND_DEFS.map((d) => d.name).sort()).toEqual(['duo', 'leaderboard', 'link', 'matches', 'profile', 'queue', 'report', 'unduo']);
+  it('defines profile, leaderboard, matches, queue, link, duo, report and alerts', () => {
+    expect(COMMAND_DEFS.map((d) => d.name).sort()).toEqual(['alerts', 'duo', 'leaderboard', 'link', 'matches', 'profile', 'queue', 'report', 'unduo']);
   });
 
   it('/profile shows your SR, record and recent matches as links, publicly', async () => {

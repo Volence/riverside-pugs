@@ -189,6 +189,27 @@ export function sideName(db: DB, s: SideRow): string {
   if (s.team_id !== null) return getTeam(db, s.team_id)?.name ?? 'A team';
   return `${getPlayer(db, s.captain_steamid)?.name ?? 'Someone'}'s group`;
 }
+/** The name of the event a tournament booking plays for, or null for any
+ *  other booking (or a tournament booking no match points at yet). */
+export function tournamentEventName(db: DB, b: Pick<BookingRow, 'id' | 'purpose'>): string | null {
+  if (b.purpose !== 'tournament') return null;
+  const row = db.prepare(
+    'SELECT e.name FROM event_matches m JOIN events e ON e.id = m.event_id WHERE m.booking_id = ? ORDER BY m.id DESC LIMIT 1',
+  ).get(b.id) as { name: string } | undefined;
+  return row?.name ?? null;
+}
+
+/** The heading a booking goes by in Discord and in game: "Scrim: A vs B",
+ *  or for a tournament "<event name>: A vs B" when that fits `max`, else
+ *  "Tournament: A vs B". */
+export function bookingHeading(db: DB, b: Pick<BookingRow, 'id' | 'purpose'>, nameA: string, nameB: string, max: number): string {
+  const vs = `${nameA} vs ${nameB}`;
+  if (b.purpose !== 'tournament') return `Scrim: ${vs}`.slice(0, max);
+  const event = tournamentEventName(db, b);
+  const named = event ? `${event}: ${vs}` : null;
+  return (named && named.length <= max ? named : `Tournament: ${vs}`).slice(0, max);
+}
+
 export function bookingRules(b: BookingRow): MatchRules | null {
   try { return parseRules(b.rules_json); } catch { return null; }
 }

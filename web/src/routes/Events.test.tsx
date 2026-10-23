@@ -35,6 +35,16 @@ describe('Events', () => {
     expect(screen.getByText('Cancelled')).toBeTruthy();
   });
 
+  it('shows the server\'s status words when it sends them (a draft past its signups)', async () => {
+    mockEvents.list.mockResolvedValue({ events: [
+      item({ slug: 'draft-night', name: 'Draft Night', status: 'registration', entryKind: 'draft', entries: 8, statusLabel: 'Teams set' }),
+    ] });
+    render(<Events session={session} />);
+    await screen.findByText('Draft Night');
+    expect(screen.getByText('Teams set')).toBeTruthy();
+    expect(screen.queryByText('Registration open')).toBeNull();
+  });
+
   it('counts a draft-kind event in signups, singular and plural', async () => {
     mockEvents.list.mockResolvedValue({ events: [
       item({ slug: 'draft-night', name: 'Draft Night', status: 'registration', entryKind: 'draft', entries: 12 }),
