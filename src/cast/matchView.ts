@@ -110,7 +110,9 @@ function careerUncached(db: DB, steamid: string): CastPlayer['career'] {
   return {
     scope,
     matches: wl.n, wins: wl.w, losses: wl.l,
-    skeets: sum('skeets') + sum('team_skeets'), dps: sum('dps_landed'),
+    // Solo skeets: "Skeets" means the solo stat wherever players compare
+    // themselves (owner, 2026-10-23); team skeets are their own stat.
+    skeets: sum('skeets'), dps: sum('dps_landed'),
     boomerRate: boomerRate({ boomer_spawns: sum('boomer_spawns'), boom_successes: sum('boom_successes') }),
   };
 }

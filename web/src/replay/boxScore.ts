@@ -23,7 +23,9 @@ export type BoxSide = 'survivor' | 'infected';
  */
 export const BOX_COLUMNS: Record<BoxSide, readonly BoxColumn[]> = {
   survivor: [
-    { key: 'skeet', label: 'Skeets', event: 'skeet', role: 'did' },
+    // Every skeet event, solo and team alike (events do not tell them
+    // apart), so not the solo Skeets stat and not labelled as it.
+    { key: 'skeet', label: 'Skeets (incl. team)', event: 'skeet', role: 'did' },
     { key: 'cleared', label: 'Clears', event: 'cleared', role: 'did' },
     { key: 'tank_death', label: 'Tank kills', event: 'tank_death', role: 'did' },
     { key: 'revive', label: 'Revives', event: 'revive', role: 'did' },

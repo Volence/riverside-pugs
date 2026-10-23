@@ -126,7 +126,7 @@ export function secondsLeft(deadline: number, now: number = Date.now()): number 
  *  src/statKeys.ts rather than importing it, because web/ cannot import
  *  server code. Kept here so MatchDetail and Profile share one copy. */
 export const STAT_LABELS: Record<string, string> = {
-  skeets: 'Skeets', team_skeets: 'Team', skeets_hurt: 'Chip',
+  skeets: 'Skeets', team_skeets: 'Team skeets', skeets_hurt: 'Chip',
   skeet_assists: 'Assists', skeets_shotgun: 'Shotgun skeets',
   skeets_sniper: 'Sniper skeets', skeets_melee: 'Melee skeets',
   deadstops: 'Deadstops', boomer_pops: 'Boomer pops', crowns: 'Crowns',
