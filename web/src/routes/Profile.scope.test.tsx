@@ -11,6 +11,7 @@ vi.mock('../api', async (importOriginal) => {
 });
 
 const { Profile } = await import('./Profile');
+const { LocationProvider, Router, Route, useLocation } = await import('preact-iso');
 
 /** Owner 2026-10-23: every profile number follows the selected season, a
  *  Career view has the all-time ones, the page says which, and a season with
@@ -105,5 +106,44 @@ describe('profile scope', () => {
     expect([...picker.options].map((o) => o.textContent)).toEqual(['Season 1 (current)', 'Season 0', 'Career (all seasons)']);
     fireEvent.change(picker, { target: { value: '1' } });
     await waitFor(() => expect(mockApi.profile).toHaveBeenLastCalledWith('1', expect.anything(), 1));
+  });
+});
+
+describe('profile scope under the router', () => {
+  /** A button that navigates, standing in for a link on the page. */
+  function Go({ to }: { to: string }) {
+    const { route } = useLocation();
+    return <button type="button" onClick={() => route(to)}>{`go ${to}`}</button>;
+  }
+  const app = () => (
+    <LocationProvider>
+      <Go to="/player/2" />
+      <Go to="/player/2?season=1" />
+      <Router>
+        <Route path="/player/:steamid" component={Profile} />
+      </Router>
+    </LocationProvider>
+  );
+
+  it('does not carry one player\'s Career view onto the next, and follows a ?season link', async () => {
+    mockApi.profile.mockImplementation(async (_id: string, _s: unknown, scope?: unknown) => (scope === 'career' ? career : dayOne));
+    history.replaceState(null, '', '/player/1?season=career');
+    render(app());
+    await screen.findByText('Career totals');
+    expect(mockApi.profile).toHaveBeenLastCalledWith('1', expect.anything(), 'career');
+
+    fireEvent.click(screen.getByText('go /player/2'));
+    await waitFor(() => expect(mockApi.profile).toHaveBeenLastCalledWith('2', expect.anything(), undefined));
+
+    fireEvent.click(screen.getByText('go /player/2?season=1'));
+    await waitFor(() => expect(mockApi.profile).toHaveBeenLastCalledWith('2', expect.anything(), 1));
+  });
+
+  it('drops a season id the server did not know, keeping the current season shown', async () => {
+    mockApi.profile.mockResolvedValue(dayOne);
+    history.replaceState(null, '', '/player/1?season=99');
+    render(app());
+    await screen.findByText('No matches in Season 1 yet');
+    await waitFor(() => expect(location.search).toBe(''));
   });
 });
