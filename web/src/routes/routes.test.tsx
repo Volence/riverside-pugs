@@ -1727,6 +1727,18 @@ describe('CustomCampaigns', () => {
     expect(heading.textContent).not.toContain('In the vote');
   });
 
+  it('tells players a converted campaign also needs the L4D2 pack, and only that one', async () => {
+    mockApi.customCampaigns.mockResolvedValue({ campaigns: [
+      { ...campaign, slug: 'detourahead', name: 'Detour Ahead', needsL4d2Pack: true },
+      campaign,
+    ] });
+    render(<CustomCampaigns />);
+    const link = await waitFor(() => screen.getByRole('link', { name: 'L4D2 campaigns pack' }));
+    expect(link.getAttribute('href')).toBe('#l4d2-pack');
+    expect(link.closest('section')!.textContent).toContain('Detour Ahead');
+    expect(screen.getAllByRole('link', { name: 'L4D2 campaigns pack' })).toHaveLength(1);
+  });
+
   it('opts the download link out of the SPA router', async () => {
     mockApi.customCampaigns.mockResolvedValue({ campaigns: [campaign] });
     render(<CustomCampaigns />);

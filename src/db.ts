@@ -2587,6 +2587,9 @@ export function openDb(path: string): DB {
   // Practice-only campaigns (Hunter Training) install everywhere and are
   // downloadable, but are never offered for the PUG map pool.
   ensureColumn(db, 'custom_campaigns', 'practice_only', 'INTEGER NOT NULL DEFAULT 0');
+  // Converted L4D2 campaigns (l4d2to1) leave out every file our L4D2 pack
+  // already has, so the campaigns page tells players to get the pack too.
+  ensureColumn(db, 'custom_campaigns', 'needs_l4d2_pack', 'INTEGER NOT NULL DEFAULT 0');
   // Minutes staff added to this match's no-show deadline from the live board
   // (src/noShow.ts). Per match: it moves the whole rule, not one player's.
   ensureColumn(db, 'matches', 'noshow_extra_minutes', 'INTEGER NOT NULL DEFAULT 0');

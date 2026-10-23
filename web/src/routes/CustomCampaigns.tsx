@@ -96,6 +96,13 @@ function CampaignList({ data, error }: { data: { campaigns: CustomCampaignRow[] 
                     <li key={ch.map}>{chapterName(ch.display, ch.map)}</li>
                   ))}
                 </ol>
+                {c.needsL4d2Pack && (
+                  <p class="ccamp__needs">
+                    Also needs the <a href="#l4d2-pack">L4D2 campaigns pack</a> above. This one
+                    was converted from L4D2 and uses its models and textures from the pack, so
+                    without it you will see missing textures and error models.
+                  </p>
+                )}
                 {c.notes && <p>{c.notes}</p>}
                 <p class="muted mono ccamp__hash">{c.filename}{c.zipBytes != null && ' (zipped)'} · sha256 {c.sha256.slice(0, 16)}...</p>
               </Panel>

@@ -488,6 +488,8 @@ export interface CustomCampaignRow {
   filename: string; notes: string | null; inPool: boolean;
   /** A practice map (Hunter Training): downloadable, never in the vote. */
   practiceOnly?: boolean;
+  /** A converted L4D2 campaign: it leaves out files the L4D2 pack has. */
+  needsL4d2Pack?: boolean;
   chapters: CustomCampaignChapter[];
 }
 
@@ -1333,6 +1335,8 @@ export interface AdminCampaign {
   maps: string[];
   /** Custom campaigns only: installs and downloads, never offered for the PUG pool. */
   practiceOnly?: boolean;
+  /** Custom campaigns only: the campaigns page tells players to get the L4D2 pack too. */
+  needsL4d2Pack?: boolean;
   /** True for the stock four, which have no custom_campaigns row and so no
    *  upload, reinstall or delete controls. */
   stock: boolean;
@@ -2986,6 +2990,8 @@ export const adminApi = {
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/maps-to-play`, { maps }),
   setCampaignPracticeOnly: (slug: string, practiceOnly: boolean) =>
     post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/practice-only`, { practiceOnly }),
+  setCampaignNeedsL4d2Pack: (slug: string, needsL4d2Pack: boolean) =>
+    post<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}/needs-l4d2-pack`, { needsL4d2Pack }),
   deleteCampaign: (slug: string) =>
     del<{ ok: true }>(`/api/admin/campaigns/${encodeURIComponent(slug)}`),
   balancePatches: (signal?: AbortSignal) => get<{ patches: PatchSummary[] }>('/api/admin/balance/patches', signal),

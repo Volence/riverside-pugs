@@ -910,6 +910,7 @@ a.ctile { text-decoration: none; }
 .howto-more > summary { cursor: pointer; color: var(--text-bright); font-family: var(--font-label); letter-spacing: 0.04em; }
 .howto-more[open] > summary { margin-bottom: var(--sp-2); }
 .ccamp__chapters { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--sp-1); color: var(--text); }
+.ccamp__needs { margin-top: var(--sp-3); padding-left: var(--sp-3); border-left: 2px solid var(--accent); }
 .ccamp__hash { margin-top: var(--sp-3); word-break: break-all; }
 
 /* ---------- versus scoreboard ---------- */

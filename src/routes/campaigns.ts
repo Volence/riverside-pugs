@@ -16,7 +16,7 @@ import { transportFor } from '../addonsTransport.js';
 import { installCampaign, uninstallCampaign, type InstallTarget } from '../campaignInstall.js';
 import {
   chaptersOf, deleteCampaign, getCampaign, insertDraft, installsOf,
-  listCampaigns, publishCampaign, setPracticeOnly,
+  listCampaigns, publishCampaign, setPracticeOnly, setNeedsL4d2Pack,
 } from '../customCampaigns.js';
 import { listVpkPaths, missionFromVpk, MissionError } from '../vpk.js';
 import { collisionMessage, consistencyCollisions, loadConsistencyList } from '../consistencyList.js';
@@ -102,6 +102,7 @@ export async function campaignRoutes(
         zipBytes: zipOf(c)?.bytes ?? null,
         filename: c.vpk_filename, notes: c.notes, inPool: pool.has(c.slug),
         practiceOnly: c.practice_only === 1,
+        needsL4d2Pack: c.needs_l4d2_pack === 1,
         chapters: chaptersOf(db, c.slug).map((ch) => ({
           map: ch.map, display: ch.display, included: ch.included === 1,
         })),
@@ -165,6 +166,7 @@ export async function campaignRoutes(
       maps: registry.get(c.slug)?.maps ?? [],
       stock: false,
       practiceOnly: c.practice_only === 1,
+      needsL4d2Pack: c.needs_l4d2_pack === 1,
     }));
     // The stock four have no custom_campaigns row, but an admin wants to drop
     // a stock finale for exactly the same reason as a custom one, so they get
@@ -396,6 +398,19 @@ export async function campaignRoutes(
     setPracticeOnly(db, slug, raw);
     invalidateCampaignCache();
     logAdmin(db, adminId, 'campaign_practice_only', slug, { practiceOnly: raw });
+    return { ok: true };
+  });
+
+  // Only changes what the public campaigns page says: a converted L4D2
+  // campaign is missing models and textures without the L4D2 pack.
+  app.post('/api/admin/campaigns/:slug/needs-l4d2-pack', async (req, reply) => {
+    const adminId = requireAdmin(req, reply);
+    if (!adminId) return reply;
+    const { slug } = req.params as { slug: string };
+    const raw = (req.body as { needsL4d2Pack?: unknown } | undefined)?.needsL4d2Pack;
+    if (typeof raw !== 'boolean') return reply.code(400).send({ error: 'needsL4d2Pack must be true or false' });
+    if (!setNeedsL4d2Pack(db, slug, raw)) return reply.code(404).send({ error: 'no such campaign' });
+    logAdmin(db, adminId, 'campaign_needs_l4d2_pack', slug, { needsL4d2Pack: raw });
     return { ok: true };
   });
 

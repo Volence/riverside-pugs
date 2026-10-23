@@ -1015,3 +1015,44 @@ describe('POST /api/admin/campaigns/:slug/practice-only', () => {
     expect((await post(app, 'hunter_training', { practiceOnly: true }, '76561198000000077')).statusCode).toBe(403);
   });
 });
+
+describe('POST /api/admin/campaigns/:slug/needs-l4d2-pack', () => {
+  const ADMIN_ID = '76561198000000001';
+  const publishDa = () => {
+    insertDraft(db, {
+      slug: 'detourahead', name: 'Detour Ahead', vpkFilename: 'detourahead_l4d1.vpk',
+      sizeBytes: 9, sha256: 'c'.repeat(64), uploadedBy: null,
+    }, [{ map: 'cdta_01detour', display: 'Detour', isFinale: false }]);
+    publishCampaign(db, 'detourahead', 'Detour Ahead');
+  };
+  const post = (app: FastifyInstance, slug: string, payload: object, steamid = ADMIN_ID) =>
+    app.inject({
+      method: 'POST', url: `/api/admin/campaigns/${slug}/needs-l4d2-pack`,
+      cookies: steamid === ADMIN_ID ? adminCookie(app, steamid) : authedCookie(app, db, steamid),
+      payload,
+    });
+  const publicRow = async (app: FastifyInstance) =>
+    (await app.inject({ method: 'GET', url: '/api/campaigns/custom' })).json()
+      .campaigns.find((c: { slug: string }) => c.slug === 'detourahead');
+
+  it('sets the flag, which the public list and the admin list both report', async () => {
+    publishDa();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await publicRow(app)).needsL4d2Pack).toBe(false);
+    expect((await post(app, 'detourahead', { needsL4d2Pack: true })).statusCode).toBe(200);
+    expect((await publicRow(app)).needsL4d2Pack).toBe(true);
+    const admin = await app.inject({ method: 'GET', url: '/api/admin/campaigns', cookies: authedCookie(app, db, ADMIN_ID) });
+    expect(admin.json().campaigns.find((c: { slug: string }) => c.slug === 'detourahead').needsL4d2Pack).toBe(true);
+    expect((await post(app, 'detourahead', { needsL4d2Pack: false })).statusCode).toBe(200);
+    expect((await publicRow(app)).needsL4d2Pack).toBe(false);
+  });
+
+  it('refuses a non-boolean, an unknown campaign and a non-admin', async () => {
+    publishDa();
+    const app = await buildTestApp({ db, addonsDir: addons });
+    expect((await post(app, 'detourahead', { needsL4d2Pack: 'yes' })).statusCode).toBe(400);
+    expect((await post(app, 'nope', { needsL4d2Pack: true })).statusCode).toBe(404);
+    expect((await post(app, 'detourahead', { needsL4d2Pack: true }, '76561198000000009')).statusCode).toBe(403);
+    expect((await publicRow(app)).needsL4d2Pack).toBe(false);
+  });
+});
