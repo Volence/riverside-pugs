@@ -77,10 +77,21 @@ describe('stat-aware balance at the queue pop', () => {
 
   it('on: the stars are split and the move is logged', () => {
     setSetting(db, 'balance_stats_enabled', '1');
+    setSetting(db, 'balance_stats_holdout_every', '0');
     const { id, teamA } = pop();
     expect(together(teamA, S1, S2)).toBe(false);
     const row = db.prepare('SELECT * FROM match_balance_log WHERE match_id = ?').get(id) as Record<string, unknown>;
     expect(row).toMatchObject({ enabled: 1, over_gate: 1, gate_fired: 1, moved: 2 });
     expect(Math.abs(Number(row.chosen_stat_a) - 0.5)).toBeLessThan(Math.abs(Number(row.best_stat_a) - 0.5));
+  });
+
+  it('on, holdout match id: the rating split plays and the row says holdout', () => {
+    setSetting(db, 'balance_stats_enabled', '1');
+    // Three past matches exist, so the pop is match 4: a holdout at every 4th.
+    const { id, teamA } = pop();
+    expect(id % 4).toBe(0);
+    expect(together(teamA, S1, S2)).toBe(true);
+    const row = db.prepare('SELECT * FROM match_balance_log WHERE match_id = ?').get(id) as Record<string, unknown>;
+    expect(row).toMatchObject({ enabled: 1, over_gate: 1, gate_fired: 1, holdout: 1, moved: 0 });
   });
 });
