@@ -214,11 +214,11 @@ describe('queue alert opt-in toggle', () => {
   it('adds the role, then removes it on a second press', async () => {
     const on = await toggle(did(0));
     expect(on.ephemeral).toBe(true);
-    expect(body(on)).toMatch(/will be pinged/i);
+    expect(body(on)).toMatch(/alerts are now ON: you will be pinged whenever/i);
     expect(t.rolesOf.get(did(0))?.has(ROLE)).toBe(true);
 
     const off = await toggle(did(0));
-    expect(body(off)).toMatch(/no longer be pinged/i);
+    expect(body(off)).toMatch(/alerts are now OFF/i);
     expect(t.rolesOf.get(did(0))?.has(ROLE)).toBe(false);
   });
 
@@ -226,7 +226,7 @@ describe('queue alert opt-in toggle', () => {
     // Wanting to know when games are filling is not the same as being ready to
     // play one, and an unlinked person is exactly who the nudge is for.
     const r = await toggle('never-seen-before');
-    expect(body(r)).toMatch(/will be pinged/i);
+    expect(body(r)).toMatch(/alerts are now ON: you will be pinged whenever/i);
     expect(t.rolesOf.get('never-seen-before')?.has(ROLE)).toBe(true);
   });
 
@@ -262,14 +262,14 @@ describe('queue alert opt-in toggle', () => {
 
   it('/alerts on and off set the role either way, and say so when there is nothing to change', async () => {
     const deps = { db, roles };
-    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/will be pinged/i);
+    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/alerts are now ON: you will be pinged whenever/i);
     expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(true);
     // Asking for what you already have changes nothing, and never toggles.
-    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/already get queue alerts/i);
+    expect(body(await setAlertRole(deps, did(3), true))).toMatch(/already ON/i);
     expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(true);
-    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/no longer be pinged/i);
+    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/alerts are now OFF/i);
     expect(t.rolesOf.get(did(3))?.has(ROLE)).toBe(false);
-    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/do not get queue alerts/i);
+    expect(body(await setAlertRole(deps, did(3), false))).toMatch(/already OFF/i);
   });
 });
 

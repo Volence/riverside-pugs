@@ -81,9 +81,9 @@ describe('startBot', () => {
     const run = (turn?: string) => s.t.handler!({
       kind: 'command', name: 'alerts', userId: '901', userName: 'x', options: turn ? { turn } : {}, picked: {}, presserTimedOutUntil: null,
     });
-    expect((await run('on')).payload.content).toMatch(/will be pinged/i);
+    expect((await run('on')).payload.content).toMatch(/alerts are now ON: you will be pinged whenever/i);
     expect(s.t.rolesOf.get('901')?.has('555000000000000001')).toBe(true);
-    expect((await run()).payload.content).toMatch(/no longer be pinged/i);
+    expect((await run()).payload.content).toMatch(/alerts are now OFF/i);
     expect(s.t.rolesOf.get('901')?.has('555000000000000001')).toBe(false);
     expect(handled).toBe(false);
     await bot!.stop();

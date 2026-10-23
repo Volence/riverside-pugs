@@ -49,7 +49,7 @@ export const COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'queue', description: 'Who is in the queue right now' },
   { name: 'link', description: 'Link your Discord to your Steam account' },
   {
-    // Handled in index.ts, beside the Notify me button, because it needs the
+    // Handled in index.ts, beside the Queue alerts (on/off) button, because it needs the
     // transport's role access, which nothing else here does.
     name: ALERTS_COMMAND,
     description: 'Get pinged when the PUG queue is almost full',

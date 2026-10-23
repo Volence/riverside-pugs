@@ -59,7 +59,7 @@ export interface PanelView {
   /** A lobby is running, so the panel can say a game is being set up. */
   phase: 'ready_check' | 'map_vote' | 'done' | 'failed' | null;
   /** The opt-in alert role, when one is configured. Drives whether the panel
-   *  offers a Notify me toggle at all. */
+   *  offers the Queue alerts (on/off) toggle at all. */
   alertRoleId?: string;
   /** A side game currently up, or null. The card is shared by everyone,
    *  so this cannot say who is opted in, only that a game is up. */
@@ -105,9 +105,12 @@ export function renderPanel(v: PanelView): MessagePayload {
           ? [{ kind: 'button' as const, customId: 'q:side', label: 'Side games', style: 'secondary' as const }]
           : []),
         // Only when an alert role is configured. Offering a toggle that silently
-        // does nothing is worse than not offering it.
+        // does nothing is worse than not offering it. The card is shared, so
+        // the label cannot know the presser's state: it names a standing
+        // on/off switch (the owner read "Notify me" as a one-time request,
+        // 2026-10-23), and the reply says which state they are now in.
         ...(v.alertRoleId
-          ? [{ kind: 'button' as const, customId: 'q:notify', label: 'Notify me', style: 'secondary' as const }]
+          ? [{ kind: 'button' as const, customId: 'q:notify', label: 'Queue alerts (on/off)', style: 'secondary' as const }]
           : []),
       ],
       [
