@@ -3620,16 +3620,21 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftpool__tools { margin-bottom: var(--sp-3); }
 .draftpool__tools input { flex: 1 1 12rem; min-width: 0; }
 .draftpool { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-3); }
-.draftcard { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3); border: 1px solid var(--border); background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
+.draftcard { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
 .draftcard__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); }
-.draftcard__name { margin: 0; min-width: 0; }
-.draftcard__sr { color: var(--rating); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.draftcard__name { margin: 0; min-width: 0; font-size: 1.1em; }
+.draftcard__sr { color: var(--rating); font-variant-numeric: tabular-nums; font-weight: 700; flex-shrink: 0; }
+.draftcard__sub { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); font-size: var(--fs-dense); }
+.draftcard__sides { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+.draftcard__side { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius, 6px); min-width: 0; font-size: var(--fs-dense); }
+.draftcard__sidelabel { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.draftcard__num { font-variant-numeric: tabular-nums; color: var(--text-bright); font-weight: 600; }
+.draftcard__skills { margin: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-dense); }
 .draftcard__line, .draftcard__note, .draftcard__form { margin: 0; font-size: var(--fs-dense); }
-.draftcard__note { color: var(--text-bright); }
-.draftcard__form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.draftcard__note { color: var(--text-bright); padding: var(--sp-1) var(--sp-2); border-left: 2px solid var(--accent); }
+.draftcard__form { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
 .draftcard__formlabel { margin-right: var(--sp-1); }
-/* Results are read, not pressed: compact letters, not the chip's 36/44px hit target, so ten fit a phone card. */
-.draftcard__res { min-height: 0; min-width: 1.5rem; padding: 2px 0; letter-spacing: 0; cursor: default; }
+.draftcard__res { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border: 1px solid var(--border); border-radius: 3px; font-size: 0.7rem; font-weight: 700; line-height: 1; cursor: default; }
 .draftcard__res--W { border-color: var(--win); color: var(--win); }
 .draftcard__res--L { border-color: var(--loss); color: var(--loss); }
 .draftcard__res--D { color: var(--draw); }

@@ -12,22 +12,42 @@ export function DraftCard({ card, note, chemistry, action }: {
   card: PlayerCardView; note?: string | null; chemistry?: PairChemistryView | null; action?: ComponentChildren;
 }) {
   const trend = trendText(card.trend);
+  // One block per side, the number first: a captain scans the figures, not the sentence.
+  const stat = (value: number, label: string) => (
+    <span class="draftcard__stat"><span class="draftcard__num">{value}</span> <span class="muted">{label}</span></span>
+  );
   return (
     <article class="draftcard" aria-label={card.name}>
       <header class="draftcard__head">
         <h4 class="draftcard__name">{card.name}</h4>
         <span class="draftcard__sr">{`SR ${card.sr}`}</span>
       </header>
-      {trend && <p class="draftcard__line muted">{trend}</p>}
-      <p class="draftcard__line">{`Survivor: ${card.survivor.siDamage} SI damage, ${card.survivor.commonKills} commons a game`}</p>
-      <p class="draftcard__line">{`Infected: ${card.infected.damageAsSi} damage, ${card.infected.dpsLanded} DPs a game`}</p>
-      {card.bestClass && <p class="draftcard__line">{`Best class: ${CLASS_NAME[card.bestClass.cls]}`}</p>}
-      {card.skills.length > 0 && <p class="draftcard__line muted">{card.skills.slice(0, 4).map((s) => `${s.label} ${s.total}`).join(' · ')}</p>}
+      {(trend || card.bestClass) && (
+        <p class="draftcard__sub">
+          {card.bestClass && <span class="teamchip">{`Best: ${CLASS_NAME[card.bestClass.cls]}`}</span>}
+          {trend && <span class="muted">{trend}</span>}
+        </p>
+      )}
+      <div class="draftcard__sides">
+        <div class="draftcard__side">
+          <span class="draftcard__sidelabel">Survivor, a game</span>
+          {stat(card.survivor.siDamage, 'SI damage')}
+          {stat(card.survivor.commonKills, 'commons')}
+        </div>
+        <div class="draftcard__side">
+          <span class="draftcard__sidelabel">Infected, a game</span>
+          {stat(card.infected.damageAsSi, 'damage')}
+          {stat(card.infected.dpsLanded, 'DPs')}
+        </div>
+      </div>
+      {card.skills.length > 0 && (
+        <p class="draftcard__skills">{card.skills.slice(0, 4).map((s) => <span key={s.label} class="draftcard__skill"><span class="draftcard__num">{s.total}</span> <span class="muted">{s.label}</span></span>)}</p>
+      )}
       <p class="draftcard__form" aria-label={card.form.length === 0 ? 'Recent form' : `Recent form: ${card.form.map((r) => RESULT[r]).join(', ')}`}>
         {card.pugs === 0 ? 'No PUGs yet' : card.form.length > 0 && (
           <>
             <span class="draftcard__formlabel muted" aria-hidden="true">{`Last ${card.form.length}`}</span>
-            {card.form.map((r, i) => <span key={i} class={`chip draftcard__res draftcard__res--${r}`} title={RESULT[r]} aria-hidden="true">{r}</span>)}
+            {card.form.map((r, i) => <span key={i} class={`draftcard__res draftcard__res--${r}`} title={RESULT[r]} aria-hidden="true">{r}</span>)}
           </>
         )}
       </p>
