@@ -2655,7 +2655,28 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .landing__table td { padding: var(--sp-2) var(--sp-3) var(--sp-2) 0; }
 .landing__table tr:last-child td { border-bottom: none; }
 
+/* ---------- profile scope ---------- */
+
+/* The season / career switch at the top of a profile, with the line saying
+   what every number below covers. Wraps under the picker on a phone. */
+.profile-scope {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
 /* ---------- season stat leaders ---------- */
+
+/* Per game / Totals above the leader cards, with a line saying which and
+   from how many games a per-game figure ranks. Wraps under the pill on a phone. */
+.lb-statmode {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
 
 /* A row of cards above the leaderboard: who leads each featured stat. Each is
    a button that sorts the table by that stat, which is how a reader discovers

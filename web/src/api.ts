@@ -364,6 +364,9 @@ export interface LeaderboardRow {
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
+  /** Completed PUGs this season, the denominator for per-game stats. Optional
+   *  for a server older than the field (the page falls back to `games`). */
+  statGames?: number;
   /** The endorsement title they have earned, if any. */
   title?: EndorseKind | null;
 }
@@ -372,6 +375,9 @@ export interface Leaderboard {
   season: { id: number; name: string; placementGames?: number; ranks?: boolean; finalMinGames?: number; ended?: boolean };
   /** Distinct matches that produced a rating this season. */
   matchesRated: number;
+  /** Completed PUGs before a per-game stat ranks (standing_min_games).
+   *  Optional for an older server; the page falls back to STAT_MIN_GAMES. */
+  statMinGames?: number;
   rows: LeaderboardRow[];
 }
 
@@ -897,13 +903,27 @@ export interface Profile {
     twitchName: string | null;
   };
   social: SocialLink[];
-  /** sr is null and mu/sigma absent while placing. */
+  /** What every number on the profile covers: one season, or the career
+   *  (owner, 2026-10-23). Optional only for a server older than the field. */
+  scope?: ProfileScopeInfo;
+  /** Seasons the profile can be viewed in: the current one, then any other
+   *  with a completed PUG, newest first. */
+  /** `games` is completed PUGs, `rated` rated games (an abandon loss is
+   *  rated with no completed PUG). */
+  seasonsPlayed?: { id: number; name: string; current: boolean; games: number; rated?: number }[];
+  /** The scoped season's rating. sr is null and mu/sigma absent while
+   *  placing; null in Career view or before a first game. */
   rating: { sr: number | null; mu?: number; sigma?: number; wins: number; losses: number } | null;
-  /** This season under its rules. */
+  /** The scoped record: a season's rated games, or the career's results. */
+  record?: { wins: number; losses: number };
+  /** The scoped season under its rules; a finished season's frozen place.
+   *  Null in Career view. */
   season?: {
-    id: number; placementGames: number; ranks: boolean; finalMinGames: number; games: number;
+    id: number; name?: string; current?: boolean;
+    placementGames: number; ranks: boolean; finalMinGames: number; games: number;
     sr: number | null; placing: Placing | null; rank: RankView | null; peakSr: number | null; top10: boolean;
-  };
+    finalRank?: number | null; of?: number | null;
+  } | null;
   /** Frozen results from each finished season, newest first. */
   pastSeasons?: PastSeason[];
   /** Matches this player's team forfeited with !gg, and !gg votes they started.
@@ -947,6 +967,15 @@ export interface Profile {
    *  switch keeps out. Optional only for a server older than the feature. */
   teams?: ProfileTeam[];
 }
+
+/** A profile's scope as the server applied it. */
+export type ProfileScopeInfo =
+  | { kind: 'season'; seasonId: number; name: string; current: boolean }
+  | { kind: 'career' };
+
+/** What a profile request asks for: the current season (undefined), one
+ *  season by id, or the career. */
+export type ProfileScopeRequest = number | 'career' | undefined;
 
 /** One name from a player's name history (src/playerNames.ts). `name` is the
  *  spelling used most; `sources` says whether it was a Steam persona, an
@@ -3518,8 +3547,8 @@ export const api = {
     post<{ ok: true; remaining: number; state: EndorseState }>(`/api/matches/${matchId}/endorse`, { to, kind }),
   endorsePending: (signal?: AbortSignal) =>
     get<{ pending: PendingEndorsement[] }>('/api/endorse/pending', signal),
-  profile: (steamid: string, signal?: AbortSignal) =>
-    get<Profile>(`/api/players/${encodeURIComponent(steamid)}`, signal),
+  profile: (steamid: string, signal?: AbortSignal, scope?: ProfileScopeRequest) =>
+    get<Profile>(`/api/players/${encodeURIComponent(steamid)}${scope === undefined ? '' : `?season=${scope}`}`, signal),
 
   register: (code: string) => post('/api/register', { code }),
   /** Whose Discord a link code is for. Reads, never spends. */

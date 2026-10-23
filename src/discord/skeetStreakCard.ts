@@ -45,8 +45,10 @@ export function renderSkeetStreak(db: DB, row: SkeetStreakRow, publicUrl: string
   const { streak, skeets } = names(row.count);
   const seconds = (row.span_ms / 1000).toFixed(1);
   const link = `${publicUrl}/match/${row.match_id}?ordinal=${row.map_ordinal}&half=${row.half}&t=${row.t_ms}`;
+  // A streak counts every skeet event, team skeets included (the feed does
+  // not tell them apart), so the line says so: plain "skeets" means solo.
   const content =
-    `**${name}** hit a **${streak}** in match ${row.match_id} on ${campaign}, ${skeets} in ${seconds} seconds. `
+    `**${name}** hit a **${streak}** in match ${row.match_id} on ${campaign}, ${skeets} (team skeets count) in ${seconds} seconds. `
     + `[Watch it](<${link}>)`;
   return { content, embeds: [], components: [], mentionUserIds: [] };
 }

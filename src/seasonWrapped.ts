@@ -7,6 +7,7 @@ import { standingMinGames, RANKED_MIN_GAMES } from './standings.js';
 import { seasonRules, srUnder } from './seasonRules.js';
 import { ENDORSE_KINDS, titleFromCounts, type EndorseKind } from './endorsements.js';
 import { awardDef } from './weeklyAwards.js';
+import { DAMAGE_AS_SI, netDamageAsSi, withNetDamageAsSi } from './siDamage.js';
 
 /**
  * Season Wrapped: a story deck of each player's season, plus the community's.
@@ -51,6 +52,21 @@ const SIGNATURE: readonly (readonly [key: string, label: string])[] = [
 ];
 /** Per-map bests, from match_live_map_stats keys. */
 const MAP_BEST_KEYS = ['sidmg', 'ck', 'skeets', 'damage_as_si', 'tank_damage'] as const;
+/**
+ * The first match whose numbers for REDEFINED_STATS mean what they mean now.
+ *
+ * On 2026-09-29, from match 324 on, these stats changed definition: pug-match
+ * 0.3.17 began counting a bile (biles_landed, survivors_biled) only when it
+ * actually hit someone (amount > 0), and the clear counters (clears,
+ * self_clears, insta_clears) changed meaning in the same batch of plugin
+ * updates (found by the 2026-10-23 stats audit). Before it the same keys counted something else, so adding
+ * the two eras together makes a season figure that is neither. Wrapped counts
+ * these keys only from this match on, and any per-match rate of them divides
+ * by the games played from this match on, not by the whole season's games.
+ * A season that starts after it (Season 1 on) is unaffected.
+ */
+export const REDEFINED_STATS_FROM_MATCH = 324;
+export const REDEFINED_STATS: ReadonlySet<string> = new Set(['biles_landed', 'survivors_biled', 'clears', 'self_clears', 'insta_clears']);
 /** Weekly awards nobody wants on a trophy shelf. */
 const SHAME_AWARDS = new Set(['slow_ready', 'friendly_fire', 'group_hug']);
 
@@ -228,11 +244,18 @@ export function computeWrapped(
   const seasonTotals: Record<string, number> = {};
   const matchSkeets = new Map<string, MatchRef>();
   for (const s of statRows) {
+    // Old-definition rows of a redefined stat count for nothing (see
+    // REDEFINED_STATS_FROM_MATCH).
+    if (REDEFINED_STATS.has(s.stat) && s.match_id < REDEFINED_STATS_FROM_MATCH) continue;
     const bag = statTotals.get(s.player_id) ?? statTotals.set(s.player_id, {}).get(s.player_id)!;
     bag[s.stat] = (bag[s.stat] ?? 0) + s.value;
     seasonTotals[s.stat] = (seasonTotals[s.stat] ?? 0) + s.value;
     if (s.stat === 'skeets' && s.value > (matchSkeets.get(s.player_id)?.value ?? 0)) matchSkeets.set(s.player_id, { matchId: s.match_id, map: null, value: s.value });
   }
+  // Damage as SI is net of damage to incapped survivors (src/siDamage.ts) on
+  // every card, leader line and signature rank below. Netted once, here.
+  for (const [id, bag] of statTotals) statTotals.set(id, withNetDamageAsSi(bag));
+  Object.assign(seasonTotals, withNetDamageAsSi(seasonTotals));
   const crownsOf = (bag: Record<string, number> | undefined) => (bag?.crowns ?? 0) + (bag?.draw_crowns ?? 0);
 
   // Maps a player was present for, with the map score.
@@ -270,7 +293,10 @@ export function computeWrapped(
       prev = { match_id: r.match_id, player_id: r.player_id, ordinal: r.ordinal, s };
       const mine = mapBest.get(r.player_id) ?? mapBest.set(r.player_id, {}).get(r.player_id)!;
       for (const k of MAP_BEST_KEYS) {
-        const d = (Number(s[k]) || 0) - (Number(base[k]) || 0);
+        // Damage as SI per map is net of damage to incapped survivors, like
+        // the season figure (both snapshots are cumulative, so net then diff).
+        const at = (bag: Record<string, number>) => (k === DAMAGE_AS_SI ? netDamageAsSi(bag) : Number(bag[k]) || 0);
+        const d = at(s) - at(base);
         if (d <= 0) continue;
         if (d > (mine[k]?.value ?? 0)) mine[k] = { matchId: r.match_id, map: r.map, value: d };
         if (!banned.has(r.player_id) && d > (communityMapBest[k]?.value ?? 0)) {
@@ -355,6 +381,7 @@ export function computeWrapped(
 
   // Percentile pool: everyone with the full deck, per-match rates.
   const gamesOf = (id: string) => byPlayer.get(id)?.length ?? 0;
+  const redefinedGamesOf = (id: string) => (byPlayer.get(id) ?? []).filter((r) => r.match_id >= REDEFINED_STATS_FROM_MATCH).length;
   const pool = [...byPlayer.keys()].filter((id) => gamesOf(id) >= fullMin);
   const fixedTotals = (id: string) => {
     const rows = byPlayer.get(id) ?? [];
@@ -371,9 +398,20 @@ export function computeWrapped(
     const f = fixedBy.get(id) as Record<string, number> | undefined;
     if (f && key in f) return f[key] / g;
     if (key === 'crowns') return crownsOf(statTotals.get(id)) / g;
+    // A redefined stat only counts from REDEFINED_STATS_FROM_MATCH, so its
+    // rate is over the games played from there on.
+    if (REDEFINED_STATS.has(key)) {
+      const since = redefinedGamesOf(id);
+      return since > 0 ? (statTotals.get(id)?.[key] ?? 0) / since : 0;
+    }
     return (statTotals.get(id)?.[key] ?? 0) / g;
   };
-  const poolMetrics = new Map(SIGNATURE.map(([k]) => [k, pool.map((id) => metric(id, k))]));
+  // A redefined stat is compared only among players with the full-deck
+  // games from REDEFINED_STATS_FROM_MATCH on, the same gate the deck uses,
+  // so a rate over two late games cannot top it; its "of N" is that pool.
+  const redefinedPool = pool.filter((id) => redefinedGamesOf(id) >= fullMin);
+  const poolFor = (key: string) => (REDEFINED_STATS.has(key) ? redefinedPool : pool);
+  const poolMetrics = new Map(SIGNATURE.map(([k]) => [k, poolFor(k).map((id) => metric(id, k))]));
 
   const gamesSorted = [...byPlayer.keys()].map(gamesOf);
   const firstEverId = pm[0]?.id ?? null;
@@ -442,9 +480,11 @@ export function computeWrapped(
     let signature: WrappedPlayer['signature'] = null;
     if (tier === 'full') {
       signature = SIGNATURE.map(([key, label]) => {
-        const mine = metric(id, key);
+        // Outside a key's pool (too few games since match 324 for a
+        // redefined stat) there is no rank to claim: dropped below.
+        const mine = poolFor(key).includes(id) ? metric(id, key) : 0;
         const field = poolMetrics.get(key)!;
-        return { key, label, perMatch: Math.round(mine * 100) / 100, rank: 1 + field.filter((v) => v > mine).length, of: pool.length, mine };
+        return { key, label, perMatch: Math.round(mine * 100) / 100, rank: 1 + field.filter((v) => v > mine).length, of: poolFor(key).length, mine };
       }).filter((s) => s.mine > 0).sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key)).slice(0, 3)
         .map(({ mine: _m, ...s }) => s);
     }

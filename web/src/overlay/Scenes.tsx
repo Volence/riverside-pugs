@@ -7,7 +7,7 @@ import { emptyReveal, stepReveal, type DraftReveal } from './draftReveal';
 import { camSlots } from '../../../src/cast/layout';
 import { emptyQueue, stepAuto, type AutoCard } from './callouts';
 import {
-  boomerRate, CALLOUT_MS, DRAFT_SCENES, type CastDraftView, ITEM, skeetTotal, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
+  boomerRate, CALLOUT_MS, DRAFT_SCENES, type CastDraftView, ITEM, soloSkeets, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
@@ -280,7 +280,7 @@ const ROUND_SURV_COLS: RoundCol[] = [
   { key: 'sidmg', label: 'SI dmg', get: (s) => s.sidmg ?? 0 },
   { key: 'sikill', label: 'SI kills', get: (s) => s.sikill ?? 0 },
   { key: 'ck', label: 'Commons', get: (s) => s.ck ?? 0 },
-  { key: 'skeets', label: 'Skeets', get: (s) => (s.skeets ?? 0) + (s.team_skeets ?? 0) },
+  { key: 'skeets', label: 'Skeets', get: (s) => soloSkeets(s) ?? 0 },
   { key: 'tank_damage', label: 'Tank', get: (s) => s.tank_damage ?? 0 },
 ];
 const ROUND_INF_COLS: RoundCol[] = [
@@ -456,7 +456,8 @@ function Avatar({ p }: { p: CastPlayer }) {
 
 const ROLE_LABEL: Record<NonNullable<CastPlayer['role']>, string | null> = { captain: 'Captain', cocaptain: 'Co-captain', member: null };
 
-/** A PUG lineup card: SR and the career PUG numbers (owner's stat set). */
+/** A PUG lineup card: SR and the PUG numbers (owner's stat set), for the
+ *  scope the server chose: this season, or the career before a first PUG of it. */
 function PugCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: number }) {
   const c = p.career!;
   const winPct = c.wins + c.losses > 0 ? Math.round((c.wins / (c.wins + c.losses)) * 100) : null;
@@ -467,7 +468,7 @@ function PugCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: num
         <span class="ov-card__name">{p.name}</span>
         <span class="ov-card__line">
           {p.sr !== null && <b>{p.sr} SR</b>}
-          {c.matches} PUGs{winPct !== null ? ` · ${winPct}% won` : ''}
+          {`${c.scope ? `${c.scope}: ` : ''}${c.matches} PUGs${winPct !== null ? ` · ${winPct}% won` : ''}`}
         </span>
       </div>
       <dl class="ov-card__stats">
@@ -528,13 +529,13 @@ function Lineups({ studio, match }: { studio: StudioState; match: CastMatchView 
 
 /** The owner's stat set (2026-10-02), survivor columns then infected. Every
  *  one is in the 10 s LIVESTAT line and in the final box score. Skeets is
- *  solo plus team skeets, counted once; Boomer % is booms landed per boomer
+ *  solo skeets only (owner, 2026-10-23); Boomer % is booms landed per boomer
  *  life, absent (shown "-") with no boomers. */
 const STAT_COLS: { key: string; label: string; side: 'survivor' | 'infected'; get: (s: Record<string, number>) => number | null; pct?: boolean }[] = [
   { key: 'sidmg', label: 'SI dmg', side: 'survivor', get: (s) => s.sidmg ?? null },
   { key: 'sikill', label: 'SI kills', side: 'survivor', get: (s) => s.sikill ?? null },
   { key: 'ck', label: 'Commons', side: 'survivor', get: (s) => s.ck ?? null },
-  { key: 'skeets', label: 'Skeets', side: 'survivor', get: skeetTotal },
+  { key: 'skeets', label: 'Skeets', side: 'survivor', get: soloSkeets },
   { key: 'tank_damage', label: 'Tank dmg', side: 'survivor', get: (s) => s.tank_damage ?? null },
   { key: 'dps_landed', label: 'DPs', side: 'infected', get: (s) => s.dps_landed ?? null },
   { key: 'boomer_rate', label: 'Boomer %', side: 'infected', get: boomerRate, pct: true },
@@ -971,7 +972,7 @@ function InfectedRow({ i, tankMax, layout }: { i: CastInfected; tankMax: number;
         <span class="ov-mrow__name">{i.name}</span>
         <span class="ov-mrow__line">
           <b class="ov-mrow__state">{status}</b>
-          {i.dmg !== null && <span class="ov-mrow__dmg"><em>Dmg</em> {i.dmg}</span>}
+          {i.dmg !== null && <span class="ov-mrow__dmg" title="Damage this half, including to incapped survivors"><em>Dmg</em> {i.dmg}</span>}
         </span>
       </span>
     </div>
@@ -1229,7 +1230,7 @@ function BandCard({ i, tankMax }: { i: CastInfected; tankMax: number }) {
       <span class="ov-bc__bar"><span style={{ width: `${frac * 100}%` }} /></span>
       <span class="ov-bc__bottom">
         <span class="ov-bc__name">{i.name}</span>
-        {i.dmg !== null && <span class="ov-bc__dmg" title="Damage this round">{i.dmg}</span>}
+        {i.dmg !== null && <span class="ov-bc__dmg" title="Damage this round, including to incapped survivors">{i.dmg}</span>}
       </span>
     </div>
   );

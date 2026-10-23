@@ -45,6 +45,10 @@ describe('weekly routes', () => {
 
   it('the profile lists weekly awards', async () => {
     freezeWeek(db, '2026-09-21');
+    // The profile shows the current season's weeks by default (owner,
+    // 2026-10-23), so the season must have been running that week; a test
+    // database's season starts at the moment it was created.
+    db.prepare("UPDATE seasons SET started_at = '2026-09-01 00:00:00'").run();
     const r = await app.inject({ url: `/api/players/${P[0]}` });
     expect(r.json().weeklyAwards.find((a: { award: string }) => a.award === 'skeets')).toMatchObject({ count: 1, weeks: ['2026-09-21'] });
   });

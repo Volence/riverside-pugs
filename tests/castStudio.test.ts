@@ -295,7 +295,8 @@ describe('overlay feed', () => {
     const f = (await feed(await keyOf(CASTER))).json();
     const p = [...f.match.teams.a.players, ...f.match.teams.b.players].find((x: { steamid: string }) => x.steamid === IDS[0]);
     expect(p.stats).toMatchObject({ sidmg: 900, skeets: 1, team_skeets: 1, dps_landed: 2 });
-    expect(p.career).toMatchObject({ skeets: 8, dps: 5, boomerRate: 25 });
+    // Solo skeets only (owner, 2026-10-23): 4 + 1, the team skeets left out.
+    expect(p.career).toMatchObject({ skeets: 5, dps: 5, boomerRate: 25 });
   });
 
   it('folds skeets into runs by the Discord streak rules, newest first', async () => {

@@ -458,3 +458,9 @@ Totals reward volume (VII and Bone Breaker top almost everything). Pair each tot
     and dates. Another reason to freeze at season close.
 15. **Season boundary.** `seasons.ended_at` is still NULL. Decide the cut (probably the moment Season 1 starts) and compute
     then; this study's numbers stop at 2026-10-19 09:37 UTC.
+16. **Stats redefined at match 324 (2026-09-29).** `biles_landed`, `survivors_biled` (counted only when a bile hits,
+    pug-match 0.3.17), `clears`, `self_clears` and `insta_clears` changed meaning that day. Wrapped counts these five only
+    from match 324 on (`REDEFINED_STATS_FROM_MATCH` in src/seasonWrapped.ts), in totals and on signature cards, and a
+    per-match rate of one divides by the games played from match 324 on. Owner ruling 2026-10-23.
+17. **Damage as SI is net of damage to incapped survivors** (`dmg_to_incapped`, src/siDamage.ts) on every Wrapped card,
+    as everywhere on the site. Owner ruling 2026-10-23.

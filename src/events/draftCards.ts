@@ -1,4 +1,5 @@
 import type { DB } from '../db.js';
+import { netDamageAsSi } from '../siDamage.js';
 import { completedPug } from '../matchKinds.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { seasonSr } from '../rating.js';
@@ -73,7 +74,8 @@ export function playerCard(db: DB, steamid: string, season = currentSeasonId(db)
     sr: placing ? 0 : Math.round(seasonSr(db, steamid, season)), placing, trend, pugs: n,
     form: games.slice(0, FORM_LEN).map((g) => (g.winner === 'draw' || g.winner === null ? 'D' : g.winner === g.team ? 'W' : 'L')),
     survivor: { siDamage: per(games.reduce((t, g) => t + g.si_damage, 0)), commonKills: per(games.reduce((t, g) => t + g.common_kills, 0)) },
-    infected: { damageAsSi: per(total('damage_as_si')), dpsLanded: per(total('dps_landed')) },
+    // Net of damage to incapped survivors (src/siDamage.ts).
+    infected: { damageAsSi: per(netDamageAsSi(Object.fromEntries(totals))), dpsLanded: per(total('dps_landed')) },
     bestClass,
     skills: SKILLS.map((d) => ({ key: d.key, label: d.label, total: total(d.key) })).filter((s) => s.total > 0),
   };

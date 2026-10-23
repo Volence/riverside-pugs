@@ -5,16 +5,16 @@ import { teamChipsOf } from './teams/teams.js';
 import { profileEvents } from './events/profileEvents.js';
 import { alsoKnownAs } from './playerNames.js';
 import { playerMapBreakdown } from './playerStats.js';
-import { matchSrChange, playerSeasonState, publicStanding, rankView, seasonLadder, seasonRules, srUnder, topTen, type SeasonRules } from './seasonRules.js';
+import { matchSrChange, playerSeasonState, publicStanding, rankView, seasonLadder, seasonRules, srUnder, topTen, type PublicStanding, type SeasonRules } from './seasonRules.js';
 import { playerPastSeasons } from './seasons.js';
 import { getPlayer, currentSeasonId, getProfileFields, socialLinks } from './players.js';
 import { STAT_DEFS, statDef } from './statKeys.js';
-import { playerStandings, RANKED_MIN_GAMES } from './standings.js';
+import { playerStandings, RANKED_MIN_GAMES, standingMinGames, type Standing } from './standings.js';
 import { resolveCampaignForMap, campaignDisplayName } from './campaignRegistry.js';
 import { chemistryFor } from './chemistry.js';
 import { allTitles, endorsementSummary } from './endorsements.js';
 import { playerWeeklyAwards } from './weeklyStore.js';
-import { completedPug } from './matchKinds.js';
+import { completedPug, seasonFilter } from './matchKinds.js';
 import { notBannedSql } from './banState.js';
 
 /** Read models shared by the HTTP routes and the Discord slash commands, so a
@@ -47,7 +47,7 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
   // client side without a request per column. Two queries for the whole
   // table rather than one per player.
   const fixed = db.prepare(
-    `SELECT mp.player_id AS steamid,
+    `SELECT mp.player_id AS steamid, COUNT(*) AS statGames,
             COALESCE(SUM(mp.si_damage),0)    AS sidmg,
             COALESCE(SUM(mp.si_kills),0)     AS sikill,
             COALESCE(SUM(mp.common_kills),0) AS ck,
@@ -66,9 +66,14 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
   ).all(seasonId) as { steamid: string; stat: string; total: number }[];
 
   const statsBy = new Map<string, Record<string, number>>();
+  // Completed PUGs this season, the denominator of every per-game figure on
+  // the board. Not `games` (rated games), which can count an abandon loss on
+  // a match that has no stats.
+  const statGamesBy = new Map<string, number>();
   for (const r of fixed) {
-    const { steamid, ...rest } = r as { steamid: string } & Record<string, number>;
+    const { steamid, statGames, ...rest } = r as { steamid: string; statGames: number } & Record<string, number>;
     statsBy.set(steamid, { ...rest });
+    statGamesBy.set(steamid, statGames);
   }
   for (const r of skill) {
     // self-visibility stats are never rankable and must not ride along on a
@@ -99,6 +104,9 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
 
   return {
     season: { ...season, placementGames: rules.placementGames, ranks: rules.ranks, finalMinGames: rules.finalMinGames, ended },
+    // Games before a per-game stat ranks on the board or its leader cards:
+    // the same gate as the profile's standing badges (standing_min_games).
+    statMinGames: standingMinGames(db),
     matchesRated,
     rows: rows
       // A soft-reset season seeds a row for every returning player; until they
@@ -121,38 +129,79 @@ export function leaderboardData(db: DB, requestedSeason?: number, now = new Date
           finalRank: f ? f.final_rank : null,
           title: titles.get(r.steamid) ?? null,
           stats: statsBy.get(r.steamid) ?? {},
+          statGames: statGamesBy.get(r.steamid) ?? 0,
         };
       })
       .sort((x, y) => (y.sr ?? -1) - (x.sr ?? -1) || y.games - x.games),
   };
 }
 
+/** Which numbers a profile shows (owner, 2026-10-23): one season (the
+ *  current one by default) or the whole career. Every number on the page
+ *  follows it, so a season record never sits beside a career match count. */
+export type ProfileScope = { kind: 'season'; seasonId?: number } | { kind: 'career' };
+
+/** The scope a request asked for: `?season=career`, `?season=N`, or nothing
+ *  (the current season). Null for something that is neither. */
+export function parseProfileScope(raw: string | undefined): ProfileScope | null {
+  if (raw === undefined || raw === '') return { kind: 'season' };
+  if (raw === 'career') return { kind: 'career' };
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? { kind: 'season', seasonId: id } : null;
+}
+
 /** A player's profile, as GET /api/players/:steamid returns it. `viewer` is the
  *  signed-in steamid (or null), which decides whether self-only stats are
  *  included. Null when there is no such player. */
-export function profileData(db: DB, steamid: string, viewer: string | null) {
+export function profileData(db: DB, steamid: string, viewer: string | null, scope: ProfileScope = { kind: 'season' }) {
   const player = getPlayer(db, steamid);
   if (!player) return null;
-  const seasonId = currentSeasonId(db);
-
-  const r = db.prepare('SELECT mu, sigma, wins, losses FROM player_ratings WHERE player_id = ? AND season_id = ?')
-    .get(steamid, seasonId) as { mu: number; sigma: number; wins: number; losses: number } | undefined;
+  const currentId = currentSeasonId(db);
+  // null = the whole career. A season id that does not exist (a stale or
+  // mistyped link) reads as the current season rather than a 404 that looks
+  // like "no such player"; `scope` in the answer says what was shown, and the
+  // page drops the bad parameter.
+  const seasonOf = (id: number) =>
+    db.prepare('SELECT id, name, ended_at FROM seasons WHERE id = ?').get(id) as { id: number; name: string; ended_at: string | null } | undefined;
+  const seasonRow = scope.kind === 'career' ? null : seasonOf(scope.seasonId ?? currentId) ?? seasonOf(currentId)!;
+  const seasonId = seasonRow ? seasonRow.id : null;
+  // Appended to every completed-PUG filter below, so each number reads the
+  // same match set.
+  const inScope = `${completedPug('m')}${seasonFilter('m', seasonId)}`;
 
   const totals = db.prepare(
     `SELECT COUNT(*) AS games, COALESCE(SUM(mp.si_damage),0) AS siDamage, COALESCE(SUM(mp.si_kills),0) AS siKills,
             COALESCE(SUM(mp.common_kills),0) AS commonKills, COALESCE(SUM(mp.ff_dealt),0) AS ffDealt, COALESCE(SUM(mp.revives),0) AS revives
      FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE mp.player_id = ? AND ${completedPug('m')}`,
+     WHERE mp.player_id = ? AND ${inScope}`,
   ).get(steamid) as { games: number; siDamage: number; siKills: number; commonKills: number; ffDealt: number; revives: number };
+
+  // The record. A season's is its rating row (rated games, as the
+  // leaderboard counts them); a career's comes from the match results, since
+  // a merged or reset rating row is not a history.
+  let record: { wins: number; losses: number } = { wins: 0, losses: 0 };
+  const r = seasonId === null ? undefined
+    : db.prepare('SELECT mu, sigma, wins, losses FROM player_ratings WHERE player_id = ? AND season_id = ?')
+      .get(steamid, seasonId) as { mu: number; sigma: number; wins: number; losses: number } | undefined;
+  if (seasonId === null) {
+    record = db.prepare(
+      `SELECT COALESCE(SUM(CASE WHEN m.winner = mp.team THEN 1 ELSE 0 END), 0) AS wins,
+              COALESCE(SUM(CASE WHEN m.winner IN ('a', 'b') AND m.winner != mp.team THEN 1 ELSE 0 END), 0) AS losses
+       FROM match_players mp JOIN matches m ON m.id = mp.match_id
+       WHERE mp.player_id = ? AND ${inScope}`,
+    ).get(steamid) as { wins: number; losses: number };
+  } else if (r) {
+    record = { wins: r.wins, losses: r.losses };
+  }
 
   // Each rated game's place in its season decides what the row may show: a
   // placement game shows no SR change, the game that completed placement
   // shows the rank it placed into, and only later games show a change.
   const rulesBySeason = new Map<number, SeasonRules>();
   const rulesOf = (id: number): SeasonRules => {
-    let r = rulesBySeason.get(id);
-    if (!r) { r = seasonRules(db, id); rulesBySeason.set(id, r); }
-    return r;
+    let x = rulesBySeason.get(id);
+    if (!x) { x = seasonRules(db, id); rulesBySeason.set(id, x); }
+    return x;
   };
   const matches = (db.prepare(
     `SELECT m.id, m.campaign, m.ended_at, m.team_a_score, m.team_b_score, m.winner, mp.team,
@@ -162,7 +211,7 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
      FROM match_players mp
      JOIN matches m ON m.id = mp.match_id
      LEFT JOIN rating_history rh ON rh.match_id = m.id AND rh.player_id = mp.player_id
-     WHERE mp.player_id = ? AND ${completedPug('m')}
+     WHERE mp.player_id = ? AND ${inScope}
      ORDER BY m.id DESC LIMIT ?`,
   ).all(steamid, PROFILE_MATCH_LIMIT) as any[]).map((m) => ({
     id: m.id, campaign: m.campaign, endedAt: m.ended_at,
@@ -171,20 +220,64 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     ...matchSrChange(m.mu_after === null ? null : rulesOf(m.rh_season), m.game_no ?? undefined, m),
   }));
 
-  // The season's SR line, from the game that completed placement on.
-  const seasonRulesNow = rulesOf(seasonId);
-  const history = (db.prepare(
-    'SELECT match_id, mu_after, sigma_after FROM rating_history WHERE player_id = ? AND season_id = ? ORDER BY id',
-  ).all(steamid, seasonId) as any[])
-    .slice(Math.max(0, seasonRulesNow.placementGames - 1))
-    .map((h) => ({ matchId: h.match_id, sr: srUnder(seasonRulesNow, h.mu_after, h.sigma_after) }));
-  const ladderEntry = playerSeasonState(db, seasonId, steamid);
-  const standing = publicStanding(seasonRulesNow, ladderEntry, ladderEntry?.placed ? topTen(db, seasonId) : []);
+  // SR, rank, placement and the SR line belong to a season. A Career view
+  // has none of them: an SR from one season beside a career record is the
+  // mix this scope exists to stop.
+  let rating: { sr: number | null; mu?: number; sigma?: number; wins: number; losses: number } | null = null;
+  let season: (PublicStanding & {
+    id: number; name: string; current: boolean; placementGames: number; ranks: boolean; finalMinGames: number; games: number;
+    finalRank: number | null; of: number | null;
+  }) | null = null;
+  let history: { matchId: number; sr: number }[] = [];
+  let standings: Record<string, Standing> = {};
+  if (seasonId !== null && seasonRow) {
+    const rules = rulesOf(seasonId);
+    history = (db.prepare(
+      'SELECT match_id, mu_after, sigma_after FROM rating_history WHERE player_id = ? AND season_id = ? ORDER BY id',
+    ).all(steamid, seasonId) as any[])
+      .slice(Math.max(0, rules.placementGames - 1))
+      .map((h) => ({ matchId: h.match_id, sr: srUnder(rules, h.mu_after, h.sigma_after) }));
+    // A finished season reads its frozen result, as the leaderboard does, so
+    // a later merge or recompute cannot change what it says.
+    const frozen = seasonRow.ended_at === null ? undefined : db.prepare(
+      `SELECT r.sr, r.peak_sr, r.games, r.wins, r.losses, r.final_rank, r.rank_idx, r.placed,
+              (SELECT COUNT(*) FROM season_results x WHERE x.season_id = r.season_id AND x.final_rank IS NOT NULL) AS of
+       FROM season_results r WHERE r.season_id = ? AND r.player_id = ?`,
+    ).get(seasonId, steamid) as { sr: number; peak_sr: number; games: number; wins: number; losses: number; final_rank: number | null; rank_idx: number | null; placed: number; of: number } | undefined;
+    // A finished season's record is its frozen one whenever it has one, as
+    // on the leaderboard: a later merge or recompute must not change it.
+    if (frozen) record = { wins: frozen.wins, losses: frozen.losses };
+    let standing: PublicStanding;
+    let games: number;
+    if (frozen) {
+      standing = frozen.placed
+        ? { sr: frozen.sr, placing: null, rank: frozen.rank_idx === null ? null : rankView(frozen.rank_idx), peakSr: frozen.peak_sr, top10: frozen.final_rank !== null && frozen.final_rank <= 10 }
+        : { sr: null, placing: { played: frozen.games, of: rules.placementGames }, rank: null, peakSr: null, top10: false };
+      games = frozen.games;
+    } else {
+      const entry = playerSeasonState(db, seasonId, steamid);
+      standing = publicStanding(rules, entry, entry?.placed ? topTen(db, seasonId) : []);
+      games = entry?.games ?? 0;
+    }
+    season = {
+      id: seasonId, name: seasonRow.name, current: seasonRow.ended_at === null,
+      placementGames: rules.placementGames, ranks: rules.ranks, finalMinGames: rules.finalMinGames, games, ...standing,
+      finalRank: frozen?.final_rank ?? null, of: frozen ? frozen.of : null,
+    };
+    // mu and sigma would give away a placing player's SR, so they ride along
+    // only once it shows, and never for a frozen season.
+    rating = r || frozen ? {
+      sr: standing.sr, wins: record.wins, losses: record.losses,
+      ...(standing.placing || frozen || !r ? {} : { mu: r.mu, sigma: r.sigma }),
+    } : null;
+    // Top-5 places in that season among ranked players, per match.
+    standings = playerStandings(db, seasonId, steamid);
+  }
 
   const statRows = db.prepare(
     `SELECT mps.stat, SUM(mps.value) AS total
      FROM match_player_stats mps JOIN matches m ON m.id = mps.match_id
-     WHERE mps.player_id = ? AND ${completedPug('m')}
+     WHERE mps.player_id = ? AND ${inScope}
      GROUP BY mps.stat`,
   ).all(steamid) as { stat: string; total: number }[];
 
@@ -199,6 +292,20 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
 
   const fields = getProfileFields(db, steamid);
 
+  // The seasons this player can be looked at in: the current one always (it
+  // is the default view), and every other they played a completed PUG or a
+  // rated game in. `rated` counts rating_history, so a season whose only
+  // rated game was an abandon loss (no completed PUG) is still listed.
+  const seasonsPlayed = (db.prepare(
+    `SELECT s.id, s.name, s.ended_at,
+            (SELECT COUNT(*) FROM match_players mp JOIN matches m ON m.id = mp.match_id
+              WHERE mp.player_id = ? AND m.season_id = s.id AND ${completedPug('m')}) AS games,
+            (SELECT COUNT(*) FROM rating_history rh WHERE rh.player_id = ? AND rh.season_id = s.id) AS rated
+     FROM seasons s ORDER BY s.id DESC`,
+  ).all(steamid, steamid) as { id: number; name: string; ended_at: string | null; games: number; rated: number }[])
+    .filter((s) => s.id === currentId || s.games > 0 || s.rated > 0)
+    .map((s) => ({ id: s.id, name: s.name, current: s.ended_at === null, games: s.games, rated: s.rated }));
+
   return {
     player: {
       steamid: player.steamid,
@@ -212,6 +319,11 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
       // id is an internal join key and has no business leaving the server.
       twitchName: player.twitch_name ?? null,
     },
+    // What every number below covers, for the page to say so.
+    scope: seasonRow
+      ? { kind: 'season' as const, seasonId: seasonRow.id, name: seasonRow.name, current: seasonRow.ended_at === null }
+      : { kind: 'career' as const },
+    seasonsPlayed,
     // Other names they have played matches under, most played first, so a
     // player who renamed is still recognisable (src/playerNames.ts).
     alsoKnownAs: alsoKnownAs(db, steamid, player.name),
@@ -225,46 +337,44 @@ export function profileData(db: DB, steamid: string, viewer: string | null) {
     // and never folds into the PUG numbers below (src/matchKinds.ts).
     events: (viewer ? competitiveAccess(db, viewer) : competitivePublic(db)) ? profileEvents(db, steamid) : [],
     social: socialLinks(db, steamid),
-    // mu and sigma would give away a placing player's SR, so they ride along
-    // only once it shows.
-    rating: r ? {
-      sr: standing.sr, wins: r.wins, losses: r.losses,
-      ...(standing.placing ? {} : { mu: r.mu, sigma: r.sigma }),
-    } : null,
-    // This season under its rules: placement progress, rank, peak, Top 10.
-    season: {
-      id: seasonId, placementGames: seasonRulesNow.placementGames, ranks: seasonRulesNow.ranks,
-      finalMinGames: seasonRulesNow.finalMinGames, games: ladderEntry?.games ?? 0, ...standing,
-    },
-    // Frozen results from every finished season, newest first.
+    // The season's rating (null in Career view, or before a first game).
+    rating,
+    // The scoped record: the season's rated games, or the career's results.
+    record,
+    // The season under its rules: placement progress, rank, peak, Top 10;
+    // a finished season's frozen place. Null in Career view.
+    season,
+    // Frozen results from every finished season, newest first. Each row is
+    // labelled with its season, so it shows in every view.
     pastSeasons: playerPastSeasons(db, steamid),
     // Public on purpose: the owner wants forfeiting allowed but visible.
-    forfeits: forfeitRecord(db, steamid, completedPug('m')),
+    forfeits: forfeitRecord(db, steamid, inScope),
     totals, matches, history,
     statTotals,
-    // Top-5 places this season, per match, among ranked players. Keyed like
-    // the stat bag plus `winrate` and `boomer_rate`.
-    standings: playerStandings(db, seasonId, steamid),
+    // Top-5 places in the season, per match, among ranked players. Keyed like
+    // the stat bag plus `winrate` and `boomer_rate`. Empty in Career view:
+    // a career figure has no season place to badge.
+    standings,
     // Weekly award wins, grouped by award with the weeks. Shame awards are
     // left out: they are for the Discord post, not a player's page.
-    weeklyAwards: playerWeeklyAwards(db, steamid),
+    weeklyAwards: playerWeeklyAwards(db, steamid, seasonId),
     // Who they win with and lose to. Three lines, computed per request: it is
     // one grouped query over an indexed primary key.
-    chemistry: chemistryFor(db, steamid),
+    chemistry: chemistryFor(db, steamid, seasonId),
     // Aggregate and anonymous: counts per kind, a per match rate and the
-    // title. Never who gave them.
-    endorsements: endorsementSummary(db, steamid),
-    // How this player does on each map, across every match. Only meaningful
-    // once per-map capture exists, so older matches contribute win/loss with
-    // an empty stat bag rather than being omitted.
+    // title. Never who gave them. The title is the career's (it travels).
+    endorsements: endorsementSummary(db, steamid, seasonId),
+    // How this player does on each map in the scope. Only meaningful once
+    // per-map capture exists, so older matches contribute win/loss with an
+    // empty stat bag rather than being omitted.
     //
     // Campaign resolved here rather than inside playerMapBreakdown: that module
     // is pure statistics over the database and has no campaign import, and
     // pulling the registry into it for a presentation concern would drag
     // customCampaigns into the stats path too.
-    byMap: playerMapBreakdown(db, steamid).map((r) => {
-      const slug = resolveCampaignForMap(db, r.map);
-      return { ...r, campaignName: slug ? campaignDisplayName(db, slug) : null };
+    byMap: playerMapBreakdown(db, steamid, seasonId).map((row) => {
+      const slug = resolveCampaignForMap(db, row.map);
+      return { ...row, campaignName: slug ? campaignDisplayName(db, slug) : null };
     }),
     // Contract (web/src/api.ts: Profile['privateStatTotals']) is populated-or-
     // null, never an empty object: Profile.tsx gates its private-stats panel

@@ -16,6 +16,14 @@ export type MatchVisibility = 'public' | 'participants' | 'staff';
 
 const COMPLETED_STATE = 'completed';
 
+/** ` AND <alias>.season_id = N` for one season, '' for all of them (a
+ *  profile's Career view). The id is forced to an integer before it goes
+ *  into the SQL, so the fragment can be appended to any match filter. */
+export function seasonFilter(alias: string, seasonId: number | null | undefined): string {
+  if (seasonId === null || seasonId === undefined) return '';
+  return ` AND ${alias}.season_id = ${Math.trunc(Number(seasonId))}`;
+}
+
 export function completedPug(alias?: string): string {
   const p = alias ? `${alias}.` : '';
   return `${p}state = '${COMPLETED_STATE}' AND ${p}kind = 'pug'`;

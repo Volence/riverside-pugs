@@ -24,7 +24,7 @@ describe('renderSkeetStreak', () => {
     setup('VII');
     const p = renderSkeetStreak(db, row(), 'https://pug.test');
     expect(p.content).toBe(
-      `**VII** hit a **triple skeet** in match ${matchId} on No Mercy, 3 skeets in 1.7 seconds. `
+      `**VII** hit a **triple skeet** in match ${matchId} on No Mercy, 3 skeets (team skeets count) in 1.7 seconds. `
       + `[Watch it](<https://pug.test/match/${matchId}?ordinal=3&half=1&t=248080>)`,
     );
     expect(p.mentionUserIds).toEqual([]);
@@ -36,14 +36,14 @@ describe('renderSkeetStreak', () => {
     setup('VII');
     const p = renderSkeetStreak(db, row({ count: 4, span_ms: 3200 }), 'https://pug.test');
     expect(p.content).toContain('hit a **quad skeet**');
-    expect(p.content).toContain('4 skeets in 3.2 seconds');
+    expect(p.content).toContain('4 skeets (team skeets count) in 3.2 seconds');
   });
 
   it('renders a 5-or-more streak', () => {
     setup('VII');
     const p = renderSkeetStreak(db, row({ count: 5, span_ms: 4990 }), 'https://pug.test');
     expect(p.content).toContain('hit a **5-skeet streak**');
-    expect(p.content).toContain('5 skeets in 5.0 seconds');
+    expect(p.content).toContain('5 skeets (team skeets count) in 5.0 seconds');
   });
 
   it('escapes a name with markdown and a mass-mention', () => {

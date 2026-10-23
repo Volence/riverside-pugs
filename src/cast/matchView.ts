@@ -4,11 +4,12 @@ import { stopAfterMap } from '../stopPoint.js';
 import { phaseFor, roundInProgress, currentOrdinal } from '../liveView.js';
 import { playerSeasonState } from '../seasonRules.js';
 import { currentSeasonId } from '../players.js';
-import { completedPug } from '../matchKinds.js';
+import { completedPug, seasonFilter } from '../matchKinds.js';
 import { getSetting } from '../settings.js';
 import { sideRow, sideName } from '../bookings/bookings.js';
 import { activeMembers, getTeam } from '../teams/teams.js';
 import { statDef } from '../statKeys.js';
+import { withNetDamageAsSi } from '../siDamage.js';
 import { STREAK_MIN, streakRuns } from '../skeetStreaks.js';
 import { boomerRate } from './types.js';
 import { liveWinLine } from '../winProb.js';
@@ -73,20 +74,45 @@ function career(db: DB, steamid: string, nowMs = Date.now()): CastPlayer['career
   return value;
 }
 
+/**
+ * The lineup card's PUG numbers (owner, 2026-10-23: say which scope).
+ *
+ * This season's, labelled with the season's name. A player with no PUG yet
+ * this season (every returning player on a season's first day) gets their
+ * career numbers instead, labelled Career, rather than a card of zeros. One
+ * match set either way, so the record, the match count and the stats agree:
+ * the old card summed W-L over every season's rating rows beside an all-time
+ * match count.
+ */
 function careerUncached(db: DB, steamid: string): CastPlayer['career'] {
-  const wl = db.prepare('SELECT COALESCE(SUM(wins), 0) AS w, COALESCE(SUM(losses), 0) AS l FROM player_ratings WHERE player_id = ?')
-    .get(steamid) as { w: number; l: number };
-  const played = db.prepare(
-    `SELECT COUNT(*) AS n FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE mp.player_id = ? AND ${completedPug('m')} AND m.voided_at IS NULL`,
-  ).get(steamid) as { n: number };
+  const season = db.prepare('SELECT id, name FROM seasons WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1').get() as { id: number; name: string };
+  const forScope = (seasonId: number | null) => {
+    const done = `${completedPug('m')} AND m.voided_at IS NULL${seasonFilter('m', seasonId)}`;
+    const wl = db.prepare(
+      `SELECT COUNT(*) AS n,
+              COALESCE(SUM(CASE WHEN m.winner = mp.team THEN 1 ELSE 0 END), 0) AS w,
+              COALESCE(SUM(CASE WHEN m.winner IN ('a', 'b') AND m.winner != mp.team THEN 1 ELSE 0 END), 0) AS l
+       FROM match_players mp JOIN matches m ON m.id = mp.match_id
+       WHERE mp.player_id = ? AND ${done}`,
+    ).get(steamid) as { n: number; w: number; l: number };
+    return { done, wl };
+  };
+  let scope = season.name;
+  let { done, wl } = forScope(season.id);
+  if (wl.n === 0) {
+    scope = 'Career';
+    ({ done, wl } = forScope(null));
+  }
   const sum = (stat: string): number => (db.prepare(
     `SELECT COALESCE(SUM(s.value), 0) AS v FROM match_player_stats s JOIN matches m ON m.id = s.match_id
-     WHERE s.player_id = ? AND s.stat = ? AND ${completedPug('m')} AND m.voided_at IS NULL`,
+     WHERE s.player_id = ? AND s.stat = ? AND ${done}`,
   ).get(steamid, stat) as { v: number }).v;
   return {
-    matches: played.n, wins: wl.w, losses: wl.l,
-    skeets: sum('skeets') + sum('team_skeets'), dps: sum('dps_landed'),
+    scope,
+    matches: wl.n, wins: wl.w, losses: wl.l,
+    // Solo skeets: "Skeets" means the solo stat wherever players compare
+    // themselves (owner, 2026-10-23); team skeets are their own stat.
+    skeets: sum('skeets'), dps: sum('dps_landed'),
     boomerRate: boomerRate({ boomer_spawns: sum('boomer_spawns'), boom_successes: sum('boom_successes') }),
   };
 }
@@ -198,7 +224,9 @@ export function buildMatchView(
     // Null while placing: a caster overlay is as public as it gets.
     const state = srOn ? playerSeasonState(db, season, r.steamid) : null;
     return {
-      steamid: r.steamid, name: r.name, avatar: r.avatar, stats,
+      // Damage as SI on air is net of damage to incapped survivors
+      // (src/siDamage.ts), like every page of the site.
+      steamid: r.steamid, name: r.name, avatar: r.avatar, stats: withNetDamageAsSi(stats),
       sr: state?.placed ? state.sr : null,
       // PUG numbers only on a PUG (owner, 2026-10-02): a scrim or a
       // tournament lineup is the team's roster, not anyone's PUG record.
@@ -299,7 +327,7 @@ function lastRoundResult(
   }
   const players = [...bags].flatMap(([steamid, stats]) => {
     const team = teamOf.get(steamid);
-    return team ? [{ steamid, name: nameOf.get(steamid) ?? steamid, team, stats }] : [];
+    return team ? [{ steamid, name: nameOf.get(steamid) ?? steamid, team, stats: withNetDamageAsSi(stats) }] : [];
   });
   const map = scored.find((s) => s.ordinal === last.ordinal)?.map ?? planned[last.ordinal] ?? '';
   return { mapNumber: last.ordinal + 1, map, half: last.half as 1 | 2, halves, players };
@@ -309,7 +337,9 @@ function lastRoundResult(
  *  by the Discord streak rules (src/skeetStreaks.ts streakRuns: same player,
  *  same map half, each skeet within 5 s of the run's first). A run is one
  *  entry, at its newest skeet, so the producer sees one "Double skeet" that
- *  replaces the "Skeet" it grew from. */
+ *  replaces the "Skeet" it grew from. A run counts every skeet event, team
+ *  skeets included (events do not tell them apart); the card says so
+ *  (web/src/overlay/callouts.ts). */
 function highlightEvents(
   db: DB, matchId: number, nameOf: Map<string, string>, teamOf: Map<string, 'a' | 'b'>,
 ): CastEvent[] {
