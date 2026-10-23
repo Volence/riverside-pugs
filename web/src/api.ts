@@ -871,7 +871,9 @@ export interface Profile {
   scope?: ProfileScopeInfo;
   /** Seasons the profile can be viewed in: the current one, then any other
    *  with a completed PUG, newest first. */
-  seasonsPlayed?: { id: number; name: string; current: boolean; games: number }[];
+  /** `games` is completed PUGs, `rated` rated games (an abandon loss is
+   *  rated with no completed PUG). */
+  seasonsPlayed?: { id: number; name: string; current: boolean; games: number; rated?: number }[];
   /** The scoped season's rating. sr is null and mu/sigma absent while
    *  placing; null in Career view or before a first game. */
   rating: { sr: number | null; mu?: number; sigma?: number; wins: number; losses: number } | null;

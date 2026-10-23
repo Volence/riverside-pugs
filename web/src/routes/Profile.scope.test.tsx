@@ -109,6 +109,17 @@ describe('profile scope', () => {
   });
 });
 
+describe('profile scope: an abandon loss only', () => {
+  it('shows the record rather than "No matches yet", and no zero stat panels', async () => {
+    mockApi.profile.mockResolvedValue({ ...dayOne, rating: { sr: null, wins: 0, losses: 1 }, record: { wins: 0, losses: 1 } });
+    const { container } = render(<Profile steamid="1" />);
+    await screen.findByText('0W 1L');
+    expect(screen.queryByText('No matches in Season 1 yet')).toBeNull();
+    expect(container.querySelector('.figures')).toBeNull();
+    expect(screen.queryByText('Season 1 totals')).toBeNull();
+  });
+});
+
 describe('profile scope under the router', () => {
   /** A button that navigates, standing in for a link on the page. */
   function Go({ to }: { to: string }) {
