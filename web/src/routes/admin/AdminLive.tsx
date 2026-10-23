@@ -100,7 +100,7 @@ export function AdminLive({ isAdmin }: { isAdmin: boolean }) {
           {/* The same overview the panels below are built from, so the table
               and the cards above it can never disagree about a match. */}
           <OpenMatchesPanel open={overview.data.open} busy={panels.busy} run={panels.run} />
-          <div class="admin-split admin-split--even">
+          <div class="admin-split adm-live-split">
             <AdminServersPanel servers={overview.data.servers} busy={panels.busy} run={panels.run}
               health={overview.data.captureHealth} canManage={isAdmin} onChat={openChat} />
             <AdminQueuePanel queue={overview.data.queue} lobbies={overview.data.lobbies} busy={panels.busy} run={panels.run} />

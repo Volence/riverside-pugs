@@ -4381,3 +4381,37 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
   .prof__matches td.num { white-space: nowrap; }
   .prof .headliner__stats { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--sp-3); }
 }
+
+/* ===== Batch E: admin desks touchup (adm-*) =====
+   Staff desks only. Controls never push the page wider than the phone: a file
+   input or a long select shrinks inside its card instead of overflowing it. */
+.page--admin .admin-body input,
+.page--admin .admin-body select,
+.page--admin .admin-body textarea { max-width: 100%; min-width: 0; }
+.page--admin .admin-body input[type='file'] { width: 100%; }
+.page--admin .admin-body label { overflow-wrap: anywhere; }
+
+/* Live board: the servers table carries the pick order, chat, pool, restart
+   and SourceTV controls, so it takes the full width with the queue under it
+   instead of scrolling sideways inside half the page. */
+.adm-live-split { grid-template-columns: minmax(0, 1fr); }
+
+/* Status words read as small chips, the same shape as the event status chip. */
+.page--admin .admin-status {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* Tables: digits line up, headers stay quiet. */
+.page--admin .admin-table .num { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Deploy desk: the Review button keeps its word on one line; the commit
+   subject wraps beside it. */
+.deploy-commit > span { min-width: 0; overflow-wrap: anywhere; }
+.deploy-commit > .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* Campaign cards: the install list and the actions wrap on a phone. */
+.page--admin .admin-list li { overflow-wrap: anywhere; }

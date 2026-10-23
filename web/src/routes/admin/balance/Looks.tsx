@@ -70,24 +70,26 @@ export function Looks() {
         return (
           <section key={slug} class="stack">
             <h3>{campaignName(slug)}</h3>
-            <table class="admin-table">
-              <thead>
-                <tr><th>Look</th><th>Matches</th><th>Halves</th><th>Avg survivor score</th><th>vs Default</th><th>Reached saferoom</th><th>Avg alive at end</th></tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.title}>
-                    <td>{r.title}</td>
-                    <td class="num">{r.matches}</td>
-                    <td class="num">{r.rounds}</td>
-                    <td class="num">{Math.round(r.avgScore)}</td>
-                    <td class="num">{deltaLabel(r, base)}</td>
-                    <td class="num">{finishLabel(r.finishRate)}</td>
-                    <td class="num">{r.avgAlive === null ? 'n/a' : r.avgAlive.toFixed(1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div class="table-wrap">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>Look</th><th>Matches</th><th>Halves</th><th>Avg survivor score</th><th>vs Default</th><th>Reached saferoom</th><th>Avg alive at end</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.title}>
+                      <td>{r.title}</td>
+                      <td class="num">{r.matches}</td>
+                      <td class="num">{r.rounds}</td>
+                      <td class="num">{Math.round(r.avgScore)}</td>
+                      <td class="num">{deltaLabel(r, base)}</td>
+                      <td class="num">{finishLabel(r.finishRate)}</td>
+                      <td class="num">{r.avgAlive === null ? 'n/a' : r.avgAlive.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         );
       })}
