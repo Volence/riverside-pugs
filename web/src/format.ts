@@ -162,6 +162,62 @@ export const STAT_LABELS: Record<string, string> = {
   ff: 'FF', rev: 'Revives',
 };
 
+/** One plain-English line per stat, shown when someone hovers a column
+ *  header. Same keys as STAT_LABELS (format.test.ts checks every label has
+ *  one); the labels stay short because the tables are wide. */
+export const STAT_HELP: Record<string, string> = {
+  skeets: 'Hunters you killed mid-pounce with nobody else having damaged them.',
+  team_skeets: 'Mid-pounce hunter kills you finished after teammates had already damaged the hunter.',
+  skeets_hurt: 'Skeets on a hunter that was already damaged. Already counted in Skeets or Team.',
+  skeet_assists: 'Times you helped damage a pouncing hunter that a teammate then skeeted.',
+  skeets_shotgun: 'Skeets landed with a shotgun.',
+  skeets_sniper: 'Skeets landed with a sniper rifle.',
+  skeets_melee: 'Skeets landed with a melee weapon.',
+  deadstops: 'Pouncing hunters knocked out of the air with a shove.',
+  boomer_pops: 'Boomers you killed before they vomited on anyone.',
+  crowns: 'Witches you killed before they hurt anyone.',
+  draw_crowns: 'Crowns on a witch that had already been hurt or startled.',
+  tongue_cuts: "Times you cut a smoker's tongue with a melee weapon.",
+  self_clears: 'Times you freed yourself from a smoker by killing or shoving it.',
+  rock_skeets: 'Tank rocks you shot out of the air.',
+  clears: 'Times you freed a pinned teammate.',
+  insta_clears: 'Times you freed a pinned teammate within 0.75 seconds.',
+  tongue_clears: 'Times you freed a teammate from a smoker before they were dragged in.',
+  dmg_as_hunter: 'Damage you dealt to survivors as a hunter.',
+  dmg_as_smoker: 'Damage you dealt to survivors as a smoker.',
+  dmg_as_boomer: 'Damage you dealt to survivors as a boomer.',
+  dmg_as_tank: 'Damage you dealt to survivors as the tank.',
+  dmg_to_incapped: 'Infected damage that only drained an incapped survivor, already in Damage as SI.',
+  quad_caps: 'All four survivors pinned at once and none back on their feet before the round ended.',
+  times_quadded: 'Times you were caught in a quad cap.',
+  dps_landed: 'Pounces from high enough up to do bonus damage on landing.',
+  pounce_damage_high: 'Damage your high pounces did on impact.',
+  biles_landed: 'Vomits that hit at least one survivor.',
+  survivors_biled: 'Survivors hit by your vomit.',
+  boomer_spawns: 'Boomer lives you played.',
+  boomer_rate: 'Share of your boomer lives that got vomit on at least one survivor.',
+  boom_successes: 'Boomer lives that got vomit on at least one survivor, by a direct hit or the explosion.',
+  boomed_vomit: 'Survivors you vomited on directly.',
+  boomed_proxy: "Survivors covered by your boomer's death explosion.",
+  tank_rocks_landed: 'Tank rocks you threw that hit a survivor.',
+  times_skeeted: 'Times you were skeeted as a hunter.',
+  times_deadstopped: 'Times your pounce was shoved out of the air.',
+  tank_damage: 'Damage you dealt to tanks.',
+  damage_as_si: 'Damage you dealt to survivors as special infected, the tank included.',
+  tank_punches: 'Tank punches you landed on survivors.',
+  hp: 'Health right now.',
+  ck: 'Common infected you killed.',
+  sidmg: 'Damage you dealt to special infected, not counting tanks.',
+  sikill: 'Special infected you killed.',
+  ff: 'Damage you dealt to your own teammates.',
+  rev: 'Teammates you revived.',
+};
+
+/** The hover line for a stat column, or undefined for a key with none. */
+export function statHelp(key: string): string | undefined {
+  return STAT_HELP[key];
+}
+
 /** Live stat columns, in display order and grouped. The groups exist so the
  *  table can draw a divider between families: with fifteen numeric columns,
  *  ungrouped, it reads as an undifferentiated wall.

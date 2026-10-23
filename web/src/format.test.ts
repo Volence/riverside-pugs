@@ -5,6 +5,7 @@ import {
   deriveLiveStats, fmtLatency, mapName, survivalLabel, survivalNote, sortMapRows, MIN_SURVIVAL_SAMPLE, DEAD_STAT_KEYS,
   STAT_FAMILIES, SUBSET_STAT_KEYS,
   FEATURED_STAT_KEYS, statLeaders, chapterName, chapterOrdinal, qualifiedMapName,
+  STAT_LABELS, STAT_HELP, statHelp,
 } from './format';
 
 describe('campaignName', () => {
@@ -689,5 +690,20 @@ describe('chapterName', () => {
   // Stripping must never leave an empty label.
   it('keeps the raw value when stripping would empty it', () => {
     expect(chapterName('1:', 'ignored')).toBe('1:');
+  });
+});
+
+describe('STAT_HELP', () => {
+  it('has a one-line meaning for every labelled stat, and nothing else', () => {
+    expect(Object.keys(STAT_HELP).sort()).toEqual(Object.keys(STAT_LABELS).sort());
+    for (const [k, v] of Object.entries(STAT_HELP)) {
+      expect(v.length, k).toBeGreaterThan(10);
+      expect(v, k).not.toMatch(/\n|\u2014/);
+    }
+  });
+
+  it('answers undefined for a key it does not know', () => {
+    expect(statHelp('ck')).toBe('Common infected you killed.');
+    expect(statHelp('nope')).toBeUndefined();
   });
 });

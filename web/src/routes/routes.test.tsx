@@ -1324,6 +1324,17 @@ describe('StatTable comparison', () => {
     expect(totals).toEqual([['2', '2'], ['1', '1']]);
   });
 
+  it('explains each stat column on hover', () => {
+    const { container } = render(
+      <StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets', 'ck']} />,
+    );
+    const titles = [...container.querySelectorAll('thead th')].slice(1).map((th) => th.getAttribute('title'));
+    expect(titles).toEqual([
+      'Hunters you killed mid-pounce with nobody else having damaged them.',
+      'Common infected you killed.',
+    ]);
+  });
+
   it('omits total rows by default', () => {
     render(<StatTable teamA={markRows([1])} teamB={markRows([2])} cols={['skeets']} />);
     expect(screen.queryByText('Team total')).toBeNull();

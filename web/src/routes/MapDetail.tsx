@@ -1,6 +1,6 @@
 import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, survivalLabel } from '../format';
+import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, statHelp, survivalLabel } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
@@ -155,7 +155,7 @@ export function MapDetail({ map }: { map: string }) {
                 <th class="num">W</th>
                 <th class="num">L</th>
                 <th class="num">Win %</th>
-                {cols.map((k) => <th class="num" key={k}>{labelFor(k)}</th>)}
+                {cols.map((k) => <th class="num" key={k} title={statHelp(k)}>{labelFor(k)}</th>)}
               </tr>
             </thead>
             <tbody>
