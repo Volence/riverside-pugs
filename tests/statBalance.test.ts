@@ -44,6 +44,11 @@ describe('S, the shrunk damage score', () => {
     finished({ x: 99999, y: 99999 }, { kind: 'scrim' });
     finished({ x: 99999, y: 99999 }, { state: 'aborted' });
     finished({ z: 9999 }); // one freak game
+    // Not real games: a row the rating step left out, and a sub from map 2.
+    const unrated = finished({ x: 99999 });
+    db.prepare("UPDATE match_players SET rated = 0 WHERE match_id = ?").run(unrated);
+    const sub = finished({ x: 99999 });
+    db.prepare("UPDATE match_players SET joined_map = 1 WHERE match_id = ?").run(sub);
     const avg = averageSiDamage(db);
     expect(avg).toBeCloseTo((3 * 8000 + 3 * 2000 + 9999) / 7, 6);
     const lines = statLines(db, ['x', 'y', 'z', 'nobody'], avg);
