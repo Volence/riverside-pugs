@@ -67,7 +67,7 @@ describe('Leaderboard stats per game', () => {
 
   it('leads with the best per-game figure among ranked players past the minimum', async () => {
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => screen.getByRole('link', { name: 'vet' }));
+    await waitFor(() => screen.getAllByRole('link', { name: 'vet' }));
     // vet 1.5/game beats grinder 1.0; fluke (6 games) and placer (placing) are off the card.
     expect(card(container).textContent).toContain('Skeets / game');
     expect(card(container).querySelector('.statleader__name')!.textContent).toBe('vet');
@@ -78,33 +78,35 @@ describe('Leaderboard stats per game', () => {
 
   it('switches cards to season totals, still for ranked players only', async () => {
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => screen.getByRole('link', { name: 'vet' }));
+    await waitFor(() => screen.getAllByRole('link', { name: 'vet' }));
     fireEvent.click(screen.getByRole('button', { name: 'Totals' }));
     expect(card(container).querySelector('.statleader__name')!.textContent).toBe('grinder');
     expect(card(container).textContent).not.toContain('placer');
   });
 
+  // The names show twice for the top three: the podium (master's top three
+  // cards) and the table, so links are looked up with getAll.
   it('keeps the table in SR order and has no Top rated card', async () => {
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => screen.getByRole('link', { name: 'vet' }));
-    const names = [...container.querySelectorAll('tbody .pname a')].map((a) => a.textContent);
+    await waitFor(() => screen.getAllByRole('link', { name: 'vet' }));
+    const names = [...container.querySelectorAll('tbody .lb__pcol a')].map((a) => a.textContent);
     expect(names).toEqual(['vet', 'grinder', 'fluke', 'placer']);
     expect(screen.queryByText('Top rated')).toBeNull();
   });
 
   it('greys a per-game cell under the minimum', async () => {
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => screen.getByRole('link', { name: 'fluke' }));
+    await waitFor(() => screen.getAllByRole('link', { name: 'fluke' }));
     const cell = container.querySelector('td[title^="Under 10 games"]');
     expect(cell?.textContent).toBe('5.0');
   });
 
   it('gives no place to a ranked player under the minimum when sorted by a stat', async () => {
     const { container } = render(<Leaderboard me={null} />);
-    await waitFor(() => screen.getByRole('link', { name: 'fluke' }));
+    await waitFor(() => screen.getAllByRole('link', { name: 'fluke' }));
     fireEvent.click(screen.getByTitle('Sort the table by Skeets'));
     const rows = [...container.querySelectorAll('tbody tr:not(.lb__group)')].map((tr) => [
-      tr.querySelector('.pname a')?.textContent, tr.querySelector('td.rank')?.textContent,
+      tr.querySelector('.lb__pcol a')?.textContent, tr.querySelector('td.rank')?.textContent,
     ]);
     // vet 1.5, grinder 1.0 ranked; fluke (6 games) listed with no place.
     expect(rows.slice(0, 3)).toEqual([['vet', '01'], ['grinder', '02'], ['fluke', '–']]);
