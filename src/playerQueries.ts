@@ -151,16 +151,19 @@ export function parseProfileScope(raw: string | undefined): ProfileScope | null 
 
 /** A player's profile, as GET /api/players/:steamid returns it. `viewer` is the
  *  signed-in steamid (or null), which decides whether self-only stats are
- *  included. Null when there is no such player, or no such season. */
+ *  included. Null when there is no such player. */
 export function profileData(db: DB, steamid: string, viewer: string | null, scope: ProfileScope = { kind: 'season' }) {
   const player = getPlayer(db, steamid);
   if (!player) return null;
   const currentId = currentSeasonId(db);
-  // null = the whole career.
-  const seasonId = scope.kind === 'career' ? null : scope.seasonId ?? currentId;
-  const seasonRow = seasonId === null ? null
-    : db.prepare('SELECT id, name, ended_at FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string; ended_at: string | null } | undefined;
-  if (seasonId !== null && !seasonRow) return null;
+  // null = the whole career. A season id that does not exist (a stale or
+  // mistyped link) reads as the current season rather than a 404 that looks
+  // like "no such player"; `scope` in the answer says what was shown, and the
+  // page drops the bad parameter.
+  const seasonOf = (id: number) =>
+    db.prepare('SELECT id, name, ended_at FROM seasons WHERE id = ?').get(id) as { id: number; name: string; ended_at: string | null } | undefined;
+  const seasonRow = scope.kind === 'career' ? null : seasonOf(scope.seasonId ?? currentId) ?? seasonOf(currentId)!;
+  const seasonId = seasonRow ? seasonRow.id : null;
   // Appended to every completed-PUG filter below, so each number reads the
   // same match set.
   const inScope = `${completedPug('m')}${seasonFilter('m', seasonId)}`;
