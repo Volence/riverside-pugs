@@ -410,8 +410,12 @@ export class DiscordSync {
     if (decision.kind !== 'post') return false;
 
     const ref = String(now);
+    // Outside the try, so whatever fails after a successful send still knows
+    // which message is out there: an alert that posted must be recorded as
+    // open, or nothing would ever close it.
+    let messageId: string | null = null;
     try {
-      const messageId = await this.deps.transport.send(cfg.channelId, renderQueueAlert({
+      messageId = await this.deps.transport.send(cfg.channelId, renderQueueAlert({
         count, size: QUEUE_SIZE, roleId: cfg.roleId, publicUrl: this.deps.publicUrl,
       }));
       saveMessage(db, { kind: 'alert', ref, channelId: cfg.channelId, messageId, state: 'open' });
@@ -420,10 +424,18 @@ export class DiscordSync {
     } catch (err) {
       // Never fatal, and recorded all the same: the cooldown counts from a
       // failed attempt too, or a Discord outage would retry on every pass for
-      // the rest of the evening.
+      // the rest of the evening. A post that went out but whose save threw is
+      // saved again as open, with its id, so a later pass can still close it.
       console.error('[discord] queue alert failed:', err);
-      saveMessage(db, { kind: 'alert', ref, channelId: cfg.channelId, messageId: '', state: 'failed' });
-      return false;
+      try {
+        saveMessage(db, {
+          kind: 'alert', ref, channelId: cfg.channelId, messageId: messageId ?? '', state: messageId ? 'open' : 'failed',
+        });
+        if (messageId) this.alertShows.set(messageId, count);
+      } catch (saveErr) {
+        console.error('[discord] recording the queue alert failed:', saveErr);
+      }
+      return messageId !== null && cfg.channelId === this.deps.channelId;
     }
   }
 
