@@ -18,8 +18,8 @@ export function DraftTeamsPanel({ eventId, slug = '', canEdit, status, startsAt,
   const { busy, error, run } = useAction(() => { reload(); onChange?.(); });
   // The clock or a captain can make the last pick: show the teams without a page reload.
   useHubEvent([`draft:${eventId}`], reload);
-  if (loadError) return <Panel><h3>Make teams</h3><p class="error">Could not load the teams.</p></Panel>;
-  if (!data) return <Panel><h3>Make teams</h3></Panel>;
+  if (loadError) return <Panel class="evdesk__panel" id="evdesk-teams"><h3>Make teams</h3><p class="error">Could not load the teams.</p></Panel>;
+  if (!data) return <Panel class="evdesk__panel" id="evdesk-teams"><h3>Make teams</h3></Panel>;
   const published = data.teamsMadeAt !== null;
   const over = status === 'cancelled' || status === 'finished';
   const write = canEdit && !over;
@@ -30,8 +30,9 @@ export function DraftTeamsPanel({ eventId, slug = '', canEdit, status, startsAt,
   const avgOf = (t: DraftTeamView) => fair?.teams.find((f) => f.captain === t.captain.steamid)?.avgSr;
 
   return (
-    <Panel class="maketeams">
+    <Panel class="maketeams evdesk__panel" id="evdesk-teams">
       <h3>Make teams</h3>
+      <p class="evdesk__help">Balance the teams by SR or run the live captains' draft, then publish them.</p>
       {published && <p>Teams published {fmtTime(data.teamsMadeAt)}</p>}
       {!canEdit && !published && <p class="muted">Read only: admins run events.</p>}
       {error && <p class="error" role="alert">{error}</p>}

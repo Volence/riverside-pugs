@@ -243,8 +243,8 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventEntries(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
   const [swapPick, setSwapPick] = useState<SwapPick | null>(null);
-  if (loadError) return <Panel><h3>Entries</h3><p class="error">Could not load the entries.</p></Panel>;
-  if (!data) return <Panel><h3>Entries</h3></Panel>;
+  if (loadError) return <Panel class="evdesk__panel" id="evdesk-entries"><h3>Entries</h3><p class="error">Could not load the entries.</p></Panel>;
+  if (!data) return <Panel class="evdesk__panel" id="evdesk-entries"><h3>Entries</h3></Panel>;
   const locked = data.lockedAt !== null;
   const showMove = !SEEDS_CLOSED.includes(status);
   const canOpenCheckin = checkin && status === 'registration';
@@ -286,8 +286,9 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
     },
   } : null;
   return (
-    <Panel>
+    <Panel class="evdesk__panel" id="evdesk-entries">
       <h3>Entries</h3>
+      <p class="evdesk__help">The teams in the event: rosters, names, seeds, replacements and swaps.</p>
       {canEdit && !locked && (
         <div class="inlinerow">
           {canOpenCheckin && (

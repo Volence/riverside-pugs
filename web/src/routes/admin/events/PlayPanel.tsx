@@ -389,12 +389,13 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
 export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { eventId: number; canEdit: boolean; gen?: number; onChange?: () => void; slug?: string }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventPlay(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
-  if (loadError) return <Panel><h3>Play</h3><p class="error">Could not load the matches.</p></Panel>;
-  if (!data) return <Panel><h3>Play</h3></Panel>;
+  if (loadError) return <Panel class="evdesk__panel" id="evdesk-play"><h3>Play</h3><p class="error">Could not load the matches.</p></Panel>;
+  if (!data) return <Panel class="evdesk__panel" id="evdesk-play"><h3>Play</h3></Panel>;
   const before = data.status === 'registration' || data.status === 'checkin';
   return (
-    <Panel class="playpanel">
+    <Panel class="playpanel evdesk__panel" id="evdesk-play">
       <h3>Play</h3>
+      <p class="evdesk__help">Every match of the event: open rooms, hold, reset, enter results and the staff tools.</p>
       {before && data.lockedAt === null && <p class="muted">The event can start once the entry list is final. It starts by itself at the start time.</p>}
       {before && data.lockedAt !== null && (
         <>
@@ -409,7 +410,7 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
       {error && <p class="error" role="alert">{error}</p>}
       {!before && data.stages.length === 0 && <Empty>No stage has started.</Empty>}
       {data.stages.map((s) => (
-        <section key={s.ordinal}>
+        <section key={s.ordinal} class="evdesk__stage">
           <h4>Stage {s.ordinal}{s.status === 'finished' ? ' (finished)' : ''}</h4>
           {s.rounds.map((r) => (
             <div key={`${r.group}-${r.round}`}>

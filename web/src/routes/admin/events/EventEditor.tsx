@@ -16,6 +16,7 @@ import { DraftPanel } from './DraftPanel';
 import { DraftTeamsPanel } from './DraftTeamsPanel';
 import { PlayPanel } from './PlayPanel';
 import { DESKS } from '../adminRoutes';
+import { deskSteps } from './deskSteps';
 
 const DESK_URL = DESKS.find((d) => d.key === 'events')!.path;
 
@@ -84,6 +85,30 @@ function Details({ ev }: { ev: AdminEventDetail }) {
   );
 }
 
+/** The "what's next" strip: every step of the event's run, the one it has
+ *  reached lit, each naming the panel that holds its button. */
+function StepStrip({ ev }: { ev: AdminEventDetail }) {
+  const steps = deskSteps(ev);
+  const now = steps.find((x) => x.state === 'now');
+  return (
+    <div class="evdesk__steps">
+      <p class="evdesk__next">
+        {ev.status === 'cancelled' ? 'This event was cancelled.'
+          : now ? <>Next: <strong>{now.label}</strong>{now.where !== 'Above' && <> in <a href={`#${now.anchor}`}>{now.where}</a></>}</>
+            : 'Every step is done.'}
+      </p>
+      <ol class="evdesk__strip">
+        {steps.map((x, i) => (
+          <li key={x.key} class={`evdesk__step evdesk__step--${x.state}`} aria-current={x.state === 'now' ? 'step' : undefined}>
+            <span class="evdesk__stepnum">{x.state === 'done' ? '\u2713' : i + 1}</span>
+            <span class="evdesk__steplabel">{x.label}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /** One event on the Events desk: lifecycle, fields, banner, stages, history.
  *  canEdit false (a mod) shows the same event with no control at all; the
  *  server refuses every write from a mod regardless. */
@@ -133,53 +158,21 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
     void run(async () => { await adminApi.updateEvent(id, f); setResetForm(true); });
   };
 
-  return (
-    <div class="stack">
-      <Panel>
-        <h3>{ev.fields.name} <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span></h3>
-        <p class="muted"><a href={`/event/${ev.slug}`}>/event/{ev.slug}</a> · last change {fmtTime(ev.updatedAt)}</p>
-        {ev.cancelReason && <p class="muted">Cancelled: {ev.cancelReason}</p>}
-        {!canEdit && <p class="muted">Read only: admins run events.</p>}
-        {error && <p class="error" role="alert">{error}</p>}
-        {canEdit && (
-          <div class="admin-row">
-            {ev.status === 'draft' && (
-              <button class="btn" disabled={busy}
-                onClick={() => void run(() => adminApi.publishEvent(id), 'Publish this event? Everyone the competitive switch lets in will see it on /events.')}>
-                Publish
-              </button>
-            )}
-            {ev.status === 'announced' && (
-              <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.openEventRegistration(id), ev.fields.entryKind === 'draft' ? 'Open signups?' : 'Open registration?')}>
-                {ev.fields.entryKind === 'draft' ? 'Open signups' : 'Open registration'}
-              </button>
-            )}
-            {ev.status === 'draft' && (
-              <button class="btn btn--danger" disabled={busy} onClick={() => void run(async () => {
-                await adminApi.deleteEvent(id);
-                route(DESK_URL);
-              }, 'Delete this draft? Its stages and history go with it. Nobody outside staff has seen it.')}>
-                Delete draft
-              </button>
-            )}
-          </div>
-        )}
-        {canEdit && !over && ev.status !== 'draft' && (
-          <form class="admin-form" onSubmit={(e) => { e.preventDefault(); void run(() => adminApi.cancelEvent(id, reason), 'Cancel this event? It cannot be reopened.'); }}>
-            <input aria-label="Cancel reason" placeholder="Reason, shown on the event page" maxLength={300} value={reason}
-              onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-            <button class="btn btn--danger" type="submit" disabled={busy}>Cancel event</button>
-          </form>
-        )}
-      </Panel>
-      <Panel>
+  /** Before the event is out (a draft or announced) its settings are the
+   *  work; after that the run panels are, so the settings fold below them. */
+  const setup = ev.status === 'draft' || ev.status === 'announced';
+  const settingsPanels = (
+    <>
+      <Panel class="evdesk__panel" id="evdesk-event">
         <h3>Event</h3>
+        <p class="evdesk__help">Name, start time, who can enter and the event page text.</p>
         {canEdit && EDITABLE.includes(ev.status)
           ? <EventFieldsForm key={`${ev.id}:${formGen}`} fields={ev.fields} status={ev.status} busy={busy} onSave={saveFields} />
           : <Details ev={ev} />}
       </Panel>
-      <Panel>
+      <Panel class="evdesk__panel" id="evdesk-banner">
         <h3>Banner</h3>
+        <p class="evdesk__help">Shown on /events and across the top of the event page.</p>
         {ev.bannerKey ? <img class="eventbanner" src={adminBannerUrl(ev.id, ev.bannerKey)} alt="" width={1600} height={400} /> : <Empty>No banner.</Empty>}
         {canEdit && (
           <div class="inlinerow">
@@ -199,8 +192,9 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
           </div>
         )}
       </Panel>
-      <Panel>
+      <Panel class="evdesk__panel" id="evdesk-stages">
         <h3>Stages</h3>
+        <p class="evdesk__help">The format, maps, veto and round times. Stages lock once the event goes live.</p>
         {ev.stages.length === 0 ? <Empty>No stages yet. An event needs at least one before it can be published.</Empty> : (
           <ol class="admin-list eventstages">
             {ev.stages.map((s, i) => (
@@ -247,23 +241,113 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
             onSave={(st) => saveStage(() => adminApi.addStage(id, st))} />
         )}
       </Panel>
-      {ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'draft' && (
-        <DraftPanel eventId={ev.id} canEdit={canEdit} signupsCloseAt={ev.fields.draft?.signupsCloseAt ?? null} gen={panelGen} onChange={panelsChanged} />
+    </>
+  );
+  const draftPanel = ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'draft'
+    ? <DraftPanel eventId={ev.id} canEdit={canEdit} signupsCloseAt={ev.fields.draft?.signupsCloseAt ?? null} gen={panelGen} onChange={panelsChanged} />
+    : null;
+  const teamsPanel = ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'draft' && ev.cutAt !== null
+    ? <DraftTeamsPanel eventId={ev.id} slug={ev.slug} canEdit={canEdit} status={ev.status} startsAt={ev.fields.startsAt} gen={panelGen} onChange={panelsChanged} />
+    : null;
+  const entriesPanel = ev.status !== 'draft' && ev.status !== 'announced' && hasEntries
+    ? <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled && ev.fields.entryKind === 'team'} draft={ev.fields.entryKind === 'draft'} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />
+    : null;
+  const standinsPanel = ev.fields.entryKind === 'draft' && ev.teamsMadeAt !== null
+    ? <StandinsPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} />
+    : null;
+  const playPanel = hasEntries && ['registration', 'checkin', 'live', 'finished'].includes(ev.status)
+    ? <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />
+    : null;
+  /** Once a draft's teams are out, the matches are the work: Play leads and
+   *  the finished draft folds below the teams. Before that the panels run in
+   *  the order staff use them. */
+  const draftDone = ev.fields.entryKind === 'draft' && ev.teamsMadeAt !== null;
+  const runPanels = draftDone ? (
+    <>
+      {playPanel}
+      {entriesPanel}
+      {standinsPanel}
+      <details class="evdesk__settings">
+        <summary>Draft and teams: the cut and how the teams were made</summary>
+        <div class="stack">{draftPanel}{teamsPanel}</div>
+      </details>
+    </>
+  ) : (
+    <>
+      {draftPanel}
+      {teamsPanel}
+      {entriesPanel}
+      {standinsPanel}
+      {playPanel}
+    </>
+  );
+
+  return (
+    <div class="stack">
+      <Panel class="evdesk__head" id="evdesk-head">
+        <div class="evdesk__title">
+          <h3>{ev.fields.name} <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span></h3>
+          <p class="muted evdesk__meta">
+            <a href={`/event/${ev.slug}`}>/event/{ev.slug}</a>
+            <span>{ev.fields.entryKind === 'draft' ? 'Draft' : 'Teams register'}</span>
+            <span>Starts {whenText(ev.fields.startsAt)}</span>
+            <span>last change {fmtTime(ev.updatedAt)}</span>
+          </p>
+        </div>
+        <StepStrip ev={ev} />
+        {ev.cancelReason && <p class="muted">Cancelled: {ev.cancelReason}</p>}
+        {!canEdit && <p class="muted">Read only: admins run events.</p>}
+        {error && <p class="error" role="alert">{error}</p>}
+        {canEdit && (
+          <div class="admin-row evdesk__actions">
+            {ev.status === 'draft' && (
+              <button class="btn" disabled={busy}
+                onClick={() => void run(() => adminApi.publishEvent(id), 'Publish this event? Everyone the competitive switch lets in will see it on /events.')}>
+                Publish
+              </button>
+            )}
+            {ev.status === 'announced' && (
+              <button class="btn" disabled={busy} onClick={() => void run(() => adminApi.openEventRegistration(id), ev.fields.entryKind === 'draft' ? 'Open signups?' : 'Open registration?')}>
+                {ev.fields.entryKind === 'draft' ? 'Open signups' : 'Open registration'}
+              </button>
+            )}
+            {ev.status === 'draft' && (
+              <button class="btn btn--danger" disabled={busy} onClick={() => void run(async () => {
+                await adminApi.deleteEvent(id);
+                route(DESK_URL);
+              }, 'Delete this draft? Its stages and history go with it. Nobody outside staff has seen it.')}>
+                Delete draft
+              </button>
+            )}
+          </div>
+        )}
+        {canEdit && !over && ev.status !== 'draft' && (
+          <form class="admin-form evdesk__danger" onSubmit={(e) => { e.preventDefault(); void run(() => adminApi.cancelEvent(id, reason), 'Cancel this event? It cannot be reopened.'); }}>
+            <input aria-label="Cancel reason" placeholder="Reason, shown on the event page" maxLength={300} value={reason}
+              onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+            <button class="btn btn--danger" type="submit" disabled={busy}>Cancel event</button>
+          </form>
+        )}
+      </Panel>
+      {setup && settingsPanels}
+      {runPanels}
+      {!setup && (
+        <details class="evdesk__settings">
+          <summary>Event settings: details, banner and stages</summary>
+          <div class="stack">{settingsPanels}</div>
+        </details>
       )}
-      {ev.status !== 'draft' && ev.status !== 'announced' && ev.fields.entryKind === 'draft' && ev.cutAt !== null && (
-        <DraftTeamsPanel eventId={ev.id} slug={ev.slug} canEdit={canEdit} status={ev.status} startsAt={ev.fields.startsAt} gen={panelGen} onChange={panelsChanged} />
-      )}
-      {ev.status !== 'draft' && ev.status !== 'announced' && hasEntries && (
-        <EntriesPanel eventId={ev.id} status={ev.status} checkin={ev.fields.checkin.enabled && ev.fields.entryKind === 'team'} draft={ev.fields.entryKind === 'draft'} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} />
-      )}
-      {ev.fields.entryKind === 'draft' && ev.teamsMadeAt !== null && (
-        <StandinsPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} />
-      )}
-      {hasEntries && ['registration', 'checkin', 'live', 'finished'].includes(ev.status) && <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />}
-      <Panel>
+      <Panel class="evdesk__panel" id="evdesk-history">
         <h3>History</h3>
-        <ul class="admin-list">
-          {ev.log.map((l, i) => <li key={i}>{fmtTime(l.at)} · {l.actorName ?? 'the clock'} · {actionText(l.action)}</li>)}
+        <p class="evdesk__help">Everything that happened to this event, oldest first.</p>
+        <ul class="admin-list evdesk__history">
+          {ev.log.map((l, i) => (
+            <li key={i}>
+              <span class="evdesk__histtime">{fmtTime(l.at)}</span>
+              <span class="evdesk__histwho">{l.actorName ?? 'the clock'}</span>
+              <span class="evdesk__histwhat">{actionText(l.action)}</span>
+            </li>
+          ))}
         </ul>
       </Panel>
     </div>
