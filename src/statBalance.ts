@@ -46,7 +46,7 @@ export const STAT_BALANCE_MODEL = {
 /** One player's stat line as the tie-break sees it. */
 export interface StatLine {
   steamid: string;
-  /** Prior completed, unvoided PUGs (all seasons, any origin). */
+  /** Prior completed, unvoided PUGs (all seasons, any origin), rated and played from the start. */
   games: number;
   /** Mean SI damage per game, null with no games. */
   rawPerGame: number | null;
@@ -62,11 +62,19 @@ export function statScore(sum: number, games: number, avg: number, model = STAT_
   return (sum + model.shrinkGames * avg) / (games + model.shrinkGames) - avg;
 }
 
+/**
+ * Which match_players rows count as a real game: rated (the RCON dump named
+ * them, so the stats are theirs) and on the starting roster (joined_map 0).
+ * A sub who came in at a later map played part of a match and would read as
+ * a weak full game.
+ */
+export const REAL_GAME = 'mp.rated = 1 AND mp.joined_map = 0';
+
 /** The average SI damage per player-game over every completed, unvoided PUG. */
 export function averageSiDamage(db: DB): number {
   const row = db.prepare(
     `SELECT AVG(mp.si_damage) AS avg FROM match_players mp JOIN matches m ON m.id = mp.match_id
-     WHERE ${completedPug('m')} AND m.voided_at IS NULL`,
+     WHERE ${completedPug('m')} AND m.voided_at IS NULL AND ${REAL_GAME}`,
   ).get() as { avg: number | null };
   return row.avg ?? 0;
 }
@@ -79,7 +87,7 @@ export function statLines(db: DB, steamids: string[], avg = averageSiDamage(db))
     const rows = db.prepare(
       `SELECT mp.player_id AS steamid, COUNT(*) AS n, SUM(mp.si_damage) AS sum
        FROM match_players mp JOIN matches m ON m.id = mp.match_id
-       WHERE ${completedPug('m')} AND m.voided_at IS NULL
+       WHERE ${completedPug('m')} AND m.voided_at IS NULL AND ${REAL_GAME}
          AND mp.player_id IN (${steamids.map(() => '?').join(',')})
        GROUP BY mp.player_id`,
     ).all(...steamids) as { steamid: string; n: number; sum: number }[];
