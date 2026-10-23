@@ -1365,6 +1365,8 @@ export interface TeamBalanceRow {
   enabled: boolean;
   overGate: boolean;
   gateFired: boolean;
+  /** The gate fired but the rating-best teams played (the A/B control). */
+  holdout: boolean;
   moved: number;
   bestRatingA: number;
   bestStatA: number;
@@ -1376,12 +1378,13 @@ export interface TeamBalanceRow {
 }
 export interface TeamBalanceBucket { matches: number; predicted: number | null; favWon: number | null; decided: number }
 export interface TeamBalance {
-  config: { enabled: boolean; gate: number; tolerance: number };
+  config: { enabled: boolean; gate: number; tolerance: number; holdoutEvery: number };
   summary: {
     logged: number;
     enabledMatches: number;
     gateFireRate: number | null;
     firedChosen: TeamBalanceBucket;
+    holdout: TeamBalanceBucket;
     firedRatingBestPredicted: number | null;
     offOverGate: TeamBalanceBucket;
     allChosen: TeamBalanceBucket;
