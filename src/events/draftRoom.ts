@@ -31,7 +31,8 @@ export interface PickRow {
   id: number; event_id: number; round: number; pick_no: number; captain_steamid: string; steamid: string;
   auto: 0 | 1; at: string; undone_at: string | null;
 }
-/** Ruling 8: an absent picker's clock, long enough for viewers to see who is up. */
+/** The shortest clock a staff resume gives (Ruling 17). Since 2026-10-23 an
+ *  absent picker gets the full pick clock, no longer this. */
 export const ABSENT_SECONDS = 5;
 /** Whether the person picking for a team is in the room (DraftClock's heartbeats). */
 export type Present = (steamid: string) => boolean;
@@ -119,8 +120,11 @@ function ranker(db: DB, signups: D.SignupRow[]): (s: D.SignupRow) => RankedPlaye
  *  can fill. The room refuses teams_changed instead; staff reset it. */
 const poolShort = (st: RoomState): boolean => st.available.length < st.slots.length - st.picks.length;
 
-const deadlineFor = (now: Date, pickSeconds: number, here: boolean): string =>
-  new Date(now.getTime() + (here ? pickSeconds : ABSENT_SECONDS) * 1000).toISOString();
+/** Every pick gets the full clock, present or not (owner, 2026-10-23: a
+ *  captain whose page was closed lost picks to 5 s auto-picks in the test
+ *  draft). `here` is kept so the call sites still say whose turn it is. */
+const deadlineFor = (now: Date, pickSeconds: number, _here: boolean): string =>
+  new Date(now.getTime() + pickSeconds * 1000).toISOString();
 
 /** Start (Ruling 5): the order from the settings, every draft_team cleared,
  *  the room running with pick 1 on the clock. A reset room ('ready' row)
@@ -155,7 +159,7 @@ export function startRoom(
 
 /** Inside the caller's transaction: the pick for st.next, then either the
  *  forced final pick and done (Ruling 9) or the next slot's clock (full when
- *  its picker is present, ABSENT_SECONDS when not). */
+ *  its picker is present or not). */
 function pickAndAdvance(db: DB, st: RoomState, player: string, auto: boolean, now: Date, present: Present): PickResult {
   const at = now.toISOString();
   const slot = st.next!;
@@ -271,7 +275,7 @@ export function resumeRoom(db: DB, o: { eventId: number; actor: string; now: Dat
  *  the site with the pick before it) both are taken back, or the final pick
  *  would be forced again at once. A delegate whose pick was undone is
  *  dropped. A running or done room runs the reopened pick like any turn: a
- *  full clock when its picker is present, ABSENT_SECONDS when not. A paused
+ *  full clock, present or not. A paused
  *  room stays paused with the full clock waiting. */
 export function undoPick(db: DB, o: { eventId: number; actor: string; now: Date; present: Present }): V.Checked<{ undone: number[] }> {
   const at = o.now.toISOString();
