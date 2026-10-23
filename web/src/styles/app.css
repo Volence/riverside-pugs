@@ -3609,7 +3609,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftclock p { margin: 0; }
 .draftclock__who { font-family: var(--font-label); font-size: var(--fs-h3); color: var(--text-bright); overflow-wrap: anywhere; }
 .draftclock__time { font-family: var(--font-display); font-size: clamp(3rem, 14vw, var(--fs-hero)); line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
-.draftboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--sp-3); }
+.draftboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: var(--sp-3); }
 .draftboard__team { padding: var(--sp-3); border: 1px solid var(--border); background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
 .draftboard__team.is-up { border-color: var(--accent); }
 .draftboard__team h4 { margin: 0 0 var(--sp-2); }
@@ -3619,23 +3619,51 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 @media (max-width: 480px) { .draftboard { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .draftpool__tools { margin-bottom: var(--sp-3); }
 .draftpool__tools input { flex: 1 1 12rem; min-width: 0; }
-.draftpool { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--sp-3); }
-.draftcard { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
+.draftpool { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--sp-3); align-items: stretch; }
+/* A pool card, read against the pick clock: name and SR, a chip row, four
+   per-game figures in one aligned row under Survivor / Infected captions,
+   then skills, form and the private lines; the Pick button sits at the
+   bottom so buttons line up across a row of cards. */
+.draftcard { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; }
 .draftcard__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2); }
-.draftcard__name { margin: 0; min-width: 0; font-size: 1.1em; }
-.draftcard__sr { color: var(--rating); font-variant-numeric: tabular-nums; font-weight: 700; flex-shrink: 0; }
+.draftcard__name { margin: 0; min-width: 0; font-size: 1.15em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draftcard__sr { color: var(--rating); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.15em; flex-shrink: 0; }
+.draftcard__srlabel { font-size: var(--fs-label); letter-spacing: 0.08em; color: var(--text-muted); font-weight: 600; }
 .draftcard__sub { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); font-size: var(--fs-dense); }
-.draftcard__sides { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
-.draftcard__side { display: flex; flex-direction: column; gap: 0; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius, 6px); min-width: 0; font-size: var(--fs-dense); }
-.draftcard__sidelabel { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.draftcard__trend { font-variant-numeric: tabular-nums; }
+.draftcard__trend--up { color: var(--win); }
+.draftcard__trend--down { color: var(--loss); }
+.draftcard__stats { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--sp-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: var(--sp-2) 0; }
+.draftcard__group { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.draftcard__cells { grid-column: 1 / -1; margin: var(--sp-1) 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.draftstat { display: flex; flex-direction: column-reverse; min-width: 0; }
+.draftstat__num { margin: 0; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text-bright); font-size: 1.05em; line-height: 1.2; }
+.draftstat__label { font-size: var(--fs-dense); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .draftcard__num { font-variant-numeric: tabular-nums; color: var(--text-bright); font-weight: 600; }
-.draftcard__skills { margin: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-dense); }
+.draftcard__skills { margin: 0; display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); font-size: var(--fs-dense); color: var(--text-muted); }
 .draftcard__line, .draftcard__note, .draftcard__form { margin: 0; font-size: var(--fs-dense); }
-.draftcard__note { color: var(--text-bright); padding: var(--sp-1) var(--sp-2); border-left: 2px solid var(--accent); }
-.draftcard__form { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
-.draftcard__stat { overflow-wrap: anywhere; }
-.draftcard__formlabel { margin-right: var(--sp-1); }
-.draftcard__res { display: inline-flex; align-items: center; justify-content: center; width: 1.05rem; height: 1.05rem; border: 1px solid var(--border); border-radius: 3px; font-size: 0.62rem; font-weight: 700; line-height: 1; cursor: default; }
+.draftcard__note { color: var(--text-bright); padding: var(--sp-1) var(--sp-2); border-left: 2px solid var(--accent); overflow-wrap: anywhere; }
+.draftcard__form { display: flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
+.draftcard__formlabel { margin-right: 2px; }
+.draftcard__action { margin-top: auto; padding-top: var(--sp-1); }
+.draftcard__action .btn { width: 100%; }
+.draftform { display: inline-flex; gap: 2px; }
+.draftpool__view { display: inline-flex; }
+.draftpool__view .btn[aria-pressed='true'] { border-color: var(--accent); color: var(--text-bright); }
+/* The list view: one row per player. */
+.draftlist { width: 100%; border-collapse: collapse; font-size: var(--fs-dense); }
+.draftlist th, .draftlist td { padding: var(--sp-1) var(--sp-2); text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.draftlist th { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+.draftlist .num { text-align: right; font-variant-numeric: tabular-nums; }
+.draftlist__name { color: var(--text-bright); font-weight: 600; }
+.draftlist__note { color: var(--accent); font-weight: 400; cursor: help; }
+.draftlist__sr { color: var(--rating); font-weight: 700; }
+.draftlist__act { text-align: right; }
+@media (max-width: 480px) { .draftlist__wide { display: none; } }
+/* The room's panels sit in a flex column: without this a wide table would
+   size its panel past the screen instead of scrolling inside it. */
+.draftroom > * { min-width: 0; }
+.draftcard__res { display: inline-flex; align-items: center; justify-content: center; width: 0.95rem; height: 0.95rem; flex-shrink: 0; border: 1px solid var(--border); border-radius: 3px; font-size: 0.62rem; font-weight: 700; line-height: 1; cursor: default; }
 .draftcard__res--W { border-color: var(--win); color: var(--win); }
 .draftcard__res--L { border-color: var(--loss); color: var(--loss); }
 .draftcard__res--D { color: var(--draw); }
@@ -3732,6 +3760,7 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .matchcard__side--won { font-weight: 700; }
 .matchcard__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .matchcard__score { font-variant-numeric: tabular-nums; }
+.matchcard__seed { display: inline-block; min-width: 1.6em; margin-right: var(--sp-1); color: var(--text-muted); font-size: var(--fs-dense); font-weight: 400; font-variant-numeric: tabular-nums; }
 .matchcard--pending { opacity: 0.7; }
 /* A match card linked to its room (plan T3a): same look, no underline, a
    hover state like other card links (the focus ring comes from the site's
@@ -4093,19 +4122,19 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 /* The desk's Play panel (PlayPanel.tsx): one card per match, the teams and
    status on top with Open the room on the right, the room tools in one bar,
    the result form in its own labelled box. */
-.matchcards { list-style: none; margin: var(--sp-2) 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
-.matchcard { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; }
-.matchcard__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
-.matchcard__teams { overflow-wrap: anywhere; min-width: 0; }
-.matchcard__room { margin-left: auto; }
-.matchcard__bar { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.matchcard__result { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px dashed var(--border); border-radius: var(--radius, 6px); }
-.matchcard__label { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-.matchcard .desk-line { margin: 0; }
+.deskmatches { list-style: none; margin: var(--sp-2) 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.deskmatch { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; }
+.deskmatch__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.deskmatch__teams { overflow-wrap: anywhere; min-width: 0; }
+.deskmatch__room { margin-left: auto; }
+.deskmatch__bar { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.deskmatch__result { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px dashed var(--border); border-radius: var(--radius, 6px); }
+.deskmatch__label { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.deskmatch .desk-line { margin: 0; }
 .resultform { align-items: end; }
 .resultform__score { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-dense); min-width: 0; }
 .resultform__score input { width: 7rem; max-width: 100%; }
 @media (max-width: 480px) {
-  .matchcard { padding: var(--sp-3); }
-  .matchcard__room { margin-left: 0; }
+  .deskmatch { padding: var(--sp-3); }
+  .deskmatch__room { margin-left: 0; }
 }
