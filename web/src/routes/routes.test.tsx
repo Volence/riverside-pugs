@@ -179,6 +179,21 @@ describe('Matches', () => {
     expect(screen.getByText('Matches')).toBeTruthy();
   });
 
+  it("names the winner after the side's lead player, not a per-match letter", async () => {
+    mockApi.matches.mockResolvedValue({
+      matches: [
+        { id: 7, campaign: 'blood_harvest', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800,
+          winner: 'a', teamALead: 'alice', teamBLead: 'bob' },
+        { id: 8, campaign: 'dead_air', endedAt: '2026-09-07T04:00:00', teamAScore: 0, teamBScore: 100,
+          winner: 'b', forfeitTeam: 'a', teamALead: 'carol', teamBLead: 'dave' },
+      ],
+    });
+    render(<Matches />);
+    await waitFor(() => expect(screen.getByText("alice's team")).toBeTruthy());
+    expect(screen.getByText("dave's team (carol's team forfeited)")).toBeTruthy();
+    expect(screen.queryByText('Team A')).toBeNull();
+  });
+
   it('summarises with facts that outlive a single match, not per-match team labels', async () => {
     mockApi.matches.mockResolvedValue({
       matches: [

@@ -73,13 +73,23 @@ export function winnerLabel(winner: Winner): string {
   return winner === 'draw' ? 'Draw' : `Team ${winner.toUpperCase()}`;
 }
 
-/** The result with the forfeit noted: "Team A (B forfeited)". */
-export function resultLabel(winner: Winner, forfeitTeam?: 'a' | 'b' | null, abandonedBy?: string | null): string {
-  const w = winnerLabel(winner);
+/** The result with the forfeit noted: "Team A (B forfeited)".
+ *
+ *  With `leads` (each side's lead player, see MatchSummary) the sides are
+ *  named after them instead, "alice's team (bob's team forfeited)", for a
+ *  list of many matches where the letters mean nothing. A side with no lead
+ *  keeps its letter. */
+export function resultLabel(
+  winner: Winner, forfeitTeam?: 'a' | 'b' | null, abandonedBy?: string | null,
+  leads?: { a?: string | null; b?: string | null },
+): string {
+  const side = (t: 'a' | 'b') => (leads?.[t] ? `${leads[t]}'s team` : `Team ${t.toUpperCase()}`);
+  const w = winner === 'draw' ? 'Draw' : leads ? side(winner) : winnerLabel(winner);
   // A match someone abandoned after it was already decided (2026-10-10): the
   // leading team won and it was rated.
   if (abandonedBy) return `${w} (decided, ${abandonedBy} abandoned)`;
-  return forfeitTeam ? `${w} (${forfeitTeam.toUpperCase()} forfeited)` : w;
+  if (!forfeitTeam) return w;
+  return leads ? `${w} (${side(forfeitTeam)} forfeited)` : `${w} (${forfeitTeam.toUpperCase()} forfeited)`;
 }
 
 /** `2026-09-06T04:12:33.000Z` → `2026-09-06 04:12`. Matches the previous

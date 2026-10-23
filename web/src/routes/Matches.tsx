@@ -59,7 +59,9 @@ export function Matches() {
                       <span class="muted match-id"> #{m.id}</span>
                     </td>
                     <td class="num">{m.teamAScore} - {m.teamBScore}</td>
-                    <td>{resultLabel(m.winner, m.forfeitTeam, m.abandonedBy)}</td>
+                    {/* Named after each side's top-rated player: "Team A"
+                        is a label dealt afresh every match (see above). */}
+                    <td>{resultLabel(m.winner, m.forfeitTeam, m.abandonedBy, { a: m.teamALead, b: m.teamBLead })}</td>
                     <td class="num muted">{fmtDate(m.endedAt)}</td>
                   </tr>
                 ))}
