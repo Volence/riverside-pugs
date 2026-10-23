@@ -63,6 +63,49 @@ export const BALANCE_TABS: { key: string; label: string; path: string }[] = [
 ];
 
 /**
+ * The header for one screen: the section's name as the page title and one
+ * line saying what the screen is for, so a moderator who lands on it from a
+ * link knows where they are without reading the strip above.
+ */
+export function sectionHeading(desk: string, section: string): { title: string; intro: string | null } {
+  const label = [...PEOPLE_TABS, ...SETUP_TABS, ...BALANCE_TABS].find((t) => t.path.startsWith(`/admin/${desk}`) && t.key === section)?.label;
+  const intro = SECTION_INTROS[`${desk}/${section}`] ?? null;
+  if (desk === 'live') return { title: 'Live board', intro: SECTION_INTROS['live/'] ?? null };
+  if (desk === 'events') return { title: section === 'event' ? 'Event' : 'Events', intro: section === 'event' ? null : SECTION_INTROS['events/list'] ?? null };
+  if (section === 'file') return { title: 'Player file', intro: null };
+  if (section === 'ticket') return { title: 'Ticket', intro: null };
+  if (section === 'appeal') return { title: 'Appeal', intro: null };
+  return { title: label ?? 'Admin', intro };
+}
+
+const SECTION_INTROS: Record<string, string> = {
+  'live/': 'Matches in play, the queue, the servers and anything booked on them.',
+  'events/list': 'Tournaments and draft nights: signups, the cut, teams, rooms and results.',
+  'people/search': 'Find anyone by name, SteamID or Discord and open their file.',
+  'people/review': 'New things on player files that no staff member has read yet.',
+  'people/bans': 'Every ban in force, plus the expired ones for the record.',
+  'people/alts': 'Known evaders and the accounts tied to them.',
+  'people/pings': 'Each player\'s usual ping to each server.',
+  'people/tickets': 'Reports from players, oldest unclaimed first.',
+  'people/appeals': 'Ban appeals waiting on staff, and the settled ones.',
+  'people/calls': 'Staff calls made in game with /mod or !admin.',
+  'people/guide': 'What every line on Needs a look means and how to read it.',
+  'setup/campaigns': 'Install, remove and configure custom campaigns on every server.',
+  'setup/fleet': 'What each game server is running right now.',
+  'setup/deploy': 'Review and send server config commits to the fleet.',
+  'setup/seasons': 'The current season and starting a new one.',
+  'setup/rulesets': 'Match rules for bookings and events.',
+  'setup/configs': 'The server configs bookings and events can run.',
+  'setup/settings': 'Site-wide switches: queue, Discord, competitive and more.',
+  'setup/audit': 'Every staff action, newest first.',
+  'balance/compare': 'Compare two sets of patches or matches, metric by metric.',
+  'balance/patches': 'Each balance patch and what it changed on the servers.',
+  'balance/knobs': 'The live balance values and what the next match would run.',
+  'balance/values': 'Every game value, as the public Game values page shows it.',
+  'balance/looks': 'How each night mode look plays, per campaign.',
+};
+
+/**
  * What main.tsx hands preact-iso for the panel.
  *
  * Two entries, because its matcher takes neither on its own: `/admin` matches

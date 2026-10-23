@@ -5284,3 +5284,112 @@ a.mapch__name:hover { color: var(--accent); }
   .replay__group + .replay__group { padding-left: 0; border-left: 0; }
   .replay__toolbar > .replay__glabel { flex-basis: 100%; min-width: 0; }
 }
+
+/* ===== UI round 3: admin desks (admhead / adm3) =====
+   The header names the screen you are on (the section) with one line on what
+   it is for; the desk tabs sit on the right of it. Below that, the section
+   strip is one segmented bar instead of loose chips. Staff desks only. */
+.page--admin .page-head__row { align-items: flex-end; flex-wrap: wrap; row-gap: var(--sp-3); }
+.page--admin .page-head__aside { margin-left: auto; }
+.admhead__desks.tabs { margin: 0; border-bottom: 0; }
+.admhead__intro { margin: var(--sp-2) 0 0; color: var(--text-muted); max-width: 70ch; }
+.admhead__sections.admin-sections {
+  gap: 0;
+  margin-top: var(--sp-4);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  width: fit-content;
+  max-width: 100%;
+}
+.admhead__sections .chip {
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  padding: var(--sp-2) var(--sp-3);
+}
+.admhead__sections .chip:last-child { border-right: 0; }
+.admhead__sections .chip.is-on { background: var(--accent); color: var(--accent-ink); }
+@media (max-width: 640px) {
+  .page--admin .page-head__aside { margin-left: 0; }
+  .admhead__sections.admin-sections { width: 100%; }
+  .admhead__sections .chip { flex: 1 1 auto; text-align: center; border-bottom: 1px solid var(--border); }
+}
+
+/* Panels on a desk breathe the same way, and their sub-headings read as
+   section labels rather than stray bold text. */
+.page--admin .admin-body .panel + .panel { margin-top: var(--sp-5); }
+.page--admin .admin-body .panel h4 {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+/* Tables: a quiet hover so a long row stays readable across, action buttons
+   never break inside their word, and digits line up. */
+.page--admin .admin-body table tbody tr:hover > td { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.page--admin .admin-body td .btn,
+.page--admin .admin-body td .chip { white-space: nowrap; }
+.page--admin .admin-body td { font-variant-numeric: tabular-nums; }
+
+/* Forms: fieldsets (Knobs groups, Compare sides) as titled boxes in the site's
+   shape instead of the browser's grooved frame. */
+.page--admin .admin-body fieldset {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  margin: 0 0 var(--sp-3);
+  min-width: 0;
+}
+.page--admin .admin-body legend {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 var(--sp-2);
+}
+.page--admin .balance-side { max-height: 14rem; min-width: min(100%, 22rem); }
+.page--admin .balance-side label { font-size: var(--fs-dense); }
+
+/* Campaign installs: one chip per server, side by side, instead of a column
+   of one-line rows. */
+.adm-installs { display: flex; flex-wrap: wrap; gap: var(--sp-2); list-style: none; padding: 0; margin: var(--sp-2) 0; }
+.adm-installs li { border: 0; padding: 0; }
+
+/* ===== UI round 3: caster studio OBS setup (studio__steps) =====
+   OBS setup reads as three numbered steps (get the scenes, connect, cut from
+   here) and the overlay links as small cards, Program first and lit. */
+.studio__steps { list-style: none; counter-reset: obsstep; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.studio__steps > li {
+  counter-increment: obsstep;
+  position: relative;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) calc(var(--sp-3) + 2rem);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.studio__steps > li::before {
+  content: counter(obsstep);
+  position: absolute;
+  left: var(--sp-3);
+  top: var(--sp-3);
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.studio__step-title { margin: 0 0 var(--sp-1); font-family: var(--font-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-bright); }
+.studio__steps .studio__dl { margin: var(--sp-2) 0 0; }
+.studio__links--cards { gap: var(--sp-2); }
+.studio__links--cards li {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+.studio__links--cards li.is-program { grid-column: 1 / -1; border-color: var(--rule); }
+.studio__links--cards li.is-program span { color: var(--text-bright); font-weight: 600; }

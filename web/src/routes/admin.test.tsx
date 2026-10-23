@@ -700,6 +700,15 @@ describe('the panel shell', () => {
     expect(screen.getByRole('tab', { name: 'Settings' }).getAttribute('aria-selected')).toBe('true');
   });
 
+  // The header is the screen's name and what it is for, not just "Admin".
+  it('heads each screen with its section name and an intro line', async () => {
+    mockAdmin.audit.mockResolvedValue({ actions: [] });
+    renderAdmin('/admin/setup/audit');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Audit');
+    expect(screen.getByText('Every staff action, newest first.')).toBeTruthy();
+    expect(screen.getByText('Admin · Setup')).toBeTruthy();
+  });
+
   // The bug this pins: with only <Route path="/admin">, every deep link in
   // the panel lands on the site's 404.
   it('mounts at a deep URL through the routes main.tsx declares', async () => {

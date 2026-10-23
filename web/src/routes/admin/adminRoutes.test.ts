@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ADMIN_ROUTE_PATHS, deskItems, eventAdminUrl, fileUrl, landingFor, legacyRedirect, parseAdminPath, ticketUrl } from './adminRoutes';
+import { ADMIN_ROUTE_PATHS, deskItems, eventAdminUrl, fileUrl, landingFor, legacyRedirect, parseAdminPath, sectionHeading, ticketUrl, PEOPLE_TABS, SETUP_TABS, BALANCE_TABS } from './adminRoutes';
 import { exec } from 'preact-iso/router';
 
 const asAdmin = { isAdmin: true };
@@ -130,5 +130,26 @@ describe('the panel URL parser', () => {
     expect(legacyRedirect('/admin/events/12', '', false)).toBeNull();
     expect(legacyRedirect('/admin/eventsfoo', '', false)).toBe('/admin/people');
     expect(eventAdminUrl(12)).toBe('/admin/events/12');
+  });
+});
+
+// The header names the screen you are on, so every section of every desk has
+// a title from its strip label and one line saying what it is for.
+describe('the screen heading', () => {
+  it('titles every section with its label and an intro line', () => {
+    for (const [desk, tabs] of [['people', PEOPLE_TABS], ['setup', SETUP_TABS], ['balance', BALANCE_TABS]] as const) {
+      for (const t of tabs) {
+        const h = sectionHeading(desk, t.key);
+        expect(h.title).toBe(t.label);
+        expect(h.intro).toBeTruthy();
+      }
+    }
+  });
+
+  it('names the screens that are not on a strip', () => {
+    expect(sectionHeading('live', 'live').title).toBe('Live board');
+    expect(sectionHeading('people', 'file').title).toBe('Player file');
+    expect(sectionHeading('people', 'ticket')).toEqual({ title: 'Ticket', intro: null });
+    expect(sectionHeading('events', 'event').title).toBe('Event');
   });
 });
