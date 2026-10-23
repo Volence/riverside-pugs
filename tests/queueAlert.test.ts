@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
-import { validateSetting } from '../src/settingsSchema.js';
+import { settingDef, validateSetting } from '../src/settingsSchema.js';
 import { decideAlert, queueAlertConfig, type AlertInput } from '../src/discord/queueAlert.js';
 import { renderQueueAlert, renderQueueAlertClosed } from '../src/discord/presenter.js';
 
@@ -67,6 +67,10 @@ describe('queue alert settings', () => {
     expect(validateSetting('discord_pug_role_id', '').ok).toBe(true);
     expect(validateSetting('discord_queue_alert_channel_id', '#queue').ok).toBe(false);
     expect(validateSetting('discord_queue_alert_channel_id', '555000000000000099').ok).toBe(true);
+  });
+
+  it('tell the admin the role must be mentionable, or the ping is silent', () => {
+    expect(settingDef('discord_pug_role_id')!.help).toContain('Allow anyone to @mention this role');
   });
 
   it('bound the threshold below a full queue', () => {
