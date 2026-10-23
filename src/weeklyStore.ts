@@ -24,7 +24,7 @@ export function freezeWeek(db: DB, week: string, now: Date = new Date()): boolea
   return db.transaction(() => {
     const exists = db.prepare('SELECT 1 FROM weekly_award_weeks WHERE week_start = ?').get(week);
     if (exists) return false;
-    const awards = computeWeek(db, week);
+    const awards = computeWeek(db, week, now);
     const recap = computeRecap(db, week);
     db.prepare("INSERT INTO weekly_award_weeks (week_start, frozen_at, weekly_recap) VALUES (?, datetime('now'), ?)")
       .run(week, JSON.stringify(recap));
