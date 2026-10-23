@@ -13,7 +13,7 @@ export function ServerPanel({ v, now }: { v: MatchRoomView; now: number }) {
   const aName = v.a?.name ?? 'TBD';
   const bName = v.b?.name ?? 'TBD';
   if (!s) return <p>Booking a server.</p>;
-  if (s.state === 'waiting') return <p>{`Waiting for a server since ${whenText(s.since)}. No box is free in the region right now; staff are told after 10 minutes.`}</p>;
+  if (s.state === 'waiting') return <p>{`Waiting for a server since ${whenText(s.since)}. Every server in the region is busy right now; this match gets the next one that frees up, and staff are alerted if it takes over 10 minutes.`}</p>;
   if (s.state === 'setup') return <p>{`Setting up ${s.name ?? 'the server'}.`}</p>;
   if (s.state === 'ended') return <p>The server is closed.</p>;
   const line = s.connect ? `password ${s.connect.password}; connect ${s.connect.host}:${s.connect.port}` : null;
