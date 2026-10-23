@@ -2898,6 +2898,9 @@ export const adminApi = {
   /** D2c addendum: staff make another starter a draft team's captain. */
   setEntryCaptain: (id: number, entryId: number, steamid: string) =>
     post<{ from: string; to: string }>(`/api/admin/events/${id}/entries/${entryId}/captain`, { steamid }),
+  /** Owner 2026-10-23: swap two starters between draft teams (teams published, not yet live). */
+  swapDraftPlayers: (id: number, a: { entryId: number; steamid: string }, b: { entryId: number; steamid: string }) =>
+    post<unknown>(`/api/admin/events/${id}/draft/swap-players`, { a, b }),
   /** Plan D3a: bench stand-ins on the desk. */
   eventStandins: (id: number, signal?: AbortSignal) => get<AdminStandinsView>(`/api/admin/events/${id}/standins`, signal),
   requestStandinFor: (id: number, body: { entryId: number; out: string; scope: StandinScope }) => post<{ requestId: number }>(`/api/admin/events/${id}/standins`, body),

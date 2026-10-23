@@ -3560,6 +3560,29 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .draftidentity { display: flex; flex-direction: column; gap: var(--sp-3); }
 .draftidentity h3 { margin: 0; }
 .entrypanel__roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+/* The desk's Entries panel (EntriesPanel.tsx): one card per entry, the team
+   line, its players with their buttons in one right-hand column, then the
+   team's labelled tools. */
+.entrycards { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.entrycard { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); min-width: 0; }
+.entrycard__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); }
+.entrycard__seed { color: var(--accent); font-weight: 700; }
+.entrycard__name { font-size: 1.05em; overflow-wrap: anywhere; }
+.entrycard__meta { flex-basis: 100%; font-size: var(--fs-dense); }
+.entrycard__roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.entrycard__player { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-3); padding: var(--sp-2) 0; border-top: 1px solid var(--border); }
+.entrycard__player.is-picked { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.entrycard__who { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
+.entrycard__acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); }
+.entrycard__tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+.entrycard__tool { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.entrycard__label { font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.entrycard__swapnote { margin: var(--sp-2) 0 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--accent); border-radius: var(--radius, 6px); }
+@media (max-width: 480px) {
+  .entrycard { padding: var(--sp-3); }
+  .entrycard__player { grid-template-columns: minmax(0, 1fr); }
+  .entrycard__acts { justify-content: flex-start; }
+}
 /* The desk's replace dialog on a draft entry (plan D2c). */
 .replaceform { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius); }
 .replaceform > p { margin: 0; }

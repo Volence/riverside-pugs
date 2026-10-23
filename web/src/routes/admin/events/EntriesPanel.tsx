@@ -110,13 +110,23 @@ function ReplaceForm({ eventId, e, out, bench, busy, run, onClose }: {
  *  `seeds_locked`, so the Up/Down controls are not offered then either. */
 const SEEDS_CLOSED: readonly string[] = ['live', 'finished', 'cancelled'];
 
-/** One entry's row. Its own component so the Disqualify reason box is this
- *  row's state alone, never shared with any other row's box or send. */
-function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, busy, active, onMove, onDisqualify, onRestore, onRename, replace }: {
+/** A player picked for a swap (owner 2026-10-23): the first half of a swap
+ *  between two draft teams, kept by the panel so the other team's rows can
+ *  offer "Swap with". */
+type SwapPick = { entryId: number; steamid: string; name: string; team: string };
+
+/** One entry's card. Its own component so the Disqualify reason box is this
+ *  card's state alone, never shared with any other card's box or send. The
+ *  card reads top down: the team (seed, name, tag, status, SR, captain), its
+ *  players with their buttons in one column on the right, then the team's
+ *  own tools, each labelled (name, seed, disqualify). */
+function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, busy, active, onMove, onDisqualify, onRestore, onRename, replace, swap }: {
   e: AdminEntryView; draft: boolean; canRename: boolean; onRename: (id: number, name: string) => void; canEdit: boolean; locked: boolean; showMove: boolean; canRestore: boolean; busy: boolean; active: boolean;
   onMove: (id: number, by: -1 | 1) => void; onDisqualify: (id: number, name: string, reason: string) => void; onRestore: (id: number, name: string) => void;
   /** Plan D2c: Replace on a draft entry's non-captain starters, while the server would take it. */
   replace: { eventId: number; bench: Person[]; run: Run } | null;
+  /** Owner 2026-10-23: swap between teams, from teams made until the event goes live. */
+  swap: { pick: SwapPick | null; onPick: (p: SwapPick | null) => void; onSwap: (with_: SwapPick) => void } | null;
 }) {
   const [reason, setReason] = useState('');
   const [name, setName] = useState(e.name);
@@ -132,49 +142,88 @@ function EntryRow({ e, draft, canRename, canEdit, locked, showMove, canRestore, 
   };
   const canReplace = (p: AdminEntryView['roster'][number]) =>
     replace !== null && canEdit && draft && active && p.role === 'starter' && e.captainSteamid !== null && p.steamid !== e.captainSteamid;
+  const canSwap = (p: AdminEntryView['roster'][number]) => swap !== null && canReplace(p);
+  const captainName = e.roster.find((p) => p.steamid === e.captainSteamid)?.name ?? null;
+  const showSeed = showMove && locked && active && e.seed !== null;
   return (
-    <li class={active ? '' : 'muted'}>
-      <strong>{e.seed !== null && active ? `#${e.seed} ` : ''}{e.name}</strong> <span class="muted">[{e.tag}]</span>
-      {' '}· {statusText(e, draft)} · SR {e.sr} · by {e.registeredByName}
-      <ul class="entrypanel__roster">
-        {e.roster.map((p) => (
-          <li key={p.steamid}>
-            <span class="teamchip">{ROLE[p.role]}</span> {p.name}{p.steamid === e.captainSteamid && <span class="muted"> (captain)</span>}
-            {p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}
-            {canReplace(p) && replacing?.steamid !== p.steamid && (
-              <button class="btn btn--ghost btn--sm" aria-label={`Replace player ${p.name}`} disabled={busy} onClick={() => setReplacing({ steamid: p.steamid, name: p.name })}>Replace player</button>
-            )}
-            {canReplace(p) && replace && (
-              <button class="btn btn--ghost btn--sm" aria-label={`Make ${p.name} captain`} disabled={busy} onClick={() => makeCaptain(replace, p)}>Make captain</button>
-            )}
-          </li>
-        ))}
+    <li class={`entrycard${active ? '' : ' muted'}`}>
+      <div class="entrycard__head">
+        {e.seed !== null && active && <span class="entrycard__seed mono">#{e.seed}</span>}
+        <strong class="entrycard__name">{e.name}</strong>
+        {e.tag.trim() !== '' && <span class="teamchip">{e.tag}</span>}
+        <span class="muted entrycard__meta">{statusText(e, draft)} · SR {e.sr}{captainName ? ` · captain ${captainName}` : ''} · by {e.registeredByName}</span>
+      </div>
+      <ul class="entrycard__roster">
+        {e.roster.map((p) => {
+          const picked = swap?.pick?.steamid === p.steamid;
+          const swapTarget = swap?.pick && swap.pick.entryId !== e.id && canSwap(p);
+          return (
+            <li key={p.steamid} class={`entrycard__player${picked ? ' is-picked' : ''}`}>
+              <span class="entrycard__who">
+                <span class="teamchip">{ROLE[p.role]}</span>
+                <span>{p.name}</span>
+                {p.steamid === e.captainSteamid && <span class="teamchip teamchip--captain">Captain</span>}
+              </span>
+              <span class="entrycard__acts">
+                {swapTarget && swap && swap.pick && (
+                  <button class="btn btn--sm" aria-label={`Swap ${swap.pick.name} with ${p.name}`} disabled={busy}
+                    onClick={() => swap.onSwap({ entryId: e.id, steamid: p.steamid, name: p.name, team: e.name })}>Swap with {swap.pick.name}</button>
+                )}
+                {canSwap(p) && swap && !swap.pick && (
+                  <button class="btn btn--ghost btn--sm" aria-label={`Swap ${p.name} to another team`} disabled={busy}
+                    onClick={() => swap.onPick({ entryId: e.id, steamid: p.steamid, name: p.name, team: e.name })}>Swap</button>
+                )}
+                {picked && swap && (
+                  <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => swap.onPick(null)}>Cancel swap</button>
+                )}
+                {canReplace(p) && replacing?.steamid !== p.steamid && (
+                  <button class="btn btn--ghost btn--sm" aria-label={`Replace player ${p.name}`} disabled={busy} onClick={() => setReplacing({ steamid: p.steamid, name: p.name })}>Replace player</button>
+                )}
+                {canReplace(p) && replace && (
+                  <button class="btn btn--ghost btn--sm" aria-label={`Make ${p.name} captain`} disabled={busy} onClick={() => makeCaptain(replace, p)}>Make captain</button>
+                )}
+              </span>
+              {p.problems.map((x) => <span key={x} class="rosterpick__why">{x}</span>)}
+            </li>
+          );
+        })}
       </ul>
       {replace && replacing && e.roster.some((p) => p.steamid === replacing.steamid) && (
         <ReplaceForm eventId={replace.eventId} e={e} out={replacing} bench={replace.bench} busy={busy} run={replace.run} onClose={() => setReplacing(null)} />
       )}
-      {canEdit && canRename && active && (
-        <div class="inlinerow">
-          <input type="text" aria-label={`Team name for ${e.name}`} maxLength={24} value={name} onInput={(ev) => setName((ev.target as HTMLInputElement).value)} />
-          <button class="btn btn--ghost btn--sm" aria-label={`Save name for ${e.name}`} disabled={busy || name === e.name} onClick={() => onRename(e.id, name)}>Save name</button>
-        </div>
-      )}
-      {canEdit && (
-        <div class="inlinerow">
-          {showMove && locked && active && e.seed !== null && (
-            <>
-              <button class="btn btn--ghost" aria-label={`Move ${e.name} up`} disabled={busy} onClick={() => onMove(e.id, -1)}>Up</button>
-              <button class="btn btn--ghost" aria-label={`Move ${e.name} down`} disabled={busy} onClick={() => onMove(e.id, 1)}>Down</button>
-            </>
+      {canEdit && (active || canRestore) && (
+        <div class="entrycard__tools">
+          {canRename && active && (
+            <div class="entrycard__tool">
+              <span class="entrycard__label">Team name</span>
+              <div class="inlinerow">
+                <input type="text" aria-label={`Team name for ${e.name}`} maxLength={24} value={name} onInput={(ev) => setName((ev.target as HTMLInputElement).value)} />
+                <button class="btn btn--ghost btn--sm" aria-label={`Save name for ${e.name}`} disabled={busy || name === e.name} onClick={() => onRename(e.id, name)}>Save name</button>
+              </div>
+            </div>
+          )}
+          {showSeed && (
+            <div class="entrycard__tool">
+              <span class="entrycard__label">Seed</span>
+              <div class="inlinerow">
+                <button class="btn btn--ghost btn--sm" aria-label={`Move ${e.name} up`} disabled={busy} onClick={() => onMove(e.id, -1)}>Up</button>
+                <button class="btn btn--ghost btn--sm" aria-label={`Move ${e.name} down`} disabled={busy} onClick={() => onMove(e.id, 1)}>Down</button>
+              </div>
+            </div>
           )}
           {active && (
-            <>
-              <input type="text" placeholder="Reason" aria-label={`Disqualify reason for ${e.name}`} value={reason} onInput={(ev) => setReason((ev.target as HTMLInputElement).value)} />
-              <button class="btn btn--ghost" disabled={busy} onClick={() => onDisqualify(e.id, e.name, reason)}>Disqualify</button>
-            </>
+            <div class="entrycard__tool">
+              <span class="entrycard__label">Disqualify</span>
+              <div class="inlinerow">
+                <input type="text" placeholder="Reason" aria-label={`Disqualify reason for ${e.name}`} value={reason} onInput={(ev) => setReason((ev.target as HTMLInputElement).value)} />
+                <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onDisqualify(e.id, e.name, reason)}>Disqualify</button>
+              </div>
+            </div>
           )}
           {!active && canRestore && (
-            <button class="btn btn--ghost" disabled={busy} onClick={() => onRestore(e.id, e.name)}>Restore</button>
+            <div class="inlinerow">
+              <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onRestore(e.id, e.name)}>Restore</button>
+            </div>
           )}
         </div>
       )}
@@ -193,6 +242,7 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
 }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventEntries(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
+  const [swapPick, setSwapPick] = useState<SwapPick | null>(null);
   if (loadError) return <Panel><h3>Entries</h3><p class="error">Could not load the entries.</p></Panel>;
   if (!data) return <Panel><h3>Entries</h3></Panel>;
   const locked = data.lockedAt !== null;
@@ -217,6 +267,24 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
   // Plan D2c Ruling 4: from teams made (the entries exist) until the event finishes.
   const replace = draft && canEdit && status !== 'finished' && status !== 'cancelled' ? { eventId, bench: data.bench ?? [], run } : null;
   const active = (e: AdminEntryView) => e.status !== 'dropped' && e.status !== 'disqualified';
+  // Owner 2026-10-23: swap two players between teams, teams made (entries
+  // exist) until the event goes live; after that Replace player is the tool.
+  const swap = draft && canEdit && (status === 'registration' || status === 'checkin') ? {
+    pick: swapPick,
+    onPick: setSwapPick,
+    onSwap: (other: SwapPick) => {
+      const first = swapPick;
+      if (!first) return;
+      void run(async () => {
+        await adminApi.swapDraftPlayers(eventId, { entryId: first.entryId, steamid: first.steamid }, { entryId: other.entryId, steamid: other.steamid });
+        setSwapPick(null);
+      }, {
+        title: `Swap ${first.name} and ${other.name}?`,
+        body: `${first.name} moves to ${other.team} and ${other.name} moves to ${first.team}. Both players and both captains get a DM. Seeds stay as they are; reorder them below if the balance changed.`,
+        confirmLabel: 'Swap',
+      });
+    },
+  } : null;
   return (
     <Panel>
       <h3>Entries</h3>
@@ -234,11 +302,12 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
       )}
       {locked && <p class="muted">The entry list is final. Seeds can be reordered until the event goes live.</p>}
       {error && <p class="error" role="alert">{error}</p>}
+      {swap?.pick && <p class="entrycard__swapnote" role="status">Swapping {swap.pick.name} from {swap.pick.team}: press Swap with {swap.pick.name} on a player of another team, or Cancel swap.</p>}
       {data.entries.length === 0 ? <Empty>No entries yet.</Empty> : (
-        <ul class="admin-list">
+        <ul class="entrycards">
           {data.entries.map((e) => (
             <EntryRow key={e.id} e={e} draft={draft} canRename={canRename} onRename={rename} canEdit={canEdit} locked={locked} showMove={showMove} canRestore={canRestore} busy={busy} active={active(e)}
-              onMove={move} onDisqualify={disqualify} onRestore={restore} replace={replace} />
+              onMove={move} onDisqualify={disqualify} onRestore={restore} replace={replace} swap={swap} />
           ))}
         </ul>
       )}
