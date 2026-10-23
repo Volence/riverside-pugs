@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
-import { ApiError, teamsApi, type MyTeams, type TeamListItem } from '../api';
+import { ApiError, teamsApi, type MyTeams, type TeamFace, type TeamListItem } from '../api';
 import { Empty, Panel } from '../components/bits';
-import { PageHeader } from '../components/PageHeader';
+import { Figure, PageHeader } from '../components/PageHeader';
 import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { TeamBadge } from '../components/TeamBadge';
@@ -14,29 +14,46 @@ const ROSTER_MAX = 8;
 const ENTRY_MIN = 4;
 const ROLE_LABEL = { captain: 'Captain', cocaptain: 'Co-captain', member: 'Member' } as const;
 
-/** "5 / 8 players", plus where the roster stands for events. */
-function rosterLine(members: number): string {
-  const need = ENTRY_MIN - members;
-  return `${members} / ${ROSTER_MAX} players · ${need > 0 ? `${need} more to enter events` : members < ROSTER_MAX ? 'ready for events' : 'roster full'}`;
+/** Up to five faces of a roster in an overlapping row, "+N" for the rest. */
+function Faces({ roster, members }: { roster: TeamFace[]; members: number }) {
+  const shown = roster.slice(0, 5);
+  const more = members - shown.length;
+  return (
+    <span class="tmfaces" aria-label={`${members} ${members === 1 ? 'player' : 'players'}: ${roster.map((r) => r.name).join(', ')}`}>
+      {shown.map((r) => r.avatar
+        ? <img key={r.steamid} class="tmfaces__face" src={r.avatar} alt="" width={28} height={28} title={r.name} loading="lazy" />
+        : <span key={r.steamid} class="tmfaces__face tmfaces__face--none" title={r.name} aria-hidden="true">{r.name.slice(0, 1).toUpperCase()}</span>)}
+      {more > 0 && <span class="tmfaces__face tmfaces__face--more" aria-hidden="true">+{more}</span>}
+    </span>
+  );
 }
 
-/** One team as a row: badge, name and tag, a line under it, and whatever
- *  sits on the right (a role chip, or nothing). The whole row is the link. */
-function TeamRow({ slug, name, tag, logoKey, line, chip }: {
-  slug: string; name: string; tag: string; logoKey: string | null; line: string; chip?: { text: string; kind: string };
+/** One team as a card: badge, name and tag, the captain, the roster's faces
+ *  and how full it is. The whole card is the link. */
+function TeamCard({ slug, name, tag, logoKey, members, captainName, roster, chip }: {
+  slug: string; name: string; tag: string; logoKey: string | null; members: number; captainName?: string;
+  roster?: TeamFace[]; chip?: { text: string; kind: string };
 }) {
+  const ready = members >= ENTRY_MIN;
   return (
-    <li>
-      <a class="teamrow" href={`/team/${slug}`}>
-        <TeamBadge tag={tag} logoKey={logoKey} />
-        <span class="teamrow__who">
-          <span class="teamrow__nameline">
-            <span class="teamrow__name">{name}</span>
-            <span class="teamrow__tag">[{tag}]</span>
+    <li class="tmcard">
+      <a class="tmcard__link" href={`/team/${slug}`}>
+        <span class="tmcard__head">
+          <TeamBadge tag={tag} logoKey={logoKey} size={56} />
+          <span class="tmcard__title">
+            <span class="tmcard__name">{name}</span>
+            <span class="tmcard__tag">[{tag}]</span>
           </span>
-          <span class="teamroster__meta">{line}</span>
+          {chip && <span class={`teamchip teamchip--${chip.kind}`}>{chip.text}</span>}
         </span>
-        {chip && <span class={`teamchip teamchip--${chip.kind}`}>{chip.text}</span>}
+        {captainName && <span class="tmcard__cap">Captain <strong>{captainName}</strong></span>}
+        <span class="tmcard__foot">
+          {roster && roster.length > 0 ? <Faces roster={roster} members={members} /> : <span />}
+          <span class={`tmcard__count${ready ? ' tmcard__count--ready' : ''}`}>
+            <span class="tmcard__frac"><span class="num">{members}</span>/{ROSTER_MAX}</span>
+            <span class="tmcard__state">{ready ? (members < ROSTER_MAX ? 'Ready for events' : 'Roster full') : `${ENTRY_MIN - members} more to enter`}</span>
+          </span>
+        </span>
       </a>
     </li>
   );
@@ -93,7 +110,15 @@ export function Teams({ session }: { session: Session }) {
       <CompeteTabs active="teams" session={session} />
       <PageHeader eyebrow="Competitive" title="Teams" aside={mine?.canCreate && !showForm
         ? <button class="btn btn--ghost" onClick={() => setCreating(true)}>Start a team</button>
-        : undefined} />
+        : undefined}>
+        {all && all.length > 0 && (
+          <div class="figures">
+            <Figure label="Teams" value={all.length} />
+            <Figure label="Ready for events" value={all.filter((t) => t.members >= ENTRY_MIN).length} sub={`${ENTRY_MIN} players or more`} />
+            <Figure label="Players on teams" value={all.reduce((n, t) => n + t.members, 0)} />
+          </div>
+        )}
+      </PageHeader>
       {error && <p class="error" role="alert">{error}</p>}
       {loadError && (
         <p class="error" role="alert">Could not load teams. <button class="btn btn--ghost btn--sm" onClick={load}>Try again</button></p>
@@ -129,9 +154,9 @@ export function Teams({ session }: { session: Session }) {
       {mine && mine.teams.length > 0 && (
         <Panel>
           <h3>Your teams</h3>
-          <ul class="teamrows">
+          <ul class="tmcards">
             {mine.teams.map((t) => (
-              <TeamRow key={t.slug} {...t} line={rosterLine(t.members)} chip={{ text: ROLE_LABEL[t.role], kind: t.role }} />
+              <TeamCard key={t.slug} {...t} roster={all?.find((x) => x.slug === t.slug)?.roster} chip={{ text: ROLE_LABEL[t.role], kind: t.role }} />
             ))}
           </ul>
         </Panel>
@@ -156,9 +181,9 @@ export function Teams({ session }: { session: Session }) {
         {all === null ? (loadError ? null : <Empty>Loading teams…</Empty>) : all.length === 0
           ? <Empty>No teams yet. Be the first.</Empty>
           : (
-            <ul class="teamrows">
+            <ul class="tmcards">
               {all.map((t) => (
-                <TeamRow key={t.slug} {...t} line={`Captain ${t.captainName} · ${rosterLine(t.members)}`}
+                <TeamCard key={t.slug} {...t}
                   chip={t.members < ENTRY_MIN ? { text: 'Needs players', kind: 'open' } : undefined} />
               ))}
             </ul>

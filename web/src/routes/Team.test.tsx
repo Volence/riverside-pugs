@@ -194,7 +194,7 @@ describe('Team', () => {
     expect(screen.getByText('Over')).toBeTruthy();
     expect(screen.getByText('No Mercy')).toBeTruthy();
     expect(screen.getByText('2 : 1')).toBeTruthy();
-    const matchLink = screen.getByRole('link', { name: 'View' }) as HTMLAnchorElement;
+    const matchLink = screen.getByText('No Mercy').closest('a') as HTMLAnchorElement;
     expect(matchLink.getAttribute('href')).toBe('/match/7');
     const bookingLink = screen.getByText('vs Other Crew').closest('a') as HTMLAnchorElement;
     expect(bookingLink.getAttribute('href')).toBe('/booking/42');
@@ -216,7 +216,7 @@ describe('Team', () => {
     render(<Team slug="rats" session={session('2')} />);
     expect(await screen.findByText('vs Other Crew')).toBeTruthy();
     expect(screen.getByText('vs Other Crew').closest('a')).toBeNull();
-    expect((screen.getByRole('link', { name: 'View' }) as HTMLAnchorElement).getAttribute('href')).toBe('/match/7');
+    expect((screen.getByText('No Mercy').closest('a') as HTMLAnchorElement).getAttribute('href')).toBe('/match/7');
   });
 
   it('shows the Scrims panel for staff not on the team', async () => {

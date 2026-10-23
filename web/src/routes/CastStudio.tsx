@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ApiError, castApi, studioApi, type CastMatch, type PrepSheet, type StudioPanel, type StudioPickDraft } from '../api';
 import { CastConnect } from './Cast';
 import { PageHeader } from '../components/PageHeader';
-import { Empty } from '../components/bits';
+import { GatePanel } from '../components/GatePanel';
 import { campaignTint } from '../format';
 import { connectObs, type ObsClient, type ObsStatus } from '../cast/obs';
 import { Overlay, setOverlayKey } from '../overlay/Scenes';
@@ -229,7 +229,15 @@ export default function CastStudio() {
     return (
       <div class="page page--list">
         <PageHeader eyebrow="Casting" title="Caster studio" />
-        <Empty>This page is for casters. Ask an admin if you should have it.</Empty>
+        <GatePanel
+          title="For casters"
+          lead="This page is for casters. Ask an admin if you should have it."
+          points={[
+            'Scene switching and OBS overlays for a live PUG or event match.',
+            'Casters see every PUG, and a scrim once both captains invite them.',
+          ]}
+          links={[{ href: '/live', label: 'Watch live matches' }, { href: '/events', label: 'See events' }]}
+        />
       </div>
     );
   }

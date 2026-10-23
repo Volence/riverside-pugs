@@ -3,7 +3,7 @@ import { useLocation } from 'preact-iso';
 import { ApiError, logoUrl, teamsApi, type TeamScrim, type TeamView } from '../api';
 import { Empty, PageSkeleton, Panel } from '../components/bits';
 import { CopyRow } from '../components/CopyRow';
-import { PageHeader } from '../components/PageHeader';
+import { Figure, PageHeader } from '../components/PageHeader';
 import type { Session } from '../hooks/useLiveState';
 import { toLogoPng } from '../teamLogo';
 import { campaignName, gameStateLabel } from '../format';
@@ -129,7 +129,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
           <p class="teamhead__tag">[{team.tag}]</p>
           <h1 class="teamhead__name">{team.name}</h1>
           <p class="teamhead__line">
-            {live ? <>Founded {day(team.createdAt)} · {team.members.length} / {ROSTER_MAX} players</>
+            {live ? <>Founded {day(team.createdAt)}</>
               : <>Disbanded {day(team.disbandedAt!)}</>}
             {team.origin && (
               <span>Formed at <a href={`/event/${team.origin.eventSlug}`}>{team.origin.eventName}</a>{team.origin.placement !== null ? ` (${placementText(team.origin.placement)})` : ''}</span>
@@ -139,6 +139,13 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
                 the team; members read the full line in the Scrims panel. */}
             {team.record && team.recordPublic && role === null && <span class="teamchip scrimbadge">{reliableBadge(team.record)}</span>}
           </p>
+          {live && (
+            <div class="figures tmhead__figs">
+              <Figure label="Players" value={`${team.members.length}/${ROSTER_MAX}`}
+                sub={team.members.length >= ENTRY_MIN ? 'Ready for events' : `${ENTRY_MIN - team.members.length} more to enter events`} />
+              {scrims !== null && <Figure label="Scrims" value={scrims.filter((x) => x.state === 'ended').length} sub="played" />}
+            </div>
+          )}
         </div>
       </header>
       {error && <p class="error" role="alert">{error}</p>}
@@ -146,7 +153,7 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
       <Panel>
         <h3>Roster</h3>
         {team.members.length === 0 ? <Empty>Nobody is on this team.</Empty> : (
-          <ul class="teamroster">
+          <ul class="teamroster tmroster">
             {team.members.map((m) => (
               <li key={m.steamid} class="teamroster__row">
                 {m.avatar ? <img class="teamroster__avatar" src={m.avatar} alt="" width={36} height={36} />
@@ -221,42 +228,50 @@ export function Team({ slug, session }: { slug: string; session: Session; refres
           {team.record && <RecordLine record={team.record} label="Record" />}
           {team.reviews && <p class="scrimrecord">{opponentsReviewLine(team.reviews)}</p>}
           {scrims.length === 0 ? <Empty>No scrims yet.</Empty> : (
-            <ul class="bookinglist">
-              {scrims.map((s) => (
-                <li key={s.bookingId}>
-                  <div class="bookingrow">
-                    {s.canView ? (
-                      <a class="teamrow__who" href={`/booking/${s.bookingId}`}>
-                        <span class="teamrow__name">vs {s.opponent}</span>
-                        <span class="teamroster__meta">{localLabel(s.startsAt)}</span>
-                      </a>
-                    ) : (
-                      <div class="teamrow__who">
-                        <span class="teamrow__name">vs {s.opponent}</span>
-                        <span class="teamroster__meta">{localLabel(s.startsAt)}</span>
-                      </div>
+            <ul class="tmscrims">
+              {scrims.map((s) => {
+                const who = (
+                  <>
+                    <span class="tmscrim__vs">vs {s.opponent}</span>
+                    <span class="tmscrim__when">{localLabel(s.startsAt)}</span>
+                  </>
+                );
+                const result = s.series && s.series.counted > 0
+                  ? (s.series.us > s.series.them ? 'win' : s.series.us < s.series.them ? 'loss' : 'draw') : null;
+                return (
+                  <li key={s.bookingId} class={`tmscrim${result ? ` tmscrim--${result}` : ''}`}>
+                    <div class="tmscrim__head">
+                      {s.canView
+                        ? <a class="tmscrim__who" href={`/booking/${s.bookingId}`}>{who}</a>
+                        : <div class="tmscrim__who">{who}</div>}
+                      <span class="tmscrim__chips">
+                        {s.purpose === 'tournament' && <span class="teamchip teamchip--tournament">Tournament</span>}
+                        <span class={`teamchip teamchip--${s.state}`}>{SCRIM_STATE_LABEL[s.state] ?? s.state}</span>
+                      </span>
+                    </div>
+                    {s.series && s.series.counted > 0 && (
+                      <p class="tmscrim__series">{seriesLine(team.name, s.series.us, s.series.them, s.opponent, s.series.draws)}</p>
                     )}
-                    {s.purpose === 'tournament' && <span class="teamchip teamchip--tournament">Tournament</span>}
-                    <span class={`teamchip teamchip--${s.state}`}>{SCRIM_STATE_LABEL[s.state] ?? s.state}</span>
-                  </div>
-                  {s.series && s.series.counted > 0 && (
-                    <p class="scrimrecord">{seriesLine(team.name, s.series.us, s.series.them, s.opponent, s.series.draws)}</p>
-                  )}
-                  {s.games.length > 0 && (
-                    <ul class="bookinggames">
-                      {s.games.map((g) => (
-                        <li key={g.matchId}>
-                          <span>{campaignName(g.campaign)}</span>
-                          <span>{g.us} : {g.them}</span>
-                          <span class="muted">{gameStateLabel(g.state)}</span>
-                          {notCountedLabel(g) && <span class="muted">{notCountedLabel(g)}</span>}
-                          <a href={`/match/${g.matchId}`}>View</a>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              ))}
+                    {s.games.length > 0 && (
+                      <ul class="tmgames">
+                        {s.games.map((g) => {
+                          const tone = g.state === 'completed' && !g.voided ? (g.us > g.them ? 'win' : g.us < g.them ? 'loss' : '') : '';
+                          return (
+                            <li key={g.matchId}>
+                              <a class={`tmgame${tone ? ` tmgame--${tone}` : ''}`} href={`/match/${g.matchId}`}>
+                                <span class="tmgame__map">{campaignName(g.campaign)}</span>
+                                <span class="tmgame__score num">{g.us} : {g.them}</span>
+                                <span class="tmgame__state">{gameStateLabel(g.state)}</span>
+                                {notCountedLabel(g) && <span class="tmgame__state">{notCountedLabel(g)}</span>}
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Panel>

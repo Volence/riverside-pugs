@@ -7,6 +7,7 @@ import {
 } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { GatePanel } from '../components/GatePanel';
 import { CompeteTabs } from '../components/CompeteTabs';
 import type { Session } from '../hooks/useLiveState';
 import { estimateLine, estimateSlot, localLabel, mergedPlaylist, nightRangeLabel, playMinutes, slotSummary, toUtcIso } from '../bookingTime';
@@ -124,45 +125,48 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
   };
 
   return (
-    <form class="bookform" onSubmit={submit}>
-      <label class="teamfield">Your side
-        <select aria-label="Your side" value={teamId === null ? '' : String(teamId)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setTeamId(v ? Number(v) : null); }}>
-          {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
-          <option value="">A pickup group (just me for now)</option>
-        </select>
-      </label>
-      <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
-      {options.showSr && (
-        <label class="teamfield">SR range
-          <select aria-label="SR range" value={srRange} onChange={(e) => setSrRange((e.target as HTMLSelectElement).value)}>
-            {SR_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+    <form class="bookform bkform" onSubmit={submit}>
+      <div class="bkform__fields">
+        <label class="teamfield">Your side
+          <select aria-label="Your side" value={teamId === null ? '' : String(teamId)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setTeamId(v ? Number(v) : null); }}>
+            {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
+            <option value="">A pickup group (just me for now)</option>
           </select>
         </label>
-      )}
-      <fieldset class="bookform__fieldset">
+        <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
+        {options.showSr && (
+          <label class="teamfield">SR range
+            <select aria-label="SR range" value={srRange} onChange={(e) => setSrRange((e.target as HTMLSelectElement).value)}>
+              {SR_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          </label>
+        )}
+        <label class="teamfield">Note<input aria-label="Note" value={note} maxLength={options.limits.noteMax} onInput={(e) => setNote((e.target as HTMLInputElement).value)} /></label>
+        {options.teams.length > 0 && (
+          <label class="teamfield">Challenge a team (optional)
+            <select aria-label="Challenge a team" value={targetTeamId} onChange={(e) => setTargetTeamId((e.target as HTMLSelectElement).value)}>
+              <option value="">Public post, any side may accept</option>
+              {options.teams.filter((t) => t.id !== teamId).map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
+            </select>
+          </label>
+        )}
+        <button class="btn" type="submit" disabled={busy || campaigns.length === 0 || !when}>Post the scrim</button>
+        {postedId !== null && (
+          <p class="muted">Posted. <a href={`/scrims?post=${postedId}`}>See it on the board</a></p>
+        )}
+      </div>
+      <fieldset class="bookform__fieldset bkform__camps">
         <legend class="teamsub">Campaigns (up to {options.limits.playlistMax}, in play order)</legend>
         {options.campaigns.map((c) => (
-          <label key={c.slug}>
+          <label key={c.slug} class={`bkcamp${campaigns.includes(c.slug) ? ' bkcamp--on' : ''}`}>
             <input type="checkbox" aria-label={c.name} checked={campaigns.includes(c.slug)} disabled={!campaigns.includes(c.slug) && campaigns.length >= options.limits.playlistMax} onChange={() => toggle(c.slug)} />
-            {c.name}
-            <span class="muted"> · about {c.minutes} min{campaigns.includes(c.slug) ? ` · #${campaigns.indexOf(c.slug) + 1}` : ''}</span>
+            <span class="bkcamp__name">{c.name}</span>
+            <span class="bkcamp__min muted">about {c.minutes} min</span>
+            {campaigns.includes(c.slug) && <span class="bkcamp__order" aria-label={`number ${campaigns.indexOf(c.slug) + 1} in play order`}>#{campaigns.indexOf(c.slug) + 1}</span>}
           </label>
         ))}
         {campaigns.length > 0 && <p class="muted">{estimateLine(playMinutes(options.estimate, campaigns), estimate, campaigns.length)}</p>}
       </fieldset>
-      <label class="teamfield">Note<input aria-label="Note" value={note} maxLength={options.limits.noteMax} onInput={(e) => setNote((e.target as HTMLInputElement).value)} /></label>
-      {options.teams.length > 0 && (
-        <label class="teamfield">Challenge a team (optional)
-          <select aria-label="Challenge a team" value={targetTeamId} onChange={(e) => setTargetTeamId((e.target as HTMLSelectElement).value)}>
-            <option value="">Public post, any side may accept</option>
-            {options.teams.filter((t) => t.id !== teamId).map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
-          </select>
-        </label>
-      )}
-      <button class="btn" type="submit" disabled={busy || campaigns.length === 0 || !when}>Post the scrim</button>
-      {postedId !== null && (
-        <p class="muted">Posted. <a href={`/scrims?post=${postedId}`}>See it on the board</a></p>
-      )}
     </form>
   );
 }
@@ -514,7 +518,26 @@ export function Scrims({ session }: { session: Session }) {
   };
 
   if (!signedIn || closed) {
-    return <main class="page page--profile bookingpage"><PageHeader title="Scrims" /><Empty>{closed ? 'The scrim board is not open yet.' : 'Sign in to use the scrim board.'}</Empty></main>;
+    return (
+      <main class="page page--profile bookingpage">
+        <PageHeader eyebrow="Competitive" title="Scrims" />
+        {closed
+          ? <GatePanel title="Not open yet" lead="The scrim board is not open yet." links={[{ href: '/events', label: 'See events' }]} />
+          : (
+            <GatePanel
+              title="Find a scrim"
+              lead="Sign in to use the scrim board."
+              points={[
+                'Post a time and the campaigns you want to play, or accept another team\'s post.',
+                'Once both sides agree, a server is booked and set up for you.',
+                'No team yet? Post as a pickup group, or start a team.',
+              ]}
+              signInNext="/scrims"
+              links={[{ href: '/teams', label: 'Browse teams' }, { href: '/events', label: 'See events' }]}
+            />
+          )}
+      </main>
+    );
   }
 
   const mine = posts?.filter((p) => p.mine) ?? [];
