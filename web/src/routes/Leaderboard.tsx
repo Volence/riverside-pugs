@@ -68,6 +68,7 @@ export function Leaderboard({ me }: { me: string | null }) {
   // played the most. Totals stay one click away.
   const [mode, setMode] = useState<StatMode>('avg');
   const minGames = data?.statMinGames ?? STAT_MIN_GAMES;
+  const statSort = !BASE_COLS.some((c) => c.key === sort.key);
 
   // Damage as SI net of damage to incapped survivors (src/siDamage.ts), once,
   // here, so the column, its sort and the leader card all read one figure.
@@ -228,7 +229,11 @@ export function Leaderboard({ me }: { me: string | null }) {
                       // when the table is ordered by something other than SR.
                       // A provisional row has no rank at all, not a low one.
                       // A finished season shows its frozen final place.
-                      const place = data.season.ended ? r.finalRank ?? null : r.ranked ? i + 1 : null;
+                      // Sorted by a stat, a row with no figure for it (under
+                      // the per-game minimum, or never recorded) has no place
+                      // either: it is listed, not ranked.
+                      const unranked = statSort && valueOf(r, sort.key, mode, minGames) === null;
+                      const place = data.season.ended ? r.finalRank ?? null : r.ranked && !unranked ? i + 1 : null;
                       const rank = place !== null ? String(place).padStart(2, '0') : '–';
                       const rowClass = [
                         r.steamid === me ? 'is-me' : '',
