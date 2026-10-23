@@ -156,3 +156,54 @@ export function autoAction(st: VetoState, pool: string[], prefs: { campaigns: st
     default: throw new Error(`no automatic action for a ${n.kind} step`);
   }
 }
+
+/** One step of the whole veto as the room lists it (owner 2026-10-23: the
+ *  testers lost track of ban versus pick). `state` is done, now or later.
+ *  `tentative` marks a step whose team rests on an order the higher seed has
+ *  not chosen yet: it is listed as if they go first, so the page names the
+ *  role ("the team that goes first") rather than a team. A 'wait' step ends
+ *  the list when the next game's picker depends on a result. */
+export interface PlanStep {
+  kind: 'order' | 'ban' | 'pick' | 'side' | 'wait';
+  by: Side | null; game: number | null; state: 'done' | 'now' | 'later'; tentative: boolean;
+}
+
+/** The whole veto from the stored actions on: the steps taken, the one now
+ *  open, and what comes after, found by playing stand-in actions forward
+ *  (first, the first open campaign, survivors). Never throws. */
+export function vetoPlan(inp: VetoInput): PlanStep[] {
+  const out: PlanStep[] = [];
+  const actions = [...inp.actions];
+  let orderOpen = false;
+  for (let guard = 0; guard < 64; guard++) {
+    let st: VetoState;
+    try {
+      st = vetoState({ ...inp, actions });
+    } catch {
+      return out;
+    }
+    if (guard === 0) {
+      // The steps already taken, from the stored actions.
+      let used = 0;
+      const replay: VetoAction[] = [];
+      while (used < inp.actions.length) {
+        const s = vetoState({ ...inp, actions: replay });
+        if (!isHumanStep(s.next)) break;
+        out.push({ kind: s.next.kind, by: s.next.by, game: 'game' in s.next ? s.next.game : null, state: 'done', tentative: false });
+        replay.push(inp.actions[used]!);
+        used++;
+      }
+    }
+    const n = st.next;
+    if (n.kind === 'done') return out;
+    if (n.kind === 'wait') {
+      out.push({ kind: 'wait', by: null, game: n.game, state: guard === 0 ? 'now' : 'later', tentative: false });
+      return out;
+    }
+    out.push({ kind: n.kind, by: n.by, game: 'game' in n ? n.game : null, state: guard === 0 ? 'now' : 'later', tentative: orderOpen });
+    if (n.kind === 'order') orderOpen = true;
+    const stand: VetoActionKind = n.kind === 'order' ? 'first' : n.kind === 'side' ? 'survivors' : n.kind;
+    actions.push({ side: n.by, action: stand, campaign: n.kind === 'ban' || n.kind === 'pick' ? st.remaining[0] ?? null : null, auto: true });
+  }
+  return out;
+}
