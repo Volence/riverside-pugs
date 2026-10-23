@@ -2,10 +2,9 @@ import { Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { api, type LeaderboardRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders } from '../format';
+import { deriveLiveStats, FEATURED_STAT_KEYS, fmtPerGame, labelFor, orderLiveStatKeys, STAT_MIN_GAMES, statFigure, statLeaders, type StatMode } from '../format';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
-import { Headliner } from '../components/Headliner';
 import { TitleTag } from '../components/TitleTag';
 import { PlacingTag, RankBadge, Top10Tag } from '../components/SeasonRank';
 import { WeeklyBoard } from './WeeklyBoard';
@@ -29,8 +28,10 @@ const BASE_COLS = [
 type Row = LeaderboardRow & { stats?: Record<string, number> };
 
 /** Everything sortable resolves through here, so a column header and the
- *  comparator can never disagree about what a column means. */
-function valueOf(r: Row, key: string): number | null {
+ *  comparator can never disagree about what a column means. A stat column
+ *  reads per game or as a total by `mode`; per game is absent under the
+ *  minimum, so those rows sort after everyone who qualifies. */
+function valueOf(r: Row, key: string, mode: StatMode, minGames: number): number | null {
   switch (key) {
     case 'sr': return r.sr;
     case 'wins': return r.wins;
@@ -42,7 +43,7 @@ function valueOf(r: Row, key: string): number | null {
       // cell must not claim a 0% win rate for someone who has not lost.
       return decided > 0 ? (r.wins / decided) * 100 : null;
     }
-    default: return r.stats?.[key] ?? null;
+    default: return statFigure(r, key, mode, minGames);
   }
 }
 
@@ -63,6 +64,10 @@ export function Leaderboard({ me }: { me: string | null }) {
   const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
   const seasons = seasonList?.seasons ?? [];
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'sr', desc: true });
+  // Per game by default (owner, 2026-10-23): a season total mostly ranks who
+  // played the most. Totals stay one click away.
+  const [mode, setMode] = useState<StatMode>('avg');
+  const minGames = data?.statMinGames ?? STAT_MIN_GAMES;
 
   // Damage as SI net of damage to incapped survivors (src/siDamage.ts), once,
   // here, so the column, its sort and the leader card all read one figure.
@@ -83,8 +88,8 @@ export function Leaderboard({ me }: { me: string | null }) {
   // player is not on the board yet, whichever column is being compared.
   const { ranked, provisional } = useMemo(() => {
     const cmp = (x: Row, y: Row) => {
-      const a = valueOf(x, sort.key);
-      const b = valueOf(y, sort.key);
+      const a = valueOf(x, sort.key, mode, minGames);
+      const b = valueOf(y, sort.key, mode, minGames);
       // Absent always sorts last, whichever direction, rather than being
       // treated as zero and beating real low scores.
       if (a === null && b === null) return x.name.localeCompare(y.name);
@@ -97,7 +102,7 @@ export function Leaderboard({ me }: { me: string | null }) {
       ranked: rows.filter((r) => r.ranked).sort(cmp),
       provisional: rows.filter((r) => !r.ranked).sort(cmp),
     };
-  }, [rows, sort]);
+  }, [rows, sort, mode, minGames]);
 
   const th = (key: string, label: string, cls = '') => (
     <th
@@ -168,7 +173,25 @@ export function Leaderboard({ me }: { me: string | null }) {
         )}
       </PageHeader>
 
-      {board === 'season' && <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />}
+      {board === 'season' && (
+        <div class="lb-statmode">
+          <div class="lb-toggle" role="group" aria-label="Stat columns">
+            <button type="button" class={mode === 'avg' ? 'is-on' : ''} aria-pressed={mode === 'avg'} onClick={() => setMode('avg')}>Per game</button>
+            <button type="button" class={mode === 'total' ? 'is-on' : ''} aria-pressed={mode === 'total'} onClick={() => setMode('total')}>Totals</button>
+          </div>
+          <span class="muted">
+            {mode === 'avg'
+              ? `Stats per game. Ranked from ${minGames} games; leader cards are for ranked players only.`
+              : 'Season totals. Leader cards are for ranked players only.'}
+          </span>
+        </div>
+      )}
+      {board === 'season' && (
+        <StatLeaders
+          rows={ranked} mode={mode} minGames={minGames}
+          sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })}
+        />
+      )}
 
       {weekly ? (
         <WeeklyBoard week={week} onWeek={setWeek} />
@@ -238,9 +261,19 @@ export function Leaderboard({ me }: { me: string | null }) {
                             </td>
                             {statCols.map((k) => {
                               const v = r.stats?.[k];
+                              if (v === undefined) return <td class="num is-dim" key={k}><span class="muted">n/a</span></td>;
+                              if (mode === 'total') return <td class={`num${v ? '' : ' is-dim'}`} key={k}>{v}</td>;
+                              // Per game. Under the minimum the average still
+                              // shows, greyed and unranked, so the row is not blank.
+                              const games = r.statGames ?? r.games;
+                              const per = games > 0 ? v / games : 0;
+                              const short = games < minGames;
                               return (
-                                <td class={`num${v ? '' : ' is-dim'}`} key={k}>
-                                  {v === undefined ? <span class="muted">n/a</span> : v}
+                                <td
+                                  class={`num${per && !short ? '' : ' is-dim'}`} key={k}
+                                  title={short ? `Under ${minGames} games: not ranked per game` : undefined}
+                                >
+                                  {short ? <span class="muted">{fmtPerGame(per)}</span> : fmtPerGame(per)}
                                 </td>
                               );
                             })}
@@ -253,24 +286,6 @@ export function Leaderboard({ me }: { me: string | null }) {
               </div>
             )}
           </Panel>
-          {/* Top rated is chosen among RANKED players only: a provisional SR
-              after one game is not a claim on the card. */}
-          {ranked.some((r) => r.sr !== null) && (() => {
-            const top = [...ranked].filter((r) => r.sr !== null).sort((a, b) => b.sr! - a.sr!)[0];
-            const decided = top.wins + top.losses;
-            return (
-              <Headliner
-                eyebrow="Top rated"
-                name={top.name}
-                rating={top.sr!}
-                stats={[
-                  { label: 'Record', value: `${top.wins}W ${top.losses}L` },
-                  { label: 'Win %', value: decided > 0 ? `${Math.round((top.wins / decided) * 100)}%` : 'n/a' },
-                  { label: 'Games', value: top.games },
-                ]}
-              />
-            );
-          })()}
         </div>
       )}
     </div>
@@ -289,22 +304,29 @@ export function Leaderboard({ me }: { me: string | null }) {
  *
  * So each card is also the control: clicking it sorts the table by that stat,
  * which is the discoverability the column headers were missing.
+ *
+ * `rows` is the RANKED players only (owner, 2026-10-23): a placing or
+ * provisional player is not on the board yet, so not on a card either. The
+ * cards read like the columns, per game (past the minimum) or as totals.
  */
 function StatLeaders(
-  { rows, sortKey, onPick }: {
+  { rows, mode, minGames, sortKey, onPick }: {
     rows: Row[];
+    mode: StatMode;
+    minGames: number;
     sortKey: string;
     onPick: (key: string) => void;
   },
 ) {
   const cards = useMemo(
     () => FEATURED_STAT_KEYS
-      .map((key) => ({ key, leaders: statLeaders(rows, key) }))
+      .map((key) => ({ key, leaders: statLeaders(rows, key, 3, (r) => statFigure(r, key, mode, minGames)) }))
       // A stat nobody has scored in yet gets no card, rather than a card
       // reading "nobody, 0". Keeps a fresh season honest.
       .filter((c) => c.leaders.length > 0),
-    [rows],
+    [rows, mode, minGames],
   );
+  const fmt = (v: number) => (mode === 'avg' ? fmtPerGame(v) : v.toLocaleString());
   if (cards.length === 0) return null;
 
   return (
@@ -320,13 +342,13 @@ function StatLeaders(
             title={`Sort the table by ${labelFor(key)}`}
             onClick={() => onPick(key)}
           >
-            <span class="statleader__label eyebrow">{labelFor(key)}</span>
+            <span class="statleader__label eyebrow">{mode === 'avg' ? `${labelFor(key)} / game` : labelFor(key)}</span>
             <span class="statleader__name">{first.name}</span>
-            <span class="statleader__value num">{first.value.toLocaleString()}</span>
+            <span class="statleader__value num">{fmt(first.value)}</span>
             {rest.length > 0 && (
               <span class="statleader__rest muted">
                 {rest.map((r, i) => (
-                  <span key={r.steamid}>{i > 0 ? ' · ' : ''}{r.name} {r.value.toLocaleString()}</span>
+                  <span key={r.steamid}>{i > 0 ? ' · ' : ''}{r.name} {fmt(r.value)}</span>
                 ))}
               </span>
             )}

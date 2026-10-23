@@ -364,6 +364,9 @@ export interface LeaderboardRow {
   /** Season totals per stat, so the table sorts by any column without a
    *  request per column. Self-visibility stats are dropped server side. */
   stats?: Record<string, number>;
+  /** Completed PUGs this season, the denominator for per-game stats. Optional
+   *  for a server older than the field (the page falls back to `games`). */
+  statGames?: number;
   /** The endorsement title they have earned, if any. */
   title?: EndorseKind | null;
 }
@@ -372,6 +375,9 @@ export interface Leaderboard {
   season: { id: number; name: string; placementGames?: number; ranks?: boolean; finalMinGames?: number; ended?: boolean };
   /** Distinct matches that produced a rating this season. */
   matchesRated: number;
+  /** Completed PUGs before a per-game stat ranks (standing_min_games).
+   *  Optional for an older server; the page falls back to STAT_MIN_GAMES. */
+  statMinGames?: number;
   rows: LeaderboardRow[];
 }
 
