@@ -563,8 +563,9 @@ describe('Profile', () => {
     render(<Profile steamid="1" />);
     await waitFor(() => expect(screen.getByText('alice')).toBeTruthy());
     // history's peak (1200) equals the current rating, so the same number
-    // appears twice: the rating hero and the "Peak" stat tile.
-    expect(screen.getAllByText('1200')).toHaveLength(2);
+    // appears four times: the rating hero, its "Peak" stat tile, and the
+    // rating chart's Now and Peak figures.
+    expect(screen.getAllByText('1200')).toHaveLength(4);
     expect(screen.getByText('Dead Air')).toBeTruthy();
     // Shown twice by design: beside the rating hero, and in the match row.
     expect(screen.getAllByText('+12')).toHaveLength(2);

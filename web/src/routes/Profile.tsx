@@ -30,6 +30,10 @@ export function Profile(
   const [mapMode, setMapMode] = useState<'avg' | 'total'>('avg');
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [ticketPassed, setTicketPassed] = useState(false);
+  // Which measure orders the bars. Both answer "what should I work on", and
+  // they genuinely disagree: a map you win while dying constantly looks fine
+  // on one and terrible on the other.
+  const [mapSort, setMapSort] = useState<MapSort>('winrate');
 
   if (error) {
     return (
@@ -41,10 +45,6 @@ export function Profile(
   if (!data) return <PageSkeleton variant="profile" panels={3} />;
 
   const byMap = data.byMap ?? [];
-  // Which measure orders the bars. Both answer "what should I work on", and
-  // they genuinely disagree: a map you win while dying constantly looks fine
-  // on one and terrible on the other.
-  const [mapSort, setMapSort] = useState<MapSort>('winrate');
   const sortedMaps = sortMapRows(byMap, mapSort);
   // Only the stats that actually occur on some map, so a server without
   // skill_detect shows no permanently empty columns.
@@ -63,11 +63,13 @@ export function Profile(
     .filter(([k]) => !DEAD_STAT_KEYS.has(k));
 
   const peak = history.length ? Math.max(...history.map((h) => h.sr)) : null;
+  const low = history.length ? Math.min(...history.map((h) => h.sr)) : null;
   const lastDelta = matches.length ? matches[0].srDelta : null;
 
   return (
-    <div class="page page--profile">
+    <div class="page page--profile prof">
       <div class="stack">
+        <div class="prof__hero">
         <Headliner
           eyebrow={`Joined ${fmtDate(player.createdAt)}`}
           name={player.name}
@@ -91,6 +93,19 @@ export function Profile(
             { label: 'Forfeits', value: data.forfeits?.forfeits ?? 0 },
           ] : []}
         />
+        {history.length > 1 && (
+          <Panel class="prof__trend">
+            <h3>Rating over time</h3>
+            <Sparkline values={history.map((h) => h.sr)} />
+            <dl class="prof__trendfacts">
+              <div><dt>Now</dt><dd class="num">{history[history.length - 1].sr}</dd></div>
+              <div><dt>Peak</dt><dd class="num">{peak}</dd></div>
+              <div><dt>Low</dt><dd class="num">{low}</dd></div>
+              <div><dt>Rated games</dt><dd class="num">{history.length}</dd></div>
+            </dl>
+          </Panel>
+        )}
+        </div>
 
         <SocialChips links={data.social} twitchName={player.twitchName} />
 
@@ -138,67 +153,69 @@ export function Profile(
         )}
         {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}
 
-        <Panel>
-          <h3>Rating over time</h3>
-          <Sparkline values={history.map((h) => h.sr)} />
-        </Panel>
 
         <ProfileFigures
           totals={totals} statTotals={statTotals} rating={rating}
           standings={data.standings ?? {}} statDefs={data.statDefs}
         />
 
-        <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
+        <div class="prof__cols">
+          <div class="prof__main">
+            <ProfileEvents events={data.events} />
 
-        <ChemistryPanel chemistry={data.chemistry} />
-        <EndorsementCounts endorsements={data.endorsements} />
-        <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
-        <ProfileEvents events={data.events} />
-
-        <div class="profile-grid">
-          <Panel>
-            <h3>Lifetime</h3>
-            <dl class="totals">
-              <div><dt>Games</dt><dd class="num">{totals.games}</dd></div>
-              <div><dt>SI damage</dt><dd class="num">{totals.siDamage}</dd></div>
-              <div><dt>SI kills</dt><dd class="num">{totals.siKills}</dd></div>
-              <div><dt>Commons</dt><dd class="num">{totals.commonKills}</dd></div>
-              <div><dt>Friendly fire</dt><dd class="num">{totals.ffDealt}</dd></div>
-              <div><dt>Revives</dt><dd class="num">{totals.revives}</dd></div>
-            </dl>
-          </Panel>
-
-          <Panel class="panel--table">
-            <h3>Recent matches</h3>
-            {matches.length === 0 ? (
-              <Empty>None yet.</Empty>
-            ) : (
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th />
-                      <th>Campaign</th>
-                      <th class="num">Score</th>
-                      <th class="num">SR</th>
-                      <th class="num">Ended</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {matches.map((m) => (
-                      <tr key={m.id} style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
-                        <td><ResultChip result={m.result} /></td>
-                        <td class="campaign-cell"><a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a></td>
-                        <td class="num">{m.teamAScore} - {m.teamBScore}</td>
-                        <td class="num"><SrDelta value={m.srDelta} /></td>
-                        <td class="num muted">{fmtDate(m.endedAt)}</td>
+            <Panel class="panel--table prof__matches">
+              <h3>Recent matches</h3>
+              {matches.length === 0 ? (
+                <Empty>None yet.</Empty>
+              ) : (
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th><span class="sr-only">Result</span></th>
+                        <th>Campaign</th>
+                        <th class="num">Score</th>
+                        <th class="num">SR</th>
+                        <th class="num prof__when">Ended</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Panel>
+                    </thead>
+                    <tbody>
+                      {matches.map((m) => (
+                        <tr key={m.id} style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
+                          <td><ResultChip result={m.result} /></td>
+                          <td class="campaign-cell">
+                            <a href={`/match/${m.id}`}>{campaignName(m.campaign)}</a>
+                            <span class="prof__when-short muted">{shortDate(m.endedAt)}</span>
+                          </td>
+                          <td class="num">{m.teamAScore} - {m.teamBScore}</td>
+                          <td class="num"><SrDelta value={m.srDelta} /></td>
+                          <td class="num muted prof__when">{fmtDate(m.endedAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          <aside class="prof__aside" aria-label="About this player">
+            <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
+            <ChemistryPanel chemistry={data.chemistry} />
+            <EndorsementCounts endorsements={data.endorsements} />
+            <Panel>
+              <h3>Lifetime</h3>
+              <dl class="totals">
+                <div><dt>Games</dt><dd class="num">{totals.games}</dd></div>
+                <div><dt>SI damage</dt><dd class="num">{totals.siDamage}</dd></div>
+                <div><dt>SI kills</dt><dd class="num">{totals.siKills}</dd></div>
+                <div><dt>Commons</dt><dd class="num">{totals.commonKills}</dd></div>
+                <div><dt>Friendly fire</dt><dd class="num">{totals.ffDealt}</dd></div>
+                <div><dt>Revives</dt><dd class="num">{totals.revives}</dd></div>
+              </dl>
+            </Panel>
+            <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
+          </aside>
         </div>
 
         {byMap.length > 0 && (
@@ -393,6 +410,13 @@ function ProfileFigures(
       )}
     </Panel>
   );
+}
+
+/** "Oct 23" for the phone column, where the full timestamp does not fit. */
+function shortDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`);
+  return Number.isNaN(d.getTime()) ? fmtDate(iso).slice(5, 10) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 /** Labels for the standings that are not registry stats. */
