@@ -72,6 +72,21 @@ describe('balance admin API', () => {
     expect((await a.inject({ method: 'GET', url: '/api/admin/balance/looks' })).statusCode).toBe(401);
   });
 
+  it('reports the stat-aware team balance log, admin only', async () => {
+    const { a, cookies } = await app();
+    db.prepare(`INSERT INTO match_balance_log (match_id, enabled, gate, tolerance, over_gate, gate_fired, stat_avg,
+      best_team_a, best_team_b, best_rating_a, best_stat_a, chosen_team_a, chosen_team_b, chosen_rating_a, chosen_stat_a, moved, players_json)
+      VALUES (1, 1, 0.6, 0.05, 1, 1, 5000, '[]', '[]', 0.5, 0.7, '[]', '[]', 0.52, 0.51, 2, '[]')`).run();
+    const res = await a.inject({ method: 'GET', url: '/api/admin/balance/teams', cookies });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      config: { enabled: false, gate: 0.6, tolerance: 0.05 },
+      summary: { logged: 1, enabledMatches: 1, gateFireRate: 1 },
+      rows: [{ matchId: 1, gateFired: true, moved: 2, winner: null }],
+    });
+    expect((await a.inject({ method: 'GET', url: '/api/admin/balance/teams' })).statusCode).toBe(401);
+  });
+
   it('refuses a non-admin', async () => {
     const a = await buildServer({ config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {} });
     const cookies = await authedCookie(a, db, '76561198000000010');
