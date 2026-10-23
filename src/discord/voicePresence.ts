@@ -12,6 +12,7 @@ export class VoicePresence {
   /** userId -> channelId, for everyone currently in a voice channel. */
   private channels: Map<string, string> | null = null;
   private leaveListeners: ((userId: string) => void)[] = [];
+  private joinListeners: ((userId: string) => void)[] = [];
 
   setAll(states: Iterable<readonly [string, string]>): void {
     this.channels = new Map(states);
@@ -21,7 +22,19 @@ export class VoicePresence {
    *  they left voice. A move between channels is not a leave. */
   update(userId: string, channelId: string | null): void {
     if (channelId) {
+      // Only a join while the states are known: before setAll there is no
+      // "before" to compare with, and a move between channels is not a join.
+      const joined = this.channels !== null && !this.channels.has(userId);
       this.channels?.set(userId, channelId);
+      if (joined) {
+        for (const fn of this.joinListeners) {
+          try {
+            fn(userId);
+          } catch (err) {
+            console.error('[discord] voice join listener failed:', err);
+          }
+        }
+      }
       return;
     }
     this.channels?.delete(userId);
@@ -37,6 +50,11 @@ export class VoicePresence {
   /** Called when someone leaves voice altogether, after they are out of the map. */
   onLeave(fn: (userId: string) => void): void {
     this.leaveListeners.push(fn);
+  }
+
+  /** Called when someone joins voice from outside it, after they are in the map. */
+  onJoin(fn: (userId: string) => void): void {
+    this.joinListeners.push(fn);
   }
 
   inVoice(userId: string): boolean | null {

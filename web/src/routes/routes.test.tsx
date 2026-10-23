@@ -873,6 +873,28 @@ describe('Play', () => {
     expect(rows[2].textContent).toContain('no Discord');
   });
 
+  it('a blocked ready check offers Check again, which refreshes', () => {
+    const refresh = vi.fn();
+    render(
+      <Play
+        session={active}
+        state={{
+          queue: { count: 8, joined: true, players: [] },
+          lobby: {
+            id: 'l1', phase: 'ready_check',
+            players: [{ steamid: '1', name: 'alice', avatar: null, readyBlock: 'join_voice' }],
+            ready: [], options: [], votes: {}, deadline: Date.now() + 30_000, myVote: null,
+          },
+          match: null,
+          readyBlock: 'join_voice',
+        }}
+        refresh={refresh}
+      />,
+    );
+    (screen.getByRole('button', { name: 'Check again' }) as HTMLButtonElement).click();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('a viewer who may ready sees an enabled Ready button and no voice notice', () => {
     render(
       <Play

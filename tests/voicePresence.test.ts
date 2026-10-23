@@ -36,6 +36,19 @@ describe('VoicePresence', () => {
     expect(left).toEqual(['1']);
   });
 
+  it('tells join listeners when someone enters voice, not when they move or before the load', () => {
+    const v = new VoicePresence();
+    const joined: string[] = [];
+    v.onJoin((id) => joined.push(id));
+    v.update('0', 'chan-a');            // states unknown: no "before" to compare with
+    v.setAll([['1', 'chan-a']]);
+    v.update('1', 'chan-b');            // a move
+    v.update('2', 'chan-a');            // a join
+    v.update('2', null);
+    v.update('2', 'chan-b');            // joins again
+    expect(joined).toEqual(['2', '2']);
+  });
+
   it('a leave event before the load is known still reaches listeners', () => {
     const v = new VoicePresence();
     const left: string[] = [];
