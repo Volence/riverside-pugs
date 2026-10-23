@@ -1071,9 +1071,17 @@ function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
       ctx.fillRect(b.x, b.y, 1, b.h);
       ctx.fillRect(b.x + b.w - 1, b.y, 1, b.h);
       const inner = b.w - 2 * FRUST_FILL_INSET;
-      const w = inner * FRUST_SAMPLE;
-      const x = pcGet(bar, 'east_aligned') === '0' ? b.x + FRUST_FILL_INSET : b.x + b.w - FRUST_FILL_INSET - w;
-      ctx.fillRect(x, b.y + FRUST_FILL_INSET, w, b.h - 2 * FRUST_FILL_INSET);
+      const west = pcGet(bar, 'east_aligned') === '0';
+      // DrawBar (client.dylib 0x3a5d90) fills across while the bar is wider than tall, else up from the
+      // bottom; east_aligned 1 slides a full bar across instead, so only a west-aligned tall bar fills upward.
+      if (west && b.h >= b.w) {
+        const tall = (b.h - 2 * FRUST_FILL_INSET) * FRUST_SAMPLE;
+        ctx.fillRect(b.x + FRUST_FILL_INSET, b.y + b.h - FRUST_FILL_INSET - tall, inner, tall);
+      } else {
+        const w = inner * FRUST_SAMPLE;
+        const x = west ? b.x + FRUST_FILL_INSET : b.x + b.w - FRUST_FILL_INSET - w;
+        ctx.fillRect(x, b.y + FRUST_FILL_INSET, w, b.h - 2 * FRUST_FILL_INSET);
+      }
     }
     for (const [name, s] of FRUST_LINES) {
       const n = shown(name);
