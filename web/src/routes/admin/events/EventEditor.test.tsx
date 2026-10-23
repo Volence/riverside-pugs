@@ -70,13 +70,18 @@ beforeEach(() => {
     mockAdmin.removeEventBanner, mockAdmin.deleteEvent]) f.mockResolvedValue({ ok: true });
 });
 
+/** History lines as "time · who · what", read from the desk's three columns. */
+const historyLines = () => [...document.querySelectorAll('.evdesk__history li')]
+  .map((li) => [...li.children].map((c) => c.textContent).join(' · '));
+const hasHistory = (re: RegExp) => historyLines().some((l) => re.test(l));
+
 describe('EventEditor', () => {
   it('shows a draft with its stages, history, Publish and no Open registration', async () => {
     mockAdmin.event.mockResolvedValue(detail());
     render(<EventEditor id={3} canEdit />);
     expect(await screen.findByText('Swiss, 4 rounds, top 8 advance')).toBeTruthy();
     expect(screen.getByText('Single elimination')).toBeTruthy();
-    expect(screen.getByText(/boss · Created/)).toBeTruthy();
+    expect(hasHistory(/boss · Created/)).toBe(true);
     expect(screen.getByRole('button', { name: 'Publish' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Open registration' })).toBeNull();
     expect((screen.getByLabelText('Entry kind') as HTMLSelectElement).disabled).toBe(false);
@@ -258,7 +263,7 @@ describe('EventEditor', () => {
     const { container } = render(<EventEditor id={3} canEdit={false} />);
     expect(await screen.findByText('Swiss, 4 rounds, top 8 advance')).toBeTruthy();
     expect(screen.getByText('Read only: admins run events.')).toBeTruthy();
-    expect(screen.getByText(/boss · Created/)).toBeTruthy();
+    expect(hasHistory(/boss · Created/)).toBe(true);
     expect(screen.getByText('Team event').tagName).toBe('EM');
     // The desk's own banner route: the public one is behind the switch.
     expect(container.querySelector('img.eventbanner')!.getAttribute('src')).toBe(`/api/admin/events/3/banner?k=${'e'.repeat(64)}`);
@@ -382,7 +387,7 @@ describe('EventEditor', () => {
       { at: '2026-10-01T12:00:00.000Z', actorName: null, action: 'reschedule_auto_accepted', detail: {} },
     ] }));
     render(<EventEditor id={1} canEdit />);
-    expect((await screen.findByText(/Match time set/)).textContent).toContain('boss');
+    expect((await screen.findByText(/Match time set/)).closest('li')!.textContent).toContain('boss');
     expect(screen.getByText(/Unanswered proposal locked/)).toBeTruthy();
   });
 
@@ -418,8 +423,8 @@ describe('EventEditor', () => {
       { at: '2026-10-01T12:00:00.000Z', actorName: 'boss', action: 'brand_new_action', detail: {} },
     ] }));
     render(<EventEditor id={3} canEdit />);
-    expect(await screen.findByText(/the clock · Stage finished/)).toBeTruthy();
-    expect(screen.getByText(/boss · Brand new action/)).toBeTruthy();
+    await waitFor(() => expect(hasHistory(/the clock · Stage finished/)).toBe(true));
+    expect(hasHistory(/boss · Brand new action/)).toBe(true);
   });
 
   it('says so when the event or the options fail to load, not Loading forever', async () => {

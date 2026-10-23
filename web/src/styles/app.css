@@ -5947,4 +5947,54 @@ a.mapch__name:hover { color: var(--accent); }
 }
 @media (max-width: 760px) {
   .ticket-row__when { grid-column: 3; grid-row: 1; }
+/* ---- Events desk (UI round 3): a guided staff console. Event header with
+   the "what's next" step strip, a help line under every panel title, grouped
+   actions, aligned history, and the event list as rows. Layout only. ---- */
+.evdesk__head { display: flex; flex-direction: column; gap: var(--sp-3); }
+.evdesk__title h3 { margin-bottom: var(--sp-1); }
+.evdesk__meta { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin: 0; font-size: var(--fs-dense); }
+.evdesk__meta > * + *::before { content: '·'; margin-right: var(--sp-3); color: var(--border-strong); }
+.evdesk__steps { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); }
+.evdesk__next { margin: 0; color: var(--text); }
+.evdesk__next strong { color: var(--accent); }
+.evdesk__strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); list-style: none; margin: 0; padding: 0; counter-reset: none; }
+.evdesk__step { display: inline-flex; align-items: center; gap: var(--sp-2); padding: 4px 10px 4px 4px; border: 1px solid var(--border); border-radius: 999px; font-size: var(--fs-dense); color: var(--text-muted); background: var(--surface); }
+.evdesk__stepnum { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; border: 1px solid var(--border-strong); font-family: var(--font-label); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.evdesk__step--done { color: var(--text); }
+.evdesk__step--done .evdesk__stepnum { border-color: var(--win); color: var(--win); }
+.evdesk__step--now { border-color: var(--accent); color: var(--text-bright); }
+.evdesk__step--now .evdesk__stepnum { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.evdesk__actions { margin: 0; }
+.evdesk__danger { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: 0; padding-top: var(--sp-3); border-top: 1px dashed var(--border); }
+.evdesk__danger > input { flex: 1 1 14rem; min-width: 0; }
+.evdesk__help { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); font-size: var(--fs-dense); color: var(--text-muted); max-width: 70ch; }
+.evdesk__panel .inlinerow { margin: var(--sp-2) 0; }
+.evdesk__panel h4 { margin: var(--sp-4) 0 var(--sp-2); }
+.evdesk__history { max-height: 28rem; overflow-y: auto; padding-right: var(--sp-2); }
+.evdesk__history li { display: grid; grid-template-columns: 11rem 9rem minmax(0, 1fr); gap: var(--sp-3); font-size: var(--fs-dense); }
+.evdesk__histtime { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.evdesk__histwho { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evdesk__histwhat { min-width: 0; }
+.evdesk__list { display: flex; flex-direction: column; gap: var(--sp-2); }
+.evdesk__item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface-2); }
+.evdesk__item:hover { border-color: var(--border-strong); }
+.evdesk__item > .muted { font-size: var(--fs-dense); }
+.evdesk__stage + .evdesk__stage { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.evdesk__panel .table-wrap { max-width: 100%; overflow-x: auto; }
+.evdesk__settings { border: 1px solid var(--border); border-radius: var(--radius, 6px); background: var(--surface); }
+.evdesk__settings > summary { cursor: pointer; padding: var(--sp-3) var(--sp-4); font-family: var(--font-label); letter-spacing: 0.08em; text-transform: uppercase; font-size: var(--fs-label); color: var(--text-muted); }
+.evdesk__settings > summary:hover, .evdesk__settings[open] > summary { color: var(--text); }
+.evdesk__settings > .stack { padding: 0 var(--sp-3) var(--sp-3); }
+.evdesk__panel .inlinerow > input[type='number'] { flex: 0 0 6rem; width: 6rem; }
+.evdesk__signups td { vertical-align: middle; }
+.evdesk__signups td.evdesk__acts .inlinerow { flex-wrap: nowrap; margin: 0; }
+.evdesk__signups td.evdesk__acts select { width: auto; }
+@media (max-width: 640px) {
+  .evdesk__steps { padding: var(--sp-3); }
+  .evdesk__meta { flex-direction: column; gap: 2px; }
+  .evdesk__meta > * + *::before { content: none; }
+  .evdesk__step { padding-right: 8px; }
+  .evdesk__history li { grid-template-columns: minmax(0, 1fr); gap: 0; padding: var(--sp-1) 0; }
+  .evdesk__histwho, .evdesk__histwhat { white-space: normal; }
+  .evdesk__item { padding: var(--sp-3); }
 }
