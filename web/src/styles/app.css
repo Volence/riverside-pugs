@@ -4822,3 +4822,145 @@ a.tmscrim__who:hover .tmscrim__vs, a.tmscrim__who:focus-visible .tmscrim__vs { c
 .bkform__camps .bkcamp:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
 .bkform__camps .bkcamp:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (min-width: 860px) { .bkform.bookform { grid-template-columns: minmax(0, 18rem) minmax(0, 1fr); } }
+
+/* ---------------------------------------------------------------------
+   Leaderboard touchup (2026-10-23): podium for the top three, the stat
+   leaders as one even grid, the table across the full width with faces and
+   names in normal case. The table keeps its capped, sticky-header scroll box
+   (owner, 2026-09-19); only the sidebar that squeezed it is gone.
+   --------------------------------------------------------------------- */
+.lb-full { display: block; }
+
+.lbpod {
+  list-style: none;
+  margin: 0 0 var(--sp-5);
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.lbpod__card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "face who" "face sr" "stats stats";
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
+  align-items: center;
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--border-strong);
+}
+.lbpod__card--1 {
+  border-top-color: var(--rating);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--rating) 9%, var(--surface)), var(--surface) 70%);
+}
+.lbpod__card--2 { border-top-color: color-mix(in srgb, var(--text-bright) 70%, var(--surface)); }
+.lbpod__card--3 { border-top-color: color-mix(in srgb, var(--accent) 55%, var(--rating)); }
+.lbpod__place {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-3);
+  font-family: var(--font-display);
+  font-size: 2.25rem;
+  line-height: 1;
+  color: var(--text-muted);
+  opacity: 0.45;
+}
+.lbpod__card--1 .lbpod__place { color: var(--rating); opacity: 0.8; }
+.lbpod__face {
+  grid-area: face;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border: 2px solid var(--border-strong);
+  border-radius: 2px;
+}
+.lbpod__card--1 .lbpod__face { border-color: var(--rating); }
+.lbpod__face--none {
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--text-muted);
+}
+.lbpod__who { grid-area: who; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding-right: 2.5rem; }
+.lbpod__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--text-bright);
+}
+.lbpod__name:hover { color: var(--accent); }
+.lbpod__who .titletag { margin-left: 0; flex: none; }
+.lbpod__sr {
+  grid-area: sr;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--rating);
+}
+.lbpod__unit { margin-left: var(--sp-1); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; color: var(--text-muted); }
+.lbpod__stats {
+  grid-area: stats;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+.lbpod__stats dt { font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.lbpod__stats dd { margin: 0; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .lbpod { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Six stat leaders in one even row on a wide screen, three by two in the
+   middle, two across on a phone: auto-fit used to leave a lone sixth card
+   on its own line. */
+.statleaders { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1180px) { .statleaders { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .statleaders { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.statleader__value { font-variant-numeric: tabular-nums; }
+.statleader__rest { display: grid; gap: 1px; white-space: normal; margin-top: var(--sp-1); }
+.statleader__runner { display: flex; gap: var(--sp-2); align-items: baseline; min-width: 0; }
+.statleader__pos { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
+.statleader__rname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+
+/* Table names: a face, the name in normal case, the earned title small and
+   inline, all on one line so rows stay one height. */
+.lb-full .lb { --lb-name-w: 16rem; }
+.lbname { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.lbname__face { flex: none; width: 24px; height: 24px; object-fit: cover; border-radius: 2px; }
+.lbpod__face--none::before, .lbname__face--none::before { content: attr(data-initial); }
+.lbname__face--none {
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.lb .lb__pcol .lbname a {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.lb .lb__pcol .lbname a:hover { color: var(--accent); }
+.lbname .titletag { flex: none; margin-left: 0; font-size: 0.65rem; padding: 0 4px; }
+@media (max-width: 480px) {
+  .lb-full .lb { --lb-name-w: 9.5rem; }
+  .lbname .titletag { display: none; }
+}

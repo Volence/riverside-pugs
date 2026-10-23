@@ -5,7 +5,6 @@ import { useFetch } from '../hooks/useFetch';
 import { deriveLiveStats, FEATURED_STAT_KEYS, labelFor, orderLiveStatKeys, statLeaders } from '../format';
 import { Empty, Panel, PlayerLink } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
-import { Headliner } from '../components/Headliner';
 import { TitleTag } from '../components/TitleTag';
 import { WeeklyBoard } from './WeeklyBoard';
 import { EndorseBoard } from './EndorseBoard';
@@ -135,13 +134,13 @@ export function Leaderboard({ me }: { me: string | null }) {
       >
         {board === 'season' && rows.length > 0 && (
           <Figures>
-            <Figure label="Players" value={rows.length} />
+            <Figure label="Players" value={rows.length.toLocaleString()} />
             {/* The API's distinct-match count. This was the top player's
                 game count, which is only right while everyone has played
                 every match. */}
-            {data && <Figure label="Matches rated" value={data.matchesRated} />}
-            {totals.tank_damage ? <Figure label="Tank damage" value={totals.tank_damage} /> : null}
-            {totals.skeets ? <Figure label="Skeets" value={totals.skeets} /> : null}
+            {data && <Figure label="Matches rated" value={data.matchesRated.toLocaleString()} />}
+            {totals.tank_damage ? <Figure label="Tank damage" value={totals.tank_damage.toLocaleString()} /> : null}
+            {totals.skeets ? <Figure label="Skeets" value={totals.skeets.toLocaleString()} /> : null}
             {totals.boomer_rate !== undefined
               ? <Figure label="Boomer %" value={`${totals.boomer_rate}%`} sub="everyone" />
               : null}
@@ -149,6 +148,11 @@ export function Leaderboard({ me }: { me: string | null }) {
         )}
       </PageHeader>
 
+      {/* The podium is chosen among RANKED players only, by SR whatever the
+          table is sorted by: a provisional SR after one game is not a claim
+          on it. It replaces the old Top rated sidebar, which repeated #1 and
+          squeezed the table into two thirds of the page. */}
+      {board === 'season' && <Podium rows={ranked} />}
       {board === 'season' && <StatLeaders rows={rows} sortKey={sort.key} onPick={(k) => setSort({ key: k, desc: true })} />}
 
       {weekly ? (
@@ -156,7 +160,7 @@ export function Leaderboard({ me }: { me: string | null }) {
       ) : endorse ? (
         <EndorseBoard season={season} me={me} />
       ) : (
-        <div class="lb-layout">
+        <div class="lb-full">
           <Panel class="panel--table">
             {error ? (
               <Empty>Couldn't load the leaderboard.</Empty>
@@ -200,7 +204,15 @@ export function Leaderboard({ me }: { me: string | null }) {
                             {/* The cell is a fixed width so SR can pin beside it on a
                                 phone; a long name is clipped, and the title carries
                                 the rest. */}
-                            <td class="lb__pcol pname" title={r.name}><PlayerLink steamid={r.steamid} name={r.name} /><TitleTag kind={r.title} /></td>
+                            <td class="lb__pcol" title={r.name}>
+                              <span class="lbname">
+                                {r.avatar
+                                  ? <img class="lbname__face" src={r.avatar} alt="" width={24} height={24} loading="lazy" />
+                                  : <span class="lbname__face lbname__face--none" aria-hidden="true" data-initial={r.name.slice(0, 1).toUpperCase()} />}
+                                <PlayerLink steamid={r.steamid} name={r.name} />
+                                <TitleTag kind={r.title} />
+                              </span>
+                            </td>
                             <td class="num sr lb__sr">{r.sr}</td>
                             <td class="num lb__wl">{r.wins}</td>
                             <td class="num lb__wl">{r.losses}</td>
@@ -214,7 +226,7 @@ export function Leaderboard({ me }: { me: string | null }) {
                               const v = r.stats?.[k];
                               return (
                                 <td class={`num${v ? '' : ' is-dim'}`} key={k}>
-                                  {v === undefined ? <span class="muted">n/a</span> : v}
+                                  {v === undefined ? <span class="muted">n/a</span> : v.toLocaleString()}
                                 </td>
                               );
                             })}
@@ -227,30 +239,45 @@ export function Leaderboard({ me }: { me: string | null }) {
               </div>
             )}
           </Panel>
-          {/* Top rated is chosen among RANKED players only: a provisional SR
-              after one game is not a claim on the card. */}
-          {ranked.length > 0 && (() => {
-            const top = [...ranked].sort((a, b) => b.sr - a.sr)[0];
-            const decided = top.wins + top.losses;
-            return (
-              <Headliner
-                eyebrow="Top rated"
-                name={top.name}
-                rating={top.sr}
-                stats={[
-                  { label: 'Record', value: `${top.wins}W ${top.losses}L` },
-                  { label: 'Win %', value: decided > 0 ? `${Math.round((top.wins / decided) * 100)}%` : 'n/a' },
-                  { label: 'Games', value: top.games },
-                ]}
-              />
-            );
-          })()}
         </div>
       )}
     </div>
   );
 }
 
+/** The top three by SR, as cards: who is on top is the first thing anyone
+ *  opens a leaderboard to see, so it gets faces and room rather than row one
+ *  of a wide table. Ordered 1, 2, 3 left to right so it reads the same on a
+ *  phone, where the cards stack. */
+function Podium({ rows }: { rows: Row[] }) {
+  const top = useMemo(() => [...rows].sort((a, b) => b.sr - a.sr || a.name.localeCompare(b.name)).slice(0, 3), [rows]);
+  if (top.length === 0) return null;
+  return (
+    <ol class="lbpod" aria-label="Top rated">
+      {top.map((r, i) => {
+        const decided = r.wins + r.losses;
+        return (
+          <li key={r.steamid} class={`lbpod__card lbpod__card--${i + 1}`}>
+            <span class="lbpod__place" aria-label={`Rank ${i + 1}`}>{i + 1}</span>
+            {r.avatar
+              ? <img class="lbpod__face" src={r.avatar} alt="" width={56} height={56} loading="lazy" />
+              : <span class="lbpod__face lbpod__face--none" aria-hidden="true" data-initial={r.name.slice(0, 1).toUpperCase()} />}
+            <div class="lbpod__who">
+              <a class="lbpod__name" href={`/player/${r.steamid}`}>{r.name}</a>
+              <TitleTag kind={r.title} />
+            </div>
+            <p class="lbpod__sr num">{r.sr.toLocaleString()}<span class="lbpod__unit">SR</span></p>
+            <dl class="lbpod__stats">
+              <div><dt>Record</dt><dd class="num">{r.wins}W {r.losses}L</dd></div>
+              <div><dt>Win %</dt><dd class="num">{decided > 0 ? `${Math.round((r.wins / decided) * 100)}%` : 'n/a'}</dd></div>
+              <div><dt>Games</dt><dd class="num">{r.games}</dd></div>
+            </dl>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 /**
  * Who leads the season in each of a few stats, as a row of cards.
@@ -300,7 +327,11 @@ function StatLeaders(
             {rest.length > 0 && (
               <span class="statleader__rest muted">
                 {rest.map((r, i) => (
-                  <span key={r.steamid}>{i > 0 ? ' · ' : ''}{r.name} {r.value.toLocaleString()}</span>
+                  <span class="statleader__runner" key={r.steamid}>
+                    <span class="statleader__pos">{i + 2}</span>
+                    <span class="statleader__rname">{r.name}</span>
+                    <span class="num">{r.value.toLocaleString()}</span>
+                  </span>
                 ))}
               </span>
             )}
