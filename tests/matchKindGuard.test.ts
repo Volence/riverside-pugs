@@ -35,7 +35,6 @@ const ALLOWED: Record<string, number> = {
   'src/inputBursts.ts': 1,          // end-of-match input checks, every kind (a scrim cheater is still one)
   'src/aimRules.ts': 1,             // end-of-match aim sweep, every kind (same reason as inputBursts)
   'src/fingerprintReplay.ts': 1,    // replays every match end, every kind, as the end-of-match sweep does
-  'src/mapMultipliers.ts': 1,       // saferoom rates for next season's multipliers: every kind plays the same maps
 };
 
 const RAW = /state\s*=\s*'completed'|state\s+IN\s*\([^)]*'completed'/g;

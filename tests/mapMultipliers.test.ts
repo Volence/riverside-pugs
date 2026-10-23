@@ -135,11 +135,11 @@ describe('versusLadder', () => {
 });
 
 describe('SEASON_RATES_SQL', () => {
-  it('counts completed matches of the season and rounds with any survivor alive', () => {
+  it('counts completed, unvoided PUGs of the season and rounds with any survivor alive', () => {
     const db = openDb(':memory:');
     const season = currentSeasonId(db);
-    const match = (state: string, rounds: (number | null)[]) => {
-      const id = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (?, ?, 'no_mercy')").run(season, state).lastInsertRowid);
+    const match = (state: string, rounds: (number | null)[], kind = 'pug', voided: string | null = null) => {
+      const id = Number(db.prepare("INSERT INTO matches (season_id, state, campaign, kind, voided_at) VALUES (?, ?, 'no_mercy', ?, ?)").run(season, state, kind, voided).lastInsertRowid);
       db.prepare("INSERT INTO match_maps (match_id, ordinal, map) VALUES (?, 1, 'l4d_vs_hospital01_apartment')").run(id);
       rounds.forEach((alive, half) => db.prepare(
         "INSERT INTO match_rounds (match_id, ordinal, half, surv_team, survivors_alive) VALUES (?, 1, ?, 'a', ?)",
@@ -148,6 +148,9 @@ describe('SEASON_RATES_SQL', () => {
     match('completed', [4, 0]);
     match('completed', [1, null]);
     match('aborted', [4, 4]);
+    match('completed', [4, 4], 'scrim');
+    match('completed', [4, 4], 'tournament');
+    match('completed', [4, 4], 'pug', '2026-10-01 00:00:00');
     const rows = db.prepare(SEASON_RATES_SQL).all(season);
     expect(rows).toEqual([{ map: 'l4d_vs_hospital01_apartment', matches: 2, rounds: 3, madeIt: 2 }]);
   });
