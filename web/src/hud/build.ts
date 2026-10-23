@@ -2675,6 +2675,32 @@ function weaponsPass(work: Work, design: HudDesign, assets: BuildAssets | null, 
   fitWeaponPanel(work, design, panel, cells);
 }
 
+/** What the download calls a survivor health number the player coloured. */
+export const OWN_COLOUR_HEALTH_NUMBER = 'HudEdHealthNumber';
+/**
+ * A survivor health number with the player's colour, renamed in the
+ * download only (the preview keeps the name, and draws the colour itself):
+ * TeamDisplayPlayer::UpdateDisplay (client.dylib 0x3cd7a0), for the own
+ * panel and every card, finds the child named HealthNumber and paints it the
+ * bar's colour each update, while the number reaches any label through the
+ * %HealthNumber% dialog variable. Probe R23
+ * (/home/volence/l4d/hud/probe-r23/runs/cards.jpg): a copy named HudEdHpNum
+ * drew magenta beside the green HealthNumber, both showing 100.
+ */
+function healthNumberPass(work: Work, design: HudDesign) {
+  for (const panelId of ['teamColumn', 'ownHealth']) {
+    if (!design.children[panelId]?.HealthNumber?.color) continue;
+    const panel = panelChildren(panelId);
+    if (!panel) continue;
+    for (const file of [panel.file, ...(panel.linked ?? []).map((l) => l.file)]) {
+      const n = work.optional(file, ['HealthNumber']);
+      if (!n) continue;
+      n.key = OWN_COLOUR_HEALTH_NUMBER;
+      if (kvGet(n, 'fieldName') !== undefined) kvSet(n, 'fieldName', OWN_COLOUR_HEALTH_NUMBER);
+    }
+  }
+}
+
 /** The icon list the crosshair's own art is cut from (hud_textures.txt, not mod_textures.txt). */
 const HUDTEX = 'scripts/hud_textures.txt';
 /**
@@ -2937,6 +2963,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   reviveAnchorPass(work);
   elementHidePass(work, design, itemsOn ? new Set(['ownHealth']) : undefined);
   codeShownPass(work, design);
+  healthNumberPass(work, design);
   fontPass(work, design, assets, extra);
   stylePass(work, design, assets, extra);
   crosshairPass(design, assets, extra);

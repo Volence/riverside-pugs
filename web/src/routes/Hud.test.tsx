@@ -79,11 +79,11 @@ describe('Hud page', () => {
     expect((screen.getByLabelText('Size') as HTMLInputElement).value).toBe('30');
   });
 
-  it('offers no colour for the health number and says why, and a colour for the name', () => {
+  it('offers a colour for the health number and says what unset does (probe R23), and a colour for the name', () => {
     render(<Hud />);
     fireEvent.click(screen.getByRole('button', { name: '＋ Health number' }));
-    expect(screen.getByText('The game colours this by health.')).toBeTruthy();
-    expect(screen.queryByLabelText('Health number colour')).toBeNull();
+    expect(screen.getByText(/Unset, the game colours this like the bar/)).toBeTruthy();
+    expect(screen.getByLabelText('Health number colour')).toBeTruthy();
     expect(screen.getByLabelText('Text size')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Name' }));
     expect(screen.getByLabelText('Name colour')).toBeTruthy();
