@@ -60,14 +60,41 @@ function value(a: WeeklyAward, w: WeeklyWinner): string {
   }
 }
 
+/** A winner's face, or their initial when Steam gave us no avatar. */
+function Face({ w }: { w: WeeklyWinner }) {
+  return w.avatar
+    ? <img class="wk__face" src={w.avatar} alt="" width={24} height={24} loading="lazy" />
+    : <span class="wk__face wk__face--none" aria-hidden="true" data-initial={w.name.slice(0, 1).toUpperCase()} />;
+}
+
+/** One line of a card: what it is, who (ties share the line), how much. */
 function Winners({ a }: { a: WeeklyAward }) {
+  const kind = a.kind === 'avg' ? 'Best average' : a.kind === 'total' ? 'Most total' : '';
   return (
-    <div class="weekly__winner">
-      <span class="weekly__kind">{a.kind === 'avg' ? 'Best average' : a.kind === 'total' ? 'Most total' : ''}</span>
-      {a.winners.map((w) => <PlayerLink key={w.steamid} steamid={w.steamid} name={w.name} />)}
-      <span class="weekly__value">{value(a, a.winners[0])}</span>
+    <div class="weekly__winner wk__row">
+      {kind && <span class="weekly__kind wk__kind">{kind}</span>}
+      <span class="wk__who">
+        <Face w={a.winners[0]} />
+        <span class="wk__names">
+          {a.winners.map((w) => <PlayerLink key={w.steamid} steamid={w.steamid} name={w.name} />)}
+        </span>
+      </span>
+      <span class="weekly__value wk__value">{(() => {
+        // "6,517 per game" -> the number stands out, the unit stays quiet.
+        const v = value(a, a.winners[0]);
+        const cut = v.indexOf(' ');
+        return cut > 0 ? <><span class="wk__num">{v.slice(0, cut)}</span> <span class="wk__unit">{v.slice(cut + 1)}</span></> : v;
+      })()}</span>
     </div>
   );
+}
+
+/** "2d 19h" to the given moment, or null once it has passed. */
+function untilText(at: number, now: number): string | null {
+  const ms = at - now;
+  if (ms <= 0) return null;
+  const h = Math.floor(ms / 3_600_000);
+  return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h >= 1 ? `${h}h ${Math.floor((ms % 3_600_000) / 60_000)}m` : `${Math.max(1, Math.ceil(ms / 60_000))}m`;
 }
 
 export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: string | undefined) => void }) {
@@ -105,7 +132,17 @@ export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: strin
     <div class="weekly">
       <div class="weekly__bar">
         {picker}
-        {data.live && <span class="weekly__note">Live. Averages need {data.minGames}+ games; final Monday 12:00 UTC.</span>}
+        {data.live && (() => {
+          const final = Date.parse(`${data.week}T12:00:00Z`) + 7 * 86_400_000;
+          const left = untilText(final, Date.now());
+          return (
+            <span class="weekly__note wk__strip">
+              <span class="wk__live">Live</span>
+              <span>Averages need {data.minGames}+ games</span>
+              <span>final Monday 12:00 UTC{left ? <>, <strong class="num">{left}</strong> left</> : ''}</span>
+            </span>
+          );
+        })()}
       </div>
       {data.awards.length === 0 && <Empty>No awards yet this week.</Empty>}
       {GROUPS.map(({ group, title }) => {
@@ -119,8 +156,8 @@ export function WeeklyBoard({ week, onWeek }: { week?: string; onWeek: (w: strin
               {keys.map((k) => {
                 const parts = inGroup.filter((a) => a.key === k);
                 return (
-                  <div class="weekly__card" key={k}>
-                    <div class="weekly__label">{parts[0].label}</div>
+                  <div class="weekly__card wk__card" key={k}>
+                    <div class="weekly__label wk__title">{parts[0].label}</div>
                     {parts.map((a) => <Winners key={a.kind} a={a} />)}
                   </div>
                 );

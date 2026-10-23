@@ -203,7 +203,7 @@ export interface Leaderboard {
 /** Which panel of the weekly board an award sits in. */
 export type AwardGroup = 'survivor' | 'infected' | 'overall' | 'endorsed' | 'shame';
 
-export interface WeeklyWinner { steamid: string; name: string; value: number; games: number; detail: string | null }
+export interface WeeklyWinner { steamid: string; name: string; value: number; games: number; detail: string | null; avatar?: string | null }
 
 /** One line of an award: `avg` and `total` can both exist for the same
  *  `key` (two rows in the same card), `single` never shares its key. */
@@ -654,6 +654,7 @@ export interface PendingEndorsement { matchId: number; remaining: number }
 export interface EndorseBoardRow {
   steamid: string; name: string; games: number;
   caller: number; clutch: number; vibes: number; total: number; givers: number;
+  avatar?: string | null;
 }
 export interface EndorseBoard { season: { id: number; name: string }; rows: EndorseBoardRow[] }
 
