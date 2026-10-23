@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { AWARDS, awardDef, computeWeek, isWeekStart, weekStartOf, type AwardKind, type AwardResult, type Winner } from './weeklyAwards.js';
+import { AWARDS, awardDef, computeWeek, isWeekStart, weekStartOf, WEEK_START_HOUR, type AwardKind, type AwardResult, type Winner } from './weeklyAwards.js';
 import { computeRecap, type Recap } from './weeklyRecap.js';
 
 /**
@@ -69,9 +69,17 @@ export function frozenWeeks(db: DB): string[] {
     .map((r) => r.week_start);
 }
 
-export function playerWeeklyAwards(db: DB, steamid: string): PlayerAward[] {
+/** `seasonId` keeps the weeks of one season; omitted, every week (a
+ *  profile's Career view). A week belongs to the season in play when it
+ *  closed (Monday 12:00 UTC, src/weeklyAwards.ts), so the week a season
+ *  starts in, which closes inside it, is that season's first. */
+export function playerWeeklyAwards(db: DB, steamid: string, seasonId?: number | null): PlayerAward[] {
+  const inSeason = seasonId === null || seasonId === undefined ? '' : `
+       AND EXISTS (SELECT 1 FROM seasons s WHERE s.id = ${Math.trunc(Number(seasonId))}
+         AND date(week_start, '+7 days') || ' ${String(WEEK_START_HOUR).padStart(2, '0')}:00:00' > s.started_at
+         AND (s.ended_at IS NULL OR date(week_start, '+7 days') || ' ${String(WEEK_START_HOUR).padStart(2, '0')}:00:00' <= s.ended_at))`;
   const rows = db.prepare(
-    'SELECT DISTINCT award, week_start FROM weekly_awards WHERE player_id = ? ORDER BY week_start DESC',
+    `SELECT DISTINCT award, week_start FROM weekly_awards WHERE player_id = ?${inSeason} ORDER BY week_start DESC`,
   ).all(steamid) as { award: string; week_start: string }[];
   const out = new Map<string, PlayerAward>();
   for (const r of rows) {

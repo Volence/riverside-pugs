@@ -21,14 +21,22 @@ import { CommunityCard } from '../components/CommunityCard';
 import { useDuoQueueOn } from '../seasonTheme';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
 import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../components/SeasonRank';
-import type { PastSeason, WrappedSeason } from '../api';
+import type { PastSeason, ProfileScopeInfo, ProfileScopeRequest, WrappedSeason } from '../api';
 import { loadWrappedSeasons } from '../wrapped';
 import { withNetDamageAsSi } from '../../../src/siDamage';
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
 ) {
-  const { data, error } = useFetch((s) => api.profile(steamid, s), [steamid]);
+  // Which numbers the page shows (owner, 2026-10-23): the current season by
+  // default, another season, or the career. Kept in the URL so a link to a
+  // career view stays one.
+  const [scope, setScopeState] = useState<ProfileScopeRequest>(readScope);
+  const setScope = (next: ProfileScopeRequest) => {
+    setScopeState(next);
+    writeScope(next);
+  };
+  const { data, error } = useFetch((s) => api.profile(steamid, s, scope), [steamid, scope]);
   // Per map by default: a career total on the per-map table mostly reports
   // which maps come up most in the rotation, not how the player does on them.
   const [mapMode, setMapMode] = useState<'avg' | 'total'>('avg');
@@ -61,6 +69,18 @@ export function Profile(
   );
 
   const { player, rating, totals, matches, history, privateStatTotals, statTotals } = data;
+  // A server older than the scope field only ever sent the current season.
+  const scopeInfo: ProfileScopeInfo = data.scope
+    ?? { kind: 'season', seasonId: data.season?.id ?? 0, name: data.season?.name ?? 'This season', current: true };
+  const career = scopeInfo.kind === 'career';
+  const scopeName = scopeInfo.kind === 'career' ? 'Career' : scopeInfo.name;
+  const currentScope = scopeInfo.kind === 'season' && scopeInfo.current;
+  const record = data.record ?? rating ?? { wins: 0, losses: 0 };
+  // Day one of a season (soft reset), or a season they sat out: no wall of
+  // zeros, a line saying so and the way to the career.
+  const empty = totals.games === 0;
+  const seasonsPlayed = data.seasonsPlayed ?? [];
+  const hasCareer = career || seasonsPlayed.some((s) => s.games > 0);
 
   // Filtered here rather than at the render site so the panel itself can be
   // dropped when nothing survives: a heading promising private numbers over an
@@ -70,9 +90,25 @@ export function Profile(
   const privateRows = Object.entries(privateStatTotals ?? {})
     .filter(([k]) => !DEAD_STAT_KEYS.has(k));
 
-  const season = data.season;
+  const season = career ? null : data.season ?? null;
   const peak = season?.peakSr ?? (history.length ? Math.max(...history.map((h) => h.sr)) : null);
-  const lastDelta = matches.length ? matches[0].srDelta : null;
+  // The last game's change, only while that season is still being played.
+  const lastDelta = currentScope && matches.length ? matches[0].srDelta : null;
+  const headStats: { label: string; value: string | number }[] = empty ? [] : career ? [
+    { label: 'Record', value: `${record.wins}W ${record.losses}L` },
+    { label: 'Matches', value: totals.games },
+    { label: 'Forfeits', value: data.forfeits?.forfeits ?? 0 },
+    { label: 'Seasons', value: seasonsPlayed.filter((s) => s.games > 0).length },
+  ] : [
+    { label: 'Record', value: `${record.wins}W ${record.losses}L` },
+    { label: 'Peak', value: peak ?? 'n/a' },
+    // The one game count on the page (the figures and totals panels used to
+    // repeat it).
+    { label: 'Matches', value: totals.games },
+    // Shown at zero too: forfeiting is allowed, and seen.
+    { label: 'Forfeits', value: data.forfeits?.forfeits ?? 0 },
+    ...(season?.finalRank ? [{ label: 'Final place', value: `#${season.finalRank}${season.of ? ` of ${season.of}` : ''}` }] : []),
+  ];
   // Best finish across finished seasons: the lowest final place.
   const best = (data.pastSeasons ?? []).filter((p) => p.finalRank !== null)
     .sort((a, b) => a.finalRank! - b.finalRank!)[0];
@@ -80,8 +116,9 @@ export function Profile(
   return (
     <div class="page page--profile">
       <div class="stack">
+        <ScopeBar scope={scopeInfo} seasons={seasonsPlayed} onPick={setScope} />
         <Headliner
-          eyebrow={`Joined ${fmtDate(player.createdAt)}`}
+          eyebrow={`Joined ${fmtDate(player.createdAt)} · ${scopeName}`}
           name={player.name}
           avatar={player.avatar}
           avatarHref={`https://steamcommunity.com/profiles/${steamid}`}
@@ -98,7 +135,8 @@ export function Profile(
               {data.teams && data.teams.length > 0 && <TeamChips teams={data.teams} />}
             </>
           ) : undefined}
-          rating={rating ? rating.sr : null}
+          rating={career ? null : rating ? rating.sr : null}
+          unratedText={career ? 'All seasons' : currentScope ? 'Unrated this season' : `Unrated in ${scopeName}`}
           placing={season?.placing ?? null}
           rankSlot={season && !season.placing && (season.rank || season.top10) ? (
             <>
@@ -107,13 +145,7 @@ export function Profile(
             </>
           ) : undefined}
           delta={lastDelta}
-          stats={rating ? [
-            { label: 'Record', value: `${rating.wins}W ${rating.losses}L` },
-            { label: 'Peak', value: peak ?? 'n/a' },
-            { label: 'Matches', value: totals.games },
-            // Shown at zero too: forfeiting is allowed, and seen.
-            { label: 'Forfeits', value: data.forfeits?.forfeits ?? 0 },
-          ] : []}
+          stats={headStats}
         />
 
         <SocialChips links={data.social} twitchName={player.twitchName} />
@@ -163,7 +195,23 @@ export function Profile(
         )}
         {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}
 
-        {season?.rank && season.sr !== null && !season.placing && (
+        {empty && (
+          <Panel class="profile-empty">
+            <h3>{career ? 'No matches yet' : `No matches in ${scopeName} yet`}</h3>
+            <p class="muted">
+              {career
+                ? 'Numbers show here after a first completed PUG.'
+                : currentScope
+                  ? `Everything on this page counts ${scopeName} only, and starts with the first match of it.`
+                  : `No completed PUGs in ${scopeName}.`}
+            </p>
+            {!career && hasCareer && (
+              <button class="chip" type="button" onClick={() => setScope('career')}>See career numbers</button>
+            )}
+          </Panel>
+        )}
+
+        {currentScope && season?.rank && season.sr !== null && !season.placing && (
           <Panel>
             <h3>Season rank</h3>
             <RankCard rank={season.rank} sr={season.sr} top10={season.top10} />
@@ -172,31 +220,34 @@ export function Profile(
 
         <Trophies past={data.pastSeasons ?? []} />
 
-        <Panel>
-          <h3>Rating over time</h3>
-          {season?.placing
-            ? <p class="muted">{`Placement: ${season.placing.played} of ${season.placing.of} games played. SR and rank show after the last one.`}</p>
-            : <Sparkline values={history.map((h) => h.sr)} />}
-        </Panel>
+        {season && !empty && (
+          <Panel>
+            <h3>{`SR in ${scopeName}`}</h3>
+            {season.placing
+              ? <p class="muted">{`Placement: ${season.placing.played} of ${season.placing.of} games played. SR and rank show after the last one.`}</p>
+              : <Sparkline values={history.map((h) => h.sr)} />}
+          </Panel>
+        )}
 
         <SeasonHistory past={data.pastSeasons ?? []} own={session?.kind === 'active' && session.me.steamid === steamid} />
 
-        <ProfileFigures
-          totals={totals} statTotals={statTotals} rating={rating}
-          standings={data.standings ?? {}} statDefs={data.statDefs}
-        />
+        {!empty && (
+          <ProfileFigures
+            totals={totals} statTotals={statTotals} record={record}
+            standings={career ? {} : data.standings ?? {}} statDefs={data.statDefs} scopeName={scopeName}
+          />
+        )}
 
         <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
 
-        <ChemistryPanel chemistry={data.chemistry} />
-        <EndorsementCounts endorsements={data.endorsements} />
+        {!empty && <ChemistryPanel chemistry={data.chemistry} />}
+        {!empty && <EndorsementCounts endorsements={data.endorsements} />}
         <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
 
-        <div class="profile-grid">
+        {!empty && <div class="profile-grid">
           <Panel>
-            <h3>Lifetime</h3>
+            <h3>{`${scopeName} totals`}</h3>
             <dl class="totals">
-              <div><dt>Games</dt><dd class="num">{totals.games}</dd></div>
               <div><dt>SI damage</dt><dd class="num">{totals.siDamage}</dd></div>
               <div><dt>SI kills</dt><dd class="num">{totals.siKills}</dd></div>
               <div><dt>Commons</dt><dd class="num">{totals.commonKills}</dd></div>
@@ -236,14 +287,14 @@ export function Profile(
               </div>
             )}
           </Panel>
-        </div>
+        </div>}
 
         {byMap.length > 0 && (
           <Panel class="panel--table">
             <h3>By map</h3>
             <p class="muted">
-              How you do on each map, across every match. A map you win inside a
-              match you lost still counts as a map win.
+              {`How you do on each map, ${career ? 'across every match' : `in ${scopeName}`}. A map you win inside a
+              match you lost still counts as a map win.`}
             </p>
 
             {/* Ordered weakest first by the server: the reason to read this is
@@ -350,12 +401,14 @@ export function Profile(
  * "never played boomer" reads as absent rather than as 0%.
  */
 function ProfileFigures(
-  { totals, statTotals, rating, standings, statDefs }: {
+  { totals, statTotals, record, standings, statDefs, scopeName }: {
     totals: ProfileData['totals'];
     statTotals: ProfileData['statTotals'];
-    rating: ProfileData['rating'];
+    record: { wins: number; losses: number };
     standings: Record<string, Standing>;
     statDefs: ProfileData['statDefs'];
+    /** "Season 1" or "Career", for the badges' wording. */
+    scopeName: string;
   },
 ) {
   const games = totals.games || 0;
@@ -368,16 +421,15 @@ function ProfileFigures(
   // `key` names the standing the tile shows a badge for, so a tile and its
   // badge always measure the same thing: a per-match tile, a per-match rank.
   const tiles: { key?: string; label: string; value: string | number; sub?: string }[] = [];
-  if (rating) {
-    const decided = rating.wins + rating.losses;
-    tiles.push({
-      key: 'winrate',
-      label: 'Win rate',
-      value: decided > 0 ? `${Math.round((rating.wins / decided) * 100)}%` : 'n/a',
-      sub: `${rating.wins}W ${rating.losses}L`,
-    });
-  }
-  tiles.push({ label: 'Matches', value: games });
+  // From the scoped record, the same one the header shows. No Matches tile:
+  // the header carries the one game count.
+  const decided = record.wins + record.losses;
+  tiles.push({
+    key: 'winrate',
+    label: 'Win rate',
+    value: decided > 0 ? `${Math.round((record.wins / decided) * 100)}%` : 'n/a',
+    sub: `${record.wins}W ${record.losses}L`,
+  });
   const sid = per(totals.siDamage);
   if (sid !== null) tiles.push({ key: 'sidmg', label: 'SI dmg / match', value: sid });
   const ck = per(totals.commonKills);
@@ -419,7 +471,7 @@ function ProfileFigures(
         ))}
       </Figures>
       {others.length > 0 && (
-        <div class="standings" aria-label="Other top five places this season">
+        <div class="standings" aria-label={`Other top five places in ${scopeName}`}>
           {others.map(([k, sd]) => (
             <span class="standings__item" key={k}>
               <RankBadge standing={sd} what={`${labelOf(k).toLowerCase()} per match`} />
@@ -429,6 +481,67 @@ function ProfileFigures(
         </div>
       )}
     </Panel>
+  );
+}
+
+/** The profile's scope from the URL: `?season=career`, `?season=N`, or the
+ *  current season. */
+function readScope(): ProfileScopeRequest {
+  if (typeof location === 'undefined') return undefined;
+  const raw = new URLSearchParams(location.search).get('season');
+  if (raw === 'career') return 'career';
+  const id = Number(raw);
+  return raw && Number.isInteger(id) && id > 0 ? id : undefined;
+}
+
+/** Puts the scope in the URL without a navigation, so a shared link opens the
+ *  same view; the current season is the bare URL. */
+function writeScope(scope: ProfileScopeRequest): void {
+  if (typeof location === 'undefined' || typeof history === 'undefined') return;
+  const url = new URL(location.href);
+  if (scope === undefined) url.searchParams.delete('season');
+  else url.searchParams.set('season', String(scope));
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+/**
+ * Which numbers the profile shows, and the switch between them: each season
+ * the player has played (the current one first, the default) and Career.
+ * Every figure below follows it, and the line beside it says so, so a season
+ * record never reads as a career one or the other way round.
+ */
+function ScopeBar(
+  { scope, seasons, onPick }: {
+    scope: ProfileScopeInfo;
+    seasons: { id: number; name: string; current: boolean; games: number }[];
+    onPick: (scope: ProfileScopeRequest) => void;
+  },
+) {
+  const value = scope.kind === 'career' ? 'career' : String(scope.seasonId);
+  return (
+    <div class="profile-scope">
+      <select
+        class="season-picker" aria-label="Show numbers for"
+        value={value}
+        onChange={(e) => {
+          const v = (e.target as HTMLSelectElement).value;
+          if (v === 'career') return onPick('career');
+          const s = seasons.find((x) => String(x.id) === v);
+          onPick(!s || s.current ? undefined : s.id);
+        }}
+      >
+        {seasons.map((s) => <option key={s.id} value={String(s.id)}>{s.current ? `${s.name} (current)` : s.name}</option>)}
+        {scope.kind === 'season' && !seasons.some((s) => s.id === scope.seasonId) && (
+          <option value={String(scope.seasonId)}>{scope.name}</option>
+        )}
+        <option value="career">Career (all seasons)</option>
+      </select>
+      <span class="muted">
+        {scope.kind === 'career'
+          ? 'Every number here is for all seasons together. Season ranks and badges are on the season views.'
+          : `Every number here is for ${scope.name}${scope.current ? ', the current season' : ''}.`}
+      </span>
+    </div>
   );
 }
 

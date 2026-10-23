@@ -25,7 +25,7 @@ import { getSession } from '../session.js';
 import { inGoodStanding } from '../standing.js';
 import { STAT_DEFS, statDef } from '../statKeys.js';
 import { roundAttribution, unrecordedOrdinals } from '../roundStats.js';
-import { leaderboardData, profileData } from '../playerQueries.js';
+import { leaderboardData, parseProfileScope, profileData } from '../playerQueries.js';
 import { DAMAGE_AS_SI, DMG_TO_INCAPPED, netDamageAsSi } from '../siDamage.js';
 import { notBannedSql } from '../banState.js';
 import { listSeasons } from '../seasons.js';
@@ -164,7 +164,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
 
   app.get('/api/players/:steamid', async (req, reply) => {
     const { steamid } = req.params as { steamid: string };
-    const data = profileData(db, steamid, viewerOf(req));
+    // ?season=N or ?season=career; nothing is the current season.
+    const scope = parseProfileScope((req.query as { season?: string }).season);
+    if (!scope) return reply.code(400).send({ error: 'bad season' });
+    const data = profileData(db, steamid, viewerOf(req), scope);
     if (!data) return reply.code(404).send({ error: 'no such player' });
     return data;
   });

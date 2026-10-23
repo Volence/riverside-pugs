@@ -454,7 +454,8 @@ function Avatar({ p }: { p: CastPlayer }) {
 
 const ROLE_LABEL: Record<NonNullable<CastPlayer['role']>, string | null> = { captain: 'Captain', cocaptain: 'Co-captain', member: null };
 
-/** A PUG lineup card: SR and the career PUG numbers (owner's stat set). */
+/** A PUG lineup card: SR and the PUG numbers (owner's stat set), for the
+ *  scope the server chose: this season, or the career before a first PUG of it. */
 function PugCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: number }) {
   const c = p.career!;
   const winPct = c.wins + c.losses > 0 ? Math.round((c.wins / (c.wins + c.losses)) * 100) : null;
@@ -465,7 +466,7 @@ function PugCard({ p, team, delay }: { p: CastPlayer; team: CastTeam; delay: num
         <span class="ov-card__name">{p.name}</span>
         <span class="ov-card__line">
           {p.sr !== null && <b>{p.sr} SR</b>}
-          {c.matches} PUGs{winPct !== null ? ` · ${winPct}% won` : ''}
+          {`${c.scope ? `${c.scope}: ` : ''}${c.matches} PUGs${winPct !== null ? ` · ${winPct}% won` : ''}`}
         </span>
       </div>
       <dl class="ov-card__stats">

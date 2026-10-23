@@ -1,7 +1,7 @@
 import type { DB } from './db.js';
 import { resolveAlias } from './aliases.js';
 import { getSetting } from './settings.js';
-import { completedPug } from './matchKinds.js';
+import { completedPug, seasonFilter } from './matchKinds.js';
 
 /**
  * Who a player wins with and loses to. Three lines on the profile and no
@@ -32,7 +32,8 @@ export interface Chemistry {
 
 interface PairRow { steamid: string; name: string; same: number; games: number; wins: number }
 
-export function chemistryFor(db: DB, steamid: string): Chemistry {
+/** `seasonId` narrows it to one season; omitted, it is the whole career. */
+export function chemistryFor(db: DB, steamid: string, seasonId?: number | null): Chemistry {
   const me = resolveAlias(db, steamid);
   const minGames = Math.max(1, Math.trunc(Number(getSetting(db, 'chemistry_min_games'))) || 5);
 
@@ -43,7 +44,7 @@ export function chemistryFor(db: DB, steamid: string): Chemistry {
     `WITH roster AS (
        SELECT DISTINCT mp.match_id, COALESCE(pa.canonical_id, mp.player_id) AS pid, mp.team
        FROM match_players mp
-       JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}
+       JOIN matches m ON m.id = mp.match_id AND ${completedPug('m')}${seasonFilter('m', seasonId)}
        LEFT JOIN player_aliases pa ON pa.steamid = mp.player_id
      )
      SELECT o.pid AS steamid, p.name AS name,

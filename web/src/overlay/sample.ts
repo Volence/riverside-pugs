@@ -9,7 +9,7 @@ import type { CastDraftCard, CastDraftPick, CastDraftPlayer, CastDraftView, Cast
 
 const player = (steamid: string, name: string): CastPlayer => ({
   steamid, name, avatar: null, stats: { sidmg: 412, sikill: 7, ck: 96, skeets: 2, team_skeets: 1, dps_landed: 1, tank_damage: 940, boomer_spawns: 5, boom_successes: 2 }, sr: null,
-  career: { matches: 42, wins: 23, losses: 19, skeets: 31, dps: 12, boomerRate: 38 }, role: null,
+  career: { scope: 'Season 1', matches: 42, wins: 23, losses: 19, skeets: 31, dps: 12, boomerRate: 38 }, role: null,
 });
 
 const team = (key: 'a' | 'b', name: string, tag: string, color: string, score: number, side: CastTeam['side'], names: string[]): CastTeam => ({
