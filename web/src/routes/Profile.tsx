@@ -23,6 +23,7 @@ import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
 import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../components/SeasonRank';
 import type { PastSeason, WrappedSeason } from '../api';
 import { loadWrappedSeasons } from '../wrapped';
+import { withNetDamageAsSi } from '../../../src/siDamage';
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
@@ -43,7 +44,11 @@ export function Profile(
   }
   if (!data) return <PageSkeleton variant="profile" panels={3} />;
 
-  const byMap = data.byMap ?? [];
+  // Damage as SI net of damage to incapped survivors (src/siDamage.ts), the
+  // same figure every other page shows.
+  const byMap = (data.byMap ?? []).map((r) => ({
+    ...r, stats: withNetDamageAsSi(r.stats), avgStats: withNetDamageAsSi(r.avgStats),
+  }));
   // Which measure orders the bars. Both answer "what should I work on", and
   // they genuinely disagree: a map you win while dying constantly looks fine
   // on one and terrible on the other.

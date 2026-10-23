@@ -593,6 +593,18 @@ describe('stats routes', () => {
       expect(res.json().rows[0].total).toBe(9);
     });
 
+    // Owner 2026-10-23: Damage as SI ranks net of damage to incapped
+    // survivors, so a bleedout farmer no longer tops the board.
+    it('ranks Damage as SI net of damage to incapped survivors', async () => {
+      const matchId = playCompletedMatch(db);
+      seedStats(db, matchId, IDS[0], { damage_as_si: 1000, dmg_to_incapped: 600 });
+      seedStats(db, matchId, IDS[1], { damage_as_si: 800, dmg_to_incapped: 100 });
+      seedStats(db, matchId, IDS[2], { damage_as_si: 500 });
+      const res = await app.inject({ method: 'GET', url: '/api/leaderboard/stat/damage_as_si?limit=2', cookies });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().rows.map((r: any) => [r.steamid, r.total])).toEqual([[IDS[1], 700], [IDS[2], 500]]);
+    });
+
     // times_skeeted is public now, and must STILL not be rankable: a board of
     // who got skeeted most is not a leaderboard. The gate is direction, not
     // visibility, and those two stopped coinciding when this went public.

@@ -9,6 +9,7 @@ import { getSetting } from '../settings.js';
 import { sideRow, sideName } from '../bookings/bookings.js';
 import { activeMembers, getTeam } from '../teams/teams.js';
 import { statDef } from '../statKeys.js';
+import { withNetDamageAsSi } from '../siDamage.js';
 import { STREAK_MIN, streakRuns } from '../skeetStreaks.js';
 import { boomerRate } from './types.js';
 import { liveWinLine } from '../winProb.js';
@@ -198,7 +199,9 @@ export function buildMatchView(
     // Null while placing: a caster overlay is as public as it gets.
     const state = srOn ? playerSeasonState(db, season, r.steamid) : null;
     return {
-      steamid: r.steamid, name: r.name, avatar: r.avatar, stats,
+      // Damage as SI on air is net of damage to incapped survivors
+      // (src/siDamage.ts), like every page of the site.
+      steamid: r.steamid, name: r.name, avatar: r.avatar, stats: withNetDamageAsSi(stats),
       sr: state?.placed ? state.sr : null,
       // PUG numbers only on a PUG (owner, 2026-10-02): a scrim or a
       // tournament lineup is the team's roster, not anyone's PUG record.
@@ -299,7 +302,7 @@ function lastRoundResult(
   }
   const players = [...bags].flatMap(([steamid, stats]) => {
     const team = teamOf.get(steamid);
-    return team ? [{ steamid, name: nameOf.get(steamid) ?? steamid, team, stats }] : [];
+    return team ? [{ steamid, name: nameOf.get(steamid) ?? steamid, team, stats: withNetDamageAsSi(stats) }] : [];
   });
   const map = scored.find((s) => s.ordinal === last.ordinal)?.map ?? planned[last.ordinal] ?? '';
   return { mapNumber: last.ordinal + 1, map, half: last.half as 1 | 2, halves, players };

@@ -211,6 +211,15 @@ describe('deriveLiveStats', () => {
     expect(deriveLiveStats({ boomer_spawns: 2, boom_successes: 0 }).boomer_rate).toBe(0);
   });
 
+  // Owner 2026-10-23: Damage as SI is shown net of damage to incapped
+  // survivors, which keeps its own On incapped column.
+  it('shows Damage as SI net of damage to incapped survivors', () => {
+    const out = deriveLiveStats({ damage_as_si: 900, dmg_to_incapped: 250 });
+    expect(out.damage_as_si).toBe(650);
+    expect(out.dmg_to_incapped).toBe(250);
+    expect(deriveLiveStats({ skeets: 1 }).damage_as_si).toBeUndefined();
+  });
+
   it('does not mutate its input', () => {
     const input = { boomer_spawns: 2, boom_successes: 1 };
     deriveLiveStats(input);

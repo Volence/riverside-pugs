@@ -1,4 +1,5 @@
 import type { MatchResult, Winner } from './api';
+import { withNetDamageAsSi } from '../../src/siDamage';
 
 export const CAMPAIGN_NAMES: Record<string, string> = {
   no_mercy: 'No Mercy',
@@ -377,9 +378,13 @@ export function fmtBytes(bytes: number): string {
  * A rate with a zero denominator is ABSENT, not zero. Nobody has played boomer
  * yet is a different fact from played boomer and landed nothing, and the table
  * renders absent as "n/a".
+ *
+ * Damage as SI comes out net of what only drained incapped survivors
+ * (src/siDamage.ts, owner 2026-10-23). Call this once per raw bag from the
+ * API: the net figure is not idempotent.
  */
 export function deriveLiveStats(stats: Record<string, number>): Record<string, number> {
-  const out = { ...stats };
+  const out = withNetDamageAsSi(stats);
   // successes/attempts, exactly as l4dcompstats prints it, so the site and
   // the console never disagree. Uses boom_successes (once per boomer life),
   // NOT biles_landed (once per vomit) and not the per-survivor counters.
