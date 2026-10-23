@@ -18,6 +18,8 @@ import { getCampaignPool } from '../settings.js';
 import { completedPug } from '../matchKinds.js';
 import { viewerFor, canViewMatch, visibleMatchesSql } from '../matchVisibility.js';
 import { mapDetail, mapIndex } from '../playerStats.js';
+import { loadMultiplierTable, publicMultipliers } from '../mapMultipliers.js';
+import { seasonOneLive } from '../seasonThemes.js';
 import { matchForecast } from '../rating.js';
 import { gameNumbers, matchSrChange, seasonRules } from '../seasonRules.js';
 import { currentSeasonId, getPlayer, saveProfileFields } from '../players.js';
@@ -222,14 +224,24 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   // `pool` is the current vote rotation, so the page can put what you might
   // actually play tonight above what you cannot. Out of rotation is not out of
   // sight: those campaigns keep every stat, they just sort below.
-  app.get('/api/maps', async () => ({ maps: mapIndex(db), pool: getCampaignPool(db) }));
+  // `multipliers` is the season's per-map score multiplier and the saferoom
+  // rate that set it (src/mapMultipliers.ts), so players can see why a map is
+  // worth what it is. Season 1 brings the new numbers in, so before the flip
+  // there is nothing to show (seasonOneLive). Read once: the table only
+  // changes with a deploy.
+  const multiplierTable = loadMultiplierTable();
+  const multipliers = (maps: string[]) => (seasonOneLive(db) ? publicMultipliers(multiplierTable, maps) : null);
+  app.get('/api/maps', async () => {
+    const maps = mapIndex(db);
+    return { maps, pool: getCampaignPool(db), multipliers: multipliers(maps.map((m) => m.map)) };
+  });
 
   /** Everyone's record on one map. Counterpart to the profile's by-map view. */
   app.get('/api/maps/:map', async (req, reply) => {
     const { map } = req.params as { map: string };
     const d = mapDetail(db, map);
     if (!d) return reply.code(404).send({ error: 'no such map' });
-    return d;
+    return { ...d, multiplier: multipliers([d.map])?.maps[d.map] ?? null };
   });
 
   app.get('/api/matches', async (req) => {

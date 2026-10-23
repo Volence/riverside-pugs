@@ -727,6 +727,20 @@ export interface MapLeaderRow {
   avgStats: Record<string, number>;
 }
 
+/** A map's score multiplier (its mission file's VersusModifier) for the
+ *  season, and the previous season's saferoom rate that set it. */
+export interface MapMultiplier { after: number; before: number; saferoomRate: number | null; matches: number; recalculated: boolean }
+
+export interface SeasonMultipliers {
+  season: string;
+  basedOn: string;
+  min: number;
+  max: number;
+  minMatches: number;
+  /** Only maps whose number was recalculated, keyed by map name. */
+  maps: Record<string, MapMultiplier>;
+}
+
 export interface MapDetail {
   map: string;
   /** Campaign slug, or null for a map the registry cannot place. */
@@ -740,6 +754,9 @@ export interface MapDetail {
   avgStats: Record<string, number>;
   rounds: RoundAggregate;
   players: MapLeaderRow[];
+  /** This season's score multiplier for the map and why; null before Season 1
+   *  or for a map that kept its number. */
+  multiplier?: MapMultiplier | null;
 }
 
 export interface MapBreakdownRow {
@@ -3549,7 +3566,7 @@ export const api = {
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   streams: (all = false, signal?: AbortSignal) =>
     get<StreamsView>(`/api/streams${all ? '?all=1' : ''}`, signal),
-  maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[] }>('/api/maps', signal),
+  maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[]; multipliers?: SeasonMultipliers | null }>('/api/maps', signal),
   campaignNames: (signal?: AbortSignal) =>
     get<{ names: Record<string, string> }>('/api/campaigns/names', signal),
   customCampaigns: (signal?: AbortSignal) =>
