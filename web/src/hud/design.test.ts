@@ -634,15 +634,18 @@ describe('validateDesign on the Tab screen', () => {
       .toEqual({ tabBoard: { MissionTitle: { color: '255 0 0 255' } }, tabInfected: { Name: { color: '0 255 255 255' } } });
   });
 
-  it('drops the other infected rows\' colour while TS5b is closed, as it ships, and keeps your row\'s (TS5)', () => {
+  it('keeps the other infected rows\' colour now TS5b passed (client code), and drops it if the gate closes', () => {
     const d = withKids({ tabInfected: {
       PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } },
       PlayerBackground_Selected: { keys: { bgcolor_override: '255 255 0 255' } },
     } });
-    expect(d.children.tabInfected).toEqual({ PlayerBackground_Selected: { keys: { bgcolor_override: '255 255 0 255' } } });
-    _setProbe('TS5b', true);
-    expect(withKids({ tabInfected: { PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } } } }).children.tabInfected)
-      .toEqual({ PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } } });
+    expect(d.children.tabInfected).toEqual({
+      PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } },
+      PlayerBackground_Selected: { keys: { bgcolor_override: '255 255 0 255' } },
+    });
+    _setProbe('TS5b', false);
+    expect(withKids({ tabInfected: { PlayerBackground: { keys: { bgcolor_override: '0 0 255 255' } } } }).children.tabInfected ?? {})
+      .toEqual({});
   });
 
   it('never keeps a colour code decides: the versus scores (TS2 failed) and the survivor names', () => {

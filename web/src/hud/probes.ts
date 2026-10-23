@@ -61,9 +61,12 @@ export const PROBES: Readonly<Record<ProbeId, { passed: boolean; batch: string; 
   TS4: { passed: true, batch: 'TAB-1 (tab-survivor tab-a)', question: "scoreboard.res CVersusModeScoreboard's xpos and PC ypos move the versus score panel" },
   // Same file, TAB-1: your infected row drew yellow (tab1/runs/tab-infected/tab-c.png, tab-d.png).
   TS5: { passed: true, batch: 'TAB-1 (tab-infected tab-c, tab-d)', question: "scoreboardinfectedplayer.res PlayerBackground_Selected's bgcolor_override colours your own infected row" },
-  // Same file, TAB-1: the other infected rows were never on screen (the harness has one infected player), so their
-  // colour waits for a second infected player (tab screen spec section 7, the TS5 split).
-  TS5b: { passed: false, batch: 'TAB-1 (tab-infected tab-c, tab-d, one infected player)', question: "scoreboardinfectedplayer.res PlayerBackground's bgcolor_override colours the other infected players' rows" },
+  // Same file, TAB-1: the other infected rows were never on screen (the harness has one infected player). Passed
+  // 2026-10-23 on the client code instead: InfectedStatsPanel::SetSelected (client.dylib 0x3f4da0) only shows
+  // PlayerBackground on every row but yours and PlayerBackground_Selected on yours, and sets no colour, so the
+  // other rows paint PlayerBackground's own bgcolor_override, the mechanism TS5 saw on your row
+  // (/home/volence/l4d/hud/re-2026-10-23/infected-side.md, "Evidence: Tab infected rows").
+  TS5b: { passed: true, batch: 'TAB-1 (tab-infected tab-c, tab-d, one infected player)', question: "scoreboardinfectedplayer.res PlayerBackground's bgcolor_override colours the other infected players' rows" },
   // Same file, TAB-1: your infected name drew cyan (tab1/runs/tab-infected/tab-c.png, "Mal"). The survivor file's
   // SurvivorStatsName and SurvivorStatsNoAvatarName stayed white whatever it said (tab1/runs/tab-survivor/tab-a.png):
   // code colours those, so they have no control and are not part of this gate. No infected bot row was on screen,
