@@ -1358,6 +1358,37 @@ export interface LookStatRow {
 }
 export interface LookStats { days: number; since: string; rows: LookStatRow[] }
 
+/** One queue match in /api/admin/balance/teams (src/statBalance.ts). Odds are for team A. */
+export interface TeamBalanceRow {
+  matchId: number;
+  createdAt: string;
+  enabled: boolean;
+  overGate: boolean;
+  gateFired: boolean;
+  moved: number;
+  bestRatingA: number;
+  bestStatA: number;
+  chosenRatingA: number;
+  chosenStatA: number;
+  /** 'a' | 'b' | 'draw' once completed unvoided, else null. */
+  winner: string | null;
+  state: string;
+}
+export interface TeamBalanceBucket { matches: number; predicted: number | null; favWon: number | null; decided: number }
+export interface TeamBalance {
+  config: { enabled: boolean; gate: number; tolerance: number };
+  summary: {
+    logged: number;
+    enabledMatches: number;
+    gateFireRate: number | null;
+    firedChosen: TeamBalanceBucket;
+    firedRatingBestPredicted: number | null;
+    offOverGate: TeamBalanceBucket;
+    allChosen: TeamBalanceBucket;
+  };
+  rows: TeamBalanceRow[];
+}
+
 export interface GameValues {
   /** Admin view only. */
   asOf?: { patchId: number; number: number } | null;
@@ -3195,6 +3226,7 @@ export const adminApi = {
   balancePatches: (signal?: AbortSignal) => get<{ patches: PatchSummary[] }>('/api/admin/balance/patches', signal),
   gameValues: (signal?: AbortSignal) => get<GameValues>('/api/admin/balance/values', signal),
   looks: (days: number, signal?: AbortSignal) => get<LookStats>(`/api/admin/balance/looks?days=${days}`, signal),
+  teamBalance: (signal?: AbortSignal) => get<TeamBalance>('/api/admin/balance/teams', signal),
   balancePatch: (id: number, signal?: AbortSignal) => get<PatchDetail>(`/api/admin/balance/patches/${id}`, signal),
   balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
   editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>
