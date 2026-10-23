@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type MapIndexRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, chapterName, fmtClock, mapName, survivalLabel } from '../format';
+import { campaignName, campaignTint, chapterName, fmtClock, mapName, survivalLabel } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
 import { CampaignTiles } from '../components/CampaignTiles';
@@ -122,63 +122,9 @@ export function Maps() {
             </p>
           )}
 
-          <div class="stack">
+          <div class="mapcamps">
             {shown.map(([campaign, rows]) => (
-              <Panel class="panel--table campaign-table" key={campaign} id={campaignAnchor(campaign)}>
-                <h3>
-                  {campaign === 'other' ? 'Other' : campaignName(campaign)}
-                  {pool.has(campaign) && <span class="ccamp__pool">In the vote</span>}
-                </h3>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Map</th>
-                        <th class="num">Played</th>
-                        <th class="num">Avg score</th>
-                        <th class="num">Survived</th>
-                        <th class="num">Fastest</th>
-                        <th class="num">Average</th>
-                        <th class="num">Slowest</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((m) => (
-                        <tr key={m.map}>
-                          <td><a href={`/map/${encodeURIComponent(m.map)}`}>{chapterName(m.display ?? null, mapName(m.map))}</a></td>
-                          <td class="num">{m.played}</td>
-                          {m.avgScore === null
-                            ? <td class="num muted">not recorded</td>
-                            : <td class="num">{m.avgScore}</td>}
-                          {/* Survival is null for every round played before
-                              the plugin reported it, which is not the same as
-                              nobody surviving. Say so rather than print 0%,
-                              and dim a sample too thin to state as a rate. */}
-                          {/* The sample size is PRINTED, not just a hover
-                              title. This column and "Played" have different
-                              denominators (played counts rounds with a usable
-                              clock, this counts rounds with a survival
-                              reading, and the second is much the smaller), so
-                              a bare percentage next to a bare count reads as
-                              a fraction of that count. It is not. */}
-                          {(() => {
-                            const s = survivalLabel(m.rounds.survivalPct, m.rounds.measured);
-                            return (
-                              <td class={`num${s.thin ? ' muted' : ''}`}>
-                                {s.value}
-                                {s.sub && <span class="map-survived__sub">{s.sub}</span>}
-                              </td>
-                            );
-                          })()}
-                          <RoundTime sec={m.rounds.fastestSec} />
-                          <RoundTime sec={m.rounds.avgSec} />
-                          <RoundTime sec={m.rounds.slowestSec} />
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Panel>
+              <CampaignCard key={campaign} campaign={campaign} rows={rows} inVote={pool.has(campaign)} />
             ))}
           </div>
         </>
@@ -187,8 +133,103 @@ export function Maps() {
   );
 }
 
-/** A round duration as mm:ss, or a muted dash when no round was timed. */
-function RoundTime({ sec }: { sec: number | null }) {
-  if (sec === null) return <td class="num muted">n/a</td>;
-  return <td class="num">{fmtClock(sec)}</td>;
+/** Survival pooled over a campaign's chapters, weighted by each chapter's own
+ *  measured rounds, so a chapter with two readings cannot swing the total. */
+export function pooledSurvival(rows: readonly MapIndexRow[]): { pct: number | null; measured: number } {
+  let measured = 0;
+  let survived = 0;
+  for (const m of rows) {
+    if (m.rounds.survivalPct === null || m.rounds.measured <= 0) continue;
+    measured += m.rounds.measured;
+    survived += (m.rounds.survivalPct / 100) * m.rounds.measured;
+  }
+  return { pct: measured > 0 ? Math.round((survived / measured) * 100) : null, measured };
+}
+
+/**
+ * One campaign as a card: a band in the campaign's tint with its name and
+ * totals, then one row per chapter in play order. Each row carries the same
+ * four facts the old table did (played, average score, survival, round
+ * times), but survival is drawn as a bar so the hard chapters stand out
+ * without reading every number. A chapter nobody has played (usually the
+ * finale, which PUGs skip) collapses to one muted line instead of a row of
+ * n/a cells.
+ */
+function CampaignCard({ campaign, rows, inVote }: { campaign: string; rows: MapIndexRow[]; inVote: boolean }) {
+  const played = rows.reduce((n, m) => n + m.played, 0);
+  const surv = pooledSurvival(rows);
+  const style = { '--campaign': campaign === 'other' ? 'var(--surface-2)' : campaignTint(campaign) } as Record<string, string>;
+  return (
+    <section class="mapcamp campaign-table" id={campaignAnchor(campaign)} style={style}>
+      <header class="mapcamp__head">
+        <div class="mapcamp__title">
+          <p class="mapcamp__eyebrow">
+            {rows.length} {rows.length === 1 ? 'chapter' : 'chapters'}
+          </p>
+          <h3>
+            {campaign === 'other' ? 'Other maps' : campaignName(campaign)}
+            {inVote && <span class="ccamp__pool">In the vote</span>}
+          </h3>
+        </div>
+        <dl class="mapcamp__figs">
+          <div><dt>Played</dt><dd>{played.toLocaleString('en-US')}</dd></div>
+          <div>
+            <dt>Survived</dt>
+            <dd>{surv.pct === null || surv.measured < 10 ? <span class="muted">n/a</span> : `${surv.pct}%`}</dd>
+          </div>
+        </dl>
+      </header>
+      <ol class="mapch-list">
+        {rows.map((m, i) => <ChapterRow key={m.map} m={m} n={i + 1} />)}
+      </ol>
+    </section>
+  );
+}
+
+function ChapterRow({ m, n }: { m: MapIndexRow; n: number }) {
+  const name = chapterName(m.display ?? null, mapName(m.map));
+  const href = `/map/${encodeURIComponent(m.map)}`;
+  if (m.played === 0) {
+    return (
+      <li class="mapch is-unplayed">
+        <span class="mapch__num">{n}</span>
+        <span class="mapch__name">{name}</span>
+        <span class="mapch__none">Not played yet</span>
+      </li>
+    );
+  }
+  // Survival is null for rounds played before the plugin reported it, which
+  // is not the same as nobody surviving; a sample too thin to state as a rate
+  // is dimmed and says so. Its denominator (rounds with a reading) differs
+  // from "played", so the count is printed beside it.
+  const s = survivalLabel(m.rounds.survivalPct, m.rounds.measured);
+  const pct = m.rounds.survivalPct;
+  return (
+    <li class="mapch">
+      <span class="mapch__num">{n}</span>
+      <a class="mapch__name" href={href}>{name}</a>
+      <span class="mapch__fig mapch__played"><b>{m.played}</b><small>played</small></span>
+      <span class="mapch__fig mapch__score">
+        {m.avgScore === null ? <b class="muted">not recorded</b> : <b>{m.avgScore}</b>}
+        <small>avg score</small>
+      </span>
+      <span class={`mapch__surv${s.thin ? ' is-thin' : ''}`}>
+        <span class="mapch__survtop">
+          <b>{s.value}</b>
+          <small>{s.thin ? (s.sub ?? 'survived') : `survived, ${s.sub}`}</small>
+        </span>
+        <span class="mapch__track" aria-hidden="true">
+          {!s.thin && pct !== null && <span class="mapch__fill" style={{ width: `${pct}%` }} />}
+        </span>
+      </span>
+      <span class="mapch__fig mapch__time">
+        <b>{m.rounds.avgSec === null ? 'n/a' : fmtClock(m.rounds.avgSec)}</b>
+        <small>
+          {m.rounds.fastestSec !== null && m.rounds.slowestSec !== null
+            ? `avg round, ${fmtClock(m.rounds.fastestSec)} to ${fmtClock(m.rounds.slowestSec)}`
+            : 'avg round'}
+        </small>
+      </span>
+    </li>
+  );
 }

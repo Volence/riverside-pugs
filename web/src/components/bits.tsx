@@ -66,8 +66,10 @@ export function Sparkline({ values }: { values: number[] }) {
  * stale maximum cannot produce a bar that overflows its track.
  */
 export function BarRow(
-  { name, value, detail, fraction, tone = 'neutral', href, mark, dim = false }: {
+  { name, value, detail, fraction, tone = 'neutral', href, mark, dim = false, icon }: {
     name: string;
+    /** Drawn before the name, e.g. a player's face. */
+    icon?: ComponentChildren;
     value: string;
     detail?: string;
     fraction: number;
@@ -83,7 +85,7 @@ export function BarRow(
   return (
     <div class={`bar${dim ? ' bar--dim' : ''}`}>
       <div class="bar__head">
-        <span class="bar__name">{href ? <a href={href}>{name}</a> : name}</span>
+        <span class="bar__name">{icon}{href ? <a href={href}>{name}</a> : name}</span>
         <span class={`bar__value bar__value--${tone}`}>
           {value}
           {detail && <span class="bar__detail"> {detail}</span>}

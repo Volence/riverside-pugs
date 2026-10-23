@@ -5085,3 +5085,145 @@ a.tmscrim__who:hover .tmscrim__vs, a.tmscrim__who:focus-visible .tmscrim__vs { c
 .endlb__n { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
 .endlb__zero .endlb__n { color: var(--text-muted); }
 .endlb td.endlb__total { color: var(--text-bright); font-weight: 600; }
+
+/* ---- Site touchup: maps (/maps campaign cards, /map/:map) ---------------- */
+.mapcamps { display: grid; gap: var(--sp-5); margin-top: var(--sp-5); }
+.mapcamp {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  scroll-margin-top: var(--sp-6);
+}
+.mapcamp__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-3) var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--campaign) 50%, var(--surface)) 0%, var(--surface) 75%);
+  border-bottom: 1px solid var(--border);
+}
+.mapcamp__title { min-width: 0; }
+.mapcamp__eyebrow {
+  margin: 0 0 var(--sp-1);
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mapcamp__head h3 .ccamp__pool { font-family: var(--font-label); font-size: 0.68rem; padding: 1px 6px; letter-spacing: 0.08em; vertical-align: 0.35em; }
+.mapcamp__head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--text-bright);
+}
+.mapcamp__figs { display: flex; gap: var(--sp-5); margin: 0; }
+.mapcamp__figs div { display: grid; gap: 2px; text-align: right; }
+.mapcamp__figs dt {
+  font-family: var(--font-label);
+  font-size: var(--fs-label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mapcamp__figs dd { margin: 0; font-family: var(--font-display); font-size: var(--fs-h3); color: var(--text-bright); font-variant-numeric: tabular-nums; }
+
+.mapch-list { list-style: none; margin: 0; padding: 0; }
+.mapch {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) 5.5rem 5.5rem minmax(9rem, 13rem) 9.5rem;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--border);
+}
+.mapch:first-child { border-top: 0; }
+.mapch:hover { background: var(--surface-2); }
+.mapch__num {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  color: color-mix(in srgb, var(--campaign) 60%, var(--text-muted));
+  font-variant-numeric: tabular-nums;
+}
+.mapch__name { min-width: 0; color: var(--text-bright); font-weight: 600; overflow-wrap: anywhere; }
+a.mapch__name:hover { color: var(--accent); }
+.mapch__fig { display: grid; gap: 1px; text-align: right; font-variant-numeric: tabular-nums; }
+.mapch__fig b { font-weight: 600; color: var(--text); }
+.mapch small {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+.mapch__surv { display: grid; gap: 4px; min-width: 0; }
+.mapch__survtop { display: flex; align-items: baseline; gap: var(--sp-2); font-variant-numeric: tabular-nums; }
+.mapch__survtop b { font-weight: 600; color: var(--text); }
+.mapch__track { position: relative; height: 5px; background: var(--surface-2); overflow: hidden; }
+.mapch__fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--win), color-mix(in srgb, var(--win) 45%, transparent)); }
+.mapch__surv.is-thin b, .mapch__surv.is-thin small { color: var(--text-muted); }
+.mapch.is-unplayed { grid-template-columns: 2rem minmax(0, 1fr) auto; opacity: 0.6; }
+.mapch.is-unplayed .mapch__name { font-weight: 400; color: var(--text); }
+.mapch__none { font-size: var(--fs-dense); color: var(--text-muted); }
+
+@media (max-width: 760px) {
+  .mapcamp__head { padding: var(--sp-3) var(--sp-4); }
+  .mapcamp__head h3 { font-size: var(--fs-h3); }
+  .mapcamp__figs dd { font-size: var(--fs-body); }
+  .mapch {
+    grid-template-columns: 1.5rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr);
+    grid-template-areas:
+      "num name name name"
+      ". surv surv surv"
+      ". played score time";
+    gap: var(--sp-2) var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .mapch__num { grid-area: num; font-size: var(--fs-body); }
+  .mapch__name { grid-area: name; }
+  .mapch__surv { grid-area: surv; }
+  .mapch__played { grid-area: played; }
+  .mapch__score { grid-area: score; }
+  .mapch__time { grid-area: time; }
+  .mapch__fig { text-align: left; }
+  .mapch.is-unplayed { grid-template-columns: 1.5rem minmax(0, 1fr); grid-template-areas: "num name" ". none"; }
+  .mapch.is-unplayed .mapch__none { grid-area: none; }
+}
+
+/* Map detail: the campaign's chapters as a strip under the header. */
+.mapchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-5); }
+.mapchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-dense);
+  text-decoration: none;
+}
+.mapchip:hover { border-color: var(--text-muted); color: var(--text-bright); }
+.mapchip__n { font-family: var(--font-display); color: var(--text-muted); }
+.mapchip.is-current {
+  border-color: var(--campaign, var(--accent));
+  background: color-mix(in srgb, var(--campaign, var(--accent)) 30%, var(--surface));
+  color: var(--text-bright);
+}
+.mapchip.is-current .mapchip__n { color: var(--text-bright); }
+.bar__name { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.mapface { flex: none; width: 20px; height: 20px; object-fit: cover; border-radius: 2px; }
+.mapface--none {
+  display: inline-grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-family: var(--font-label);
+}
+.mapface--none::before { content: attr(data-initial); }
+.mapmore { margin-top: var(--sp-2); }
+.mapdetail .lb .lb__pcol .lbname a { text-transform: none; font-family: var(--font-body); letter-spacing: normal; }
