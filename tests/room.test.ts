@@ -5,7 +5,7 @@ import { recordResultFlow } from '../src/events/flow.js';
 import { ADMIN, NOW } from './eventFixture.js';
 import { A, B } from './entryFixture.js';
 import { playFixture, SWISS } from './playFixture.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { POOL7, TIMERS, fakeBooking, fakeMatch, roomFixture, type RoomFixture } from './roomFixture.js';
 
 const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
@@ -322,7 +322,7 @@ describe('series writer (plan T3b)', () => {
   });
 
   it('runs the loser\'s pick and the side choice on a live match, then clears the deadline', async () => {
-    const f = await roomFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7) });
+    const f = await roomFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7) });
     bothReady(f);
     const opening: [string, number, string, string | null][] = [[A[0], 0, 'first', null], [A[0], 1, 'ban', POOL7[0]!], [B[0], 2, 'ban', POOL7[1]!], [A[0], 3, 'ban', POOL7[2]!], [B[0], 4, 'ban', POOL7[3]!], [A[0], 5, 'pick', POOL7[5]!], [B[0], 6, 'survivors', null]];
     for (const [who, step, action, campaign] of opening) ok(veto(f, who, step, action, campaign));

@@ -1,15 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { checkVeto, parseVetoConfig, presetConfig, presetOf, vetoFamily, vetoSummary, type VetoConfig } from '../src/events/vetoConfig.js';
+import { checkVeto, legacyPresetConfig, parseVetoConfig, presetConfig, presetOf, vetoFamily, vetoSummary, type VetoConfig } from '../src/events/vetoConfig.js';
 
 const base: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' };
 
+/** The owner's standard for new stages (2026-10-23). */
+const std: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher', firstPick: 'higher', laterPicks: 'loser', lateBans: 0, sides: 'non_picker' };
+
 describe('veto presets', () => {
-  it('fills the knobs for each preset from the pool size', () => {
-    expect(presetConfig('ban_to_one', 7)).toEqual(base);
-    expect(presetConfig('home_away', 7)).toEqual({ ...base, games: 2, banTo: 7 });
-    expect(presetConfig('pick_ban', 7)).toEqual({ ...base, games: 3, banTo: 5, lateBans: 2 });
-    expect(presetConfig('pick_ban', 5)).toEqual({ ...base, games: 3, banTo: 3, lateBans: 0 });
-    expect(presetConfig('loser_picks', 7)).toEqual({ ...base, games: 3, banTo: 3, firstPick: 'higher', laterPicks: 'loser' });
+  it('fills the knobs for each preset from the pool size, on the owner\'s standard: higher seed bans first and picks game 1, loser picks next, the other team chooses sides', () => {
+    expect(presetConfig('ban_to_one', 7)).toEqual(std);
+    expect(presetConfig('home_away', 7)).toEqual({ ...std, games: 2, banTo: 7, laterPicks: 'alternate' });
+    expect(presetConfig('pick_ban', 7)).toEqual({ ...std, games: 3, banTo: 5, lateBans: 2, laterPicks: 'alternate' });
+    expect(presetConfig('pick_ban', 5)).toEqual({ ...std, games: 3, banTo: 3, lateBans: 0, laterPicks: 'alternate' });
+    expect(presetConfig('loser_picks', 7)).toEqual({ ...std, games: 3, banTo: 3 });
+    // Every new preset passes its own checks on a pool big enough for it.
+    for (const [p, n] of [['ban_to_one', 7], ['home_away', 4], ['pick_ban', 7], ['loser_picks', 7]] as const) expect(checkVeto(presetConfig(p, n), n)).toBe('ok');
+  });
+
+  it('keeps the old defaults for a stage made before veto_json (legacy presets)', () => {
+    expect(legacyPresetConfig('ban_to_one', 7)).toEqual(base);
+    expect(legacyPresetConfig('home_away', 7)).toEqual({ ...base, games: 2, banTo: 7 });
+    expect(legacyPresetConfig('pick_ban', 7)).toEqual({ ...base, games: 3, banTo: 5, lateBans: 2 });
+    expect(legacyPresetConfig('pick_ban', 5)).toEqual({ ...base, games: 3, banTo: 3, lateBans: 0 });
+    expect(legacyPresetConfig('loser_picks', 7)).toEqual({ ...base, games: 3, banTo: 3, firstPick: 'higher', laterPicks: 'loser' });
+  });
+
+  it('reads a stage stored with the old defaults as custom, so its knobs are never swapped for the new ones', () => {
+    expect(presetOf(base, 7)).toBe('custom');
   });
 
   it('recognises a preset and calls anything else custom', () => {
@@ -69,15 +86,19 @@ describe('parseVetoConfig', () => {
 });
 
 describe('vetoSummary', () => {
+  it('says the new standard plainly', () => {
+    expect(vetoSummary({ ...presetConfig('ban_to_one', 9), banTo: 3 }, 9)).toBe('Bo1: ban down to 3, the higher seed goes first, the higher seed picks the campaign, the team that did not pick chooses sides.');
+  });
+
   it('says the owner\'s format in one sentence', () => {
-    expect(vetoSummary(presetConfig('loser_picks', 7), 7)).toBe(
+    expect(vetoSummary(legacyPresetConfig('loser_picks', 7), 7)).toBe(
       'Bo3: ban down to 3, the higher seed chooses to go first or second, the higher seed picks game 1, the loser of each game picks the next, the team that did not pick chooses sides.',
     );
   });
 
   it('says a Bo1 ban to one and a home and away', () => {
     expect(vetoSummary(base, 7)).toBe('Bo1: ban down to 1, the higher seed chooses to go first or second, the team that did not pick chooses sides.');
-    expect(vetoSummary(presetConfig('home_away', 4), 4)).toBe(
+    expect(vetoSummary(legacyPresetConfig('home_away', 4), 4)).toBe(
       'Bo2, total score: no bans, the higher seed chooses to go first or second, the team that goes first picks game 1, the teams take turns picking the rest, the team that did not pick chooses sides.',
     );
   });

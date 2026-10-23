@@ -8,7 +8,7 @@ import { ADMIN, NOW } from './eventFixture.js';
 import { A, B } from './entryFixture.js';
 import { POOL7, TIMERS, roomFixture, windowFixture, type RoomFixture } from './roomFixture.js';
 import { MIN, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { RR, SE, SWISS, playFixture } from './playFixture.js';
 import { autoAction } from '../src/events/veto.js';
 import * as E from '../src/events/events.js';
@@ -218,7 +218,7 @@ describe('RoomClock with the series (plan T3b)', () => {
   afterEach(() => { vi.restoreAllMocks(); f?.close(); });
 
   it('resumes an overdue pick step with its full length, leaves a connect deadline alone, and acts on the pick when it passes', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
     const connectDeadline = f.match().deadline;
     expect(f.match().status).toBe('connect');
@@ -304,7 +304,7 @@ describe('RoomClock with the series (plan T3b)', () => {
   });
 
   it('checks a timed-out pick\'s result before handing it to the engine, and logs a refusal once (Task 7 review)', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
     const g1 = f.gameOf(1);
     f.goLive(g1.match_id!);
@@ -330,7 +330,7 @@ describe('RoomClock with the series (plan T3b)', () => {
   });
 
   it('still pushes a timed-out pick when the engine throws after it (Task 8 review)', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
     const g1 = f.gameOf(1);
     f.goLive(g1.match_id!);
