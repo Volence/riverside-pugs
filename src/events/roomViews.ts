@@ -42,7 +42,9 @@ export interface RoomServer {
   state: 'waiting' | 'setup' | 'ready' | 'ended'; name: string | null; since: string;
   connect: { host: string; port: number; password: string } | null; present: { a: number; b: number } | null; graceEndsAt: string | null;
 }
-export interface RoomPlayer { steamid: string; name: string }
+/** avatar and role ride along for the lineup columns (event match page):
+ *  role is the entry's captain, a roster sub, or a stand-in from outside it. */
+export interface RoomPlayer { steamid: string; name: string; avatar?: string | null; role?: 'captain' | 'sub' | 'standin' | null }
 /** One reschedule proposal as the room page lists it (plan T4). */
 export interface RoomProposal {
   id: number; side: 'a' | 'b'; byName: string; time: string; createdAt: string; autoAcceptAt: string | null;
@@ -67,6 +69,8 @@ export interface RoomSchedule {
 /** a and b are null only while a bracket match still waits for its teams. */
 export interface MatchRoomView {
   id: number; eventSlug: string; eventName: string; roundLabel: string; a: PlayEntry | null; b: PlayEntry | null; phase: RoomPhase;
+  /** When the match was decided; null until then. */
+  finishedAt: string | null;
   higher: 'a' | 'b' | null; deadline: string | null; serverNow: string; ready: { a: boolean; b: boolean };
   vetoSummary: string; pool: RoomCampaign[]; log: RoomLogLine[]; games: RoomGame[];
   /** Every veto step in order, done / now / later (veto.ts vetoPlan); empty before the room opens. */
@@ -131,7 +135,15 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
   const showLineup = (side: 'a' | 'b'): RoomPlayer[] | null => {
     const l = lineupOf(side);
     if (!l || !(both || staff || mySide === side)) return null;
-    return (JSON.parse(l.steamids) as string[]).map((s) => player(db, s));
+    const entryId = side === 'a' ? m.entry_a! : m.entry_b!;
+    const entryRow = N.getEntry(db, entryId);
+    const managers = entryRow ? N.entryManagers(db, entryRow) : [];
+    const roster = N.rosterOf(db, entryId);
+    const onRoster = new Set([...roster.starters, ...roster.subs]);
+    return (JSON.parse(l.steamids) as string[]).map((s): RoomPlayer => ({
+      ...player(db, s), avatar: getPlayer(db, s)?.avatar ?? null,
+      role: managers.includes(s) ? 'captain' : roster.subs.includes(s) ? 'sub' : onRoster.has(s) ? null : 'standin',
+    }));
   };
 
   const manager = mySide !== null && viewer !== null && R.sideOf(db, m, viewer) === mySide;
@@ -210,6 +222,7 @@ export function matchRoomView(db: DB, ev: E.EventRow, m: P.MatchRow, viewer: str
   }
   return {
     id: m.id, eventSlug: ev.slug, eventName: ev.name, roundLabel: matchLabel(db, ev, m), a: entry(m.entry_a), b: entry(m.entry_b), phase: phaseOf(m),
+    finishedAt: m.finished_at,
     higher: m.room_higher, deadline: m.deadline, serverNow: now.toISOString(), ready: { a: m.ready_a_at !== null, b: m.ready_b_at !== null },
     vetoSummary: vetoSummary(settings.veto, settings.campaignPool.length), pool,
     plan: st ? vetoPlan(R.vetoInput(db, m)) : [],
