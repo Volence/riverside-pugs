@@ -5024,6 +5024,9 @@ a.tmscrim__who:hover .tmscrim__vs, a.tmscrim__who:focus-visible .tmscrim__vs { c
   cursor: pointer;
 }
 .ccard__mod > .chip.report:hover, .ccard__modlink:hover { color: var(--accent); }
+/* The closed Report button is a .chip.report: drop the chip's 36px floor and .report's margin-top (meant for the open
+   form), or it sits lower than Remove and Delete beside it. */
+.ccard__mod > .chip.report { margin: 0; min-height: 0; }
 @media (max-width: 640px) {
   .community__bar { padding: var(--sp-3); }
   .community__count { margin-left: 0; flex-basis: 100%; }
