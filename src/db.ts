@@ -1490,6 +1490,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
   discord_pug_role_id: '',
+  // The "queue almost full" ping (src/discord/queueAlert.ts): at 6 of 8, at
+  // most once per 45 minutes, in the queue channel unless a channel is set.
+  queue_alert_threshold: '6',
+  queue_alert_cooldown_minutes: '45',
+  discord_queue_alert_channel_id: '',
   mod_call_role_id: '',
   mod_calls_enabled: '1',
   // Empty: guild membership alone activates a linked player. A role id: the

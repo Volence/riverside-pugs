@@ -99,7 +99,10 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'admin_feed_conduct', group: 'Admin feed', label: 'Slurs in chat and names', help: 'A slur typed in chat or used in a name on any game server, by anyone, in a match or not. Slurs only: swearing and insults do not post. Chat posts at most once a minute per player, a name once per player per name, and every line is kept on the player file either way.', type: { kind: 'bool' } },
   { key: 'admin_feed_staff_messages', group: 'Admin feed', label: 'Messages to staff', help: 'A player typed /staff in game. One line per player per ten minutes, no ping; the whole conversation is in the chat drawer on Live.', type: { kind: 'bool' } },
   { key: 'admin_feed_renames', group: 'Admin feed', label: 'Rename digest', help: 'At most once a day, one line per player who played a match under a name they had never used in a match before, with their names in order. A new player\'s first name never posts. Off also stops collecting, so turning it back on starts from that day.', type: { kind: 'bool' } },
-  { key: 'discord_pug_role_id', group: 'Discord', label: 'Queue alert role id', help: 'Role pinged when the queue fills past a threshold. Members opt in with the Notify me button on the panel. Empty turns the alert off.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
+  { key: 'discord_pug_role_id', group: 'Discord', label: 'Queue alert role id', help: 'Role pinged when the PUG queue is almost full. Players opt in and out themselves with Notify me on the queue card or /alerts in Discord. The bot\'s own role must sit above it in the server\'s role list to hand it out. Empty turns queue alerts off.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
+  { key: 'queue_alert_threshold', group: 'Discord', label: 'Queue alert at (players)', help: 'Players in the PUG queue (out of 8) when the alert role is pinged. The alert is edited as the queue moves and closed when it pops, empties or falls three or more below this. Side games, drafts, scrims and events never ping.', type: { kind: 'int', min: 2, max: 7 } },
+  { key: 'queue_alert_cooldown_minutes', group: 'Discord', label: 'Queue alert cooldown (minutes)', help: 'Shortest gap between two queue alert pings, so a queue hovering around the threshold does not ping over and over. Counted from the last ping, across restarts.', type: { kind: 'int', min: 0, max: 1440 } },
+  { key: 'discord_queue_alert_channel_id', group: 'Discord', label: 'Queue alert channel id', help: 'Where queue alerts are posted. Empty posts them in the queue channel, just above the queue card.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'mod_call_role_id', group: 'Discord', label: 'Mod call role', help: 'Role mentioned on every in-game /mod call in the admin channel. Empty posts calls without a ping.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'mod_calls_enabled', group: 'Discord', label: 'In-game mod calls', help: 'Post /mod calls from the game servers to the admin channel. Off still stores every call and lists it on the In-game calls page.', type: { kind: 'bool' } },
   { key: 'discord_required_role_id', group: 'Discord', label: 'Required role id', help: 'Empty: any member of the Discord server is let in on linking. A role id: they must also have that role.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
@@ -204,8 +207,11 @@ export function validateSetting(
       if (v.length > t.maxLength) return { ok: false, error: `at most ${t.maxLength} characters` };
       // The mod call card pings <@&value>. A pasted mention or a role name
       // would post a broken ping on every call, so only a Discord id passes.
-      if (key === 'mod_call_role_id' && v !== '' && !/^\d{17,20}$/.test(v)) {
+      if ((key === 'mod_call_role_id' || key === 'discord_pug_role_id') && v !== '' && !/^\d{17,20}$/.test(v)) {
         return { ok: false, error: 'must be a Discord role id (17 to 20 digits), or empty' };
+      }
+      if (key === 'discord_queue_alert_channel_id' && v !== '' && !/^\d{17,20}$/.test(v)) {
+        return { ok: false, error: 'must be a Discord channel id (17 to 20 digits), or empty' };
       }
       return { ok: true, value: v };
     }

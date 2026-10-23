@@ -137,23 +137,48 @@ export interface QueueAlertView {
   size: number;
   roleId: string;
   publicUrl: string;
+  /** False for an edit of a standing alert: the text keeps the role tag but
+   *  the payload pings nobody, whatever Discord would make of it. */
+  ping?: boolean;
 }
 
 export function renderQueueAlert(v: QueueAlertView): MessagePayload {
-  const need = Math.max(0, v.size - v.count);
+  // Never "0 more": a held pop (a duo that does not fit) still wants one.
+  const need = Math.max(1, v.size - v.count);
   return {
-    content: `<@&${v.roleId}> **${v.count}/${v.size}** in the queue`
-      + (need === 1 ? ', one more and it pops.' : `, ${need} more needed.`),
+    content: `<@&${v.roleId}> **${v.count}/${v.size}** in the PUG queue`
+      + (need === 1 ? ', one more and it pops.' : `, ${need} more needed.`)
+      + ' Join from the button below or on the website.',
     embeds: [],
     components: [[
       { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
-      link(`${v.publicUrl}/`, 'Website'),
+      link(`${v.publicUrl}/`, 'Play on the website'),
     ]],
     // The role is the only thing this message may ping. Nothing else in it is
     // user-controlled text, but the allowlist stays explicit either way.
     mentionUserIds: [],
-    mentionRoleIds: [v.roleId],
+    mentionRoleIds: v.ping === false ? [] : [v.roleId],
   };
+}
+
+export interface QueueAlertClosedView {
+  why: 'popped' | 'emptied' | 'dropped';
+  count: number;
+  size: number;
+}
+
+/**
+ * What a queue alert is edited to once it is no longer worth answering, so
+ * somebody scrolling up an hour later does not jump into a queue that popped
+ * or emptied long ago. No role tag and no buttons: it is a record now.
+ */
+export function renderQueueAlertClosed(v: QueueAlertClosedView): MessagePayload {
+  const content = v.why === 'popped'
+    ? '**Queue popped: match started.** This alert is over; the next one goes out when the queue fills again.'
+    : v.why === 'emptied'
+      ? '**Queue emptied.** This alert is over; the next one goes out when the queue fills again.'
+      : `**Queue dropped to ${v.count}/${v.size}.** It is not close to popping any more; the next alert goes out when it fills again.`;
+  return { content, embeds: [], components: [], mentionUserIds: [], mentionRoleIds: [] };
 }
 
 // ---------- lobby (ready check, vote) ----------
