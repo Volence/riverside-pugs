@@ -25,6 +25,13 @@ export function whenText(iso: string): string {
   return Number.isNaN(t) ? iso : new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/** A round's start in the viewer's zone with the weekday, as "Sat, Oct 24, 8:00 PM":
+ *  bracket columns read by day, and the year is noise there. */
+export function roundWhenText(iso: string): string {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? iso : new Date(t).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 /** ISO UTC to the value a datetime-local input shows: the viewer's zone. */
 export function toLocalInput(iso: string): string {
   const d = new Date(iso);

@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/preact';
 import type { PlayEntry, PlayMatch, StagePlayView } from '../../api';
 import { StagePlay } from './StagePlay';
-import { placementText, whenText } from '../../eventFormat';
+import { placementText, roundWhenText, whenText } from '../../eventFormat';
+import { CONFIRMING_TEXT, byeTeams } from './Bracket';
 
 afterEach(cleanup);
 
@@ -108,5 +109,41 @@ describe('StagePlay', () => {
     expect(header).toContain('play by');
     expect(document.querySelectorAll('.matchcard__when')).toHaveLength(1);
     expect(document.querySelector('.matchcard__when')!.textContent).toBe(whenText('2026-10-16T20:00:00.000Z'));
+  });
+  it('single elim with a third-place match: a bye card for the top seed, one heading per column, seeds and the confirm chip', () => {
+    const stage: StagePlayView = {
+      ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', standings: [], advanceCount: null, pairsAsItGoes: false,
+      groups: [{ number: 1, label: 'Bracket' }, { number: 2, label: 'Third place' }],
+      rounds: [
+        { group: 1, round: 1, label: 'Quarterfinals', dates: null, defaultAt: null, window: null, matches: [
+          match({ id: 2, a: team(4, 'Owls'), b: team(5, 'Bees'), status: 'confirming', phase: 'confirming', winner: 'a', scoreA: 900, scoreB: 800 }),
+          match({ id: 3, slot: 2, a: team(2, 'Bats'), b: team(7, 'Moths') }),
+          match({ id: 4, slot: 3, a: team(3, 'Cats'), b: team(6, 'Dogs') }),
+        ] },
+        { group: 1, round: 2, label: 'Semifinals', dates: null, defaultAt: '2026-10-25T00:00:00.000Z', window: null, matches: [
+          match({ id: 5, a: team(1, 'Rats'), b: null, status: 'pending', phase: 'pending' }),
+          match({ id: 6, slot: 2, a: null, b: null, status: 'pending', phase: 'pending' }),
+        ] },
+        { group: 1, round: 3, label: 'Final', dates: null, defaultAt: '2026-10-25T00:00:00.000Z', window: null, matches: [match({ id: 7, a: null, b: null, status: 'pending', phase: 'pending' })] },
+        { group: 2, round: 1, label: 'Third place', dates: null, defaultAt: '2026-10-25T00:00:00.000Z', window: null, matches: [match({ id: 8, a: null, b: null, status: 'pending', phase: 'pending' })] },
+      ],
+    };
+    render(<StagePlay stage={stage} slug="cup" />);
+    const cols = document.querySelectorAll('.bracket__round');
+    const bye = cols[0]!.querySelector('.matchcard--bye')!;
+    expect(bye.textContent).toContain('Rats');
+    expect(bye.textContent).toContain('Bye');
+    expect(document.querySelectorAll('h4')).toHaveLength(0);
+    expect(screen.getAllByText(/^Third place/)).toHaveLength(1);
+    expect(cols[1]!.querySelector('.eyebrow')!.textContent).toBe(`Semifinals · ${roundWhenText('2026-10-25T00:00:00.000Z')}`);
+    expect(screen.getByText(CONFIRMING_TEXT)).toBeTruthy();
+    expect(cols[0]!.querySelector('.matchcard__seed')!.textContent).toBe('1');
+  });
+
+  it('byeTeams: teams in round 2 that no round 1 match names, by seed; none without a round 2', () => {
+    const r1 = { group: 1, round: 1, label: 'R1', dates: null, defaultAt: null, window: null, matches: [match({ a: team(4, 'Owls'), b: team(5, 'Bees') })] };
+    const r2 = { group: 1, round: 2, label: 'R2', dates: null, defaultAt: null, window: null, matches: [match({ a: team(2, 'Bats'), b: team(1, 'Rats') }), match({ a: team(4, 'Owls'), b: null })] };
+    expect(byeTeams([r1, r2]).map((e) => e.name)).toEqual(['Rats', 'Bats']);
+    expect(byeTeams([r1])).toEqual([]);
   });
 });
