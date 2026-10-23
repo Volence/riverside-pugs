@@ -121,7 +121,7 @@ describe('saved Phase 1 designs download the same bytes', () => {
       v: 1, crosshair: 'none', hideGameCrosshair: true,
       elements: { chat: { visible: false }, killNotices: { visible: false } },
       weapons: { indent: 10, boxActive: { kind: 'flat', color: '255 0 0 128' } },
-    }), '82c38aa4101fe354d21b71030d50f8f04854ea14c0fa7b25f0d9ebbe88983fbd'],
+    }), '7656ba3baecb32fcb046f253eef465f64004b25d50fa5bf9b8c06e5babb8792a'],
     ['damage splatters', () => validateDesign({ v: 1, splatters: {
       splatTeam: { kind: 'fade', color: '200 0 0 255' }, splatTop: { kind: 'fade' }, splatBottom: { kind: 'none' },
     } }), '7160dc9059ec11b974fdc19ec29e5cac1a346ec622eb1c5d53cb88bef5a26cff'],
@@ -155,11 +155,11 @@ describe('saved infected designs download the same bytes', () => {
     'stock: your infected health scaled 1.5 and moved': '840539fa287b8094c1e6535a8436299137d27c792fc35f1fa0f3c6e176ad4216',
     'stock: infected teammates scaled 2 with a stored spacing 200': '93ed646c11be551258e91c3ede3efcc3f8833f79b765b81dcd3aa3d627918334',
     'stock: the ability timer moved': 'e3c0ddd98ad677d3d77d0e324fe4da9c45bf86c55cf990dd9afc9a5914faf29a',
-    'stock: the game crosshair hidden': '93f6382e8f97c317c910a3f73265973e430530b954c65b23c00ce462fb9b79a5',
+    'stock: the game crosshair hidden': '1e743108e53595d2c1d71a2d90bf2768c4e77cb4d8b02d201aa77c88da72e633',
     'modern: your infected health scaled 1.5 and moved': 'c15d38246b4b15a78480fb09749214c754c370f5c854b20848bcd99d8bf20f48',
     'modern: infected teammates scaled 2 with a stored spacing 200': '224ce222028da1fa065e94f36686d950b07bbc36d7d012e14bf5819e1ab02e12',
     'modern: the ability timer moved': '2cceb68b08bfa67ab5dc8688cbc351d4cde143604b54a3a4cbe1c0abd9deef23',
-    'modern: the game crosshair hidden': '7afca08f606cd33611b27fc79b3ee0d586722788a27d8e3b99d8ceccb6f0995f',
+    'modern: the game crosshair hidden': 'd1347ee7086b62c4076ff9174f2e31fb0120c5b1b854e29c55a7065a95d4d533',
   };
   for (const [name, make] of [...infected('stock'), ...infected('modern')]) {
     it(`${name} packs to the same bytes`, () => {

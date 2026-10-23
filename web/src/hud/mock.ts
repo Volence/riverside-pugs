@@ -876,13 +876,13 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
  * progress (so a standing Hunter, with none, draws nothing: probe Q16a,
  * /home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png b),
  * else the ready colour, or the attack colour with a survivor in reach.
- * The preview's Recharging draws the ring's sample share. Never drawn with
- * the game's crosshair hidden: never_draw takes the whole HudCrosshair
- * (probe Q16b, b10/shots/crops/centre-bcef.png).
+ * The preview's Recharging draws the ring's sample share. Hiding the game's
+ * crosshair keeps it (build.ts gameCrosshairPass blanks only the icon; probe
+ * XR, /home/volence/l4d/hud/probe-xhair-ring/ab-alpha.jpg).
  */
 function paintAbilityMarker(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, _k: number, onAsset?: () => void, view: HudView = {}) {
   const state = previewOf(view.state);
-  if (design.hideGameCrosshair || state.infected !== 'alive' || state.ability === 'notReady') return;
+  if (state.infected !== 'alive' || state.ability === 'notReady') return;
   const c = kvFind(buildTrees(design)('scripts/hudlayout.res'), ['HudCrosshair']);
   const key = state.ability === 'ready' ? 'ability_ready_color' : 'ability_charging_color';
   const rgba = rgbaOf(design, (c && pcGet(c, key)) ?? '255 255 255 255');

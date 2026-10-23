@@ -227,10 +227,6 @@ function layoutPass(work: Work, design: HudDesign) {
   // "Crosshair"): there Game default only means the editor adds none.
   if (!wants && has && !work.imported) layout.splice(layout.indexOf(has), 1);
 
-  // Probe T2: the engine crosshair honours never_draw, so a player with an
-  // image crosshair can hide the game's own one underneath it.
-  if (design.hideGameCrosshair) { const c = work.optional(LAYOUT, ['HudCrosshair']); if (c) kvSet(c, 'never_draw', '1'); }
-
   for (const el of ELEMENTS) {
     const o = design.elements[el.id];
     // An element the base lacks is skipped whole: an imported HUD that has
@@ -2674,9 +2670,39 @@ function weaponsPass(work: Work, design: HudDesign, assets: BuildAssets | null, 
       if (rect) pointCell(e, file, rect.w, rect.h);
       else kvSet(e, 'file', file);
     }
-    if (repoint.some(([, file]) => file === CLEAR_TEXTURE)) out.push(...clearTextureFiles());
+    if (repoint.some(([, file]) => file === CLEAR_TEXTURE) && !out.some((f) => f.path === `materials/${CLEAR_TEXTURE}.vtf`)) out.push(...clearTextureFiles());
   }
   fitWeaponPanel(work, design, panel, cells);
+}
+
+/** The icon list the crosshair's own art is cut from (hud_textures.txt, not mod_textures.txt). */
+const HUDTEX = 'scripts/hud_textures.txt';
+/**
+ * Hide the game's crosshair, keeping the infected ability ring. The infected
+ * crosshair is the PZ_crosshair_open icon (CHudTerrorCrosshair::SetCrosshairMode
+ * 2, client.dylib 0x3cff60, which every claw asks for), and crosshair_default
+ * is the one ResetCrosshair falls back to; both point at the clear texture,
+ * their cells kept, so the ring, sized from the icon's cell (CHudCrosshair::Paint
+ * 0x30fb80 passes it to OnPaint 0x3d0070), keeps its size. never_draw, used
+ * before, made ShouldDraw (0x30fa40) skip the whole element, the ring with it,
+ * and never touched the survivor gun's circle, which C_TerrorGun draws itself
+ * from the cl_crosshair_* cvars (DrawCircleCrosshair 0xe69a0): probe XR
+ * (/home/volence/l4d/hud/probe-xhair-ring/ab-alpha.jpg) drew the ring here
+ * and none with never_draw, and the survivor circle under both. So does the
+ * crosshair cvar at 0, the usual way to clear the way for a custom crosshair,
+ * hence the editor's note to keep it at 1 and use cl_crosshair_alpha 0.
+ * An imported HUD whose list lacks an entry is skipped there.
+ */
+function gameCrosshairPass(work: Work, design: HudDesign, out: VpkFile[]) {
+  if (!design.hideGameCrosshair) return;
+  const cells = work.optional(HUDTEX, ['TextureData']);
+  if (!cells) return;
+  for (const entry of ['PZ_crosshair_open', 'crosshair_default']) {
+    const e = kvFind(cells.value as KvNode[], [entry]);
+    if (!e) { if (work.imported) continue; throw new Error(`${HUDTEX}: no ${entry}`); }
+    kvSet(e, 'file', CLEAR_TEXTURE);
+  }
+  if (!out.some((f) => f.path === `materials/${CLEAR_TEXTURE}.vtf`)) out.push(...clearTextureFiles());
 }
 
 /** What each voice upload is called in an error naming it. */
@@ -2893,6 +2919,7 @@ export function buildHud(design: HudDesign, assets: BuildAssets = {}, report?: B
   const extra: VpkFile[] = [];
   layoutPass(work, design);
   weaponsPass(work, design, assets, extra);
+  gameCrosshairPass(work, design, extra);
   voicePass(work, design, assets, extra);
   noticePass(work, design, extra);
   countdownPass(work, design);
