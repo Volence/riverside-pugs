@@ -1,6 +1,5 @@
 import type { PlayerFileData, TimelineSource } from '../../../api';
 import { fmtTime } from '../useAction';
-import { timeoutOffenses } from '../../../format';
 
 /** One word per source, in the panel's own vocabulary. The badge is the same
  *  neutral shape for every source on purpose: colouring "LilAC" differently
@@ -26,49 +25,51 @@ export function SourceBadge({ source }: { source: TimelineSource }) {
   return <span class="source-badge">{SOURCE_LABEL[source]}</span>;
 }
 
-/** Is there anything here. One row, read before anything else on the page. */
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+/** One count, as a tile that jumps to the section holding the rows behind
+ *  it. A zero stays quiet; anything else reads at full strength. */
+function Tile({ n, label, href }: { n: number; label: string; href: string }) {
+  return (
+    <a class={`file-tile${n === 0 ? ' is-zero' : ''}`} href={href}>
+      <span class="file-tile__n">{n}</span>
+      <span class="file-tile__label">{label}</span>
+    </a>
+  );
+}
+
+/** Is there anything here. Read before anything else on the page: the four
+ *  counts, then what the last 30 days recorded, as neutral chips. */
 export function GlanceRow({ d }: { d: PlayerFileData }) {
   const g = d.glance;
   return (
-    <section class="file-glance">
-      <p>
-        {/* Each figure bolded as one phrase, not just the digit: a count and
-            its noun split across elements is unfindable by its own text, and
-            reads no better bold-then-plain than bold as a whole. */}
-        <strong>{g.openTickets} open ticket{g.openTickets === 1 ? '' : 's'}</strong>
-        {' · '}<strong>{g.bans} ban{g.bans === 1 ? '' : 's'} on record</strong>
-        {' · '}<strong>{g.penalties} penalt{g.penalties === 1 ? 'y' : 'ies'}</strong>
-        {g.aliases > 0 && <> · <strong>{g.aliases} merged second account{g.aliases === 1 ? '' : 's'}</strong></>}
-        {g.sharesAddressWith.length > 0 && <> · shares a connection with {g.sharesAddressWith.map((s) => s.name).join(', ')}</>}
-      </p>
-      <p>
-        {g.evidence.length === 0
-          ? <span class="muted">Nothing recorded in the last 30 days.</span>
-          : (
-            <>
-              Last 30 days:{' '}
-              {g.evidence.map((e, i) => (
-                <span key={e.source}>
-                  {i > 0 ? ', ' : ''}{e.count} {SOURCE_LABEL[e.source]}{e.count === 1 ? '' : 's'}
-                </span>
-              ))}
-              . Context to weigh, not a verdict.
-            </>
-          )}
-      </p>
-      {g.activeBan && (
-        <p class="admin-warn">
-          Banned: {g.activeBan.reason}
-          {g.activeBan.expiresAt ? `, until ${fmtTime(g.activeBan.expiresAt)}` : ', permanently'}.
+    <section class="file-glance" aria-label="At a glance">
+      <div class="file-tiles">
+        <Tile n={g.openTickets} label={plural(g.openTickets, 'open ticket', 'open tickets')} href="#tickets" />
+        <Tile n={g.bans} label={plural(g.bans, 'ban on record', 'bans on record')} href="#standing" />
+        <Tile n={g.penalties} label={plural(g.penalties, 'penalty', 'penalties')} href="#standing" />
+        <Tile n={g.aliases} label={plural(g.aliases, 'merged account', 'merged accounts')} href="#identity" />
+      </div>
+      <div class="file-glance__notes">
+        <p class="file-glance__recent">
+          <span class="file-glance__label">Last 30 days</span>
+          {g.evidence.length === 0
+            ? <span class="muted">Nothing recorded.</span>
+            : g.evidence.map((e) => (
+              <span key={e.source} class="file-ev"><b>{e.count}</b> {SOURCE_LABEL[e.source]}</span>
+            ))}
+          {g.evidence.length > 0 && <span class="muted file-glance__hedge">Context to weigh, not a verdict.</span>}
         </p>
-      )}
-      {g.timeout && <p class="admin-warn">Queue timeout until {fmtTime(g.timeout.until)}, {timeoutOffenses(g.timeout)} in the penalty window.</p>}
-      {g.steamFlags.map((f) => <p key={f.kind} class="muted">{f.text}</p>)}
-      <p class="muted">
-        {d.lastReview
-          ? `Looked at by ${d.lastReview.reviewedByName ?? d.lastReview.reviewedBy} ${fmtTime(d.lastReview.reviewedAt)}${d.lastReview.note ? `: ${d.lastReview.note}` : ''}`
-          : 'Nobody has marked this file looked at.'}
-      </p>
+        {g.sharesAddressWith.length > 0 && (
+          <p>Shares a connection with {g.sharesAddressWith.map((s) => s.name).join(', ')}</p>
+        )}
+        {g.steamFlags.map((f) => <p key={f.kind} class="muted">{f.text}</p>)}
+        <p class="muted">
+          {d.lastReview
+            ? `Looked at by ${d.lastReview.reviewedByName ?? d.lastReview.reviewedBy} ${fmtTime(d.lastReview.reviewedAt)}${d.lastReview.note ? `: ${d.lastReview.note}` : ''}`
+            : 'Nobody has marked this file looked at.'}
+        </p>
+      </div>
     </section>
   );
 }

@@ -106,9 +106,14 @@ describe('the Player File', () => {
     render(<PlayerFile steamid={P} me="76561199000000009" />);
     expect(await screen.findByRole('heading', { name: /griefer/ })).toBeTruthy();
     expect(screen.getByText(P)).toBeTruthy();
-    expect(screen.getByText(/12 games/)).toBeTruthy();
-    expect(screen.getByText(/1 open ticket/)).toBeTruthy();
-    expect(screen.getByText(/2 Little Anti-Cheat/)).toBeTruthy();
+    // Facts and counts are label/number pairs now: read each pair as one.
+    const fact = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.textContent;
+    expect(fact('Games')).toBe('12');
+    expect(fact('SR')).toBe('900');
+    const tile = screen.getByText('open ticket').closest('a')!;
+    expect(tile.textContent).toBe('1open ticket');
+    expect(tile.getAttribute('href')).toBe('#tickets');
+    expect(document.querySelector('.file-ev')?.textContent).toBe('2 Little Anti-Cheat');
     expect(screen.getByText(/New account/)).toBeTruthy();
     expect(screen.getByText('Nobody has marked this file looked at.')).toBeTruthy();
     expect(screen.getByRole('link', { name: '#12' }).getAttribute('href')).toBe('/admin/people/tickets/12');
@@ -144,9 +149,11 @@ describe('the Player File', () => {
       },
     }));
     render(<PlayerFile steamid={P} me="76561199000000009" />);
-    expect(await screen.findByText('Names played under:')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Names played under' })).toBeTruthy();
     expect(screen.getByText(/12 matches · in game and Steam/)).toBeTruthy();
-    expect(screen.getByText(/1 match · Steam · first/)).toBeTruthy();
+    const v = screen.getByText('v').closest('li')!.textContent!;
+    expect(v).toContain('1 match · Steam');
+    expect(v).toContain('first ');
   });
 
   it('lists Discord sanctions from before the player linked Steam', async () => {
@@ -208,9 +215,11 @@ describe('the Player File', () => {
     expect(await screen.findByText('No such player, or not a file you can open.')).toBeTruthy();
   });
 
-  it('bans, unbans and clears penalties from the standing section', async () => {
+  it('bans from the standing banner, after unfolding its form', async () => {
     render(<><PlayerFile steamid={P} me="76561199000000009" /><ConfirmHost /></>);
     await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.queryByLabelText('Ban reason')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Ban this player' }));
     fireEvent.input(screen.getByLabelText('Ban reason'), { target: { value: 'throwing' } });
     fireEvent.change(screen.getByLabelText('Ban length'), { target: { value: '1440' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ban' }));
@@ -220,18 +229,22 @@ describe('the Player File', () => {
     await waitFor(() => expect(mockAdmin.ban).toHaveBeenCalledWith(P, 'throwing', 1440));
   });
 
-  // The header chip only jumps to Standing; for a banned player the thing
-  // there is Unban, so it must not say "Ban" (2026-09-26, owner looked for Unban).
-  it('labels the header chip Unban for a banned player, Ban otherwise', async () => {
+  // Unban sits on the banner at the top of the file, beside the ban it lifts
+  // (the owner went looking for it on 2026-09-26 and again on 2026-10-23).
+  it('puts Unban on the standing banner for a banned player, and no Ban', async () => {
     const base = file();
     mockPeople.file.mockResolvedValue(file({ sections: { ...base.sections, standing: { ...base.sections.standing,
       activeBan: { id: 2, reason: 'Abandoned match #223', createdBy: 'system', createdByName: null, createdAt: '2026-09-26T07:02:33.000Z', expiresAt: '2026-09-27T07:02:33.000Z', liftedBy: null, liftedByName: null, liftedAt: null } } } }));
-    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    render(<><PlayerFile steamid={P} me="76561199000000009" /><ConfirmHost /></>);
     await screen.findByRole('heading', { name: /griefer/ });
-    const chip = screen.getByRole('link', { name: 'Unban' });
-    expect(chip.getAttribute('href')).toBe('#standing');
-    expect(screen.queryByRole('link', { name: 'Ban' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Unban' })).toBeTruthy();
+    const banner = document.querySelector('.file-standing--banned') as HTMLElement;
+    expect(banner.textContent).toContain('Abandoned match #223');
+    expect(within(banner).getByRole('button', { name: 'Unban' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Ban this player' })).toBeNull();
+    fireEvent.click(within(banner).getByRole('button', { name: 'Unban' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Unban' }));
+    await waitFor(() => expect(mockAdmin.unban).toHaveBeenCalledWith(P));
   });
 
   it('writes a note and marks the file looked at', async () => {
