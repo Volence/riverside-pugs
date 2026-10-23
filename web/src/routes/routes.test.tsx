@@ -1742,8 +1742,8 @@ describe('CustomCampaigns', () => {
     mockApi.customCampaigns.mockResolvedValue({ campaigns: [{ ...campaign, slug: 'hunter_training', name: 'Hunter Training', inPool: false, practiceOnly: true }] });
     render(<CustomCampaigns />);
     const badge = await waitFor(() => screen.getByText('Practice map'));
-    // Scoped to this campaign's heading: the L4D2 pack block has vote badges of its own.
-    const heading = badge.closest('h3')!;
+    // Scoped to this campaign's card: the L4D2 pack block has vote badges of its own.
+    const heading = badge.closest('.cccard')!;
     expect(heading.textContent).toContain('Hunter Training');
     expect(heading.textContent).not.toContain('In the vote');
   });

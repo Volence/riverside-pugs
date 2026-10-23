@@ -31,7 +31,7 @@ export function CustomCampaigns() {
         <Figures>
           <Figure label="L4D2 campaigns" value={L4D2_PACK_SIZE} sub="every one, in one download" />
           {campaigns && <Figure label="Custom campaigns" value={campaigns.length} sub="beyond the stock four" />}
-          {campaigns && <Figure label="In the vote" value={campaigns.filter((c) => c.inPool).length} sub="can come up in a match" />}
+          {campaigns && <Figure label="In the match vote" value={campaigns.filter((c) => c.inPool).length} sub="can come up in a match" />}
         </Figures>
       </PageHeader>
       <DocLayout sections={SECTIONS}>
