@@ -14,7 +14,7 @@ import { getSetting } from '../settings.js';
  * ms), so a web restart neither forgets the cooldown nor loses the open
  * message it still has to close:
  *   - state 'open': the alert still standing, at most one;
- *   - 'popped' / 'emptied' / 'dropped': closed, and why;
+ *   - 'popped' / 'emptied' / 'dropped' / 'off': closed, and why;
  *   - 'failed': Discord refused the post. Kept so the cooldown still counts
  *     from it, or an outage would retry on every pass all evening;
  *   - 'done': rows from the first version of the alert, which never closed.
@@ -40,11 +40,19 @@ export const ALERT_DROP_MARGIN = 2;
 
 const DISCORD_ID = /^\d{17,20}$/;
 
-/** The alert's settings, or null when it is off: no role id, or one that is
- *  not a Discord id (it would post a broken ping). */
-export function queueAlertConfig(db: DB, queueChannelId: string): QueueAlertConfig | null {
+/** The alert role, or null when queue alerts are off: no role id, or one
+ *  that is not a Discord id (it would post a broken ping, and a toggle for it
+ *  could only fail). The one reading of the setting that the alert, the
+ *  queue card's button and /alerts all share. */
+export function queueAlertRoleId(db: DB): string | null {
   const roleId = (getSetting(db, 'discord_pug_role_id') ?? '').trim();
-  if (!DISCORD_ID.test(roleId)) return null;
+  return DISCORD_ID.test(roleId) ? roleId : null;
+}
+
+/** The alert's settings, or null when it is off (see queueAlertRoleId). */
+export function queueAlertConfig(db: DB, queueChannelId: string): QueueAlertConfig | null {
+  const roleId = queueAlertRoleId(db);
+  if (!roleId) return null;
   const threshold = Number(getSetting(db, 'queue_alert_threshold') ?? 6);
   const minutes = Number(getSetting(db, 'queue_alert_cooldown_minutes') ?? 45);
   const channel = (getSetting(db, 'discord_queue_alert_channel_id') ?? '').trim();
@@ -56,7 +64,9 @@ export function queueAlertConfig(db: DB, queueChannelId: string): QueueAlertConf
   };
 }
 
-export type AlertClose = 'popped' | 'emptied' | 'dropped';
+/** Why an alert was closed. 'off': queue alerts were switched off (the role
+ *  id cleared) while it stood, which says nothing about the queue. */
+export type AlertClose = 'popped' | 'emptied' | 'dropped' | 'off';
 
 export type AlertDecision =
   | { kind: 'none' }

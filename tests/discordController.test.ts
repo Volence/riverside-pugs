@@ -196,7 +196,7 @@ describe('spectate button', () => {
 });
 
 describe('queue alert opt-in toggle', () => {
-  const ROLE = '55501';
+  const ROLE = '555000000000000001';
   let roles: FakeTransport['roles'];
   let t: FakeTransport;
 
@@ -234,6 +234,13 @@ describe('queue alert opt-in toggle', () => {
     setSetting(db, 'discord_pug_role_id', '');
     const r = await toggle(did(0));
     expect(body(r)).toMatch(/not set up/i);
+  });
+
+  it('treats a stored role id that is not a Discord id as not set up, and touches no role', async () => {
+    setSetting(db, 'discord_pug_role_id', 'Queue Alerts');
+    expect(body(await toggle(did(0)))).toMatch(/not set up/i);
+    expect(body(await setAlertRole({ db, roles }, did(0), true))).toMatch(/not set up/i);
+    expect(t.rolesOf.get(did(0))).toBeUndefined();
   });
 
   it('does not guess when it cannot read the member', async () => {

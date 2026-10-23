@@ -14,7 +14,7 @@ import {
   renderQueueAlertClosed, renderResult, type MatchCardState, type MatchView, type PlayerView, type ResultPlayer,
 } from './presenter.js';
 import { getSetting } from '../settings.js';
-import { decideAlert, lastAlertAt, openAlerts, queueAlertConfig, type AlertClose } from './queueAlert.js';
+import { decideAlert, lastAlertAt, openAlerts, queueAlertConfig, queueAlertRoleId, type AlertClose } from './queueAlert.js';
 import { sideGamesEnabled, type SidePublicView } from '../sideGames.js';
 import { ABORT_REASON, abortParties, anyRequeued, type AbortCause } from '../matchAborts.js';
 
@@ -347,7 +347,7 @@ export class DiscordSync {
       size: QUEUE_SIZE,
       players: q.players.map((p) => this.player(p.steamid)),
       phase: q.phase,
-      alertRoleId: getSetting(db, 'discord_pug_role_id') || undefined,
+      alertRoleId: queueAlertRoleId(db) ?? undefined,
       sideGame: this.deps.sideGame?.() ?? null,
       sideGamesEnabled: sideGamesEnabled(db),
     });
@@ -381,8 +381,9 @@ export class DiscordSync {
     for (const stale of open.slice(1)) await this.closeAlert(stale, popped ? 'popped' : 'emptied', count);
     const current = open[0] ?? null;
     if (!cfg) {
-      // Turned off with an alert standing: close it rather than strand it.
-      if (current) await this.closeAlert(current, popped ? 'popped' : count === 0 ? 'emptied' : 'dropped', count);
+      // Turned off with an alert standing: close it rather than strand it,
+      // saying only that, since the queue itself did nothing.
+      if (current) await this.closeAlert(current, 'off', count);
       return false;
     }
 

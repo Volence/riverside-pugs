@@ -6,6 +6,7 @@ import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js
 import { spectateFor, type SpectateInfo } from '../spectate.js';
 import type { BotInteraction, InteractionReply, MessagePayload, RoleOps } from './transport.js';
 import { getSetting } from '../settings.js';
+import { queueAlertRoleId } from './queueAlert.js';
 import { ENDORSE_ERROR_TEXT, ENDORSE_LABEL, endorseState, giveEndorsement } from '../endorsements.js';
 import { escapeName, renderEndorseKinds, renderEndorsePicker } from './presenter.js';
 import { MERGED_MESSAGE, standingOf } from '../standing.js';
@@ -230,7 +231,7 @@ function serverOfMatch(db: ControllerDeps['db'], matchId: number): number | null
 export async function setAlertRole(
   deps: Pick<ControllerDeps, 'db' | 'roles'>, userId: string, want?: boolean,
 ): Promise<InteractionReply> {
-  const roleId = getSetting(deps.db, 'discord_pug_role_id');
+  const roleId = queueAlertRoleId(deps.db);
   if (!roleId || !deps.roles) return say('Queue alerts are not set up on this server yet.');
 
   const has = await deps.roles.has(userId, roleId).catch(() => null);
