@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
@@ -753,6 +753,53 @@ describe('queue-filling alert', () => {
     await queueTo(7);
     expect(pings).toHaveLength(0);
     expect(alertRows().map((r) => r.state)).toEqual(['failed']);
+  });
+
+  it('a post whose first save throws is still recorded open, with its id, and closed later', async () => {
+    setRole();
+    await build().start();
+    const prepare = db.prepare.bind(db);
+    let throwOnce = true;
+    db.prepare = ((sql: string) => {
+      if (throwOnce && sql.includes('INSERT INTO discord_messages')) {
+        throwOnce = false;
+        throw new Error('database is locked');
+      }
+      return prepare(sql);
+    }) as typeof db.prepare;
+    await queueTo(6);
+    db.prepare = prepare as typeof db.prepare;
+
+    expect(pings).toHaveLength(1);
+    const row = db.prepare("SELECT message_id, state FROM discord_messages WHERE kind = 'alert'").get() as { message_id: string; state: string };
+    expect(row).toEqual({ message_id: pings[0].id, state: 'open' });
+    await queueTo(0);
+    expect(alertMsg().payload.content).toMatch(/Queue emptied/);
+  });
+
+  it('a save that keeps failing after a post is logged, and the pass carries on to the panel', async () => {
+    setRole();
+    await build().start();
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((msg: unknown) => { errors.push(String(msg)); });
+    const prepare = db.prepare.bind(db);
+    let failures = 2; // the alert's save, then the fallback save
+    db.prepare = ((sql: string) => {
+      if (failures > 0 && pings.length > 0 && sql.includes('INSERT INTO discord_messages')) {
+        failures--;
+        throw new Error('database is locked');
+      }
+      return prepare(sql);
+    }) as typeof db.prepare;
+    await queueTo(6);
+    db.prepare = prepare as typeof db.prepare;
+    spy.mockRestore();
+
+    expect(failures).toBe(0);
+    expect(errors).toContain('[discord] recording the queue alert failed:');
+    expect(errors).not.toContain('[discord] sync pass failed:');
+    // The panel still went up below the alert.
+    expect(JSON.stringify(t.byId(panelId())!.payload)).toContain('6/8');
   });
 
   it('a hand-deleted alert is not re-posted (that would ping again)', async () => {
