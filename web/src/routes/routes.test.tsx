@@ -609,6 +609,28 @@ describe('Profile', () => {
     render(<Profile steamid="1" />);
     expect(await screen.findByText(/Dead Center 2 · Streets/)).toBeTruthy();
   });
+
+  // The bar is the rate itself (not how often the map came up), and a map
+  // with only a few games folds away instead of topping the list at 0%.
+  it('draws by-map bars as the win rate and folds small samples away', async () => {
+    mockApi.profile.mockResolvedValue({
+      ...profile,
+      byMap: [
+        { map: 'c1m2_streets', campaignName: 'Dead Center', games: 2, wins: 0, losses: 2, stats: {}, avgStats: {} },
+        { map: 'l4d_hospital01_apartment', campaignName: 'No Mercy', games: 20, wins: 15, losses: 5, stats: {}, avgStats: {} },
+      ],
+    });
+    const { container } = render(<Profile steamid="1" />);
+    await screen.findByText(/No Mercy 1/);
+    const rows = [...container.querySelectorAll('.bars > .bar')];
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.querySelector('.bar__fill') as HTMLElement).style.width).toBe('75%');
+    expect(rows[0]!.querySelector('.bar__mark')).toBeTruthy();
+    const few = container.querySelector('.bars__few')!;
+    expect(few.querySelector('summary')!.textContent).toBe('1 map with fewer than 5 games');
+    expect(few.querySelector('.bar--dim')).toBeTruthy();
+    expect(few.querySelector('.bar__fill--neutral')).toBeTruthy();
+  });
 });
 
 describe('skill stats display', () => {

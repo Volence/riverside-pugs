@@ -21,6 +21,9 @@ import type { Session } from '../hooks/useLiveState';
 import { CommunityCard } from '../components/CommunityCard';
 import { WeeklyAwardChips } from '../components/WeeklyAwardChips';
 
+/** Maps with fewer games than this fold away on the by-map bars: a 0W 2L map says little. */
+const MAP_MIN_SAMPLE = 5;
+
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
 ) {
@@ -226,21 +229,22 @@ export function Profile(
               match you lost still counts as a map win.
             </p>
 
-            {/* Ordered weakest first by the server: the reason to read this is
-                to find the maps you lose on, so they belong at the top rather
-                than buried in a list ordered by how often you drew each map.
-                Bar length is still how often you played it, colour whether you
-                tend to win it. */}
+            {/* Weakest first: the reason to read this is to find the maps you
+                lose (or die) on. The bar is the rate itself with a line at 50%,
+                so its length and colour say the same thing. Maps with only a
+                handful of games would otherwise crowd the top with 0% and 100%
+                rows that mean nothing, so they fold away below. */}
             <Tabs
               active={mapSort}
               onSelect={(k) => setMapSort(k as MapSort)}
               tabs={[{ key: 'winrate', label: 'Win rate' }, { key: 'survival', label: 'Survival' }]}
             />
-            <Bars label={mapSort === 'survival' ? 'Maps you die on most' : 'Maps you lose most'}>
-              {sortedMaps.map((r) => {
+            {(() => {
+              const sampleOf = (r: typeof byMap[number]): number =>
+                mapSort === 'survival' ? r.survivalMeasured ?? 0 : r.wins + r.losses;
+              const row = (r: typeof byMap[number], few: boolean) => {
                 const decided = r.wins + r.losses;
                 const wr = decided > 0 ? Math.round((r.wins / decided) * 100) : null;
-                const maxGames = Math.max(...byMap.map((x) => x.games));
                 const sMeasured = r.survivalMeasured ?? 0;
                 const sPct = sMeasured > 0 ? Math.round(((r.survived ?? 0) / sMeasured) * 100) : null;
                 const lead = mapSort === 'survival' ? sPct : wr;
@@ -253,12 +257,31 @@ export function Profile(
                     detail={mapSort === 'survival'
                       ? `(survived ${r.survived ?? 0} of ${sMeasured})  ${wr === null ? 'n/a' : `${wr}%`} win rate`
                       : `(${r.wins}W ${r.losses}L)${survivalNote(r)}`}
-                    fraction={r.games / maxGames}
-                    tone={lead === null ? 'neutral' : lead >= 50 ? 'good' : 'bad'}
+                    fraction={(lead ?? 0) / 100}
+                    mark={0.5}
+                    dim={few}
+                    tone={lead === null || few ? 'neutral' : lead >= 50 ? 'good' : 'bad'}
                   />
                 );
-              })}
-            </Bars>
+              };
+              const enough = sortedMaps.filter((r) => sampleOf(r) >= MAP_MIN_SAMPLE);
+              const few = sortedMaps.filter((r) => sampleOf(r) < MAP_MIN_SAMPLE);
+              return (
+                <Bars label={mapSort === 'survival' ? 'Maps you die on most' : 'Maps you lose most'}>
+                  <p class="bars__legend">
+                    The bar is your {mapSort === 'survival' ? 'survival' : 'win'} rate on the map; the line marks 50%.
+                  </p>
+                  {enough.map((r) => row(r, false))}
+                  {enough.length === 0 && <p class="muted">No map has {MAP_MIN_SAMPLE} games yet.</p>}
+                  {few.length > 0 && (
+                    <details class="bars__few">
+                      <summary>{few.length} {few.length === 1 ? 'map' : 'maps'} with fewer than {MAP_MIN_SAMPLE} games</summary>
+                      {few.map((r) => row(r, true))}
+                    </details>
+                  )}
+                </Bars>
+              );
+            })()}
 
             <Tabs
               active={mapMode}

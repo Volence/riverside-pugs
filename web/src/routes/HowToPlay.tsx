@@ -15,7 +15,7 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
   {
     q: 'Do I need to change any settings?',
-    a: <>One thing: your rates. Riverside runs at 100 tick and an L4D1 client ignores rates the server tries to set for it, so they have to be set on your machine or your hit registration is worse than everyone else's. Download <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> and drop it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. It runs on its own every time the game starts. The rates are at the top; everything below them is preference you can change.</>,
+    a: <>One thing: your rates. Riverside runs at 128 tick and an L4D1 client ignores rates the server tries to set for it, so they have to be set on your machine or your hit registration is worse than everyone else's. Download <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> and drop it in <code>steamapps/common/left 4 dead/left4dead/cfg/</code>. It runs on its own every time the game starts. The rates are at the top; everything below them is preference you can change.</>,
   },
   {
     q: 'What launch options should I use?',
@@ -101,7 +101,7 @@ export function HowToPlay({ session }: { session: Session }) {
         <Panel id="config">
           <h3>Your config</h3>
           <p>
-            Riverside runs at 100 tick. L4D1 clients ignore rates the server tries to set for
+            Riverside runs at 128 tick. L4D1 clients ignore rates the server tries to set for
             them, so unless you set your own, your hit registration is worse than everyone
             else's and the server cannot fix it for you.
           </p>
@@ -117,7 +117,7 @@ export function HowToPlay({ session }: { session: Session }) {
             <li>
               Restart L4D. It runs by itself, nothing to type. Check it took by holding
               TAB in a game: the net graph appears, and <code>cl_updaterate</code> in the
-              console reads 100.
+              console reads 128.
             </li>
           </ol>
           <p class="muted">
