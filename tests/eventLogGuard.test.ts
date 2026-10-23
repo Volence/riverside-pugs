@@ -13,7 +13,7 @@ import { ADMIN, NOW, START, eventFixture, stageBody, type Fixture } from './even
 import { A, B, entryFixture, rosterA, type EntryFixture } from './entryFixture.js';
 import { SE, SWISS, playFixture, type PlayFixture } from './playFixture.js';
 import { POOL7, TIMERS, driveToBooking, fakeBooking, fakeMatch, roomFixture, windowFixture, type RoomFixture } from './roomFixture.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import * as D from '../src/events/drafts.js';
 import { P as DP, draftFixture, type DraftFixture } from './draftFixture.js';
 import * as DR from '../src/events/draftRoom.js';
@@ -286,6 +286,17 @@ describe('event_log guard', () => {
           return N.setDraftCaptain(f.db, { eventId: f.eventId, entryId, steamid: N.rosterOf(f.db, entryId).starters[1]!, actor: ADMIN, now: NOW });
         },
       },
+      // Owner 2026-10-23: a swap between the first two teams' second starters.
+      swapDraftPlayers: {
+        action: 'entry_players_swapped',
+        setup: (f) => { balancedDraft(f); must(N.createDraftEntries(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW })); },
+        run: (f) => {
+          const [e1, e2] = (f.db.prepare('SELECT id FROM event_entries ORDER BY id LIMIT 2').all() as { id: number }[]).map((r) => r.id) as [number, number];
+          return N.swapDraftPlayers(f.db, {
+            eventId: f.eventId, a: { entryId: e1, steamid: N.rosterOf(f.db, e1).starters[1]! }, b: { entryId: e2, steamid: N.rosterOf(f.db, e2).starters[1]! }, actor: ADMIN, now: NOW,
+          });
+        },
+      },
       // Plan D3a Task 3: DP[8] (not signed up by balancedDraft) put on the bench and offered the first team's second starter's place.
       placeStandin: {
         action: 'standin_placed',
@@ -484,9 +495,9 @@ describe('event_log guard', () => {
       f.db.prepare('SELECT * FROM events ORDER BY id').all(),
     ]);
 
-    it('only src/events/drafts.ts (and the account merge, and draftRoom.ts for draft_team) writes the draft tables', () => {
+    it('only src/events/drafts.ts (and the account merge, and draftRoom.ts and entries.ts swapDraftPlayers for draft_team) writes the draft tables', () => {
       const offenders = walk('src')
-        .filter((f) => f !== 'src/events/drafts.ts' && f !== 'src/mergePlayers.ts' && f !== 'src/events/draftRoom.ts')
+        .filter((f) => f !== 'src/events/drafts.ts' && f !== 'src/mergePlayers.ts' && f !== 'src/events/draftRoom.ts' && f !== 'src/events/entries.ts')
         .filter((f) => (readFileSync(join(root, f), 'utf8').match(DRAFT_WRITERS) ?? []).length > 0);
       expect(offenders).toEqual([]);
       expect('update draft_signups set x = 1'.match(DRAFT_WRITERS)).toHaveLength(1);
@@ -953,7 +964,7 @@ describe('event_log guard', () => {
     // stage is rewritten before the room opens: test setup only).
     const pickDue = (f: RoomFixture) => {
       f.db.prepare('UPDATE event_stages SET campaign_pool_json = ?, veto_json = ? WHERE id = ?')
-        .run(JSON.stringify(POOL7), JSON.stringify(presetConfig('loser_picks', 7)), f.stageId);
+        .run(JSON.stringify(POOL7), JSON.stringify(legacyPresetConfig('loser_picks', 7)), f.stageId);
       bothReady(f);
       const opening: [string, number, string, string | null][] = [[A[0]!, 0, 'first', null], [A[0]!, 1, 'ban', POOL7[0]!], [B[0]!, 2, 'ban', POOL7[1]!],
         [A[0]!, 3, 'ban', POOL7[2]!], [B[0]!, 4, 'ban', POOL7[3]!], [A[0]!, 5, 'pick', POOL7[5]!], [B[0]!, 6, 'survivors', null]];

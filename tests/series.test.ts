@@ -11,7 +11,7 @@ import * as E from '../src/events/events.js';
 import { matchRoomView } from '../src/events/roomViews.js';
 import { SERVER_ALERT_MS, PRESENCE_FALLBACK_MS, DEFAULT_GRACE_MINUTES, seriesTimings } from '../src/events/series.js';
 import { setSetting } from '../src/settings.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { adminEventRoutes } from '../src/routes/adminEvents.js';
 import { eventRoutes } from '../src/routes/events.js';
 import type { AdminEvent } from '../src/adminFeed.js';
@@ -317,7 +317,7 @@ describe('SeriesEngine: a game aborted outside crash recovery (T3b final review)
 
 describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
   it('plays a Bo3 with loser picks: records game 1, opens the loser\'s pick, schedules each game with its sides, and ends in the confirm window', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
     const g1 = f.gameOf(1);
     // Bats survive first on game 1: match team a is Bats (entry b).
@@ -385,7 +385,7 @@ describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
   });
 
   it('acts for a team that runs out of time on its pick, from its saved order, and schedules the game', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     R.savePrefs(f.db, { entryId: f.entryB, by: BATS[0]!, staff: false, prefs: { defaultFour: null, side: null, campaigns: { [String(f.stageId)]: [POOL7[6]!] } }, now: new Date(f.t.t) });
     await f.tick();
     const g1 = f.gameOf(1);
@@ -704,7 +704,7 @@ describe('SeriesEngine: robustness (T3b Task 6 review)', () => {
 
 describe('SeriesEngine: a load that failed after the game was appended (T3b final review)', () => {
   it('schedules the next game again without appending it twice', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
     const g1 = f.gameOf(1);
     f.goLive(g1.match_id!);
@@ -740,7 +740,7 @@ describe('SeriesEngine: a load that failed after the game was appended (T3b fina
 
 describe('SeriesEngine: a staff hold while a game runs (T3b final review)', () => {
   it('records the game that ends under the hold, and moves the series no further', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
     const g1 = f.gameOf(1);
     f.goLive(g1.match_id!);
@@ -761,7 +761,7 @@ describe('SeriesEngine: a Bo2 home and away (T3b final review)', () => {
     const how = { gg: 'typed !gg', disconnect: 'ran out of reconnect time', staff: 'forfeited by staff ruling' } as const;
     for (const why of ['gg', 'disconnect', 'staff'] as const) {
       f?.close();
-      f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+      f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
       await f.tick();
       const g1 = f.gameOf(1).match_id!;
       f.goLive(g1);
@@ -777,7 +777,7 @@ describe('SeriesEngine: a Bo2 home and away (T3b final review)', () => {
   });
 
   it('plays both games, and tied totals replay game 2\'s last chapter as the tiebreak', async () => {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     await f.tick();
     const g1 = f.gameOf(1);
     expect(g1).toMatchObject({ campaign: 'death_toll', first_survivors: f.entryA });
@@ -821,7 +821,7 @@ describe('SeriesEngine: the pick route on a live match (plan T3b Task 8)', () =>
   afterEach(() => { vi.restoreAllMocks(); f?.close(); });
 
   it('hands a human pick and side choice on a live match to the engine, which schedules the next game', async () => {
-    f = await seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks });
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
     await f.tick();
     const g1 = f.gameOf(1);
     f.goLive(g1.match_id!);

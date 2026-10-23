@@ -206,7 +206,7 @@ export async function seriesFixture(o: {
 
 /** The room test's loser picks opening (POOL7, Bo3 ban to three): Rats go
  *  first, four bans, Rats pick POOL7[5] for game 1, Bats survive first, both
- *  lineups locked. Use with seriesFixture({ pool: POOL7, veto: presetConfig('loser_picks', 7), drive: driveLoserPicks }). */
+ *  lineups locked. Use with seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks }). */
 export function driveLoserPicks(f: RoomFixture): void {
   const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
   const ok = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => { if (!r.ok) throw new Error(r.error); return r.value; };
@@ -227,7 +227,7 @@ export const HA = ['no_mercy', 'dead_air', 'death_toll', 'blood_harvest'];
 /** Rats go second, Bats pick death_toll and Rats survive first, Rats pick
  *  no_mercy and Bats take infected: Rats survive first in both. With
  *  game2Bats 'survivors', Bats survive first in game 2 instead (plan T6). Use with
- *  seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway }). */
+ *  seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway }). */
 export function driveHomeAway(r: RoomFixture, game2Bats: 'infected' | 'survivors' = 'infected'): void {
   const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
   const ok = <T>(x: { ok: true; value: T } | { ok: false; error: string }): T => { if (!x.ok) throw new Error(x.error); return x.value; };

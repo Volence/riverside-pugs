@@ -3,6 +3,8 @@ import type { AdminEventOptions, StageSettings, VetoConfig } from '../../../api'
 import { configOf, draftFrom, settingsFrom, staleValues } from './stageDraft';
 
 const BAN_TO_ONE: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher_chooses', firstPick: 'first', laterPicks: 'alternate', lateBans: 0, sides: 'non_picker' };
+/** The owner's standard for new stages (2026-10-23). */
+const NEW_STAGE_VETO: VetoConfig = { games: 1, banTo: 1, firstBan: 'higher', firstPick: 'higher', laterPicks: 'loser', lateBans: 0, sides: 'non_picker' };
 
 const OPTIONS: AdminEventOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy' }, { slug: 'dead_air', name: 'Dead Air' }],
@@ -22,7 +24,7 @@ describe('stage drafts', () => {
   it('a new stage starts as single elimination on the default ruleset and the site pool', () => {
     expect(settingsFrom(draftFrom(null, OPTIONS))).toEqual({
       type: 'single_elim', config: { thirdPlace: false }, rulesetId: 2, gameConfig: 'standard', campaignPool: ['no_mercy', 'dead_air'],
-      vetoType: 'ban_to_one', veto: BAN_TO_ONE, chapters: null, scheduling: 'rolling', advanceCount: null,
+      vetoType: 'ban_to_one', veto: NEW_STAGE_VETO, chapters: null, scheduling: 'rolling', advanceCount: null,
     });
   });
 

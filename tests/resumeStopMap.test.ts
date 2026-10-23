@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
-import { presetConfig } from '../src/events/vetoConfig.js';
+import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { restoreSnapshot, resumeLines } from '../src/bookings/restore.js';
 import { gameStopMap } from '../src/events/stopMap.js';
 import { HA, MIN, driveHomeAway, seriesFixture, type SeriesFixture } from './seriesFixture.js';
@@ -53,7 +53,7 @@ describe('sm_pug_resume carries the game\'s stop map (audit D1)', () => {
   });
 
   async function game1(): Promise<number> {
-    f = await seriesFixture({ pool: HA, veto: presetConfig('home_away', 4), drive: driveHomeAway });
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
     await f.tick();
     const g1 = f.gameOf(1).match_id!;
     f.goLive(g1);
