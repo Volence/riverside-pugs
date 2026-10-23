@@ -55,3 +55,26 @@ describe('Wrapped and the stats redefined at match 324', () => {
     expect(sig.skeets).toBe(2);
   });
 });
+
+describe('Wrapped signature pool for the redefined stats', () => {
+  it('ranks a redefined stat only among players with the full-deck games since 324, and counts "of" from them', () => {
+    setSetting(db, 'standing_min_games', '2');
+    const ids3 = [...ids, ...seedPlayers(db, 3).slice(2)];
+    const line = (statsBy: Record<string, Record<string, number>>) =>
+      ids3.map((id, i) => ({ id, team: (i % 2 ? 'b' : 'a') as 'a' | 'b', stats: statsBy[id] ?? {} }));
+    // Two old games for everyone; ids[1] then plays only once more after 324.
+    nextMatchId(300);
+    seedMatch(db, { endedAt: '2026-09-25 20:00:00', lines: line({}) });
+    seedMatch(db, { endedAt: '2026-09-26 20:00:00', lines: line({}) });
+    nextMatchId(REDEFINED_STATS_FROM_MATCH);
+    seedMatch(db, { endedAt: '2026-09-30 20:00:00', lines: line({ [ids[0]]: { clears: 2 }, [ids[1]]: { clears: 50 }, [ids3[2]]: { clears: 4 } }) });
+    seedMatch(db, { endedAt: '2026-10-01 20:00:00', lines: line({ [ids[0]]: { clears: 2 }, [ids3[2]]: { clears: 4 } }).filter((l) => l.id !== ids[1]) });
+
+    const { players } = computeWrapped(db, 1);
+    const sig = (id: string) => players.find((p) => p.steamid === id)!.signature?.find((s) => s.key === 'clears');
+    // ids[1] has one game since 324: out of the clears pool, no clears card,
+    // and its 50 does not outrank anyone.
+    expect(sig(ids[1])).toBeUndefined();
+    expect(sig(ids3[2])).toMatchObject({ rank: 1, of: 2, perMatch: 4 });
+  });
+});
