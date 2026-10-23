@@ -25,7 +25,9 @@ export const CALLOUT_KINDS: Record<string, (e: CastEvent) => CardText> = {
 
 /** One card per skeet run (the feed folds a run into its newest skeet):
  *  Skeet, then Double / Triple / Quad skeet as the same player keeps going,
- *  counted by the Discord streak rules. */
+ *  counted by the Discord streak rules. A run counts every skeet event, team
+ *  skeets too (the feed cannot tell them apart), so a run's card says so:
+ *  plain "skeets" means the solo stat (owner, 2026-10-23). */
 const STREAK_TITLES = ['Skeet', 'Double skeet', 'Triple skeet', 'Quad skeet'];
 const BILE_TITLES = ['Boomed', 'Double bile', 'Triple bile', 'Quad bile'];
 
@@ -44,7 +46,7 @@ export function skeetCallout(e: CastEvent): CardText {
   const targets = e.streak?.targets.length ? e.streak.targets : e.target ? [e.target] : [];
   const who = targets.length === 0 ? (n > 1 ? `${n} hunters` : 'a hunter')
     : targets.length === 1 ? targets[0] : `${targets.slice(0, -1).join(', ')} and ${targets[targets.length - 1]}`;
-  return { title, text: `${e.actor} skeeted ${who}` };
+  return { title, text: `${e.actor} skeeted ${who}${n > 1 ? ' (team skeets count)' : ''}` };
 }
 
 export function sideOfEvent(kind: string): 'survivor' | 'infected' {

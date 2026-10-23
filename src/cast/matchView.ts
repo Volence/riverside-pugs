@@ -337,7 +337,9 @@ function lastRoundResult(
  *  by the Discord streak rules (src/skeetStreaks.ts streakRuns: same player,
  *  same map half, each skeet within 5 s of the run's first). A run is one
  *  entry, at its newest skeet, so the producer sees one "Double skeet" that
- *  replaces the "Skeet" it grew from. */
+ *  replaces the "Skeet" it grew from. A run counts every skeet event, team
+ *  skeets included (events do not tell them apart); the card says so
+ *  (web/src/overlay/callouts.ts). */
 function highlightEvents(
   db: DB, matchId: number, nameOf: Map<string, string>, teamOf: Map<string, 'a' | 'b'>,
 ): CastEvent[] {
