@@ -111,6 +111,16 @@ describe('Matchmaker', () => {
     expect(st.match?.teamA).toHaveLength(4);
   });
 
+  it('broadcasts refresh again once setup settles, so browsers see the match go live', async () => {
+    fillQueue();
+    for (const id of IDS) mm.ready(id);
+    for (const id of IDS) mm.vote(id, 'dead_air');
+    const atCreate = broadcasts;
+    // setupMatch is async: its settle lands on the microtask queue.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(broadcasts).toBe(atCreate + 1);
+  });
+
   it('never offers a practice-only campaign in the vote, even if the saved pool still has it', () => {
     insertDraft(db, {
       slug: 'hunter_training', name: 'Hunter Training', vpkFilename: 'hunter_training.vpk',

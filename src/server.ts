@@ -1201,7 +1201,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (ev.kind === 'match_end') {
           noTankWatch.forget(ev.token);
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
-          if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
+          // 'refresh' once collection settles: browsers no longer refetch the
+          // queue state on 'live' (web/src/hooks/useLiveState.ts), and the
+          // match leaving 'live' changes what /api/state shows its roster.
+          if (row) {
+            void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser)
+              .finally(() => hub.broadcast('refresh'));
+          }
           return;
         }
         if (ev.kind === 'abandon') {
@@ -1535,7 +1541,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       // (see the token re-registration above), and a deploy while a match is
       // waiting on a box must not strand it. Registered after reconcileServers
       // so a server it just freed can drain straight into a waiting match.
-      pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id));
+      // 'refresh' once setup settles, for the same reason as in the
+      // matchmaker: the connect block appears when the match goes live.
+      pending = new PendingMatches(deps.db, (id) => (orchestrator as RealOrchestrator).setupMatch(id)
+        .finally(() => hub.broadcast('refresh')));
       pending.rebuildFromDb();
       releaser.onFreed(() => pending.drain());
       holdFreed = () => pending?.drain();
