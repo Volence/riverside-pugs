@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { favLabel, pct, statFavWon } from './TeamBalance';
+import { favLabel, gateLabel, pct, statFavWon } from './TeamBalance';
 import type { TeamBalanceRow } from '../../../api';
 
 const row = (chosenStatA: number, winner: string | null): TeamBalanceRow => ({
-  matchId: 1, createdAt: '', enabled: true, overGate: true, gateFired: true, moved: 2,
+  matchId: 1, createdAt: '', enabled: true, overGate: true, gateFired: true, holdout: false, moved: 2,
   bestRatingA: 0.5, bestStatA: 0.7, chosenRatingA: 0.52, chosenStatA, winner, state: 'completed',
 });
 
@@ -19,5 +19,12 @@ describe('team balance panel', () => {
     expect(statFavWon(row(0.4, 'a'))).toBe(false);
     expect(statFavWon(row(0.4, 'draw'))).toBeNull();
     expect(statFavWon(row(0.4, null))).toBeNull();
+  });
+
+  it('labels the gate column', () => {
+    expect(gateLabel(row(0.5, null))).toBe('fired');
+    expect(gateLabel({ ...row(0.5, null), holdout: true })).toBe('holdout');
+    expect(gateLabel({ ...row(0.5, null), gateFired: false })).toBe('over');
+    expect(gateLabel({ ...row(0.5, null), gateFired: false, overGate: false })).toBe('-');
   });
 });
