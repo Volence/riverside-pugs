@@ -268,19 +268,30 @@ export function EntriesPanel({ eventId, status, checkin, canEdit, draft = false,
   const replace = draft && canEdit && status !== 'finished' && status !== 'cancelled' ? { eventId, bench: data.bench ?? [], run } : null;
   const active = (e: AdminEntryView) => e.status !== 'dropped' && e.status !== 'disqualified';
   // Owner 2026-10-23: swap two players between teams, teams made (entries
-  // exist) until the event goes live; after that Replace player is the tool.
-  const swap = draft && canEdit && (status === 'registration' || status === 'checkin') ? {
+  // exist) until the event ends (owner 2026-10-24: between rounds too). The
+  // server refuses a player in the locked lineup of a match still played.
+  const swap = draft && canEdit && (status === 'registration' || status === 'checkin' || status === 'live') ? {
     pick: swapPick,
     onPick: setSwapPick,
     onSwap: (other: SwapPick) => {
       const first = swapPick;
       if (!first) return;
       void run(async () => {
-        await adminApi.swapDraftPlayers(eventId, { entryId: first.entryId, steamid: first.steamid }, { entryId: other.entryId, steamid: other.steamid });
+        try {
+          await adminApi.swapDraftPlayers(eventId, { entryId: first.entryId, steamid: first.steamid }, { entryId: other.entryId, steamid: other.steamid });
+        } catch (err) {
+          // A refusal naming who is in a lineup: the names go into the one error line.
+          if (err instanceof ApiError && err.problems?.length) {
+            throw new ApiError(err.status, `${err.message} ${err.problems.map((p) => `${p.name}: ${p.problems.join(' ')}`).join(' ')}`);
+          }
+          throw err;
+        }
         setSwapPick(null);
       }, {
         title: `Swap ${first.name} and ${other.name}?`,
-        body: `${first.name} moves to ${other.team} and ${other.name} moves to ${first.team}. Both players and both captains get a DM. Seeds stay as they are; reorder them below if the balance changed.`,
+        body: status === 'live'
+          ? `${first.name} moves to ${other.team} and ${other.name} moves to ${first.team}. Both players and both captains get a DM, and open match rooms of both teams show the new rosters.`
+          : `${first.name} moves to ${other.team} and ${other.name} moves to ${first.team}. Both players and both captains get a DM. Seeds stay as they are; reorder them below if the balance changed.`,
         confirmLabel: 'Swap',
       });
     },
