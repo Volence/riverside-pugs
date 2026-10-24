@@ -225,6 +225,13 @@ export interface VoiceOps {
   createTeamChannels(name: string, labels: string[], staffRoleId: string | null): Promise<{
     categoryId: string; channelIds: string[]; staffDropped?: boolean;
   }>;
+  /** A private category (hidden from @everyone, the bot let in), placed
+   *  right below `afterId` when that category exists. For a tournament
+   *  match's own heading over its two team channels. */
+  createPrivateCategory(name: string, afterId: string | null): Promise<string>;
+  /** Move a channel under another category, keeping its own permission
+   *  overwrites (never synced to the new parent). Ignores an unknown channel. */
+  moveChannel(channelId: string, parentId: string): Promise<void>;
   /** The voice channel a guild member is sitting in, or null. */
   memberVoiceChannel(userId: string): Promise<string | null>;
   move(userId: string, channelId: string): Promise<void>;

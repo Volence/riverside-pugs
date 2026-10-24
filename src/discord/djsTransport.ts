@@ -21,6 +21,8 @@ const STYLE = { primary: 1, secondary: 2, success: 3, danger: 4 } as const;
 const UNKNOWN_MESSAGE = 10008;
 const UNKNOWN_CHANNEL = 10003;
 const UNKNOWN_MEMBER = 10007;
+/** Discord's answer to a member overwrite for someone it cannot place (not in the server). */
+const UNKNOWN_OVERWRITE = 10009;
 const UNKNOWN_BAN = 10026;
 
 function toButton(b: Button) {
@@ -489,6 +491,33 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     async createTeamChannels(name, labels, staffRoleId) {
       return createChannelSet(name, labels.map((label) => ({ label, userIds: [] })), staffRoleId, true);
     },
+    async createPrivateCategory(name, afterId) {
+      const me = client.user!.id;
+      const after = afterId ? await channelById(afterId) : null;
+      const category = await guild.channels.create({
+        name,
+        type: ChannelType.GuildCategory,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+          {
+            id: me, type: OverwriteType.Member,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.MoveMembers, PermissionFlagsBits.ManageChannels],
+          },
+        ],
+      });
+      // Best effort: a heading that lands at the bottom of the list still works.
+      if (after && 'position' in after) {
+        await category.setPosition(after.position + 1).catch((err: unknown) => {
+          console.error(`[discord] placing category ${category.id} below ${afterId} failed:`, err);
+        });
+      }
+      return category.id;
+    },
+    async moveChannel(channelId, parentId) {
+      const ch = await channelById(channelId);
+      if (!ch || !('setParent' in ch)) return;
+      await ch.setParent(parentId, { lockPermissions: false });
+    },
     async memberVoiceChannel(userId) {
       return guild.voiceStates.cache.get(userId)?.channelId ?? null;
     },
@@ -526,7 +555,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           await ch.permissionOverwrites.delete(userId);
         }
       } catch (err) {
-        if (codeOf(err) !== UNKNOWN_CHANNEL && codeOf(err) !== UNKNOWN_MEMBER) throw err;
+        if (codeOf(err) !== UNKNOWN_CHANNEL && codeOf(err) !== UNKNOWN_MEMBER && codeOf(err) !== UNKNOWN_OVERWRITE) throw err;
       }
     },
   };
