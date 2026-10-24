@@ -16,7 +16,7 @@ import { getServer } from '../serverPool.js';
 import { bookingGames, gamesPlayed, liveBookingGame, type BookingGameView } from './games.js';
 import { ACCEPT_CUTOFF_MS, nearestFreeSlot, openPostAt } from '../scrims/rules.js';
 import { seriesTally, type SeriesTally } from './series.js';
-import { castersOf, type CasterView } from './casters.js';
+import { activeCasters, castersOf, fullyInvited, type CasterView } from './casters.js';
 import { canSeeReliability, reliability, type Reliability } from '../scrims/reliability.js';
 import { ownReview, reviewable, reviewOpen, staffReviews, type ReviewTag, type StaffReview } from '../scrims/reviews.js';
 import { blocked } from '../scrims/blocks.js';
@@ -614,13 +614,18 @@ function barredFromBox(db: DB, steamid: string, now: Date): boolean {
 }
 
 /** Who may be on the booked box (plan 4b2): the steamids of the booking's
- *  accepted people who are not barred (barredFromBox), plus every admin and mod in good standing. De-duplicated
- *  and sorted, so the same list is pushed the same way each time. */
+ *  accepted people who are not barred (barredFromBox), plus every admin and mod in good standing,
+ *  plus casters: every caster in good standing on a tournament booking, and on a scrim only
+ *  the ones both sides invited (fullyInvited). De-duplicated and sorted, so the same list is
+ *  pushed the same way each time. */
 export function allowList(db: DB, bookingId: number): string[] {
   const now = new Date();
   const ids = new Set(acceptedPeople(db, bookingId).map((p) => p.steamid).filter((id) => !barredFromBox(db, id, now)));
   const staff = db.prepare('SELECT steamid FROM players WHERE is_admin = 1 OR is_mod = 1').all() as { steamid: string }[];
   for (const { steamid } of staff) if (inGoodStanding(db, steamid)) ids.add(steamid);
+  const b = getBooking(db, bookingId);
+  if (b?.purpose === 'tournament') for (const c of activeCasters(db)) ids.add(c.steamid);
+  else for (const c of castersOf(db, bookingId)) if (fullyInvited(db, bookingId, c.steamid)) ids.add(c.steamid);
   return [...ids].sort();
 }
 
