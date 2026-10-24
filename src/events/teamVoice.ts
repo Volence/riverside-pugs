@@ -19,6 +19,33 @@ interface VoiceRow { entry_id: number; event_id: number; category_id: string; ch
 const OPEN_SQL = `SELECT * FROM events WHERE status IN ('registration','checkin','live') AND locked_at IS NOT NULL
   AND (entry_kind = 'team' OR teams_made_at IS NOT NULL) ORDER BY id`;
 
+/** Match statuses from the room opening to the result standing: the match's
+ *  two team channels sit under a heading of its own meanwhile. */
+const PLAYING = ['veto', 'lineup', 'booking', 'connect', 'live', 'confirming', 'admin_hold'];
+const PLAYING_SQL = PLAYING.map((x) => `'${x}'`).join(', ');
+
+/**
+ * When an entry's channel should go: at once for a team that dropped out, was
+ * disqualified or was eliminated at a stage's end; FINISHED_GRACE_MS after the
+ * match that knocked it out of an elimination bracket (its last finished
+ * match there was a loss and no unfinished match has it); otherwise null.
+ */
+export function outSince(db: DB, entry: N.EntryRow): number | null {
+  if (entry.status === 'dropped' || entry.status === 'disqualified' || entry.status === 'eliminated') return 0;
+  const busy = db.prepare(
+    `SELECT 1 FROM event_matches WHERE event_id = ? AND (entry_a = ? OR entry_b = ?) AND status NOT IN ('done','forfeit','bye') LIMIT 1`,
+  ).get(entry.event_id, entry.id, entry.id);
+  if (busy) return null;
+  const last = db.prepare(
+    `SELECT m.winner_entry, m.finished_at FROM event_matches m JOIN event_stages s ON s.id = m.stage_id
+     WHERE m.event_id = ? AND (m.entry_a = ? OR m.entry_b = ?) AND m.status IN ('done','forfeit')
+       AND s.type IN ('single_elim','double_elim')
+     ORDER BY m.finished_at DESC, m.id DESC LIMIT 1`,
+  ).get(entry.event_id, entry.id, entry.id) as { winner_entry: number | null; finished_at: string | null } | undefined;
+  if (!last || last.winner_entry === null || last.winner_entry === entry.id) return null;
+  return (last.finished_at ? Date.parse(last.finished_at) : 0) + FINISHED_GRACE_MS;
+}
+
 /** Open channels for every entry of a tournament booking's match: when both
  *  teams have one, the booking makes no voice of its own (bookings/voice.ts). */
 export function teamVoiceCovers(db: DB, bookingId: number): boolean {
@@ -95,6 +122,7 @@ export class TeamVoice {
           try {
             await this.ensure(voice, ev);
             await this.sync(voice, ev);
+            await this.headings(voice, ev);
           } catch (err) {
             console.error(`[events] team voice of event ${ev.id} failed:`, err);
           }
@@ -102,6 +130,7 @@ export class TeamVoice {
       }
       // Closing runs with voice switched off as well, so turning it off
       // never strands channels.
+      await this.closeHeadings(voice);
       await this.closeDone(voice);
     } catch (err) {
       console.error('[events] team voice tick failed:', err);
@@ -172,23 +201,90 @@ export class TeamVoice {
     }
   }
 
+  /** A heading for every match being played whose two teams both have a
+   *  channel: a private category named after the match, right below the
+   *  event's, with the two channels moved into it. */
+  private async headings(voice: VoiceOps, ev: EventRow): Promise<void> {
+    const { db } = this.deps;
+    const matches = db.prepare(
+      `SELECT m.id, m.entry_a, m.entry_b FROM event_matches m
+       WHERE m.event_id = ? AND m.status IN (${PLAYING_SQL}) AND m.entry_a IS NOT NULL AND m.entry_b IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM event_match_voice v WHERE v.match_id = m.id) ORDER BY m.id`,
+    ).all(ev.id) as { id: number; entry_a: number; entry_b: number }[];
+    for (const m of matches) {
+      const a = this.openRow(m.entry_a);
+      const b = this.openRow(m.entry_b);
+      if (!a || !b) continue;
+      const name = (id: number) => N.getEntry(db, id)?.name ?? 'A team';
+      try {
+        const categoryId = await voice.createPrivateCategory(`${name(m.entry_a)} vs ${name(m.entry_b)}`.slice(0, NAME_MAX), a.category_id);
+        db.prepare('INSERT INTO event_match_voice (match_id, event_id, category_id, created_at) VALUES (?, ?, ?, ?)').run(m.id, ev.id, categoryId, this.nowIso());
+        for (const r of [a, b]) {
+          await voice.moveChannel(r.channel_id, categoryId).catch((err: unknown) => {
+            console.error(`[events] match ${m.id}: moving ${r.channel_id} under its heading failed:`, err);
+          });
+        }
+      } catch (err) {
+        // A heading is a nicety: the channels keep working where they are.
+        // Recorded with no category so it is not tried every tick.
+        console.error(`[events] match ${m.id}: creating its voice heading failed:`, err);
+        db.prepare("INSERT OR IGNORE INTO event_match_voice (match_id, event_id, category_id, created_at, deleted_at) VALUES (?, ?, '', ?, ?)")
+          .run(m.id, ev.id, this.nowIso(), this.nowIso());
+      }
+    }
+  }
+
+  /** Every heading whose match is no longer being played (or whose event is
+   *  over): its channels go back under the event's category, then it goes. */
+  private async closeHeadings(voice: VoiceOps): Promise<void> {
+    const { db } = this.deps;
+    const rows = db.prepare(
+      `SELECT v.match_id, v.category_id, m.entry_a, m.entry_b FROM event_match_voice v
+       JOIN event_matches m ON m.id = v.match_id JOIN events e ON e.id = v.event_id
+       WHERE v.deleted_at IS NULL AND (m.status NOT IN (${PLAYING_SQL}) OR e.status IN ('finished','cancelled'))`,
+    ).all() as { match_id: number; category_id: string; entry_a: number | null; entry_b: number | null }[];
+    for (const h of rows) {
+      for (const entryId of [h.entry_a, h.entry_b]) {
+        const r = entryId === null ? undefined : this.openRow(entryId);
+        if (!r) continue;
+        await voice.moveChannel(r.channel_id, r.category_id).catch((err: unknown) => {
+          console.error(`[events] match ${h.match_id}: moving ${r.channel_id} back failed:`, err);
+        });
+      }
+      try {
+        await voice.deleteChannel(h.category_id);
+        db.prepare('UPDATE event_match_voice SET deleted_at = ? WHERE match_id = ?').run(this.nowIso(), h.match_id);
+      } catch (err) {
+        console.error(`[events] match ${h.match_id}: deleting its voice heading failed:`, err);
+      }
+    }
+  }
+
+  private openRow(entryId: number): VoiceRow | undefined {
+    return this.deps.db.prepare('SELECT * FROM event_entry_voice WHERE entry_id = ? AND deleted_at IS NULL').get(entryId) as VoiceRow | undefined;
+  }
+
   /** Delete the channel of every entry that is out, and every channel and
    *  category of an event that is over. */
   private async closeDone(voice: VoiceOps): Promise<void> {
     const { db } = this.deps;
     const now = this.deps.now?.() ?? Date.now();
     const rows = db.prepare(
-      `SELECT v.*, e.status AS ev_status, e.finished_at AS ev_finished, x.status AS entry_status
-       FROM event_entry_voice v JOIN events e ON e.id = v.event_id JOIN event_entries x ON x.id = v.entry_id
+      `SELECT v.*, e.status AS ev_status, e.finished_at AS ev_finished
+       FROM event_entry_voice v JOIN events e ON e.id = v.event_id
        WHERE v.deleted_at IS NULL ORDER BY v.event_id, v.entry_id`,
-    ).all() as (VoiceRow & { ev_status: string; ev_finished: string | null; entry_status: N.EntryStatus })[];
+    ).all() as (VoiceRow & { ev_status: string; ev_finished: string | null })[];
     const over = (r: (typeof rows)[number]) => r.ev_status === 'cancelled'
       || (r.ev_status === 'finished' && (r.ev_finished === null || Date.parse(r.ev_finished) + FINISHED_GRACE_MS <= now));
     const lobby = getSetting(db, 'discord_lobby_channel_id') || null;
     const closedEvents = new Set<number>();
     for (const r of rows) {
       const eventOver = over(r);
-      if (!eventOver && r.entry_status !== 'dropped' && r.entry_status !== 'disqualified') continue;
+      if (!eventOver) {
+        const entry = N.getEntry(db, r.entry_id);
+        const out = entry ? outSince(db, entry) : 0;
+        if (out === null || out > now) continue;
+      }
       if (await this.deleteOne(voice, r.entry_id, r.channel_id, lobby)) {
         db.prepare('UPDATE event_entry_voice SET deleted_at = ? WHERE entry_id = ?').run(this.nowIso(), r.entry_id);
         this.granted.delete(r.entry_id);

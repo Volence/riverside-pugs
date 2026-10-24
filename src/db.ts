@@ -269,6 +269,16 @@ CREATE TABLE IF NOT EXISTS event_entry_voice (
   created_at  TEXT NOT NULL,
   deleted_at  TEXT
 );
+-- A tournament match's own voice heading (owner 2026-10-24): while the match
+-- is being played, a private category named after it holds its two teams'
+-- event_entry_voice channels; they go back under the event's category after.
+CREATE TABLE IF NOT EXISTS event_match_voice (
+  match_id    INTEGER PRIMARY KEY REFERENCES event_matches(id),
+  event_id    INTEGER NOT NULL REFERENCES events(id),
+  category_id TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  deleted_at  TEXT
+);
 -- Casters both captains invited to a booked scrim (plan 4c). Each side's
 -- manager sets their half; the caster sees the booking's games, live feed and
 -- relay only while both halves are set and they still hold is_caster in good

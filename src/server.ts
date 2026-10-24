@@ -2282,7 +2282,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // An event's team voice, from the moment its teams are known (owner 2026-10-24).
   // Read per tick: the bot logs in some seconds after this runs.
   const teamVoice = new TeamVoice({ db: deps.db, voice: () => bot?.transport?.voice ?? null });
-  const teamVoiceTick = setInterval(() => { void teamVoice.tick(); }, EVENT_TICK_MS);
+  const teamVoiceTick = setInterval(() => { void teamVoice.tick(); }, 15_000);
   teamVoiceTick.unref();
 
   await app.register(teamRoutes, {

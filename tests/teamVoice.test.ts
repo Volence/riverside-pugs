@@ -3,7 +3,7 @@ import type { DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import * as N from '../src/events/entries.js';
-import { FINISHED_GRACE_MS, TeamVoice, teamVoiceChannel, teamVoiceCovers } from '../src/events/teamVoice.js';
+import { FINISHED_GRACE_MS, TeamVoice, outSince, teamVoiceChannel, teamVoiceCovers } from '../src/events/teamVoice.js';
 import { ADMIN, NOW, must } from './eventFixture.js';
 import { draftFixture } from './draftFixture.js';
 import { BENCH, liveStandins, standinFixture } from './standinFixture.js';
@@ -165,5 +165,72 @@ describe('TeamVoice', () => {
     f.db.prepare("UPDATE event_entries SET status = 'disqualified' WHERE id = ?").run(m.entry_b);
     await tv.tick();
     expect(teamVoiceCovers(f.db, 999)).toBe(false);
+  });
+});
+
+describe('TeamVoice match headings and knockouts', () => {
+  const firstMatch = (db: DB, eventId: number) => db.prepare(
+    'SELECT id, entry_a, entry_b FROM event_matches WHERE event_id = ? AND entry_a IS NOT NULL AND entry_b IS NOT NULL ORDER BY id LIMIT 1',
+  ).get(eventId) as { id: number; entry_a: number; entry_b: number };
+  const heading = (db: DB, matchId: number) => db.prepare('SELECT * FROM event_match_voice WHERE match_id = ?').get(matchId) as
+    { category_id: string; deleted_at: string | null } | undefined;
+
+  it('puts a match being played under a heading named after it, below the event category, and back once it is over', async () => {
+    const f = await liveStandins();
+    const tv = setup(f.db);
+    await tv.tick();
+    const m = firstMatch(f.db, f.eventId);
+    // Waiting for its room: no heading yet.
+    await tv.tick();
+    expect(heading(f.db, m.id)).toBeUndefined();
+    f.db.prepare("UPDATE event_matches SET status = 'veto' WHERE id = ?").run(m.id);
+    await tv.tick();
+    const h = heading(f.db, m.id)!;
+    const teams = rows(f.db, f.eventId)[0].category_id;
+    const name = (id: number) => N.getEntry(f.db, id)!.name;
+    expect(t.channels.get(h.category_id)).toMatchObject({ name: `${name(m.entry_a)} vs ${name(m.entry_b)}`, privateView: true });
+    expect(t.categoryAfter.get(h.category_id)).toBe(teams);
+    expect(t.parentOf.get(teamVoiceChannel(f.db, m.entry_a)!)).toBe(h.category_id);
+    expect(t.parentOf.get(teamVoiceChannel(f.db, m.entry_b)!)).toBe(h.category_id);
+    // Still one heading on later ticks.
+    await tv.tick();
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM event_match_voice').get()).toEqual({ n: 1 });
+
+    f.db.prepare("UPDATE event_matches SET status = 'done', winner_entry = ?, finished_at = ? WHERE id = ?").run(m.entry_a, new Date(clock).toISOString(), m.id);
+    await tv.tick();
+    expect(heading(f.db, m.id)!.deleted_at).not.toBeNull();
+    expect(t.channels.has(h.category_id)).toBe(false);
+    expect(t.parentOf.get(teamVoiceChannel(f.db, m.entry_a)!)).toBe(teams);
+    expect(t.parentOf.get(teamVoiceChannel(f.db, m.entry_b)!)).toBe(teams);
+  });
+
+  it('deletes a knocked-out team\'s channel a while after the match that put it out, in an elimination bracket only', async () => {
+    const f = await liveStandins();
+    const tv = setup(f.db);
+    await tv.tick();
+    const m = firstMatch(f.db, f.eventId);
+    f.db.prepare("UPDATE event_matches SET status = 'done', winner_entry = ?, finished_at = ? WHERE id = ?").run(m.entry_a, new Date(clock).toISOString(), m.id);
+    // A swiss loss is not out.
+    expect(outSince(f.db, N.getEntry(f.db, m.entry_b)!)).toBeNull();
+    f.db.prepare("UPDATE event_stages SET type = 'single_elim' WHERE event_id = ?").run(f.eventId);
+    expect(outSince(f.db, N.getEntry(f.db, m.entry_a)!)).toBeNull();
+    expect(outSince(f.db, N.getEntry(f.db, m.entry_b)!)).toBe(clock + FINISHED_GRACE_MS);
+    await tv.tick();
+    expect(teamVoiceChannel(f.db, m.entry_b)).not.toBeNull();
+    clock += FINISHED_GRACE_MS;
+    await tv.tick();
+    expect(teamVoiceChannel(f.db, m.entry_b)).toBeNull();
+    expect(teamVoiceChannel(f.db, m.entry_a)).not.toBeNull();
+  });
+
+  it('does not count a loser as out while a later match (a third place match) has it', async () => {
+    const f = await liveStandins();
+    setup(f.db);
+    const m = firstMatch(f.db, f.eventId);
+    f.db.prepare("UPDATE event_stages SET type = 'single_elim' WHERE event_id = ?").run(f.eventId);
+    f.db.prepare("UPDATE event_matches SET status = 'done', winner_entry = ?, finished_at = ? WHERE id = ?").run(m.entry_a, new Date(clock).toISOString(), m.id);
+    const other = f.db.prepare("SELECT id FROM event_matches WHERE event_id = ? AND id != ? ORDER BY id LIMIT 1").get(f.eventId, m.id) as { id: number };
+    f.db.prepare("UPDATE event_matches SET entry_a = ?, status = 'waiting' WHERE id = ?").run(m.entry_b, other.id);
+    expect(outSince(f.db, N.getEntry(f.db, m.entry_b)!)).toBeNull();
   });
 });
