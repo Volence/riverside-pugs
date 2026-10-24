@@ -14,7 +14,7 @@ import {
   renderQueueAlertClosed, renderResult, type MatchCardState, type MatchView, type PlayerView, type ResultPlayer,
 } from './presenter.js';
 import { getSetting } from '../settings.js';
-import { decideAlert, lastAlertAt, openAlerts, queueAlertConfig, queueAlertRoleId, type AlertClose } from './queueAlert.js';
+import { decideAlert, expiredClosedAlerts, lastAlertAt, openAlerts, queueAlertConfig, queueAlertRoleId, type AlertClose } from './queueAlert.js';
 import { sideGamesEnabled, type SidePublicView } from '../sideGames.js';
 import { ABORT_REASON, abortParties, anyRequeued, type AbortCause } from '../matchAborts.js';
 
@@ -375,6 +375,7 @@ export class DiscordSync {
     const popped = this.poppedSinceLastPass;
     this.poppedSinceLastPass = false;
     const cfg = queueAlertConfig(db, this.deps.channelId);
+    await this.sweepClosedAlerts();
     const open = openAlerts(db);
     // Older open alerts than the newest should not exist; close any found as
     // the newest would be, so none is left inviting people in.
@@ -401,6 +402,7 @@ export class DiscordSync {
     if (decision.kind === 'update') {
       const result = await this.safeEdit(current!.channel_id, current!.message_id, renderQueueAlert({
         count, size: QUEUE_SIZE, roleId: cfg.roleId, publicUrl: this.deps.publicUrl, ping: false,
+        inQueueChannel: current!.channel_id === this.deps.channelId,
       }));
       if (result === 'ok') this.alertShows.set(current!.message_id, count);
       // Deleted by hand: it is gone, and re-posting it would ping again.
@@ -417,6 +419,7 @@ export class DiscordSync {
     try {
       messageId = await this.deps.transport.send(cfg.channelId, renderQueueAlert({
         count, size: QUEUE_SIZE, roleId: cfg.roleId, publicUrl: this.deps.publicUrl,
+        inQueueChannel: cfg.channelId === this.deps.channelId,
       }));
       saveMessage(db, { kind: 'alert', ref, channelId: cfg.channelId, messageId, state: 'open' });
       this.alertShows.set(messageId, count);
@@ -436,6 +439,19 @@ export class DiscordSync {
         console.error('[discord] recording the queue alert failed:', saveErr);
       }
       return messageId !== null && cfg.channelId === this.deps.channelId;
+    }
+  }
+
+  /** Delete every closed alert whose linger has run out (ALERT_LINGER_MINUTES).
+   *  Marked removed first, so a failed delete (already gone by hand, missing
+   *  permissions) is not retried every pass. Never throws. */
+  private async sweepClosedAlerts(): Promise<void> {
+    const { db } = this.deps;
+    for (const a of expiredClosedAlerts(db, this.deps.now?.() ?? Date.now())) {
+      setMessageState(db, 'alert', a.ref, 'removed');
+      await this.deps.transport.remove(a.channel_id, a.message_id).catch((err: unknown) => {
+        console.error(`[discord] deleting closed queue alert ${a.message_id} failed:`, err);
+      });
     }
   }
 

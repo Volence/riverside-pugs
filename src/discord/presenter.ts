@@ -143,6 +143,9 @@ export interface QueueAlertView {
   /** False for an edit of a standing alert: the text keeps the role tag but
    *  the payload pings nobody, whatever Discord would make of it. */
   ping?: boolean;
+  /** Posted in the queue channel itself, where the queue panel right below
+   *  it has Join already (owner 2026-10-24): no buttons of its own. */
+  inQueueChannel?: boolean;
 }
 
 export function renderQueueAlert(v: QueueAlertView): MessagePayload {
@@ -151,9 +154,9 @@ export function renderQueueAlert(v: QueueAlertView): MessagePayload {
   return {
     content: `<@&${v.roleId}> **${v.count}/${v.size}** in the PUG queue`
       + (need === 1 ? ', one more and it pops.' : `, ${need} more needed.`)
-      + ' Join from the button below or on the website.',
+      + (v.inQueueChannel ? ' Join from the queue panel below or on the website.' : ' Join from the button below or on the website.'),
     embeds: [],
-    components: [[
+    components: v.inQueueChannel ? [] : [[
       { kind: 'button', customId: 'q:join', label: 'Join Queue', style: 'success' },
       link(`${v.publicUrl}/`, 'Play on the website'),
     ]],
@@ -172,8 +175,9 @@ export interface QueueAlertClosedView {
 
 /**
  * What a queue alert is edited to once it is no longer worth answering, so
- * somebody scrolling up an hour later does not jump into a queue that popped
- * or emptied long ago. No role tag and no buttons: it is a record now.
+ * somebody scrolling up does not jump into a queue that popped or emptied.
+ * No role tag and no buttons. It is deleted ALERT_LINGER_MINUTES later
+ * (owner 2026-10-24: a channel of "this alert is over" lines is clutter).
  */
 export function renderQueueAlertClosed(v: QueueAlertClosedView): MessagePayload {
   const content = v.why === 'popped'

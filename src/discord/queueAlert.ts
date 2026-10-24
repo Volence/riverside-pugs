@@ -67,6 +67,19 @@ export function queueAlertConfig(db: DB, queueChannelId: string): QueueAlertConf
 /** Why an alert was closed. 'off': queue alerts were switched off (the role
  *  id cleared) while it stood, which says nothing about the queue. */
 export type AlertClose = 'popped' | 'emptied' | 'dropped' | 'off';
+export const ALERT_CLOSES: readonly AlertClose[] = ['popped', 'emptied', 'dropped', 'off'];
+/** How long a closed alert stays up before the bot deletes it. */
+export const ALERT_LINGER_MINUTES = 10;
+
+/** Closed alerts whose linger has run out, oldest first. */
+export function expiredClosedAlerts(db: DB, nowMs: number): StoredAlert[] {
+  const cutoff = new Date(nowMs - ALERT_LINGER_MINUTES * 60_000).toISOString().replace('T', ' ').slice(0, 19);
+  return db.prepare(
+    `SELECT ref, channel_id, message_id FROM discord_messages
+     WHERE kind = 'alert' AND state IN (${ALERT_CLOSES.map(() => '?').join(', ')}) AND message_id != '' AND updated_at <= ?
+     ORDER BY updated_at`,
+  ).all(...ALERT_CLOSES, cutoff) as StoredAlert[];
+}
 
 export type AlertDecision =
   | { kind: 'none' }
