@@ -258,6 +258,17 @@ CREATE TABLE IF NOT EXISTS booking_voice (
   created_at  TEXT NOT NULL,
   deleted_at  TEXT
 );
+-- An event's team voice (owner 2026-10-24): one private category per event
+-- and a private voice channel per entry, made once the teams are known and
+-- removed when the event is over or the entry is out. deleted_at when gone.
+CREATE TABLE IF NOT EXISTS event_entry_voice (
+  entry_id    INTEGER PRIMARY KEY REFERENCES event_entries(id),
+  event_id    INTEGER NOT NULL REFERENCES events(id),
+  category_id TEXT NOT NULL,
+  channel_id  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  deleted_at  TEXT
+);
 -- Casters both captains invited to a booked scrim (plan 4c). Each side's
 -- manager sets their half; the caster sees the booking's games, live feed and
 -- relay only while both halves are set and they still hold is_caster in good

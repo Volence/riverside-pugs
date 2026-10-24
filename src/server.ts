@@ -173,6 +173,7 @@ import { adminEventRoutes } from './routes/adminEvents.js';
 import { adminRulesetRoutes } from './routes/adminRulesets.js';
 import { ScrimBoard, TICK_MS as SCRIM_TICK_MS } from './scrims/board.js';
 import { EventRunner, TICK_MS as EVENT_TICK_MS } from './events/runner.js';
+import { TeamVoice } from './events/teamVoice.js';
 import { RoomClock, ROOM_TICK_MS } from './events/roomClock.js';
 import { STANDIN_TICK_MS, Standins } from './events/standinFlow.js';
 import { standinRoutes } from './routes/standins.js';
@@ -2278,6 +2279,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const eventRunner = new EventRunner({ db: deps.db, notifier, publicUrl: deps.config.publicUrl });
   const eventTick = setInterval(() => { void eventRunner.tick(); }, EVENT_TICK_MS);
   eventTick.unref();
+  // An event's team voice, from the moment its teams are known (owner 2026-10-24).
+  // Read per tick: the bot logs in some seconds after this runs.
+  const teamVoice = new TeamVoice({ db: deps.db, voice: () => bot?.transport?.voice ?? null });
+  const teamVoiceTick = setInterval(() => { void teamVoice.tick(); }, EVENT_TICK_MS);
+  teamVoiceTick.unref();
 
   await app.register(teamRoutes, {
     db: deps.db, store: getCommunityStore, publicUrl: deps.config.publicUrl,

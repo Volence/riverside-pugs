@@ -437,6 +437,18 @@ export class FakeTransport implements BotTransport {
       const [categoryId, teamAId, teamBId] = made;
       return { categoryId, teamAId, teamBId, staffDropped: staffRoleId !== null && this.refuseStaffRole };
     },
+    createTeamChannels: async (name, labels, staffRoleId) => {
+      if (this.failVoice) throw new Error('missing permissions');
+      const staff = this.refuseStaffRole ? null : staffRoleId;
+      const categoryId = `cat${++this.seq}`;
+      this.channels.set(categoryId, { name, members: new Set(), allowed: [], staffRoleId: null, privateView: true });
+      const channelIds = labels.map((label) => {
+        const id = `vt${++this.seq}`;
+        this.channels.set(id, { name: label, members: new Set(), allowed: [], staffRoleId: staff, privateView: true });
+        return id;
+      });
+      return { categoryId, channelIds, staffDropped: staffRoleId !== null && this.refuseStaffRole };
+    },
     memberVoiceChannel: async (userId) => this.voiceOf.get(userId) ?? null,
     move: async (userId, channelId) => {
       // Discord rejects a move into a channel that is not there, which is how
