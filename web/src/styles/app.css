@@ -5947,6 +5947,7 @@ a.mapch__name:hover { color: var(--accent); }
 }
 @media (max-width: 760px) {
   .ticket-row__when { grid-column: 3; grid-row: 1; }
+}
 /* ---- Events desk (UI round 3): a guided staff console. Event header with
    the "what's next" step strip, a help line under every panel title, grouped
    actions, aligned history, and the event list as rows. Layout only. ---- */
@@ -5998,3 +5999,15 @@ a.mapch__name:hover { color: var(--accent); }
   .evdesk__histwho, .evdesk__histwhat { white-space: normal; }
   .evdesk__item { padding: var(--sp-3); }
 }
+
+/* Events desk night bar (owner 2026-10-24): where every match stands, hold all, release. */
+.nightbar { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); margin-bottom: var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--radius, 6px); background: var(--bg); }
+.nightbar__counts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.nightbar__count { display: flex; align-items: baseline; gap: 0.4em; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius, 6px); font-family: var(--font-label); font-size: var(--fs-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.nightbar__count strong { font-family: var(--font-display); font-size: var(--fs-body); color: var(--text-bright); }
+.nightbar__count.is-zero { opacity: 0.5; }
+.nightbar__count--live:not(.is-zero) { border-color: var(--win); }
+.nightbar__count--hold:not(.is-zero) { border-color: var(--accent); }
+.nightbar__count--hold:not(.is-zero) strong { color: var(--accent); }
+.nightbar__acts input { flex: 1 1 14rem; min-width: 0; }
+.evdesk__settings > .evdesk__danger { margin: 0 var(--sp-4) var(--sp-3); }

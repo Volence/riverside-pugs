@@ -321,13 +321,6 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
             )}
           </div>
         )}
-        {canEdit && !over && ev.status !== 'draft' && (
-          <form class="admin-form evdesk__danger" onSubmit={(e) => { e.preventDefault(); void run(() => adminApi.cancelEvent(id, reason), 'Cancel this event? It cannot be reopened.'); }}>
-            <input aria-label="Cancel reason" placeholder="Reason, shown on the event page" maxLength={300} value={reason}
-              onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-            <button class="btn btn--danger" type="submit" disabled={busy}>Cancel event</button>
-          </form>
-        )}
       </Panel>
       {setup && settingsPanels}
       {runPanels}
@@ -335,6 +328,17 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
         <details class="evdesk__settings">
           <summary>Event settings: details, banner and stages</summary>
           <div class="stack">{settingsPanels}</div>
+        </details>
+      )}
+      {canEdit && !over && ev.status !== 'draft' && (
+        // Owner 2026-10-24: the one button nobody wants mid-event sits folded at the bottom, not on top.
+        <details class="evdesk__settings">
+          <summary>Cancel the event</summary>
+          <form class="admin-form evdesk__danger" onSubmit={(e) => { e.preventDefault(); void run(() => adminApi.cancelEvent(id, reason), 'Cancel this event? It cannot be reopened.'); }}>
+            <input aria-label="Cancel reason" placeholder="Reason, shown on the event page" maxLength={300} value={reason}
+              onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+            <button class="btn btn--danger" type="submit" disabled={busy}>Cancel event</button>
+          </form>
         </details>
       )}
       <Panel class="evdesk__panel" id="evdesk-history">

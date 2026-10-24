@@ -10,7 +10,7 @@ const { mockAdmin } = vi.hoisted(() => ({
     openEventRoom: vi.fn(), resetEventRoom: vi.fn(), holdEventMatch: vi.fn(),
     actForTeam: vi.fn(), reopenEventVeto: vi.fn(), replayEventChapter: vi.fn(), moveEventServer: vi.fn(),
     extendEventGrace: vi.fn(), releaseEventHold: vi.fn(), freezeEventMatch: vi.fn(), unfreezeEventMatch: vi.fn(),
-    setEventMatchTime: vi.fn(), techPenaltyEventMatch: vi.fn(),
+    setEventMatchTime: vi.fn(), techPenaltyEventMatch: vi.fn(), holdAllEventMatches: vi.fn(), releaseAllEventHolds: vi.fn(),
   },
 }));
 vi.mock('../../../api', async (importOriginal) => {
@@ -44,6 +44,39 @@ const twoMatches = () => play({
 });
 
 describe('PlayPanel', () => {
+  it('counts where the live matches stand, holds every room not on a server with a reason, and holds a waiting match by itself (owner 2026-10-24)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(twoMatches());
+    mockAdmin.holdAllEventMatches.mockResolvedValue({ held: 2 });
+    mockAdmin.holdEventMatch.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    const bar = await screen.findByLabelText('Matches tonight');
+    expect(within(bar).getByText('To play').closest('li')?.textContent).toBe('1 To play');
+    expect(within(bar).getByText('Playing').closest('li')?.textContent).toBe('1 Playing');
+    expect(within(bar).queryByRole('button', { name: 'Release staff holds' })).toBeNull();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Hold all rooms' }));
+    const go = within(bar).getByRole('button', { name: 'Hold all' }) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    fireEvent.input(within(bar).getByLabelText('Hold all reason'), { target: { value: 'Short break' } });
+    fireEvent.click(go);
+    await waitFor(() => expect(mockAdmin.holdAllEventMatches).toHaveBeenCalledWith(9, 'Short break'));
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Hold 2 matches?' }));
+    expect(await within(bar).findByText('2 matches put on hold.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hold: Rats vs Bats' }));
+    fireEvent.input(screen.getByLabelText('Hold reason'), { target: { value: 'Waiting on a sub' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Put on hold' }));
+    await waitFor(() => expect(mockAdmin.holdEventMatch).toHaveBeenCalledWith(9, 7, 'Waiting on a sub'));
+  });
+
+  it('releases the staff holds from the night bar', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ ...play().stages[0]!.rounds[0]!, matches: [m({ status: 'admin_hold', phase: 'hold' })] }] }] }));
+    mockAdmin.releaseAllEventHolds.mockResolvedValue({ released: 1, failed: 0 });
+    render(<PlayPanel eventId={9} canEdit />);
+    const bar = await screen.findByLabelText('Matches tonight');
+    fireEvent.click(within(bar).getByRole('button', { name: 'Release staff holds' }));
+    await waitFor(() => expect(mockAdmin.releaseAllEventHolds).toHaveBeenCalledWith(9));
+    expect(await within(bar).findByText('1 released.')).toBeTruthy();
+  });
+
   it('offers Start once the list is final and before the event is live', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ status: 'checkin', stages: [] }));
     mockAdmin.startEvent.mockResolvedValue({});

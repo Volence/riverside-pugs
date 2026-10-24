@@ -12,7 +12,8 @@ import { cutDraft, type DraftFixture } from './draftFixture.js';
 
 /**
  * Owner 2026-10-23: staff swap two starters between draft teams after the
- * teams are published and before the event goes live.
+ * teams are published, until the event ends (owner 2026-10-24: a live
+ * event too; tests/draftReplace.test.ts covers the lineup refusal).
  */
 
 const must = <T>(r: { ok: true; value: T } | { ok: false; error: string }): T => {
@@ -59,7 +60,7 @@ describe('swapDraftPlayers', () => {
     ]);
   });
 
-  it('refuses a captain, the same team, a non-starter and a live event, writing nothing', () => {
+  it('refuses a captain, the same team, a non-starter and a finished event, writing nothing', () => {
     const f = published();
     const [e1, e2] = f.entries as [number, number];
     const before = snapshot(f);
@@ -70,7 +71,7 @@ describe('swapDraftPlayers', () => {
     expect(swap([e1, starters(f, e1)[0]!], [e2, starters(f, e2)[1]!])).toBe('swap_captain');
     expect(swap([e1, starters(f, e1)[1]!], [e1, starters(f, e1)[2]!])).toBe('swap_same_team');
     expect(swap([e1, starters(f, e2)[1]!], [e2, starters(f, e2)[2]!])).toBe('replace_not_starter');
-    f.db.prepare("UPDATE events SET status = 'live' WHERE id = ?").run(f.eventId);
+    f.db.prepare("UPDATE events SET status = 'finished' WHERE id = ?").run(f.eventId);
     expect(swap([e1, starters(f, e1)[1]!], [e2, starters(f, e2)[1]!])).toBe('swap_closed');
     expect(snapshot(f)).toBe(before);
   });
