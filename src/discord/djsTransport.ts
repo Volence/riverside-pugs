@@ -379,102 +379,115 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     });
   };
 
-  const voice: VoiceOps = {
-    async createMatchChannels(name, teamA, teamB, staffRoleId, opts) {
-      const me = client.user!.id;
-      const privateView = opts?.privateView ?? false;
-      // An overwrite for someone who is not in the guild is rejected by
-      // Discord, which would fail the whole channel; keep members only.
-      const members = async (ids: string[]) => {
-        const out: string[] = [];
-        for (const id of ids) {
-          try {
-            await guild.members.fetch(id);
-            out.push(id);
-          } catch { /* left the server */ }
-        }
-        return out;
-      };
-      // Everything made so far, so a failure part way through can take it
-      // all back down rather than leave an empty category (or one channel)
-      // behind for ever: nothing records a half-made set anywhere else.
-      const made: string[] = [];
-      let staffDropped = false;
-      try {
-        // Private: the category is named after both sides, so it is hidden as
-        // well, with the bot let in to manage it. Public: no overwrites, as it
-        // always was.
-        const category = await guild.channels.create({
-          name,
-          type: ChannelType.GuildCategory,
-          ...(privateView ? {
-            permissionOverwrites: [
-              { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-              {
-                id: me, type: OverwriteType.Member,
-                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.MoveMembers, PermissionFlagsBits.ManageChannels],
-              },
-            ],
-          } : {}),
-        });
-        made.push(category.id);
-        const make = async (label: string, ids: string[], staff: string | null) => guild.channels.create({
-          name: label,
-          type: ChannelType.GuildVoice,
-          parent: category.id,
+  /** A category with a voice channel per team, for createMatchChannels (two
+   *  teams) and createTeamChannels (an event's every team). */
+  const createChannelSet = async (
+    name: string, teams: { label: string; userIds: string[] }[], staffRoleId: string | null, privateView: boolean,
+  ): Promise<{ categoryId: string; channelIds: string[]; staffDropped: boolean }> => {
+    const me = client.user!.id;
+    // An overwrite for someone who is not in the guild is rejected by
+    // Discord, which would fail the whole channel; keep members only.
+    const members = async (ids: string[]) => {
+      const out: string[] = [];
+      for (const id of ids) {
+        try {
+          await guild.members.fetch(id);
+          out.push(id);
+        } catch { /* left the server */ }
+      }
+      return out;
+    };
+    // Everything made so far, so a failure part way through can take it
+    // all back down rather than leave an empty category (or one channel)
+    // behind for ever: nothing records a half-made set anywhere else.
+    const made: string[] = [];
+    let staffDropped = false;
+    try {
+      // Private: the category is named after both sides, so it is hidden as
+      // well, with the bot let in to manage it. Public: no overwrites, as it
+      // always was.
+      const category = await guild.channels.create({
+        name,
+        type: ChannelType.GuildCategory,
+        ...(privateView ? {
           permissionOverwrites: [
-            // Private: nobody sees the channel exists until setMemberAccess
-            // lets them in one at a time. Public (today's behaviour, and what
-            // every existing caller still gets): anyone can see in, only the
-            // roster below can connect.
-            privateView
-              ? { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] }
-              : { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel], deny: [PermissionFlagsBits.Connect] },
-            ...(await members(ids)).map((id) => ({
-              id, type: OverwriteType.Member,
-              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
-            })),
-            // MoveMembers as well as Connect: sorting someone into the right
-            // team channel is the reason staff are in here at all.
-            ...(staff ? [{
-              id: staff, type: OverwriteType.Role,
-              allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.MoveMembers],
-            }] : []),
+            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
             {
               id: me, type: OverwriteType.Member,
               allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.MoveMembers, PermissionFlagsBits.ManageChannels],
             },
           ],
-        });
-        // The staff overwrite is the one part of this that depends on a setting
-        // naming a role the bot may not be allowed to grant, and a rejected
-        // overwrite fails the whole channel. Team voice for a live match must
-        // not be lost over it, so a failure retries once without staff and says
-        // so, rather than taking the match's voice down with it.
-        const makeSafe = async (label: string, ids: string[]) => {
-          if (!staffRoleId) return make(label, ids, null);
-          try {
-            return await make(label, ids, staffRoleId);
-          } catch (err) {
-            console.error(`[discord] staff role ${staffRoleId} could not be added to ${label}; creating it without:`, err);
-            staffDropped = true;
-            return make(label, ids, null);
-          }
-        };
-        const a = await makeSafe(teamA.label, teamA.userIds);
-        made.push(a.id);
-        const b = await makeSafe(teamB.label, teamB.userIds);
-        made.push(b.id);
-        return { categoryId: category.id, teamAId: a.id, teamBId: b.id, staffDropped };
-      } catch (err) {
-        // Channels first, then the category: newest first is exactly that.
-        for (const id of made.reverse()) {
-          await removeChannel(id).catch((e: unknown) => {
-            console.error(`[discord] could not delete ${id} after a failed channel setup:`, e);
-          });
+        } : {}),
+      });
+      made.push(category.id);
+      const make = async (label: string, ids: string[], staff: string | null) => guild.channels.create({
+        name: label,
+        type: ChannelType.GuildVoice,
+        parent: category.id,
+        permissionOverwrites: [
+          // Private: nobody sees the channel exists until setMemberAccess
+          // lets them in one at a time. Public (today's behaviour, and what
+          // every existing caller still gets): anyone can see in, only the
+          // roster below can connect.
+          privateView
+            ? { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] }
+            : { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel], deny: [PermissionFlagsBits.Connect] },
+          ...(await members(ids)).map((id) => ({
+            id, type: OverwriteType.Member,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
+          })),
+          // MoveMembers as well as Connect: sorting someone into the right
+          // team channel is the reason staff are in here at all.
+          ...(staff ? [{
+            id: staff, type: OverwriteType.Role,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.MoveMembers],
+          }] : []),
+          {
+            id: me, type: OverwriteType.Member,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.MoveMembers, PermissionFlagsBits.ManageChannels],
+          },
+        ],
+      });
+      // The staff overwrite is the one part of this that depends on a setting
+      // naming a role the bot may not be allowed to grant, and a rejected
+      // overwrite fails the whole channel. Team voice for a live match must
+      // not be lost over it, so a failure retries once without staff and says
+      // so, rather than taking the match's voice down with it.
+      const makeSafe = async (label: string, ids: string[]) => {
+        if (!staffRoleId) return make(label, ids, null);
+        try {
+          return await make(label, ids, staffRoleId);
+        } catch (err) {
+          console.error(`[discord] staff role ${staffRoleId} could not be added to ${label}; creating it without:`, err);
+          staffDropped = true;
+          return make(label, ids, null);
         }
-        throw err;
+      };
+      const channelIds: string[] = [];
+      for (const t of teams) {
+        const ch = await makeSafe(t.label, t.userIds);
+        made.push(ch.id);
+        channelIds.push(ch.id);
       }
+      return { categoryId: category.id, channelIds, staffDropped };
+    } catch (err) {
+      // Channels first, then the category: newest first is exactly that.
+      for (const id of made.reverse()) {
+        await removeChannel(id).catch((e: unknown) => {
+          console.error(`[discord] could not delete ${id} after a failed channel setup:`, e);
+        });
+      }
+      throw err;
+    }
+  };
+
+  const voice: VoiceOps = {
+    async createMatchChannels(name, teamA, teamB, staffRoleId, opts) {
+      const r = await createChannelSet(name, [teamA, teamB], staffRoleId, opts?.privateView ?? false);
+      return { categoryId: r.categoryId, teamAId: r.channelIds[0], teamBId: r.channelIds[1], staffDropped: r.staffDropped };
+    },
+    async createTeamChannels(name, labels, staffRoleId) {
+      return createChannelSet(name, labels.map((label) => ({ label, userIds: [] })), staffRoleId, true);
     },
     async memberVoiceChannel(userId) {
       return guild.voiceStates.cache.get(userId)?.channelId ?? null;

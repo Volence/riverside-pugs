@@ -3,6 +3,7 @@ import { getSetting } from '../settings.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import type { VoiceOps } from '../discord/transport.js';
 import { bookingHeading, getBooking, sideName, sidesOf, voiceMembers, type Side } from './bookings.js';
+import { teamVoiceCovers } from '../events/teamVoice.js';
 
 /** Discord's limit on a channel or category name. */
 const NAME_MAX = 100;
@@ -75,6 +76,9 @@ export class BookingVoice {
     if (this.row(bookingId)) return;
     const b = getBooking(db, bookingId);
     if (!b || b.ending_at !== null) return;
+    // A tournament match whose two teams already have their event channels
+    // (events/teamVoice.ts) talks there instead.
+    if (b.purpose === 'tournament' && teamVoiceCovers(db, bookingId)) return;
     const sides = sidesOf(db, bookingId);
     const a = sides.find((s) => s.side === 'a');
     const bs = sides.find((s) => s.side === 'b');

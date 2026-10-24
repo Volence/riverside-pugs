@@ -1,0 +1,234 @@
+import type { DB } from '../db.js';
+import type { VoiceOps } from '../discord/transport.js';
+import { publishAdminEvent } from '../adminFeed.js';
+import { getPlayer } from '../players.js';
+import { getSetting } from '../settings.js';
+import * as N from './entries.js';
+import type { EventRow } from './events.js';
+
+/** Discord's limit on a channel or category name. */
+const NAME_MAX = 100;
+/** A finished event keeps its team channels this long, so teams can talk
+ *  over the final before the channels go. */
+export const FINISHED_GRACE_MS = 10 * 60_000;
+
+interface VoiceRow { entry_id: number; event_id: number; category_id: string; channel_id: string; created_at: string; deleted_at: string | null }
+
+/** Events whose teams are known and not over: a team event once its entry
+ *  list is final, a draft once its teams are published. */
+const OPEN_SQL = `SELECT * FROM events WHERE status IN ('registration','checkin','live') AND locked_at IS NOT NULL
+  AND (entry_kind = 'team' OR teams_made_at IS NOT NULL) ORDER BY id`;
+
+/** Open channels for every entry of a tournament booking's match: when both
+ *  teams have one, the booking makes no voice of its own (bookings/voice.ts). */
+export function teamVoiceCovers(db: DB, bookingId: number): boolean {
+  const m = db.prepare('SELECT entry_a, entry_b FROM event_matches WHERE booking_id = ? ORDER BY id DESC LIMIT 1')
+    .get(bookingId) as { entry_a: number | null; entry_b: number | null } | undefined;
+  if (!m || m.entry_a === null || m.entry_b === null) return false;
+  const open = db.prepare('SELECT 1 FROM event_entry_voice WHERE entry_id = ? AND deleted_at IS NULL');
+  return !!open.get(m.entry_a) && !!open.get(m.entry_b);
+}
+
+/** The team's own channel, open, or null. */
+export function teamVoiceChannel(db: DB, entryId: number): string | null {
+  const row = db.prepare('SELECT channel_id FROM event_entry_voice WHERE entry_id = ? AND deleted_at IS NULL').get(entryId) as { channel_id: string } | undefined;
+  return row?.channel_id ?? null;
+}
+
+/**
+ * An event's team voice (owner 2026-10-24, after Draft Tourney #1: teams
+ * were in the ban phase with nowhere to talk, because a match's voice is only
+ * made once its server is booked). As soon as an event's teams are known, one
+ * private category named after the event with a private voice channel per
+ * team; each team's roster (starters, subs, coach) is let in and kept in step
+ * every minute, so a replace or a stand-in gets the new player in and the old
+ * one out. A team that drops out or is disqualified loses its channel; the
+ * rest go a little after the event finishes (or at once on a cancel), with
+ * everyone in them moved to the lobby first, as a booking's voice is.
+ *
+ * Same contract as BookingVoice: nothing here throws to its caller, a bot
+ * without permissions or not connected leaves the event running exactly as
+ * it would without voice, and a failure is reported to staff once.
+ */
+export class TeamVoice {
+  /** Events whose channels could not be made in this process: reported once
+   *  and not tried again until a restart. */
+  private readonly failed = new Set<number>();
+  /** Entries whose channel could not be deleted, already reported. */
+  private readonly closeReported = new Set<number>();
+  /** Who this process let in, per entry; empty after a restart, when the
+   *  first sync lets everyone in again (setMemberAccess is idempotent). */
+  private readonly granted = new Map<number, Set<string>>();
+  private ticking = false;
+
+  constructor(private readonly deps: { db: DB; voice: () => VoiceOps | null; now?: () => number }) {}
+
+  private nowIso(): string {
+    return new Date(this.deps.now?.() ?? Date.now()).toISOString();
+  }
+
+  private rowsOf(eventId: number): VoiceRow[] {
+    return this.deps.db.prepare('SELECT * FROM event_entry_voice WHERE event_id = ? AND deleted_at IS NULL ORDER BY entry_id').all(eventId) as VoiceRow[];
+  }
+
+  /** The discord ids of an entry's roster. */
+  private desired(entryId: number): Set<string> {
+    const r = N.rosterOf(this.deps.db, entryId);
+    const out = new Set<string>();
+    for (const s of [...r.starters, ...r.subs, ...(r.coach ? [r.coach] : [])]) {
+      const id = getPlayer(this.deps.db, s)?.discord_id;
+      if (id) out.add(id);
+    }
+    return out;
+  }
+
+  /** The minute tick: make, sync and close. Never throws. */
+  async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      const voice = this.deps.voice();
+      if (!voice) return;
+      const enabled = getSetting(this.deps.db, 'discord_voice_enabled') === '1';
+      if (enabled) {
+        for (const ev of this.deps.db.prepare(OPEN_SQL).all() as EventRow[]) {
+          try {
+            await this.ensure(voice, ev);
+            await this.sync(voice, ev);
+          } catch (err) {
+            console.error(`[events] team voice of event ${ev.id} failed:`, err);
+          }
+        }
+      }
+      // Closing runs with voice switched off as well, so turning it off
+      // never strands channels.
+      await this.closeDone(voice);
+    } catch (err) {
+      console.error('[events] team voice tick failed:', err);
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  /** Make the event's category and a channel per active entry, once. */
+  private async ensure(voice: VoiceOps, ev: EventRow): Promise<void> {
+    const { db } = this.deps;
+    if (this.failed.has(ev.id)) return;
+    // Made once per event: an entry restored after that gets no channel, and
+    // its matches fall back to the booking's own voice (teamVoiceCovers).
+    if (db.prepare('SELECT 1 FROM event_entry_voice WHERE event_id = ? LIMIT 1').get(ev.id)) return;
+    const entries = N.entriesOf(db, ev.id).filter(N.isActive);
+    if (entries.length === 0) return;
+    try {
+      const made = await voice.createTeamChannels(
+        `${ev.name}: Teams`.slice(0, NAME_MAX),
+        entries.map((e) => e.name.slice(0, NAME_MAX)),
+        getSetting(db, 'discord_staff_role_id') || null,
+      );
+      const at = this.nowIso();
+      const ins = db.prepare('INSERT INTO event_entry_voice (entry_id, event_id, category_id, channel_id, created_at) VALUES (?, ?, ?, ?, ?)');
+      db.transaction(() => entries.forEach((e, i) => ins.run(e.id, ev.id, made.categoryId, made.channelIds[i], at)))();
+      if (made.staffDropped) {
+        publishAdminEvent({
+          kind: 'problem',
+          text: `${ev.name}: Discord refused the staff role on the team voice channels, so staff cannot see them. Check the bot may grant discord_staff_role_id.`,
+        });
+      }
+    } catch (err) {
+      this.failed.add(ev.id);
+      const why = err instanceof Error ? err.message : String(err);
+      console.error(`[events] ${ev.id}: creating the team voice channels failed:`, err);
+      publishAdminEvent({ kind: 'problem', text: `${ev.name}: could not create the team voice channels (${why}). Matches fall back to their own voice.` });
+    }
+  }
+
+  /** Let each roster in and the players no longer on it out (they are not
+   *  kicked from the channel, as with a booking). */
+  private async sync(voice: VoiceOps, ev: EventRow): Promise<void> {
+    for (const row of this.rowsOf(ev.id)) {
+      const entry = N.getEntry(this.deps.db, row.entry_id);
+      if (!entry || !N.isActive(entry)) continue;
+      const want = this.desired(row.entry_id);
+      const had = this.granted.get(row.entry_id) ?? new Set<string>();
+      this.granted.set(row.entry_id, had);
+      for (const userId of want) {
+        if (had.has(userId)) continue;
+        try {
+          await voice.setMemberAccess(row.channel_id, userId, true);
+          had.add(userId);
+        } catch (err) {
+          console.error(`[events] entry ${row.entry_id}: letting ${userId} into team voice failed:`, err);
+        }
+      }
+      for (const userId of [...had]) {
+        if (want.has(userId)) continue;
+        try {
+          await voice.setMemberAccess(row.channel_id, userId, false);
+          had.delete(userId);
+        } catch (err) {
+          console.error(`[events] entry ${row.entry_id}: taking ${userId} out of team voice failed:`, err);
+        }
+      }
+    }
+  }
+
+  /** Delete the channel of every entry that is out, and every channel and
+   *  category of an event that is over. */
+  private async closeDone(voice: VoiceOps): Promise<void> {
+    const { db } = this.deps;
+    const now = this.deps.now?.() ?? Date.now();
+    const rows = db.prepare(
+      `SELECT v.*, e.status AS ev_status, e.finished_at AS ev_finished, x.status AS entry_status
+       FROM event_entry_voice v JOIN events e ON e.id = v.event_id JOIN event_entries x ON x.id = v.entry_id
+       WHERE v.deleted_at IS NULL ORDER BY v.event_id, v.entry_id`,
+    ).all() as (VoiceRow & { ev_status: string; ev_finished: string | null; entry_status: N.EntryStatus })[];
+    const over = (r: (typeof rows)[number]) => r.ev_status === 'cancelled'
+      || (r.ev_status === 'finished' && (r.ev_finished === null || Date.parse(r.ev_finished) + FINISHED_GRACE_MS <= now));
+    const lobby = getSetting(db, 'discord_lobby_channel_id') || null;
+    const closedEvents = new Set<number>();
+    for (const r of rows) {
+      const eventOver = over(r);
+      if (!eventOver && r.entry_status !== 'dropped' && r.entry_status !== 'disqualified') continue;
+      if (await this.deleteOne(voice, r.entry_id, r.channel_id, lobby)) {
+        db.prepare('UPDATE event_entry_voice SET deleted_at = ? WHERE entry_id = ?').run(this.nowIso(), r.entry_id);
+        this.granted.delete(r.entry_id);
+        if (eventOver) closedEvents.add(r.event_id);
+      }
+    }
+    // The category goes once none of its channels are left.
+    for (const eventId of closedEvents) {
+      if (this.rowsOf(eventId).length > 0) continue;
+      const cat = db.prepare('SELECT category_id FROM event_entry_voice WHERE event_id = ? LIMIT 1').get(eventId) as { category_id: string } | undefined;
+      if (!cat) continue;
+      await voice.deleteChannel(cat.category_id).catch((err: unknown) => {
+        console.error(`[events] ${eventId}: deleting the team voice category failed:`, err);
+      });
+    }
+  }
+
+  /** Move everyone in the channel to the lobby, then delete it; true when it
+   *  is gone. A failure is reported once and retried next minute. */
+  private async deleteOne(voice: VoiceOps, entryId: number, channelId: string, lobby: string | null): Promise<boolean> {
+    if (lobby) {
+      const members = await voice.channelMemberIds(channelId).catch(() => null);
+      for (const userId of members ?? []) {
+        await voice.move(userId, lobby).catch((err: unknown) => {
+          console.error(`[events] entry ${entryId}: moving ${userId} to the lobby failed:`, err);
+        });
+      }
+    }
+    try {
+      await voice.deleteChannel(channelId);
+      this.closeReported.delete(entryId);
+      return true;
+    } catch (err) {
+      console.error(`[events] entry ${entryId}: deleting its team voice failed:`, err);
+      if (!this.closeReported.has(entryId)) {
+        this.closeReported.add(entryId);
+        const why = err instanceof Error ? err.message : String(err);
+        publishAdminEvent({ kind: 'problem', text: `Could not delete a team voice channel (${why}). Retrying every minute; delete it by hand if this keeps up.` });
+      }
+      return false;
+    }
+  }
+}
