@@ -7,7 +7,7 @@
 set -euo pipefail
 SRC=/home/pug/app/data/pug.db
 DEST=/home/pug/backups
-KEEP=60   # 6-hourly, so about 15 days
+KEEP=16   # 6-hourly, so 4 days; the workstation pull (pull-db-backups.sh) keeps 90
 
 mkdir -p "$DEST"
 STAMP=$(date -u +%Y%m%d-%H%M)

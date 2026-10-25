@@ -3,7 +3,7 @@
 ## Database backups
 
 The box snapshots `/home/pug/app/data/pug.db` every 6 hours into
-`/home/pug/backups/pug-YYYYmmdd-HHMM.db.gz`, keeping 60 (about 15 days).
+`/home/pug/backups/pug-YYYYmmdd-HHMM.db.gz`, keeping 16 (4 days; 60 until 2026-10-25, the workstation copy is the long one).
 The workstation pulls those daily into `~/l4d/backups/pug/`, keeping 90.
 The box backup run also deletes hand-made `data/pug.db.*` copies (pre-deploy snapshots etc.) older than one day.
 
