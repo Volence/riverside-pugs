@@ -1697,8 +1697,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   event_ready_minutes: '10',
   event_veto_step_seconds: '60',
   event_lineup_minutes: '5',
-  // Tournaments plan T3b: the confirm window after a series' last game.
-  event_confirm_minutes: '15',
+  // Tournaments plan T3b: the confirm window after a series' last game; 0
+  // (owner 2026-10-24) records the result at once.
+  event_confirm_minutes: '0',
   // Tournaments plan T4: how long an unanswered reschedule proposal waits
   // before it locks (spec section 5), and how early a scheduled match's room opens.
   reschedule_autoaccept_hours: '24',

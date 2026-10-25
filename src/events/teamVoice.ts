@@ -116,6 +116,12 @@ export class TeamVoice {
     try {
       const voice = this.deps.voice();
       if (!voice) return;
+      // Finished headings close first: a team going straight into its next
+      // match must land under the new heading, not be moved back out of it
+      // by the old one's close (Draft Tourney #1, matches 7 to 8 and 9).
+      // Closing runs with voice switched off as well, so turning it off
+      // never strands channels.
+      await this.closeHeadings(voice);
       const enabled = getSetting(this.deps.db, 'discord_voice_enabled') === '1';
       if (enabled) {
         for (const ev of this.deps.db.prepare(OPEN_SQL).all() as EventRow[]) {
@@ -128,9 +134,6 @@ export class TeamVoice {
           }
         }
       }
-      // Closing runs with voice switched off as well, so turning it off
-      // never strands channels.
-      await this.closeHeadings(voice);
       await this.closeDone(voice);
     } catch (err) {
       console.error('[events] team voice tick failed:', err);
@@ -246,7 +249,7 @@ export class TeamVoice {
     for (const h of rows) {
       for (const entryId of [h.entry_a, h.entry_b]) {
         const r = entryId === null ? undefined : this.openRow(entryId);
-        if (!r) continue;
+        if (!r || this.inOtherHeading(entryId!, h.match_id)) continue;
         await voice.moveChannel(r.channel_id, r.category_id).catch((err: unknown) => {
           console.error(`[events] match ${h.match_id}: moving ${r.channel_id} back failed:`, err);
         });
@@ -258,6 +261,17 @@ export class TeamVoice {
         console.error(`[events] match ${h.match_id}: deleting its voice heading failed:`, err);
       }
     }
+  }
+
+  /** The entry's channel already sits under the open heading of another
+   *  match still being played (a close that failed and is retried after the
+   *  team's next match opened): it stays there. */
+  private inOtherHeading(entryId: number, matchId: number): boolean {
+    return !!this.deps.db.prepare(
+      `SELECT 1 FROM event_match_voice v JOIN event_matches m ON m.id = v.match_id
+       WHERE v.deleted_at IS NULL AND v.category_id <> '' AND v.match_id <> ? AND m.status IN (${PLAYING_SQL})
+         AND (m.entry_a = ? OR m.entry_b = ?) LIMIT 1`,
+    ).get(matchId, entryId, entryId);
   }
 
   private openRow(entryId: number): VoiceRow | undefined {

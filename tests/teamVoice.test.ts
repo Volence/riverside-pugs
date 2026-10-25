@@ -204,6 +204,28 @@ describe('TeamVoice match headings and knockouts', () => {
     expect(t.parentOf.get(teamVoiceChannel(f.db, m.entry_b)!)).toBe(teams);
   });
 
+  it('leaves a team under its next match\'s heading when that match opens on the tick its last one ends', async () => {
+    const f = await liveStandins();
+    const tv = setup(f.db);
+    await tv.tick();
+    const m = firstMatch(f.db, f.eventId);
+    f.db.prepare("UPDATE event_matches SET status = 'veto' WHERE id = ?").run(m.id);
+    await tv.tick();
+    const old = heading(f.db, m.id)!;
+    // Draft Tourney #1: match 7 ended and matches 8 and 9 (each with one of
+    // its teams) opened before the next tick.
+    const third = f.entries.find((e) => e !== m.entry_a && e !== m.entry_b)!;
+    const next = f.db.prepare('SELECT id FROM event_matches WHERE event_id = ? AND id != ? ORDER BY id LIMIT 1').get(f.eventId, m.id) as { id: number };
+    f.db.prepare("UPDATE event_matches SET status = 'done', winner_entry = ?, finished_at = ? WHERE id = ?").run(m.entry_a, new Date(clock).toISOString(), m.id);
+    f.db.prepare("UPDATE event_matches SET entry_a = ?, entry_b = ?, status = 'veto' WHERE id = ?").run(m.entry_a, third, next.id);
+    await tv.tick();
+    const h = heading(f.db, next.id)!;
+    expect(t.channels.has(old.category_id)).toBe(false);
+    expect(t.parentOf.get(teamVoiceChannel(f.db, m.entry_a)!)).toBe(h.category_id);
+    expect(t.parentOf.get(teamVoiceChannel(f.db, third)!)).toBe(h.category_id);
+    expect(t.parentOf.get(teamVoiceChannel(f.db, m.entry_b)!)).toBe(rows(f.db, f.eventId)[0].category_id);
+  });
+
   it('deletes a knocked-out team\'s channel a while after the match that put it out, in an elimination bracket only', async () => {
     const f = await liveStandins();
     const tv = setup(f.db);

@@ -324,7 +324,10 @@ export function eventMessage(
           : v.totalScore
           ? `${v.winner === 'a' ? v.totalA : v.totalB} to ${v.winner === 'a' ? v.totalB : v.totalA} on total score`
           : winsLine(v.winner === 'a' ? v.winsA : v.winsB, v.winner === 'a' ? v.winsB : v.winsA);
-        content = `${a} vs ${b} in ${event}: ${winner} beat ${loser} ${line}. Captains have ${roomTimers(db).confirmMinutes} minutes to confirm or dispute the result on the match page; otherwise it stands.`;
+        const mins = roomTimers(db).confirmMinutes;
+        content = `${a} vs ${b} in ${event}: ${winner} beat ${loser} ${line}. ${mins > 0
+          ? `Captains have ${mins} minutes to confirm or dispute the result on the match page; otherwise it stands.`
+          : 'A problem with the result? Tell a mod.'}`;
       }
       return {
         content, embeds: [],
