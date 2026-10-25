@@ -76,6 +76,9 @@ export interface StagePlayView {
   /** Swiss, or a league paired Swiss: a later round's existence locks a
    *  table match's result (play.ts recordResult). */
   pairsAsItGoes: boolean;
+  /** The stage's series format, so a result typed by hand is in its units:
+   *  games won for Bo1/Bo3/Bo5, total score for a Bo2 (seriesRules.ts). */
+  series: { bestOf: number; totalScore: boolean };
 }
 
 /** Every entry of the event as a bracket shows it, by entry id. */
@@ -170,6 +173,7 @@ export function stagePlayViews(db: DB, ev: E.EventRow, opts: { staff?: boolean }
     return {
       ordinal: s.ordinal, type: st.type, status: s.status as 'live' | 'finished', layout: elim ? 'bracket' : 'table',
       groups, rounds, standings, advanceCount: st.advanceCount, pairsAsItGoes: P.totalRounds(s) !== null,
+      series: { bestOf: st.veto.games, totalScore: st.veto.games === 2 },
     };
   });
 }
