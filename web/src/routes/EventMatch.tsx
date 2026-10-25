@@ -2,6 +2,8 @@ import { useEffect, useState } from 'preact/hooks';
 import { ApiError, entryLogoUrl, eventsApi, type MatchRoomView } from '../api';
 import { Empty, PageSkeleton, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { DemoPlaybackHint } from '../components/StatTable';
+import { fmtBytes, mapName } from '../format';
 import { useHubEvent } from '../hooks/useHubEvent';
 import type { Session } from '../hooks/useLiveState';
 import { whenText } from '../eventFormat';
@@ -40,7 +42,7 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
   const [busy, setBusy] = useState(false);
   const [offset, setOffset] = useState(0);
   const [now, setNow] = useState(Date.now());
-  const gameStats = useGameStats(v);
+  const { stats: gameStats, demos: gameDemos } = useGameStats(v);
 
   const load = () => eventsApi.room(slug, matchId).then((x) => {
     setV(x);
@@ -180,6 +182,26 @@ export function EventMatchPage({ slug, id, session: _session }: { slug: string; 
         </Panel>
       )}
       {done && showLineups && lineups}
+      {done && gameDemos.length > 0 && (
+        <Panel>
+          <h3>Demos</h3>
+          <DemoPlaybackHint />
+          {gameDemos.map((g) => (
+            <div key={g.matchId}>
+              {gameDemos.length > 1 && <h4>{`${g.title} · ${g.campaignName}`}</h4>}
+              <ul class="demos">
+                {g.demos.map((d) => (
+                  <li class="demos__row" key={d.ordinal}>
+                    <span class="demos__map">{mapName(d.map)}</span>
+                    <span class="demos__size muted num">{fmtBytes(d.bytes)}</span>
+                    <a class="demos__link" href={`/api/matches/${g.matchId}/demos/${d.ordinal}`} download>Download</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </Panel>
+      )}
       {showVeto && v.a && v.b && (
         <Panel>
           <h3>Veto</h3>
