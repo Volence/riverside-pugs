@@ -16,7 +16,7 @@ const match = (over: Partial<PlayMatch>): PlayMatch => ({
 describe('StagePlay', () => {
   it('draws a bracket: one column per round, scores, the winner marked, TBD for unknown teams', () => {
     const stage: StagePlayView = {
-      ordinal: 2, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      ordinal: 2, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 1, totalScore: false },
       rounds: [
         { group: 1, round: 1, label: 'Semifinals', dates: null, defaultAt: null, window: null, matches: [match({ status: 'done', winner: 'a', scoreA: 1200, scoreB: 900 }), match({ id: 2, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'forfeit', winner: 'b', forfeit: true })] },
         { group: 1, round: 2, label: 'Final', dates: null, defaultAt: null, window: null, matches: [match({ id: 3, a: team(1, 'Rats'), b: null, status: 'pending' })] },
@@ -35,7 +35,7 @@ describe('StagePlay', () => {
 
   it('draws a table stage: standings with Swiss columns, then the rounds; a bye and an out team are marked', () => {
     const stage: StagePlayView = {
-      ordinal: 1, type: 'swiss', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], advanceCount: 2, pairsAsItGoes: true,
+      ordinal: 1, type: 'swiss', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], advanceCount: 2, pairsAsItGoes: true, series: { bestOf: 1, totalScore: false },
       standings: [
         { entry: team(1, 'Rats'), group: 1, rank: 1, groupRank: 1, played: 1, wins: 1, losses: 0, points: 1, buchholz: 0, scoreDiff: 300 },
         { entry: team(3, 'Cats'), group: 1, rank: 2, groupRank: 2, played: 0, wins: 1, losses: 0, points: 1, buchholz: 0, scoreDiff: 0 },
@@ -58,7 +58,7 @@ describe('StagePlay', () => {
 
   it('shows a league round\'s week dates next to its label', () => {
     render(<StagePlay slug="cup" stage={{
-      ordinal: 1, type: 'league', status: 'live', layout: 'table', advanceCount: null, pairsAsItGoes: false, standings: [], groups: [{ number: 1, label: 'Rounds' }],
+      ordinal: 1, type: 'league', status: 'live', layout: 'table', advanceCount: null, pairsAsItGoes: false, series: { bestOf: 1, totalScore: false }, standings: [], groups: [{ number: 1, label: 'Rounds' }],
       rounds: [{ group: 1, round: 3, label: 'Week 3', dates: { from: '2026-10-26', to: '2026-11-01' }, defaultAt: null, window: null, matches: [] }],
     }} />);
     expect(screen.getByText('Week 3 · Oct 26 to Nov 1')).toBeTruthy();
@@ -67,7 +67,7 @@ describe('StagePlay', () => {
   it('shows one table per round robin group', () => {
     const s = (id: number, name: string, group: number) => ({ entry: team(id, name), group, rank: id, groupRank: 1, played: 0, wins: 0, losses: 0, points: 0, buchholz: 0, scoreDiff: 0 });
     render(<StagePlay slug="cup" stage={{
-      ordinal: 1, type: 'round_robin', status: 'live', layout: 'table', advanceCount: null, pairsAsItGoes: false, rounds: [],
+      ordinal: 1, type: 'round_robin', status: 'live', layout: 'table', advanceCount: null, pairsAsItGoes: false, series: { bestOf: 1, totalScore: false }, rounds: [],
       groups: [{ number: 1, label: 'Group A' }, { number: 2, label: 'Group B' }], standings: [s(1, 'Rats', 1), s(2, 'Bats', 2)],
     }} />);
     expect(screen.getAllByRole('table')).toHaveLength(2);
@@ -76,7 +76,7 @@ describe('StagePlay', () => {
 
   it('links a match with both teams to its room and shows the room phase', () => {
     const stage: StagePlayView = {
-      ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 1, totalScore: false },
       rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [match({ id: 7, status: 'veto', phase: 'veto' }), match({ id: 8, b: null, status: 'pending', phase: 'pending' }),
         match({ id: 9, slot: 2, status: 'live', phase: 'live' })] }],
     };
@@ -95,7 +95,7 @@ describe('StagePlay', () => {
 
   it('shows a round\'s default time and window, and a match\'s own time when it differs (plan T4)', () => {
     const stage: StagePlayView = {
-      ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 1, totalScore: false },
       rounds: [{
         group: 1, round: 1, label: 'Week 1', dates: { from: '2026-10-12', to: '2026-10-18' }, defaultAt: '2026-10-14T21:00:00.000Z',
         window: { from: '2026-10-12T00:00:00.000Z', to: '2026-10-18T23:59:59.000Z' },
@@ -112,7 +112,7 @@ describe('StagePlay', () => {
   });
   it('single elim with a third-place match: a bye card for the top seed, one heading per column, seeds and the confirm chip', () => {
     const stage: StagePlayView = {
-      ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', standings: [], advanceCount: null, pairsAsItGoes: false,
+      ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 1, totalScore: false },
       groups: [{ number: 1, label: 'Bracket' }, { number: 2, label: 'Third place' }],
       rounds: [
         { group: 1, round: 1, label: 'Quarterfinals', dates: null, defaultAt: null, window: null, matches: [

@@ -30,12 +30,12 @@ const m = (over: Partial<PlayMatch> = {}): PlayMatch => ({
 });
 const play = (over: Partial<AdminEventPlay> = {}): AdminEventPlay => ({
   status: 'live', lockedAt: 'x', startsAt: '2026-10-10T20:00:00.000Z', seeded: 2, ...over,
-  stages: over.stages ?? [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+  stages: over.stages ?? [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
     rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m()] }] }],
 });
 
 const twoMatches = () => play({
-  stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+  stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
     rounds: [{ group: 1, round: 1, label: 'Semifinals', dates: null, defaultAt: null, window: null, matches: [
       m(),
       m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'lineup', phase: 'lineup' }),
@@ -96,29 +96,68 @@ describe('PlayPanel', () => {
     mockAdmin.eventPlay.mockResolvedValue(play());
     mockAdmin.recordEventResult.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit />);
-    fireEvent.input(await screen.findByLabelText('Rats score'), { target: { value: '1200' } });
-    fireEvent.input(screen.getByLabelText('Bats score'), { target: { value: '900' } });
+    fireEvent.input(await screen.findByLabelText('Rats total score'), { target: { value: '1200' } });
+    fireEvent.input(screen.getByLabelText('Bats total score'), { target: { value: '900' } });
     fireEvent.change(screen.getByLabelText('Winner'), { target: { value: 'a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save result' }));
     await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'a', scoreA: 1200, scoreB: 900, forfeit: false }));
     expect(confirm).toHaveBeenCalledWith({ title: 'Rats wins 1200 : 900?', body: expect.stringMatching(/can no longer be changed/) });
   });
 
+  it('takes games won in a Bo1, filling in 1 : 0 for the winner picked (Draft Tourney #1 match 7 was typed as campaign points)', async () => {
+    const bo1 = play();
+    bo1.stages[0]!.series = { bestOf: 1, totalScore: false };
+    mockAdmin.eventPlay.mockResolvedValue(bo1);
+    mockAdmin.recordEventResult.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.change(await screen.findByLabelText('Winner'), { target: { value: 'b' } });
+    expect((screen.getByLabelText('Rats games won') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('Bats games won') as HTMLInputElement).value).toBe('1');
+    expect(screen.getByText('Bo1: games won, the winner 1.')).toBeTruthy();
+    const save = screen.getByRole('button', { name: 'Save result' }) as HTMLButtonElement;
+    fireEvent.input(screen.getByLabelText('Rats games won'), { target: { value: '654' } });
+    fireEvent.input(screen.getByLabelText('Bats games won'), { target: { value: '1490' } });
+    expect(save.disabled).toBe(true);
+    fireEvent.input(screen.getByLabelText('Rats games won'), { target: { value: '0' } });
+    fireEvent.input(screen.getByLabelText('Bats games won'), { target: { value: '1' } });
+    fireEvent.click(save);
+    await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'b', scoreA: 0, scoreB: 1, forfeit: false }));
+  });
+
+  it('takes a Bo3 only as the winner\'s two games to fewer', async () => {
+    const bo3 = play();
+    bo3.stages[0]!.series = { bestOf: 3, totalScore: false };
+    mockAdmin.eventPlay.mockResolvedValue(bo3);
+    render(<PlayPanel eventId={9} canEdit />);
+    fireEvent.change(await screen.findByLabelText('Winner'), { target: { value: 'a' } });
+    const save = screen.getByRole('button', { name: 'Save result' }) as HTMLButtonElement;
+    const put = (x: string, y: string) => {
+      fireEvent.input(screen.getByLabelText('Rats games won'), { target: { value: x } });
+      fireEvent.input(screen.getByLabelText('Bats games won'), { target: { value: y } });
+    };
+    put('1', '0');
+    expect(save.disabled).toBe(true);
+    put('2', '2');
+    expect(save.disabled).toBe(true);
+    put('2', '1');
+    expect(save.disabled).toBe(false);
+  });
+
   it('disables Save until both scores are filled with a winner picked', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play());
     render(<PlayPanel eventId={9} canEdit />);
     fireEvent.change(await screen.findByLabelText('Winner'), { target: { value: 'a' } });
-    fireEvent.input(screen.getByLabelText('Rats score'), { target: { value: '1200' } });
+    fireEvent.input(screen.getByLabelText('Rats total score'), { target: { value: '1200' } });
     const save = screen.getByRole('button', { name: 'Save result' }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.click(save);
     expect(mockAdmin.recordEventResult).not.toHaveBeenCalled();
-    fireEvent.input(screen.getByLabelText('Bats score'), { target: { value: '900' } });
+    fireEvent.input(screen.getByLabelText('Bats total score'), { target: { value: '900' } });
     expect(save.disabled).toBe(false);
   });
 
   it('records a forfeit without scores, and offers Correct on a finished match', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'swiss', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: true,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'swiss', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: true, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, defaultAt: null, window: null, matches: [m(), m({ id: 8, slot: 2, status: 'done', winner: 'b', scoreA: 1, scoreB: 2 })] }] }] }));
     mockAdmin.recordEventResult.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit />);
@@ -132,14 +171,14 @@ describe('PlayPanel', () => {
   });
 
   it('closes the correction form and brings Correct back once a correction succeeds, with its own confirm', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
     mockAdmin.recordEventResult.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Correct' }));
     fireEvent.change(screen.getByLabelText('Winner'), { target: { value: 'b' } });
-    fireEvent.input(screen.getByLabelText('Rats score'), { target: { value: '1' } });
-    fireEvent.input(screen.getByLabelText('Bats score'), { target: { value: '2' } });
+    fireEvent.input(screen.getByLabelText('Rats total score'), { target: { value: '1' } });
+    fireEvent.input(screen.getByLabelText('Bats total score'), { target: { value: '2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save result' }));
     await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalledWith(9, 7, { winner: 'b', scoreA: 1, scoreB: 2, forfeit: false }));
     expect(confirm).toHaveBeenCalledTimes(1);
@@ -149,14 +188,14 @@ describe('PlayPanel', () => {
   });
 
   it('keeps the correction form open with what was typed when the save fails', async () => {
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 })] }] }] }));
     mockAdmin.recordEventResult.mockRejectedValue(new ApiError(409, 'A result that later matches already depend on is refused.'));
     render(<PlayPanel eventId={9} canEdit />);
     fireEvent.click(await screen.findByRole('button', { name: 'Correct' }));
     fireEvent.change(screen.getByLabelText('Winner'), { target: { value: 'b' } });
-    fireEvent.input(screen.getByLabelText('Rats score'), { target: { value: '1' } });
-    fireEvent.input(screen.getByLabelText('Bats score'), { target: { value: '2' } });
+    fireEvent.input(screen.getByLabelText('Rats total score'), { target: { value: '1' } });
+    fireEvent.input(screen.getByLabelText('Bats total score'), { target: { value: '2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save result' }));
     await waitFor(() => expect(mockAdmin.recordEventResult).toHaveBeenCalled());
     expect(await screen.findByText('A result that later matches already depend on is refused.')).toBeTruthy();
@@ -176,15 +215,15 @@ describe('PlayPanel', () => {
     mockAdmin.eventPlay.mockResolvedValue(play());
     render(<PlayPanel eventId={9} canEdit />);
     // The team's name is the visible label over its box, not a placeholder that vanishes on typing.
-    expect((await screen.findByLabelText('Rats score')).closest('label')!.textContent).toContain('Rats');
-    expect(screen.getByLabelText('Bats score').closest('label')!.textContent).toContain('Bats');
+    expect((await screen.findByLabelText('Rats total score')).closest('label')!.textContent).toContain('Rats');
+    expect(screen.getByLabelText('Bats total score').closest('label')!.textContent).toContain('Bats');
   });
 
   it('hides Correct where the server would refuse it: a paired-as-it-goes round with a later round, and a forfeit against an out team', async () => {
     const done = m({ status: 'done', winner: 'a', scoreA: 2, scoreB: 1 });
     const later = { group: 1, round: 2, label: 'Round 2', dates: null, defaultAt: null, window: null, matches: [m({ id: 9, round: 2 })] };
     const table = (pairsAsItGoes: boolean) => play({ stages: [{ ordinal: 1, type: pairsAsItGoes ? 'swiss' : 'league', status: 'live', layout: 'table',
-      groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes,
+      groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Round 1', dates: null, defaultAt: null, window: null, matches: [done] }, later] }] });
     mockAdmin.eventPlay.mockResolvedValue(table(true));
     render(<PlayPanel eventId={9} canEdit />);
@@ -198,7 +237,7 @@ describe('PlayPanel', () => {
     cleanup();
 
     const out = { ...team(2, 'Bats'), out: true };
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket', groups: [{ number: 1, label: 'Bracket' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m({ b: out, status: 'forfeit', winner: 'a', forfeit: true })] }] }] }));
     render(<PlayPanel eventId={9} canEdit />);
     expect(await screen.findByText(/forfeit, Rats wins/)).toBeTruthy();
@@ -207,7 +246,7 @@ describe('PlayPanel', () => {
 
   it('labels a third place match once, not "Third place, Third place"', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'single_elim', status: 'live', layout: 'bracket',
-      groups: [{ number: 1, label: 'Bracket' }, { number: 2, label: 'Third place' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+      groups: [{ number: 1, label: 'Bracket' }, { number: 2, label: 'Third place' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 2, label: 'Final', dates: null, defaultAt: null, window: null, matches: [m()] }, { group: 2, round: 1, label: 'Third place', dates: null, defaultAt: null, window: null, matches: [m({ id: 8, group: 2 })] }] }] }));
     render(<PlayPanel eventId={9} canEdit={false} />);
     expect(await screen.findByText('Third place')).toBeTruthy();
@@ -248,7 +287,7 @@ describe('PlayPanel', () => {
   it('offers the result form on a match in a room phase, and no room buttons to a mod (plan T3a)', async () => {
     mockAdmin.eventPlay.mockResolvedValue(twoMatches());
     render(<PlayPanel eventId={9} canEdit />);
-    expect(await screen.findByLabelText('Cats score')).toBeTruthy();
+    expect(await screen.findByLabelText('Cats total score')).toBeTruthy();
     cleanup();
     render(<PlayPanel eventId={9} canEdit={false} />);
     await screen.findByText('Semifinals');
@@ -268,7 +307,7 @@ describe('PlayPanel', () => {
     await waitFor(() => expect(mockAdmin.resetEventRoom).toHaveBeenCalledWith(9, 9));
     expect(screen.getByText(/Live/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Hold: Emus vs Foxes' })).toBeTruthy();
-    expect(screen.getByLabelText('Emus score')).toBeTruthy();
+    expect(screen.getByLabelText('Emus total score')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Reset room: Cats vs Dogs' }));
     await waitFor(() => expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('Ready, veto and lineups are cleared') })));
   });
@@ -404,7 +443,7 @@ describe('PlayPanel', () => {
       holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: { side: 'b' as const, byName: 'bob', time: '2026-10-16T20:00:00.000Z', autoAcceptAt: null }, proposals: 2 },
     };
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ scheduledAt: '2026-10-14T21:00:00.000Z', scheduleSource: 'default', desk: desk2 })] }] }] }));
     mockAdmin.setEventMatchTime.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit slug="cup" />);
@@ -422,7 +461,7 @@ describe('PlayPanel', () => {
       holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: { side: 'b' as const, byName: 'bob', time: '2026-10-16T20:00:00.000Z', autoAcceptAt: null }, proposals: 1 },
     };
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ desk: desk2 })] }] }] }));
     render(<PlayPanel eventId={9} canEdit slug="cup" />);
     expect((await screen.findByText(/Proposal open: bob \(Bats\)/)).textContent).toContain('1 proposal');
@@ -434,7 +473,7 @@ describe('PlayPanel', () => {
       holdReason: 'window_expired', holdFrom: 'waiting', dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: null, proposals: 1 },
     };
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ status: 'admin_hold', phase: 'hold', desk: desk2 })] }] }] }));
     mockAdmin.setEventMatchTime.mockResolvedValue({});
     render(<PlayPanel eventId={9} canEdit slug="cup" />);
@@ -452,7 +491,7 @@ describe('PlayPanel', () => {
       holdReason: null, holdFrom: null, dispute: null, frozen: false, graceEndsAt: null, booking: null, liveGame: null, subs: { a: 0, b: 0 }, pauses: [],
       schedule: { windowStart: '2026-10-12T00:00:00.000Z', windowEnd: '2026-10-18T23:59:59.000Z', proposal: null, proposals: 0 },
     };
-    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false,
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ordinal: 1, type: 'league', status: 'live', layout: 'table', groups: [{ number: 1, label: 'Rounds' }], standings: [], advanceCount: null, pairsAsItGoes: false, series: { bestOf: 2, totalScore: true },
       rounds: [{ group: 1, round: 1, label: 'Week 1', dates: null, defaultAt: null, window: null, matches: [m({ desk: desk2 })] }] }] }));
     mockAdmin.setEventMatchTime.mockRejectedValue(new ApiError(409, 'Refused.'));
     render(<PlayPanel eventId={9} canEdit slug="cup" />);
