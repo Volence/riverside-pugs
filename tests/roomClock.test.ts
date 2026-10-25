@@ -1,3 +1,4 @@
+import { setSetting } from '../src/settings.js';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as P from '../src/events/play.js';
 import * as R from '../src/events/room.js';
@@ -255,6 +256,19 @@ describe('RoomClock with the series (plan T3b)', () => {
     f.t.t += 15 * MIN;
     await f.clock.tick();
     expect(f.match()).toMatchObject({ status: 'done', result_source: 'auto', winner_entry: f.entryA });
+  });
+
+  it('records the result on the next tick when there is no confirm window (owner 2026-10-24)', async () => {
+    f = await seriesFixture();
+    setSetting(f.db, 'event_confirm_minutes', '0');
+    await f.tick();
+    const g1 = f.gameOf(1);
+    f.goLive(g1.match_id!);
+    f.endGame(g1.match_id!, [{ map: 'm1', a: 100, b: 500 }]);
+    expect(f.match()).toMatchObject({ status: 'confirming', deadline: new Date(f.t.t).toISOString() });
+    await f.clock.tick();
+    expect(f.match()).toMatchObject({ status: 'done', result_source: 'auto', winner_entry: f.entryA });
+    expect(f.sent.some((x) => x.includes('A problem with the result? Tell a mod.'))).toBe(true);
   });
 
   it('finalize says whether it changed the match; the clock pushes only on a change and logs a refused result once (Task 7 review)', async () => {

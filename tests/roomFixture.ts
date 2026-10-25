@@ -1,3 +1,4 @@
+import { setSetting } from '../src/settings.js';
 import type { DB } from '../src/db.js';
 import * as E from '../src/events/events.js';
 import * as N from '../src/events/entries.js';
@@ -23,6 +24,9 @@ export const POOL7 = ['no_mercy', 'dead_air', 'death_toll', 'blood_harvest', 'de
 export async function roomFixture(o: { veto?: object; pool?: string[]; startsAt?: string; now?: Date } = {}): Promise<RoomFixture> {
   const now = o.now ?? NOW;
   const f = entryFixture({ checkin: false, startsAt: o.startsAt });
+  // The live default is 0 (no window, owner 2026-10-24); these tests drive
+  // the window itself, as TIMERS does.
+  setSetting(f.db, 'event_confirm_minutes', String(TIMERS.confirmMinutes));
   const reg = (teamId: number, by: string, roster: object) => {
     const r = N.registerEntry(f.db, { eventId: f.eventId, teamId, by, roster, now });
     if (!r.ok) throw new Error(r.error);
