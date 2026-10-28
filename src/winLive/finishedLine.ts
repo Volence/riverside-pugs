@@ -8,7 +8,7 @@ import { FORM_PARAMS } from '../winForm.js';
 import { progressMade } from './halfModel.js';
 import { momentOf, price, priceCtx, PROGRESS_MAPS, type Moment } from './liveState.js';
 import { winPointsVersion } from './modelVersion.js';
-import { feedProgressPoints, halfSnapshots, progressStep, type Snapshot } from './snapshot.js';
+import { feedProgressPoints, halfSnapshots, mapThenFallback, progressStep, type Snapshot } from './snapshot.js';
 import { furthestProg, type ProgressMap } from './progressMap.js';
 
 /**
@@ -64,22 +64,27 @@ function halfProgress(
   db: DB, key: RoundKey, map: string, rr: RoundReplay, maps: ReadonlyMap<string, ProgressMap>,
 ): (tMs: number) => number | null {
   const pm = maps.get(map.toLowerCase());
+  const stored = db.prepare(
+    'SELECT t_ms AS tMs, prog FROM match_progress_samples WHERE match_id = ? AND ordinal = ? AND half = ? ORDER BY t_ms',
+  ).all(key.matchId, key.ordinal, key.half) as { tMs: number; prog: number }[];
+  const fallback = (): ((tMs: number) => number | null) => {
+    if (stored.length > 0) return progressStep(stored);
+    const feeds = feedProgressPoints(db, key, rr.frames[rr.frames.length - 1]!.tMs)
+      .filter((p) => Number.isFinite(p.prog) && p.prog >= 0 && p.prog <= 100);
+    if (feeds.length >= MIN_FEED_POINTS) return progressStep(feeds);
+    return () => null;
+  };
   if (pm) {
     const pts: { tMs: number; prog: number }[] = [];
     for (const f of rr.frames) {
       const v = furthestProg(pm, f);
       if (v !== null) pts.push({ tMs: f.tMs, prog: v });
     }
-    if (pts.length > 0) return progressStep(pts);
+    // Before the map's first mapped frame the live side stood on the
+    // fallback, so the finished line does too (see mapThenFallback).
+    if (pts.length > 0) return mapThenFallback(progressStep(pts), Math.min(...pts.map((p) => p.tMs)), fallback());
   }
-  const stored = db.prepare(
-    'SELECT t_ms AS tMs, prog FROM match_progress_samples WHERE match_id = ? AND ordinal = ? AND half = ? ORDER BY t_ms',
-  ).all(key.matchId, key.ordinal, key.half) as { tMs: number; prog: number }[];
-  if (stored.length > 0) return progressStep(stored);
-  const feeds = feedProgressPoints(db, key, rr.frames[rr.frames.length - 1]!.tMs)
-    .filter((p) => Number.isFinite(p.prog) && p.prog >= 0 && p.prog <= 100);
-  if (feeds.length >= MIN_FEED_POINTS) return progressStep(feeds);
-  return () => null;
+  return fallback();
 }
 
 /** A half's snapshots as the live side turns them into points: progress made

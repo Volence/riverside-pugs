@@ -1403,8 +1403,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             if (rs) {
               const ord = currentOrdinal(deps.db, rs.id);
               liveHudStore.resetReach(ev.token, ord, ev.half);
-              resetLiveWin(rs.id, ord, ev.half);
-              clearProgressSamples(deps.db, rs.id, ord, ev.half);
+              // Garnish: a failure here must not skip what follows.
+              try { resetLiveWin(rs.id, ord, ev.half); } catch (err) { console.error('[winlive] reset on half restart failed:', err); }
+              try { clearProgressSamples(deps.db, rs.id, ord, ev.half); } catch (err) { console.error('[winlive] clearing progress samples failed:', err); }
             }
           }
           else if (ev.kind === 'balance_part') {
@@ -1452,9 +1453,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             // (src/winLive/liveState.ts): never while it was live.
             const pe = liveMatchRow(ev.token);
             if (pe) {
-              const ord = ordinalForRoundEnd(deps.db, pe.id, ev.map);
-              writeProgressSamples(deps.db, pe.id, ord, ev.half,
-                liveHudStore.history(ev.token, ord, ev.half), liveHudStore.halfStartedAt(ev.token, ord, ev.half));
+              // Garnish: the replay indexing and the broadcast below must
+              // still happen when this fails.
+              try {
+                const ord = ordinalForRoundEnd(deps.db, pe.id, ev.map);
+                writeProgressSamples(deps.db, pe.id, ord, ev.half,
+                  liveHudStore.history(ev.token, ord, ev.half), liveHudStore.halfStartedAt(ev.token, ord, ev.half));
+              } catch (err) { console.error('[winlive] storing progress samples failed:', err); }
             }
             // A round just closed, so the plugin has finished its replay file.
             // Rounds are the unit here, unlike demos which are per map, so this

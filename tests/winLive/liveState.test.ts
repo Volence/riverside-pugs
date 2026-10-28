@@ -159,6 +159,17 @@ describe('liveSnapshot', () => {
     expect(got.snap.prog).toBeGreaterThan(0);
   });
 
+  it('stands on LIVEHUD progress until the first frame maps, then on the map, made from the first known value', () => {
+    // One mapped cell at x 600: frames within 3 cells of it map, from about 13 s.
+    const pm = buildProgressMap('m1', [{ x: 600, y: 0, z: 0, prog: 50 }]);
+    configureLiveWin({ progressMaps: new Map([['m1', pm]]) });
+    writeHalf(frames(60_000));
+    sample(START + 1000, 5);
+    const s = liveSnapshot(db, id, NOW, 0)!;
+    // prog0 is the LIVEHUD 5 the opening seconds stood on; the map says 50 from then on.
+    expect(s.snap.prog).toBe(45);
+  });
+
   it('ignores the abandoned attempt of a restarted half until the new file arrives', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeHalf(frames(60_000));
