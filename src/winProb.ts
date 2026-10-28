@@ -422,9 +422,11 @@ export const SWING_WINDOW_MS = 30_000;
  * half-end point before it, or the opening point), its points during the half
  * and its half-end point, which counts as at the time of its last point. The
  * swing is the largest change between two of those at most SWING_WINDOW_MS
- * apart. A half with no points during it is just its two ends, so on a
- * half-end line this is the biggest change from one half to the next, the
- * earliest on a tie.
+ * apart, the earliest on a tie. On a line with no points during halves each
+ * half is just its two ends, so this is the biggest change from one half to
+ * the next. On a line with them, a half that has none (its replay was
+ * missing) is left out: its whole-half change would otherwise beat every
+ * 30 s window on the line.
  */
 export function biggestSwing(points: WinPoint[]): { from: number; to: number } | null {
   const halves: { i: number; t: number }[][] = [];
@@ -439,9 +441,11 @@ export function biggestSwing(points: WinPoint[]): { from: number; to: number } |
   // A half still being played: its points so far.
   if (half.length > 1) halves.push(half);
 
+  const during = points.some((pt) => pt.tMs !== undefined);
   let best: { from: number; to: number } | null = null;
   let biggest = 0;
   for (const h of halves) {
+    if (during && h.length <= 2) continue;
     for (let b = 1; b < h.length; b++) {
       for (let a = b - 1; a >= 0 && h[b].t - h[a].t <= SWING_WINDOW_MS; a--) {
         const swing = Math.abs(points[h[b].i].pA - points[h[a].i].pA);

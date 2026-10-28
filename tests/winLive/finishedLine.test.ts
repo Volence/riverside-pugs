@@ -131,8 +131,8 @@ describe('matchWinLine with stored points', () => {
     writeFinishedPoints(db, id, [point(0, 1, 0, 0.5), point(0, 1, 5000, 0.55), point(0, 1, 20_000, 0.97, 'tank_death')]);
     const l = matchWinLine(db, id, model, { live: true })!;
     expect(l.winnerLow).toEqual({ index: 3, p: expect.closeTo(0.03, 9) });
-    expect(l.turningFrom).toBeDefined();
-    expect(l.points[l.turning!]!.pA - l.points[l.turningFrom!]!.pA).not.toBe(0);
+    // 0.5 at the half's start to 0.97 at the tank kill, 20 s on.
+    expect({ from: l.turningFrom, to: l.turning }).toEqual({ from: 1, to: 3 });
     // A line without points during halves carries no turningFrom.
     expect(matchWinLine(db, id, model)!.turningFrom).toBeUndefined();
   });

@@ -65,13 +65,18 @@ export function chartSlots(line: WinLine): { at: number[]; span: number } {
   return { at, span: slot + (line.halvesLeft ?? 0) };
 }
 
-/** The biggest swing's two ends, and the first moment inside it, its start
- *  point included (a tank's point is where the fight it brings begins). */
+/** The biggest swing's two ends, and the moment inside it, its start point
+ *  included (a tank's point is where the fight it brings begins). With more
+ *  than one, the likeliest cause by MOMENT rank (a wipe over the tank that
+ *  brought it), the first on a tie. */
 function swingOf(line: WinLine): { before: WinPoint; at: WinPoint; moment: WinPoint | null } | null {
   if (line.turning === null) return null;
   const pts = line.points;
   const from = line.turningFrom ?? line.turning - 1;
-  const moment = pts.slice(from, line.turning + 1).find((pt) => pt.moment) ?? null;
+  let moment: WinPoint | null = null;
+  for (const pt of pts.slice(from, line.turning + 1)) {
+    if (pt.moment && (!moment || MOMENT[pt.moment].rank > MOMENT[moment.moment!].rank)) moment = pt;
+  }
   return { before: pts[from], at: pts[line.turning], moment };
 }
 
@@ -173,6 +178,8 @@ const H = 220;
 const PAD = { top: 14, right: 12, bottom: 34, left: 64 };
 /** The top margin when the line marks moments: their icons sit above the plot. */
 const MOMENT_TOP = 32;
+/** Moment icons (14 px across) closer than this share one, so none touch. */
+const MARK_MERGE_PX = 18;
 
 /** `names` call the teams by name (a scrim or tournament game); the axis
  *  uses `short`, which has to fit the 64 px left margin. Both default to Team
@@ -239,13 +246,13 @@ export function WinChart({ line, names = TEAM_NAME, short = names }: { line: Win
   };
 
   // Moments as icons above the plot, each over its point with a thin guide
-  // down to the line. Icons closer than one icon's width share one (the
-  // weightiest kind shows; the title lists them all).
+  // down to the line. Icons that would touch share one (the weightiest kind
+  // shows; its title and tooltip list them all).
   const marks: { x: number; items: number[] }[] = [];
   pts.forEach((pt, i) => {
     if (!pt.moment) return;
     const prev = marks[marks.length - 1];
-    if (prev && x(i) - prev.x < 14) prev.items.push(i);
+    if (prev && x(i) - prev.x < MARK_MERGE_PX) prev.items.push(i);
     else marks.push({ x: x(i), items: [i] });
   });
   const markKind = (items: number[]): Moment =>
@@ -257,15 +264,24 @@ export function WinChart({ line, names = TEAM_NAME, short = names }: { line: Win
   const low = line.winnerLow && line.winnerLow.p < 0.25 && line.winnerLow.index > 0 ? line.winnerLow : null;
   const summary = winSummary(line, names);
   const hovered = hover === null ? null : pts[hover];
+  // A point under a moment icon shows every moment that icon stands for.
+  const hoverMark = hover === null ? null : marks.find((m) => m.items.includes(hover)) ?? null;
+  const exactAt = (i: number) => finished && i === n - 1;
   // The table keeps one row per half: the points during halves are the line's.
   const rows = pts.map((pt, i) => ({ pt, i })).filter(({ pt }) => pt.tMs === undefined);
 
-  /** The point nearest the pointer, read off the x axis. */
+  /** The point nearest the pointer, read off the x axis. A half-end point
+   *  shares its x with its half's last point and wins the tie, so the half's
+   *  score and a finished match's final 100% stay reachable. */
   const pick = (clientX: number, el: SVGElement) => {
     const box = (el.ownerSVGElement ?? el).getBoundingClientRect();
     const px = clientX - box.left;
     let best = 0;
-    for (let i = 1; i < n; i++) if (Math.abs(x(i) - px) < Math.abs(x(best) - px)) best = i;
+    for (let i = 1; i < n; i++) {
+      const d = Math.abs(x(i) - px);
+      const bd = Math.abs(x(best) - px);
+      if (d < bd - 1e-6 || (d <= bd + 1e-6 && pts[i].tMs === undefined && pts[best].tMs !== undefined)) best = i;
+    }
     setHover(best);
   };
 
@@ -352,7 +368,14 @@ export function WinChart({ line, names = TEAM_NAME, short = names }: { line: Win
             const last = pts[m.items[m.items.length - 1]];
             const cy = top - 14;
             return (
-              <g key={m.items[0]} class={`winchart__moment winchart__moment--${kind}`}>
+              // Tapped, clicked or chosen from the keyboard, an icon shows its
+              // moments in the tooltip (a title alone needs a mouse).
+              <g key={m.items[0]} class={`winchart__moment winchart__moment--${kind}`} tabindex={0}
+                 role="button" aria-label={m.items.map((i) => describePoint(pts[i], pts[i - 1], names)).join('; ')}
+                 onClick={() => setHover(m.items[0])}
+                 onKeyDown={(e) => {
+                   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHover(m.items[0]); }
+                 }}>
                 <title>{m.items.map((i) => `${describePoint(pts[i], pts[i - 1], names)}. ${chanceLine(pts[i])}`).join('\n')}</title>
                 <line class="winchart__momentguide" x1={m.x} x2={m.x} y1={cy + 7} y2={y(last.pA)} />
                 <circle cx={m.x} cy={cy} r={7} />
@@ -367,12 +390,26 @@ export function WinChart({ line, names = TEAM_NAME, short = names }: { line: Win
             left: `${Math.min(Math.max(x(hover), 110), width - 110)}px`,
             top: `${hovered.pA > 0.5 ? y(hovered.pA) + 14 : y(hovered.pA) - 70}px`,
           }}>
-            <div class="winchart__tiphead">{describePoint(hovered, pts[hover - 1], names)}</div>
-            <div>{hovered.tMs !== undefined ? 'Score at the start of the half' : 'Score'} {hovered.scoreA} - {hovered.scoreB}</div>
-            <div>
-              {names.a} {fmtChance(hovered.pA, finished && hover === n - 1)}
-              {' · '}{names.b} {fmtChance(1 - hovered.pA, finished && hover === n - 1)}
-            </div>
+            {hoverMark && hoverMark.items.length > 1 ? (
+              <>
+                {hoverMark.items.map((i) => (
+                  <div key={i}>
+                    <div class="winchart__tiphead">{describePoint(pts[i], pts[i - 1], names)}</div>
+                    <div>{names.a} {fmtChance(pts[i].pA)}{' · '}{names.b} {fmtChance(1 - pts[i].pA)}</div>
+                  </div>
+                ))}
+                <div>Score at the start of the half {hovered.scoreA} - {hovered.scoreB}</div>
+              </>
+            ) : (
+              <>
+                <div class="winchart__tiphead">{describePoint(hovered, pts[hover - 1], names)}</div>
+                <div>{hovered.tMs !== undefined ? 'Score at the start of the half' : 'Score'} {hovered.scoreA} - {hovered.scoreB}</div>
+                <div>
+                  {names.a} {fmtChance(hovered.pA, exactAt(hover))}
+                  {' · '}{names.b} {fmtChance(1 - hovered.pA, exactAt(hover))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -395,10 +432,11 @@ export function WinChart({ line, names = TEAM_NAME, short = names }: { line: Win
         </div>
       </details>
       <p class="muted winchart__foot">
-        From the scoreboard alone: both teams start at 50%, and every half still to play is priced
+        {during ? 'After each half the line comes from the scoreboard alone: ' : 'From the scoreboard alone: '}
+        both teams start at 50%, and every half still to play is priced
         from the {line.halves.toLocaleString('en-US')} PUG halves played so far, map by map. Ratings
         play no part. Checked against past matches: halves it called 80-90% were won 83% of the time.
-        {during && ' During each half the line also moves every 5 seconds with how far the survivors have got, their health and the tank; the icons mark tanks, wipes and saferooms.'}
+        {during && ' During each half it also moves every 5 seconds with how far the survivors have got, time into the half, deaths, downs, health lost and how much of the tank has been beaten; the icons mark tank spawns, tank kills, wipes and saferooms.'}
       </p>
     </div>
   );
