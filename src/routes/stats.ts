@@ -33,6 +33,7 @@ import { sessionsForMatch } from '../sourcetvSessions.js';
 import { abortCauseOf, abortParties } from '../matchAborts.js';
 import { isActiveStaff } from '../serverChat.js';
 import { matchWinLine } from '../winProb.js';
+import { formOption } from '../winForm.js';
 import { bookedSidesFor } from '../matchSides.js';
 
 /** A face on the recent-matches list. */
@@ -174,7 +175,12 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    *  standing, never to an anonymous visitor or one who is banned, inactive,
    *  or merged (see standing.ts inGoodStanding, which viewerOf already
    *  applies). discord_id itself is never selected at all. */
-  app.get('/api/live', async (req) => ({ matches: getLiveMatches(db, viewerOf(req) !== null) }));
+  app.get('/api/live', async (req) => {
+    const viewer = viewerOf(req);
+    // Team form on the win chance line is the win_chance_form setting, or an
+    // admin viewer, who sees it before it goes public (src/winForm.ts).
+    return { matches: getLiveMatches(db, viewer !== null, formOption(db, viewer !== null && isAdminViewer(viewer))) };
+  });
 
   /** Every map that has been played, so the map pages are discoverable. */
   // `pool` is the current vote rotation, so the page can put what you might
@@ -380,9 +386,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // Win chance after every half, from the scoreboard alone (both teams start
     // at 50%, ratings play no part), so unlike the forecast above it is
     // public. Null when the score cannot carry a line; see matchWinLine.
+    // Team form is in it when win_chance_form is on, or for an admin viewer.
     let winLine: ReturnType<typeof matchWinLine> = null;
     try {
-      winLine = matchWinLine(db, id);
+      winLine = matchWinLine(db, id, undefined, { form: formOption(db, viewer !== null && isAdminViewer(viewer)) });
     } catch (err) {
       req.log.warn({ err, matchId: id }, 'win line failed');
     }

@@ -21,16 +21,22 @@
  * (Brier 0.163). Treating halves as independent leaves it a little
  * underconfident, because a team that has outscored the other so far tends to
  * keep doing so; CALIBRATION is the one temperature that corrects for that.
+ *
+ * Team form (src/winForm.ts, the win_chance_form setting) is an option on
+ * top: it tilts each team's remaining halves by how it has played so far in
+ * the match and brings its own temperature. Without it every line is the
+ * plain one described here.
  */
 import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
 import { unrecordedOrdinals } from './roundStats.js';
 import { campaignRegistry } from './campaignRegistry.js';
 import { stopAfterMap } from './stopPoint.js';
+import { teamForm, tilt, type FormParams } from './winForm.js';
 
 /** Score bucket width. Half scores run 0 to about 1,800; 20 keeps every
  *  convolution small without blurring a lead that decides a match. */
-const BIN = 20;
+export const BIN = 20;
 /** Highest half score kept apart; anything above lands in the last bucket. */
 const MAX_HALF = 2000;
 const NB = MAX_HALF / BIN + 1;
@@ -142,11 +148,16 @@ function convolve(a: Float64Array, b: Float64Array): Float64Array {
   return out;
 }
 
-function remaining(model: WinModel, maps: string[]): Float64Array {
+function remaining(model: WinModel, maps: string[], theta = 0): Float64Array {
   let d: Float64Array = new Float64Array([1]);
-  for (const m of maps) d = convolve(d, model.dist(m));
+  for (const m of maps) d = convolve(d, tilt(model.dist(m), theta));
   return d;
 }
+
+/** Team form for winChance (src/winForm.ts): each team's remaining survivor
+ *  halves tilted by that much, and the temperature fitted with form in place
+ *  of CALIBRATION. All optional; none given is today's line. */
+export interface WinChanceOpts { tiltA?: number; tiltB?: number; calibration?: number }
 
 /**
  * Chance team A wins from here: `gap` is A's score minus B's so far, and each
@@ -154,10 +165,10 @@ function remaining(model: WinModel, maps: string[]): Float64Array {
  * counts as half a win either way. Calibrated; returns exactly 1, 0 or 0.5
  * once nothing is left to play.
  */
-export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: string[]): number {
+export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: string[], opts: WinChanceOpts = {}): number {
   if (mapsA.length === 0 && mapsB.length === 0) return gap > 0 ? 1 : gap < 0 ? 0 : 0.5;
-  const ra = remaining(model, mapsA);
-  const rb = remaining(model, mapsB);
+  const ra = remaining(model, mapsA, opts.tiltA);
+  const rb = remaining(model, mapsB, opts.tiltB);
   // P(gap + RA*BIN - RB*BIN > 0), summed without building the difference
   // distribution. Each bucket stands for scores spread evenly across its
   // width, so for each RA bucket the RB buckets wholly below team A's total
@@ -177,7 +188,7 @@ export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: 
     win += ra[i] * (cumB[j0] + rb[j0] * (limit - j0 + 0.5));
   }
   const raw = Math.min(1 - 1e-9, Math.max(1e-9, win));
-  const z = CALIBRATION * Math.log(raw / (1 - raw));
+  const z = (opts.calibration ?? CALIBRATION) * Math.log(raw / (1 - raw));
   return 1 / (1 + Math.exp(-z));
 }
 
@@ -234,15 +245,30 @@ export interface PlayedHalf { ordinal: number; half: number; survTeam: 'a' | 'b'
 /** One survivor half still to come: whose, and on which map. */
 export interface FutureHalf { team: 'a' | 'b'; map: string }
 
+/** Options for a line: `form` turns team form on (src/winForm.ts formOption
+ *  says when), with `siDmg` the per-half SI damage terms where feeds exist.
+ *  No caller passes siDmg today: SI damage did not improve the 2026-10-28
+ *  backtest, so the fitted siDamage strength is 0 and the term is unused. */
+export interface WinLineOpts { form?: FormParams; siDmg?: Map<string, number> }
+
 /**
  * The line through `played`, pricing each point against every later played
  * half plus `future`. Shared by finished matches (no future) and live ones.
+ * With form, each point tilts the halves after it by the form of the halves
+ * up to it, never later ones.
  */
-export function winLineFrom(model: WinModel, played: PlayedHalf[], future: FutureHalf[]): WinLine {
+export function winLineFrom(model: WinModel, played: PlayedHalf[], future: FutureHalf[], opts: WinLineOpts = {}): WinLine {
   const slots: FutureHalf[] = [...played.map((r) => ({ team: r.survTeam, map: r.map })), ...future];
   const rest = (from: number, team: 'a' | 'b') => slots.slice(from).filter((x) => x.team === team).map((x) => x.map);
+  const { form } = opts;
+  /** Chance after the first `n` played halves, with gap `gap`. */
+  const chance = (n: number, gap: number): number => {
+    if (!form) return winChance(model, gap, rest(n, 'a'), rest(n, 'b'));
+    const t = teamForm(model, played.slice(0, n), opts.siDmg, form);
+    return winChance(model, gap, rest(n, 'a'), rest(n, 'b'), { tiltA: t.a, tiltB: t.b, calibration: form.calibration });
+  };
   const points: WinPoint[] = [
-    { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: winChance(model, 0, rest(0, 'a'), rest(0, 'b')) },
+    { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: chance(0, 0) },
   ];
   let a = 0;
   let b = 0;
@@ -250,7 +276,7 @@ export function winLineFrom(model: WinModel, played: PlayedHalf[], future: Futur
     if (r.survTeam === 'a') a += r.score; else b += r.score;
     points.push({
       ordinal: r.ordinal, half: r.half, survTeam: r.survTeam, map: r.map,
-      scoreA: a, scoreB: b, pA: winChance(model, a - b, rest(i + 1, 'a'), rest(i + 1, 'b')),
+      scoreA: a, scoreB: b, pA: chance(i + 1, a - b),
     });
   });
 
@@ -307,7 +333,7 @@ function wellFormed(rounds: PlayedHalf[], openEnd: boolean): boolean {
  * not completed, a map without both halves, or a map whose stored score is
  * not a result (see unrecordedOrdinals).
  */
-export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db)): WinLine | null {
+export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db), opts: WinLineOpts = {}): WinLine | null {
   const match = db.prepare(
     'SELECT state, team_a_score AS a, team_b_score AS b FROM matches WHERE id = ?',
   ).get(matchId) as { state: string; a: number; b: number } | undefined;
@@ -323,7 +349,7 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
   // The rounds have to add up to the result the page shows, or the line
   // would end somewhere the scoreboard does not.
   if (sumA !== match.a || sumB !== match.b) return null;
-  return winLineFrom(model, rounds, []);
+  return winLineFrom(model, rounds, [], opts);
 }
 
 /**
@@ -333,7 +359,7 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
  * campaign), when the maps played do not follow it, or when the rounds so far
  * are not whole halves in order. A half in progress counts as still to play.
  */
-export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db)): WinLine | null {
+export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db), opts: WinLineOpts = {}): WinLine | null {
   // Scrims and event games choose their own maps (a stage's chapter count, a
   // tiebreak map), which the campaign's stop map does not know about.
   const kind = (db.prepare('SELECT kind FROM matches WHERE id = ?').get(matchId) as { kind: string } | undefined)?.kind;
@@ -363,5 +389,5 @@ export function liveWinLine(db: DB, matchId: number, campaign: string, model: Wi
   for (let o = nextOrdinal; o < plan.length; o++) {
     future.push({ team: 'a', map: plan[o] }, { team: 'b', map: plan[o] });
   }
-  return winLineFrom(model, played, future);
+  return winLineFrom(model, played, future, opts);
 }

@@ -27,6 +27,7 @@ const ABORT_LINE_TTL_MIN = 5;
 
 import type { BotTransport, MessagePayload } from './transport.js';
 import { matchWinLine } from '../winProb.js';
+import { formOption } from '../winForm.js';
 
 /** Team voice channels, plugged in by voice.ts. Kept as a narrow hook so this
  *  file does not depend on how channels are made. */
@@ -640,7 +641,8 @@ export class DiscordSync {
  *  (under 25%), else null. Never lets a fault in the odds stop a result card. */
 function comebackFrom(db: DB, matchId: number): number | null {
   try {
-    const low = matchWinLine(db, matchId)?.winnerLow;
+    // Team form only once win_chance_form is on: the card is public.
+    const low = matchWinLine(db, matchId, undefined, { form: formOption(db) })?.winnerLow;
     return low && low.p < 0.25 ? low.p : null;
   } catch {
     return null;
