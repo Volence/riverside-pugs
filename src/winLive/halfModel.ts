@@ -70,6 +70,10 @@ export const FEATURES = [
   'time5m',
 ] as const;
 
+/** The features made from progress. A snapshot with unknown progress never
+ *  trains their weights (scripts/win-backtest-live.ts masks them). */
+export const PROGRESS_FEATURES: ReadonlySet<string> = new Set(['prog', 'prog25', 'prog50', 'prog75', 'half2Prog']);
+
 export interface HalfModelParams {
   /** Upper edges of the score classes, in units of the map's scale, ascending. */
   classEdges: number[];
@@ -143,11 +147,13 @@ export function classProbs(shares: ArrayLike<number>, weights: number[][], x: Ar
 }
 
 /** The progress values to average over: the snapshot's own, or the time
- *  bucket's quantiles when it has none. */
+ *  bucket's quantiles when it has none. In the first bucket an unknown
+ *  progress is 0 (the survivors are still at the start), so a half going
+ *  live before its first progress sample sits exactly on the base. */
 export function progressCandidates(params: HalfModelParams, snap: Snapshot): number[] {
   if (snap.prog !== null) return [snap.prog];
   const { stepMs, quantiles } = params.progByTime;
-  if (quantiles.length === 0) return [0];
+  if (quantiles.length === 0 || snap.tMs < stepMs) return [0];
   return quantiles[Math.min(quantiles.length - 1, Math.max(0, Math.floor(snap.tMs / stepMs)))];
 }
 
@@ -171,15 +177,19 @@ function addReweighted(
   // was a wipe ending short of the distance already made, so it goes to the
   // wipe bands at or above the floor, in proportion.
   const floorScore = params.floorPerProg * (prog / 100) * scale;
-  const below = Math.min(base.length, Math.floor(floorScore / BIN));
+  // The last bin always stays, so a floor past the end of the scale still
+  // leaves somewhere for the mass to go.
+  const below = Math.min(base.length - 1, Math.floor(floorScore / BIN));
   if (below > 0) {
     let lost = 0;
     for (let i = 0; i < below; i++) { lost += d[i]; d[i] = 0; }
     const top = Math.min(base.length, Math.ceil(params.wipeTop * scale / BIN));
     let room = 0;
     for (let i = below; i < top; i++) room += d[i];
+    // With no wipe bins left above the floor (it is past wipeTop, or they
+    // are empty) the mass sits on the floor's own bin.
     if (room > 0) for (let i = below; i < top; i++) d[i] += lost * d[i] / room;
-    else d[Math.min(base.length - 1, below)] += lost;
+    else d[below] += lost;
   }
   for (let i = 0; i < base.length; i++) out[i] += w * d[i];
 }
@@ -191,7 +201,7 @@ function addReweighted(
  * team is surviving first or second on the map.
  */
 export function predictHalf(
-  model: WinModel, params: HalfModelParams, map: string, theta: number, snap: Snapshot | null, half: 1 | 2 = 1,
+  model: WinModel, params: HalfModelParams, map: string, theta: number, snap: Snapshot | null, half: 1 | 2,
 ): Float64Array {
   const base = tilt(model.dist(map), theta);
   if (!snap) return base;

@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import { BIN, type WinModel } from '../src/winProb.js';
 import type { Snapshot } from '../src/winLive/snapshot.js';
 import {
-  classOf, classProbs, FEATURES, featureVector, predictHalf, progressCandidates, type HalfModelParams,
+  classOf, classProbs, FEATURES, featureVector, predictHalf, progressCandidates, PROGRESS_FEATURES, type HalfModelParams,
 } from '../src/winLive/halfModel.js';
 
 export interface LiveContext {
@@ -54,16 +54,18 @@ function quantile(sorted: number[], q: number): number {
 }
 
 /** The train halves of the dataset, streamed; test lines are dropped on their match id. */
-async function readTrainHalves(path: string, trainIds: Set<number>): Promise<DatasetHalf[]> {
-  const out: DatasetHalf[] = [];
+async function readTrainHalves(path: string, trainIds: Set<number>): Promise<{ halves: DatasetHalf[]; unreadable: number }> {
+  const halves: DatasetHalf[] = [];
+  let unreadable = 0;
   const lines = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
   for await (const line of lines) {
     if (!line) continue;
     const id = Number(/"matchId":(\d+)/.exec(line)?.[1]);
+    if (!Number.isInteger(id)) { unreadable += 1; continue; }
     if (!trainIds.has(id)) continue;
-    out.push(JSON.parse(line) as DatasetHalf);
+    halves.push(JSON.parse(line) as DatasetHalf);
   }
-  return out;
+  return { halves, unreadable };
 }
 
 /** The progress rules and the time quantiles, from these halves. */
@@ -100,10 +102,12 @@ function fitProgressRules(model: WinModel, halves: DatasetHalf[]): Pick<HalfMode
 }
 
 /** Training rows: each sampled snapshot's candidate feature vectors (one, or
- *  the time quantiles when progress is unknown), its true class and its map's
- *  base class shares. Snapshots with nobody alive are left out: the point
- *  mass rule prices those. */
-interface LiveRows { x: Float64Array[][]; y: number[]; shares: Float64Array[] }
+ *  the time quantiles when progress is unknown), whether its progress was
+ *  known, its true class and its map's base class shares. Snapshots with
+ *  nobody alive are left out: the point mass rule prices those. `dropped`
+ *  counts halves whose true class has no share in their map's base (they
+ *  cannot be scored). */
+interface LiveRows { x: Float64Array[][]; progKnown: boolean[]; y: number[]; shares: Float64Array[]; dropped: number }
 function liveRows(model: WinModel, halves: DatasetHalf[], rules: Pick<HalfModelParams, 'progByTime'>, use: (f: number) => boolean): LiveRows {
   const K = LIVE_CLASS_EDGES.length + 1;
   const sharesOf = new Map<string, Float64Array>();
@@ -116,15 +120,16 @@ function liveRows(model: WinModel, halves: DatasetHalf[], rules: Pick<HalfModelP
     sharesOf.set(map, s);
     return s;
   };
-  const rows: LiveRows = { x: [], y: [], shares: [] };
+  const rows: LiveRows = { x: [], progKnown: [], y: [], shares: [], dropped: 0 };
   for (const h of halves) {
     const y = classOf(h.score / model.scale(h.map), LIVE_CLASS_EDGES);
     const sh = shares(h.map);
-    if (!(sh[y] > 0)) continue;
+    if (!(sh[y] > 0)) { rows.dropped += 1; continue; }
     h.snaps.forEach((s, i) => {
       if (i % LIVE_SAMPLE_EVERY !== 0 || s.alive <= 0) return;
       const progs = progressCandidates({ ...LIVE_NEUTRAL, progByTime: rules.progByTime }, s);
       rows.x.push(progs.map((p) => featureVector(s, p, h.half).map((v, f) => (use(f) ? v : 0))));
+      rows.progKnown.push(s.prog !== null);
       rows.y.push(y);
       rows.shares.push(sh);
     });
@@ -155,7 +160,9 @@ function classLoss(rows: LiveRows, weights: number[][]): number {
 
 /** Maximum likelihood with an L2 penalty, by Adam. A snapshot with unknown
  *  progress counts through its marginal (the mean over its candidates), so
- *  its gradient weights each candidate by how well it explains the class. */
+ *  its gradient weights each candidate by how well it explains the class,
+ *  and it trains only the features not made from progress: the progress
+ *  weights learn from snapshots that knew their progress. */
 function fitWeights(rows: LiveRows): number[][] {
   const K = LIVE_CLASS_EDGES.length + 1;
   const F = FEATURES.length;
@@ -164,6 +171,7 @@ function fitWeights(rows: LiveRows): number[][] {
   const v = new Float64Array(K * F);
   const lr = 0.05; const b1 = 0.9; const b2 = 0.999;
   const n = rows.y.length;
+  const fromProgress = FEATURES.map((f) => PROGRESS_FEATURES.has(f));
   for (let it = 1; it <= LIVE_ITERS; it++) {
     const g = new Float64Array(K * F);
     for (let r = 0; r < n; r++) {
@@ -176,7 +184,7 @@ function fitWeights(rows: LiveRows): number[][] {
         for (let c = 0; c < K; c++) {
           const e = resp * (p[c] - (c === y ? 1 : 0));
           if (e === 0) continue;
-          for (let f = 0; f < F; f++) g[c * F + f] += e * x[f];
+          for (let f = 0; f < F; f++) if (rows.progKnown[r] || !fromProgress[f]) g[c * F + f] += e * x[f];
         }
       });
     }
@@ -220,7 +228,7 @@ function liveSanity(model: WinModel, label: string, halves: DatasetHalf[], param
 }
 
 export async function runLive({ dbPath, model, trainIds, matchOrder, halvesPath: path, write }: LiveContext): Promise<void> {
-  const halves = await readTrainHalves(path, trainIds);
+  const { halves, unreadable } = await readTrainHalves(path, trainIds);
   const order = new Map(matchOrder.map((id, i) => [id, i]));
   const trainMatchIds = [...new Set(halves.map((h) => h.matchId))].sort((a, b) => order.get(a)! - order.get(b)!);
   const fitIds = new Set(trainMatchIds.slice(0, Math.round(trainMatchIds.length * LIVE_FIT_SHARE)));
@@ -229,6 +237,7 @@ export async function runLive({ dbPath, model, trainIds, matchOrder, halvesPath:
   console.log(`# Win chance backtest, part live\n\nDB ${dbPath}, halves ${path}\n`);
   console.log(`Train halves ${halves.length} from ${trainMatchIds.length} matches (progress: ${['feeds', 'map', 'none'].map((k) => `${k} ${halves.filter((h) => h.progSource === k).length}`).join(', ')}).`);
   console.log(`Sanity split inside train: fit ${fitHalves.length} halves (${fitIds.size} matches), check ${checkHalves.length} halves.`);
+  console.log(`Dataset lines dropped for an unreadable matchId: ${unreadable}. Train halves dropped for a true class with no base share: ${liveRows(model, halves, { progByTime: LIVE_NEUTRAL.progByTime }, () => true).dropped}.`);
 
   const rules = fitProgressRules(model, fitHalves);
   console.log(`\nProgress rules on the fit part: wipePerProg ${rules.wipePerProg}, floorPerProg ${rules.floorPerProg}.`);
