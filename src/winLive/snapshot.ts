@@ -70,6 +70,33 @@ export function progressTimeline(points: { tMs: number; prog: number }[]): (tMs:
   };
 }
 
+/** Progress as a backward-looking step: the largest sample at or before the
+ *  asked time, no interpolation, null before the first sample. Unlike
+ *  `progressTimeline` it never uses a later sample, so it only knows what a
+ *  live reader would have known. Samples outside 0..100 are dropped. */
+export function progressStep(points: { tMs: number; prog: number }[]): (tMs: number) => number | null {
+  const sorted = points
+    .filter((p) => Number.isFinite(p.prog) && p.prog >= 0 && p.prog <= 100)
+    .sort((a, b) => a.tMs - b.tMs);
+  const ts: number[] = [];
+  const ps: number[] = [];
+  let best = -Infinity;
+  for (const p of sorted) {
+    best = Math.max(best, p.prog);
+    if (ts.length > 0 && ts[ts.length - 1] === p.tMs) ps[ps.length - 1] = best;
+    else { ts.push(p.tMs); ps.push(best); }
+  }
+  return (tMs: number): number | null => {
+    if (ts.length === 0 || tMs < ts[0]) return null;
+    let lo = 0, hi = ts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (ts[mid] <= tMs) lo = mid; else hi = mid - 1;
+    }
+    return ps[lo];
+  };
+}
+
 /** The tank on the field in this frame, with a key stable across frames, or null. */
 function liveTank(frame: Frame): { key: string; health: number } | null {
   for (const p of frame.players) {

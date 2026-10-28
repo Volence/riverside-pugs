@@ -2,16 +2,21 @@
 // Turn every past PUG half into 5-second snapshots for the live win model.
 // Usage: npx tsx scripts/win-dataset.ts --db <copy of prod pug.db> [--out DIR] [--limit N] [--resume]
 //
-// Replays come from the public R2 URL and are cached under <out>/rpl/, so a
-// rerun does not fetch them again. --resume also remembers replays that were
-// missing (404) instead of asking for them again.
+// Replays come from the public R2 URL and are cached under <out>/rpl/ (always
+// used, so a rerun does not fetch them again). --resume only additionally
+// reads <out>/missing.json, the replays that answered 404, so they are not
+// asked for again; without it they are retried.
 //
 // Pass 1 learns a position-to-progress map per map from halves that have data
 // feeds, holding out 20% of them to measure its error. Pass 2 writes one line
-// per half: feed halves use the feeds, the others use their map's progress map
-// when its holdout median error is small enough, else no progress at all.
+// per half. Progress is what a live reader would know, with no lookahead: on a
+// map whose progress map is trusted (holdout median error small enough, from at
+// least MIN_HOLDOUT_HALVES held-out halves) it is the running max of the
+// furthest survivor's mapped progress, feed halves included (progSource 'map',
+// `feed` tells them apart). Feed halves on other maps use a backward-looking
+// step of the feed samples ('feeds'). Everything else gets 'none'.
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { DB } from '../src/db.js';
 import { completedPug } from '../src/matchKinds.js';
@@ -20,7 +25,7 @@ import type { RoundKey, RoundReplay } from '../src/metrics/types.js';
 import { infectedMaskForHeader } from '../src/replaySides.js';
 import { STATE } from '../src/replayFormat.js';
 import {
-  feedProgressPoints, halfSnapshots, progressTimeline, type Snapshot,
+  feedProgressPoints, halfSnapshots, progressStep, progressTimeline, type Snapshot,
 } from '../src/winLive/snapshot.js';
 import { buildProgressMap, furthestProg, progressAt, type ProgressMap } from '../src/winLive/progressMap.js';
 
@@ -31,6 +36,8 @@ const FETCH_TRIES = 4;
 const MAX_MAP_ERROR = 8;
 /** Feed halves needed this many usable progress samples to count as having feeds. */
 const MIN_FEED_POINTS = 3;
+/** A map needs this many held-out feed halves before its progress map is trusted. */
+const MIN_HOLDOUT_HALVES = 3;
 /** Training positions are taken this often per half. */
 const TRAIN_EVERY_MS = 2000;
 const HOLDOUT_EVERY_MS = 5000;
@@ -95,7 +102,9 @@ async function fetchOne(h: HalfRow): Promise<void> {
       const res = await fetch(R2_BASE + h.r2Key);
       if (res.status === 404) { missing.add(h.r2Key); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      writeFileSync(path, Buffer.from(await res.arrayBuffer()));
+      const tmp = `${path}.part`;
+      writeFileSync(tmp, Buffer.from(await res.arrayBuffer()));
+      renameSync(tmp, path);
       return;
     } catch (e) {
       if (t === FETCH_TRIES) { console.error(`fetch failed ${h.r2Key}: ${(e as Error).message}`); return; }
@@ -121,25 +130,32 @@ async function fetchAll(): Promise<void> {
   writeFileSync(missingPath, JSON.stringify([...missing]));
 }
 
+/** Halves whose cached replay exists but did not decode into a usable round. */
+const decodeFailures = new Set<string>();
+
 function decodeHalf(h: HalfRow): RoundReplay | null {
   const path = cachePath(h);
   if (!existsSync(path)) return null;
   const buf = readFileSync(path);
   try {
-    return decodeRoundReplay(buf, () => infectedMaskForHeader(db, buf, h.matchId, h.ordinal, h.half));
-  } catch {
+    const rr = decodeRoundReplay(buf, () => infectedMaskForHeader(db, buf, h.matchId, h.ordinal, h.half));
+    if (!rr) decodeFailures.add(`${h.matchId}/${h.ordinal}/${h.half}`);
+    return rr;
+  } catch (e) {
+    console.error(`decode failed match ${h.matchId} (${h.ordinal}/${h.half}): ${(e as Error).message}`);
+    decodeFailures.add(`${h.matchId}/${h.ordinal}/${h.half}`);
     return null;
   }
 }
 
 const keyOf = (h: HalfRow): RoundKey => ({ matchId: h.matchId, ordinal: h.ordinal, half: h.half });
 
-/** Feed progress timeline for a half, or null when it has too few usable samples. */
-function feedTimeline(h: HalfRow, rr: RoundReplay): ((tMs: number) => number | null) | null {
+/** Usable feed progress samples for a half, or null when there are too few. */
+function feedPoints(h: HalfRow, rr: RoundReplay): { tMs: number; prog: number }[] | null {
   const endTMs = rr.frames[rr.frames.length - 1].tMs;
   const pts = feedProgressPoints(db, keyOf(h), endTMs)
     .filter((p) => Number.isFinite(p.prog) && p.prog >= 0 && p.prog <= 100);
-  return pts.length >= MIN_FEED_POINTS ? progressTimeline(pts) : null;
+  return pts.length >= MIN_FEED_POINTS ? pts : null;
 }
 
 interface FeedHalf {
@@ -174,8 +190,10 @@ async function main(): Promise<void> {
   for (const h of halves) {
     const rr = decodeHalf(h);
     if (!rr) continue;
-    const tl = feedTimeline(h, rr);
-    if (!tl) continue;
+    const fpts = feedPoints(h, rr);
+    if (!fpts) continue;
+    // The interpolated timeline is only the fit's geometry target; the lookup sees position alone.
+    const tl = progressTimeline(fpts);
     const fh: FeedHalf = { h, holdout: seenFeed++ % 5 === 4, samples: [], evalFrames: [] };
     let nextTrain = rr.frames[0].tMs, nextEval = rr.frames[0].tMs;
     for (const f of rr.frames) {
@@ -218,7 +236,7 @@ async function main(): Promise<void> {
   const buildFor = (map: string, fhs: FeedHalf[]): ProgressMap => fit(map, fhs, fit(map, fhs, null));
 
   const maps = [...new Set(feedHalves.map((f) => f.h.map))].sort();
-  const mapError = new Map<string, { median: number; n: number; unmapped: number }>();
+  const mapError = new Map<string, { median: number; n: number; halves: number; unmapped: number; trusted: boolean }>();
   const allErr: number[] = [];
   for (const map of maps) {
     const mine = feedHalves.filter((f) => f.h.map === map);
@@ -232,7 +250,12 @@ async function main(): Promise<void> {
       }
     }
     if (errs.length > 0) {
-      mapError.set(map, { median: median(errs), n: errs.length, unmapped });
+      const halvesN = mine.filter((f) => f.holdout && f.evalFrames.length > 0).length;
+      const med = median(errs);
+      mapError.set(map, {
+        median: med, n: errs.length, halves: halvesN, unmapped,
+        trusted: halvesN >= MIN_HOLDOUT_HALVES && med <= MAX_MAP_ERROR,
+      });
       allErr.push(...errs);
     }
   }
@@ -254,23 +277,22 @@ async function main(): Promise<void> {
     if (!rr) { skipped++; continue; }
     let progSource: ProgSource = 'none';
     let prog: (tMs: number) => number | null = () => null;
-    const tl = feedTimeline(h, rr);
+    const fpts = feedPoints(h, rr);
     const pm = finalMaps.get(h.map);
-    const err = mapError.get(h.map);
-    if (tl) { progSource = 'feeds'; prog = tl; }
-    else if (pm && err && err.median <= MAX_MAP_ERROR) {
+    if (pm && mapError.get(h.map)?.trusted) {
       const pts: { tMs: number; prog: number }[] = [];
       for (const f of rr.frames) {
         const v = furthestProg(pm, f);
         if (v !== null) pts.push({ tMs: f.tMs, prog: v });
       }
-      if (pts.length > 0) { progSource = 'map'; prog = progressTimeline(pts); }
+      if (pts.length > 0) { progSource = 'map'; prog = progressStep(pts); }
     }
+    if (progSource === 'none' && fpts) { progSource = 'feeds'; prog = progressStep(fpts); }
     const snaps: Snapshot[] = halfSnapshots(rr, prog, tankFlowOf(h));
     counts[progSource]++;
     buffer.push(JSON.stringify({
       matchId: h.matchId, ordinal: h.ordinal, half: h.half, map: h.map, survTeam: h.survTeam,
-      score: h.score, made: h.made, endedAt: h.endedAt, progSource, snaps,
+      score: h.score, made: h.made, endedAt: h.endedAt, progSource, feed: fpts !== null, snaps,
     }));
     written++;
     if (buffer.length >= 100) { appendFileSync(outPath, buffer.join('\n') + '\n'); buffer = []; }
@@ -278,11 +300,11 @@ async function main(): Promise<void> {
   if (buffer.length > 0) appendFileSync(outPath, buffer.join('\n') + '\n');
 
   console.log('--- summary ---');
-  console.log(`halves selected ${halves.length}, written ${written}, skipped (no replay or undecodable) ${skipped}, 404 ${missing.size}`);
+  console.log(`halves selected ${halves.length}, written ${written}, skipped ${skipped} (no cached replay ${skipped - decodeFailures.size}, undecodable ${decodeFailures.size}), 404 ${missing.size}`);
   console.log(`progSource: feeds ${counts.feeds}, map ${counts.map}, none ${counts.none}`);
   console.log(`holdout median abs error, overall: ${allErr.length ? median(allErr).toFixed(2) : 'n/a'} (n=${allErr.length})`);
   for (const [map, e] of [...mapError].sort()) {
-    console.log(`  ${map}: median ${e.median.toFixed(2)} over ${e.n} frames, ${e.unmapped} unmapped${e.median <= MAX_MAP_ERROR ? '' : '  (not trusted)'}`);
+    console.log(`  ${map}: median ${e.median.toFixed(2)} over ${e.n} frames from ${e.halves} halves, ${e.unmapped} unmapped${e.trusted ? '' : '  (not trusted)'}`);
   }
   console.log(`no progress map: ${maps.filter((m) => !mapError.has(m)).join(', ') || 'none'}`);
 }
