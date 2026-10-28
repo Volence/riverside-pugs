@@ -33,6 +33,7 @@ import { unrecordedOrdinals } from './roundStats.js';
 import { campaignRegistry } from './campaignRegistry.js';
 import { stopAfterMap } from './stopPoint.js';
 import { teamForm, tilt, type FormParams } from './winForm.js';
+import { DEFAULT_DELAY_MS } from './replayTail.js';
 
 /** Score bucket width. Half scores run 0 to about 1,800; 20 keeps every
  *  convolution small without blurring a lead that decides a match. */
@@ -242,7 +243,7 @@ function convolve(a: Float64Array, b: Float64Array): Float64Array {
 }
 
 /** The distribution of the sum of these halves. */
-function remaining(dists: Float64Array[]): Float64Array {
+export function sumDists(dists: Float64Array[]): Float64Array {
   let d: Float64Array = new Float64Array([1]);
   for (const x of dists) d = convolve(d, x);
   return d;
@@ -275,8 +276,8 @@ export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: 
  */
 export function winChanceDists(gap: number, distsA: Float64Array[], distsB: Float64Array[], calibration = CALIBRATION): number {
   if (distsA.length === 0 && distsB.length === 0) return gap > 0 ? 1 : gap < 0 ? 0 : 0.5;
-  const ra = remaining(distsA);
-  const rb = remaining(distsB);
+  const ra = sumDists(distsA);
+  const rb = sumDists(distsB);
   // P(gap + RA*BIN - RB*BIN > 0), summed without building the difference
   // distribution. Each bucket stands for scores spread evenly across its
   // width, so for each RA bucket the RB buckets wholly below team A's total
@@ -332,6 +333,11 @@ export interface WinPoint {
   scoreB: number;
   /** Team A's chance of winning after this half. */
   pA: number;
+  /** A point during a half (src/winLive/liveState.ts): ms into the half,
+   *  RoundMs. Unset on half-end points. */
+  tMs?: number;
+  /** What just happened, on a point during a half. */
+  moment?: 'tank_spawn' | 'tank_death' | 'wipe' | 'saferoom';
 }
 
 export interface WinLine {
@@ -460,14 +466,38 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
   return winLineFrom(model, rounds, [], opts);
 }
 
+/** liveWinLine's options: `live` adds the points during halves
+ *  (src/winLive/liveState.ts, the win_chance_live setting, winLiveOption),
+ *  from state at least `delayMs` old (DEFAULT_DELAY_MS unless given: 0 is
+ *  the caster overlay's undelayed view and must be asked for). */
+export interface LiveLineOpts extends WinLineOpts { live?: boolean; nowMs?: number; delayMs?: number }
+
+/** What gives liveWinLine its points during halves: the in-half points of
+ *  each played half by `${ordinal}:${half}`, and the visible ones of the
+ *  half in progress. */
+export type InHalfProvider = (
+  db: DB, matchId: number, model: WinModel, played: PlayedHalf[], future: FutureHalf[],
+  opts: { form?: FormParams; nowMs: number; delayMs: number },
+) => { finished: Map<string, WinPoint[]>; current: WinPoint[] };
+
+/** src/winLive/liveState.ts registers itself here when it loads (the server
+ *  and every caller that asks for `live` import it). A hook rather than an
+ *  import because the web project's type check reads this module, and the
+ *  replay reader behind the live points would pull the server's routes in
+ *  with it. With nothing registered, `live` changes nothing. */
+let inHalfProvider: InHalfProvider | null = null;
+export function provideInHalfPoints(fn: InHalfProvider): void { inHalfProvider = fn; }
+
 /**
  * The line so far for a match being played, priced against the maps it still
  * has to play: the campaign's chapters up to its stop map (see stopAfterMap).
  * Null when that plan is unknown (no missions directory, an unregistered
  * campaign), when the maps played do not follow it, or when the rounds so far
- * are not whole halves in order. A half in progress counts as still to play.
+ * are not whole halves in order. A half in progress counts as still to play,
+ * and with `live` its points so far come after the last half-end point
+ * (each played half's own points before its half-end point).
  */
-export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db), opts: WinLineOpts = {}): WinLine | null {
+export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db), opts: LiveLineOpts = {}): WinLine | null {
   // Scrims and event games choose their own maps (a stage's chapter count, a
   // tiebreak map), which the campaign's stop map does not know about.
   const kind = (db.prepare('SELECT kind FROM matches WHERE id = ?').get(matchId) as { kind: string } | undefined)?.kind;
@@ -497,5 +527,32 @@ export function liveWinLine(db: DB, matchId: number, campaign: string, model: Wi
   for (let o = nextOrdinal; o < plan.length; o++) {
     future.push({ team: 'a', map: plan[o] }, { team: 'b', map: plan[o] });
   }
-  return winLineFrom(model, played, future, opts);
+  const line = winLineFrom(model, played, future, opts);
+  if (!opts.live || !inHalfProvider) return line;
+  const extra = inHalfProvider(db, matchId, model, played, future, {
+    form: opts.form, nowMs: opts.nowMs ?? Date.now(), delayMs: opts.delayMs ?? DEFAULT_DELAY_MS,
+  });
+  return withInHalf(line, extra.finished, extra.current);
+}
+
+/** `line` with each played half's in-half points just before its half-end
+ *  point and the half in progress's after the last. The swing and the
+ *  winner's low still point at the half-end points they did. */
+function withInHalf(line: WinLine, finished: Map<string, WinPoint[]>, current: WinPoint[]): WinLine {
+  if (finished.size === 0 && current.length === 0) return line;
+  const points: WinPoint[] = [line.points[0]];
+  const at: number[] = [0];
+  for (let i = 1; i < line.points.length; i++) {
+    const p = line.points[i];
+    points.push(...(finished.get(`${p.ordinal}:${p.half}`) ?? []));
+    at.push(points.length);
+    points.push(p);
+  }
+  points.push(...current);
+  return {
+    ...line,
+    points,
+    turning: line.turning === null ? null : at[line.turning],
+    winnerLow: line.winnerLow ? { ...line.winnerLow, index: at[line.winnerLow.index] } : null,
+  };
 }
