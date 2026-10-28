@@ -155,41 +155,75 @@ export function halfSnapshots(
   tankFlow: number | null,
   everyMs = SNAPSHOT_EVERY_MS,
 ): Snapshot[] {
-  const frames = rr.frames;
-  if (frames.length === 0) return [];
+  const walker = new SnapshotWalker(prog, tankFlow, everyMs);
   const out: Snapshot[] = [];
-  let lifeMax = 0;
-  let lastSeenMs: number | null = null;
-  let gone = false;
-  let next = frames[0].tMs;
-  for (let i = 0; i < frames.length; i++) {
-    const f = frames[i];
+  for (const f of rr.frames) out.push(...walker.push(f));
+  out.push(...walker.finish());
+  return out;
+}
+
+/**
+ * halfSnapshots one frame at a time, for a reader whose frames arrive as the
+ * half is played (src/winLive/liveState.ts): the same snapshots in the same
+ * order, without keeping the frames. A frame's snapshots come out when the
+ * next frame arrives (they cover the sample times up to it), and `finish`
+ * gives the last frame's own.
+ */
+export class SnapshotWalker {
+  private lifeMax = 0;
+  private lastSeenMs: number | null = null;
+  private gone = false;
+  private next: number | null = null;
+  private pending: { f: Frame; tank: { key: string; health: number } | null } | null = null;
+
+  constructor(
+    private readonly prog: (tMs: number) => number | null,
+    private readonly tankFlow: number | null,
+    private readonly everyMs = SNAPSHOT_EVERY_MS,
+  ) {}
+
+  /** Take the next frame (in time order); returns the previous frame's snapshots. */
+  push(f: Frame): Snapshot[] {
+    const out = this.pending ? this.emit(this.pending, f.tMs) : [];
+    if (this.next === null) this.next = f.tMs;
     const tank = liveTank(f);
     // Death is judged on frames that lack a tank, so a coarse frame spacing
     // never reads as an absence.
-    if (!tank && lastSeenMs !== null && f.tMs - lastSeenMs > TANK_GONE_MS) gone = true;
+    if (!tank && this.lastSeenMs !== null && f.tMs - this.lastSeenMs > TANK_GONE_MS) this.gone = true;
     if (tank) {
-      if (gone) { lifeMax = 0; gone = false; }
-      lifeMax = Math.max(lifeMax, tank.health);
-      lastSeenMs = f.tMs;
+      if (this.gone) { this.lifeMax = 0; this.gone = false; }
+      this.lifeMax = Math.max(this.lifeMax, tank.health);
+      this.lastSeenMs = f.tMs;
     }
-    // The frame stands for every sample time up to the next frame's time; the
-    // last one stands only for its own time. A sample time that falls in a
-    // hole (a pause, or a gap in the file) is skipped rather than answered
-    // with a stale frame.
-    const until = i + 1 < frames.length ? frames[i + 1].tMs : f.tMs + 1;
-    for (; next < until; next += everyMs) {
-      if (next - f.tMs > FRAME_DT_CAP_MS) continue;
-      const s = snapshotAt(f, prog(f.tMs), tankFlow, tank && lifeMax > 0 ? lifeMax : null);
-      if (!tank && lastSeenMs !== null) {
+    this.pending = { f, tank };
+    return out;
+  }
+
+  /** The last frame's snapshot for its own time, if a sample time falls on it. */
+  finish(): Snapshot[] {
+    const p = this.pending;
+    this.pending = null;
+    return p ? this.emit(p, p.f.tMs + 1) : [];
+  }
+
+  /** The frame stands for every sample time up to `until` (the next frame's
+   *  time). A sample time that falls in a hole (a pause, or a gap in the
+   *  file) is skipped rather than answered with a stale frame. */
+  private emit(p: { f: Frame; tank: { key: string; health: number } | null }, until: number): Snapshot[] {
+    const out: Snapshot[] = [];
+    const { f, tank } = p;
+    for (; this.next! < until; this.next! += this.everyMs) {
+      if (this.next! - f.tMs > FRAME_DT_CAP_MS) continue;
+      const s = snapshotAt(f, this.prog(f.tMs), this.tankFlow, tank && this.lifeMax > 0 ? this.lifeMax : null);
+      if (!tank && this.lastSeenMs !== null) {
         // A brief absence is still the same tank; a long one is its death.
-        s.tank = gone ? 'dead' : 'alive';
+        s.tank = this.gone ? 'dead' : 'alive';
         s.tankFlowGap = null;
       }
       out.push(s);
     }
+    return out;
   }
-  return out;
 }
 
 /** Route progress samples the data feeds recorded for one half: SI spawns,

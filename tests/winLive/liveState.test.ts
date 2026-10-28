@@ -19,7 +19,7 @@ import { halfSnapshots, progressStep } from '../../src/winLive/snapshot.js';
 import { buildProgressMap, furthestProg } from '../../src/winLive/progressMap.js';
 import { progressMade } from '../../src/winLive/halfModel.js';
 import {
-  configureLiveWin, liveSnapshot, PROGRESS_MAPS, resetLiveWin, winLiveOption, writeProgressSamples,
+  configureLiveWin, liveSnapshot, PROGRESS_MAPS, RECOMPUTE_MS, resetLiveWin, winLiveOption, writeProgressSamples,
 } from '../../src/winLive/liveState.js';
 
 const TOKEN = 'c'.repeat(32);
@@ -42,11 +42,12 @@ const ALIVE = STATE.PRESENT | STATE.ALIVE;
 function player(slot: number, p: Partial<PlayerSample> = {}): PlayerSample {
   return { slot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, state: ALIVE, health: 100, temp: 1, cls: slot < 4 ? 0 : 3, weapon: 0, clip: 0, reserve: 0, ...p };
 }
-/** A half every 500 ms up to `toMs`: survivors walk +x 10 units per second,
- *  and from `tankAt` slot 4 is the tank. */
-function frames(toMs: number, tankAt = 30_000): Frame[] {
+/** A half every 500 ms up to `toMs` and one frame past it (a frame's
+ *  snapshots come out once the next frame is read): survivors walk +x 10
+ *  units per second, and from `tankAt` slot 4 is the tank. */
+function frames(toMs: number, tankAt = 30_000, fromMs = 0): Frame[] {
   const out: Frame[] = [];
-  for (let t = 0; t <= toMs; t += 500) {
+  for (let t = fromMs; t <= toMs + 500; t += 500) {
     const x = Math.round(t / 100);
     out.push({
       tMs: t, offset: 0, entities: [],
@@ -64,7 +65,7 @@ let id: number;
 let liveDir: string;
 let hud: LiveHudStore;
 
-function writeHalf(fs: Frame[], startedUnixMs = START, map = 'm1'): string {
+function writeHalf(fs: Frame[], startedUnixMs = START, map = 'm1', mtimeMs = NOW): string {
   const h = encodeHeader({
     version: VERSION, token: TOKEN, ordinal: 0, half: 1, playerHz: 10, entityHz: 2, map,
     startedUnix: Math.floor(startedUnixMs / 1000), indexOffset: 0, indexCount: 0, frameCount: 0,
@@ -73,7 +74,7 @@ function writeHalf(fs: Frame[], startedUnixMs = START, map = 'm1'): string {
   const path = join(liveDir, `pug_${TOKEN}_0_1.rpl`);
   writeFileSync(path, Buffer.concat([h, ...fs.map(encodeFrame)]));
   // The writer is current: the file was touched just now.
-  utimesSync(path, NOW / 1000, NOW / 1000);
+  utimesSync(path, mtimeMs / 1000, mtimeMs / 1000);
   return path;
 }
 const line = (prog: number, tank = 40): LiveHudLine => ({ prog, tank, witch: 0, players: [] });
@@ -97,6 +98,7 @@ beforeEach(() => {
   hud.resetReach(TOKEN, 0, 1, START);
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(liveDir, { recursive: true, force: true });
   setMissionsDirs([]);
   invalidateCampaignCache();
@@ -158,6 +160,7 @@ describe('liveSnapshot', () => {
   });
 
   it('ignores the abandoned attempt of a restarted half until the new file arrives', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeHalf(frames(60_000));
     sample(START + 1000, 5);
     expect(liveSnapshot(db, id, NOW, 0)).not.toBeNull();
@@ -186,7 +189,7 @@ describe('liveWinLine with points during a half', () => {
 
   it('starts on the half-end line and adds one point per 5 s, the public one only up to its delay', () => {
     writeHalf(frames(60_000));
-    sample(START, 5);
+    sample(START + 1500, 5);
     sample(START + 30_000, 20);
     const base = plain();
     const caster = live(0);
@@ -194,7 +197,8 @@ describe('liveWinLine with points during a half', () => {
     expect(caster.points.slice(0, base.points.length)).toEqual(base.points);
     expect(inHalf.map((p) => p.tMs)).toEqual([0, 5000, 10_000, 15_000, 20_000, 25_000, 30_000, 35_000, 40_000, 45_000, 50_000, 55_000, 60_000]);
     expect(inHalf.every((p) => p.ordinal === 0 && p.half === 1 && p.survTeam === 'a' && p.map === 'm1')).toBe(true);
-    // The half going live does not move the line.
+    // The half going live does not move the line, though the first LIVEHUD
+    // sample came 1.5 s in: the opening point stands on it.
     expect(inHalf[0]!.pA).toBeCloseTo(base.points[base.points.length - 1]!.pA, 9);
     const pub = live(10_000).points.slice(base.points.length);
     expect(pub.map((p) => p.tMs).at(-1)).toBe(50_000);
@@ -203,20 +207,21 @@ describe('liveWinLine with points during a half', () => {
 
   it('uses the public delay unless told otherwise', () => {
     writeHalf(frames(60_000));
-    sample(START, 5);
+    sample(START + 1500, 5);
     expect(liveWinLine(db, id, 'five', model, { live: true, nowMs: NOW })).toEqual(live(10_000));
   });
 
   it('marks the tank spawning', () => {
     writeHalf(frames(60_000));
-    sample(START, 5);
+    sample(START + 1500, 5);
     const pts = live(0).points.filter((p) => p.moment !== undefined);
     expect(pts.map((p) => [p.tMs, p.moment])).toEqual([[30_000, 'tank_spawn']]);
   });
 
   it('a restarted half starts clean', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeHalf(frames(60_000));
-    sample(START, 5);
+    sample(START + 1500, 5);
     expect(live(0).points.length).toBeGreaterThan(1);
     // The admin restarts the half: ROUND_START resets the history and the points.
     const restart = NOW + 30_000;
@@ -230,9 +235,21 @@ describe('liveWinLine with points during a half', () => {
     expect(again).toEqual([0, 5000, 10_000]);
   });
 
+  it('shows a finished half\'s last seconds to the public only once they are the delay old', () => {
+    writeHalf(frames(60_000));
+    sample(START + 1500, 5);
+    live(0);
+    db.prepare("UPDATE match_rounds SET score = 640, ended_at = datetime('now'), survivors_alive = 3 WHERE match_id = ?").run(id);
+    const tms = (l: ReturnType<typeof live>) => l.points.filter((p) => p.tMs !== undefined).map((p) => p.tMs);
+    // The file's mtime puts frame 60.5 s at NOW: 60 s was seen 0.5 s before it.
+    expect(tms(live(0, NOW + 1000)).at(-1)).toBe(60_000);
+    expect(tms(live(10_000, NOW + 1000)).at(-1)).toBe(50_000);
+    expect(tms(live(10_000, NOW + 9500)).at(-1)).toBe(60_000);
+  });
+
   it('keeps a finished half\'s points before its half-end point, the last marked when they made the saferoom', () => {
     writeHalf(frames(60_000));
-    sample(START, 5);
+    sample(START + 1500, 5);
     const during = live(0).points.slice(1);
     db.prepare("UPDATE match_rounds SET score = 640, ended_at = datetime('now'), survivors_alive = 3 WHERE match_id = ?").run(id);
     const after = live(0, NOW + 6000);
@@ -243,6 +260,56 @@ describe('liveWinLine with points during a half', () => {
     expect(after.points.at(-1)!.tMs).toBeUndefined();
     // The biggest swing still names the half-end point.
     expect(after.turning).toBe(after.points.length - 1);
+  });
+});
+
+describe('the half clock across a pause', () => {
+  const sqlite = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+
+  it('puts LIVEHUD samples after a pause on the frames\' clock (game time, which stood still)', () => {
+    // Game time runs 0 to 30 s, a 20 s pause (wall 30 to 50 s), then on.
+    sample(START + 1000, 5);
+    writeHalf(frames(29_500), START, 'm1', START + 30_000);
+    expect(liveSnapshot(db, id, START + 30_000, 0)).not.toBeNull();
+    writeHalf(frames(34_500), START, 'm1', START + 55_000);
+    liveSnapshot(db, id, START + 55_000, 0);
+    // 58 s of wall time is 38 s of game time.
+    sample(START + 58_000, 40);
+    writeHalf(frames(44_500), START, 'm1', START + 65_000);
+    const s = liveSnapshot(db, id, START + 65_000, 0)!;
+    expect(s.snap.tMs).toBe(40_000);
+    expect(s.snap.prog).toBe(40 - 5);
+  });
+
+  it('stores progress samples on the game clock, taking off the half\'s pauses when no replay was read', () => {
+    db.prepare('INSERT INTO match_pauses (match_id, map_ordinal, half, started_at, ended_at) VALUES (?, 0, 1, ?, ?)')
+      .run(id, sqlite(START + 30_000), sqlite(START + 50_000));
+    writeProgressSamples(db, id, 0, 1, [{ at: START + 20_000, prog: 10, tank: 40 }, { at: START + 60_000, prog: 30, tank: 40 }], START);
+    expect(db.prepare('SELECT t_ms, prog FROM match_progress_samples ORDER BY t_ms').all()).toEqual([
+      { t_ms: 20_000, prog: 10 }, { t_ms: 40_000, prog: 30 },
+    ]);
+  });
+});
+
+describe('failure paths', () => {
+  it('a missing file is not looked for again for RECOMPUTE_MS', () => {
+    sample(START + 1500, 5);
+    expect(liveSnapshot(db, id, NOW, 0)).toBeNull();
+    writeHalf(frames(60_000));
+    expect(liveSnapshot(db, id, NOW + 1000, 0)).toBeNull();
+    expect(liveSnapshot(db, id, NOW + RECOMPUTE_MS, 0)).not.toBeNull();
+  });
+
+  it('logs an abandoned attempt (or a server clock behind) once per half', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeHalf(frames(60_000));
+    hud.resetReach(TOKEN, 0, 1, START + 50_000);
+    sample(START + 51_000, 5);
+    expect(liveSnapshot(db, id, NOW, 0)).toBeNull();
+    expect(liveSnapshot(db, id, NOW + 2 * RECOMPUTE_MS, 0)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain('abandoned attempt');
+    warn.mockRestore();
   });
 });
 

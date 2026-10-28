@@ -984,7 +984,8 @@ CREATE TABLE IF NOT EXISTS match_demos (
 -- match link by construction and a lost datagram would otherwise leave a
 -- real file permanently unindexed.
 -- LIVEHUD progress through a half, one sample per 10 s of half time (t_ms
--- since the half went live, pauses included like the plugin's RoundMs),
+-- on the plugin's RoundMs clock: game time since the half went live, which
+-- stops during a pause, the clock of replay frames and the data feeds),
 -- written once the half has ended (src/winLive/liveState.ts
 -- writeProgressSamples) so later retraining of the live win chance has true
 -- progress. Never written while a half is live: the samples are undelayed.
