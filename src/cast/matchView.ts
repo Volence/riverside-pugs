@@ -12,6 +12,8 @@ import { statDef } from '../statKeys.js';
 import { STREAK_MIN, streakRuns } from '../skeetStreaks.js';
 import { boomerRate } from './types.js';
 import { liveWinLine } from '../winProb.js';
+import { formOption } from '../winForm.js';
+import { winLiveOption } from '../winLive/liveState.js';
 import type {
   CastChapter, CastEvent, CastMatchView, CastRoundResult, CastPlayer, CastRole, CastSide, CastTeam, StudioState, TeamOverride,
 } from './types.js';
@@ -252,7 +254,11 @@ export function buildMatchView(
   let winChanceA: number | null = null;
   if (m.state === 'live' && !teams.a.overridden.includes('score') && !teams.b.overridden.includes('score')) {
     try {
-      const line = liveWinLine(db, matchId, m.campaign);
+      // Team form only once win_chance_form is on, and the line moving during
+      // a half only once win_chance_live is: the overlay is public. Casters
+      // get no delay (this view is only reached through the caster gate), so
+      // the points during a half use the current state.
+      const line = liveWinLine(db, matchId, m.campaign, undefined, { form: formOption(db), live: winLiveOption(db), delayMs: 0 });
       winChanceA = line ? line.points[line.points.length - 1].pA : null;
     } catch {
       // Odds are garnish; a fault here must not blank the overlay.

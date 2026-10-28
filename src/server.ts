@@ -115,7 +115,7 @@ import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, recordChat,
-  recordRoundStart, recordRoundEnd,
+  recordRoundStart, recordRoundEnd, ordinalForRoundEnd,
   reapOrphanedMatches,
   recordPhase,
   currentOrdinal,
@@ -144,6 +144,8 @@ import { modCallRoutes } from './routes/modCalls.js';
 import { serverChatRoutes } from './routes/serverChat.js';
 import { castRoutes } from './routes/cast.js';
 import { liveHudStore } from './cast/liveHud.js';
+import { clearProgressSamples, configureLiveWin, forgetLiveWin, resetLiveWin, writeProgressSamples } from './winLive/liveState.js';
+import { runWinPointsPass } from './winLive/finishedLine.js';
 import { NoTankWatch, noTankText } from './noTankWatch.js';
 import { castStudioRoutes } from './routes/castStudio.js';
 import { statsRoutes } from './routes/stats.js';
@@ -1202,6 +1204,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (ev.kind === 'match_end') {
           noTankWatch.forget(ev.token);
           const row = deps.db.prepare('SELECT id FROM matches WHERE token = ?').get(ev.token) as { id: number } | undefined;
+          if (row) forgetLiveWin(row.id);
           if (row) void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser);
           return;
         }
@@ -1393,8 +1396,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             const rs = liveMatchRow(ev.token);
             if (rs) resetRoundLines(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
             if (rs) resetRoundFeeds(deps.db, rs.id, currentOrdinal(deps.db, rs.id), ev.half as 1 | 2);
-            // The caster studio's opponent mark starts over with the half.
-            if (rs) liveHudStore.resetReach(ev.token, currentOrdinal(deps.db, rs.id), ev.half);
+            // The caster studio's opponent mark starts over with the half, and
+            // so does the live win chance: the LIVEHUD history, the points
+            // made during the half and its stored progress samples all belong
+            // to the previous attempt.
+            if (rs) {
+              const ord = currentOrdinal(deps.db, rs.id);
+              liveHudStore.resetReach(ev.token, ord, ev.half);
+              // Garnish: a failure here must not skip what follows.
+              try { resetLiveWin(rs.id, ord, ev.half); } catch (err) { console.error('[winlive] reset on half restart failed:', err); }
+              try { clearProgressSamples(deps.db, rs.id, ord, ev.half); } catch (err) { console.error('[winlive] clearing progress samples failed:', err); }
+            }
           }
           else if (ev.kind === 'balance_part') {
             balanceAssembler.part(ev.token, ev.half, ev.part, ev.items, Date.now(), ev.sent);
@@ -1437,6 +1449,18 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'round_end') {
             recordRoundEnd(deps.db, ev.token, ev);
+            // The half is over, so its LIVEHUD progress may now be stored
+            // (src/winLive/liveState.ts): never while it was live.
+            const pe = liveMatchRow(ev.token);
+            if (pe) {
+              // Garnish: the replay indexing and the broadcast below must
+              // still happen when this fails.
+              try {
+                const ord = ordinalForRoundEnd(deps.db, pe.id, ev.map);
+                writeProgressSamples(deps.db, pe.id, ord, ev.half,
+                  liveHudStore.history(ev.token, ord, ev.half), liveHudStore.halfStartedAt(ev.token, ord, ev.half));
+              } catch (err) { console.error('[winlive] storing progress samples failed:', err); }
+            }
             // A round just closed, so the plugin has finished its replay file.
             // Rounds are the unit here, unlike demos which are per map, so this
             // is the earliest honest moment to index one. excludeOpen skips the
@@ -1697,6 +1721,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     a2s: a2sInfo,
   });
 
+  /** A win points pass is still running (see the reaper below). */
+  let winPointsBusy = false;
   const reaper = setInterval(() => {
     // Before the orphan reaper, so a match is alerted on while still live.
     if (serverLostWatch) void serverLostWatch.tick();
@@ -1770,6 +1796,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       runMetricsPass(deps.db, deps.config.replayDir, { limit: reaperRoundLimit(deps.db) });
     } catch (err) {
       console.error('[metrics] pass failed', err);
+    }
+    // A finished match's win line during its halves: one match per minute,
+    // once its replays are on disk (src/winLive/finishedLine.ts). Never on a
+    // page view, and never in the way of recording a result.
+    // It yields between halves, and a tick that finds the last one still
+    // running skips.
+    if (!winPointsBusy) {
+      winPointsBusy = true;
+      void runWinPointsPass(deps.db, deps.config.replayDir, { limit: 1 })
+        .catch((err) => console.error('[win-points] pass failed', err))
+        .finally(() => { winPointsBusy = false; });
     }
   }, 60_000);
   reaper.unref();
@@ -2147,6 +2184,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(replayRoutes, {
     db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
   });
+  // The live win chance reads the half in progress from the same files.
+  configureLiveWin({ replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir });
   // Replay drills read rounds through the same local-then-R2 path as the
   // replay route above (finishedReplayBytes), so they take the same sources.
   await app.register(practiceRoutes, {

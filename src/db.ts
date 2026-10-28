@@ -983,6 +983,49 @@ CREATE TABLE IF NOT EXISTS match_demos (
 -- as discoverMatchDemos works, because the filename already carries the
 -- match link by construction and a lost datagram would otherwise leave a
 -- real file permanently unindexed.
+-- LIVEHUD progress through a half, one sample per 10 s of half time (t_ms
+-- on the plugin's RoundMs clock: game time since the half went live, which
+-- stops during a pause, the clock of replay frames and the data feeds),
+-- written once the half has ended (src/winLive/liveState.ts
+-- writeProgressSamples) so later retraining of the live win chance has true
+-- progress. Never written while a half is live: the samples are undelayed.
+-- tank is the tank flow %, NULL when the plugin did not know it.
+CREATE TABLE IF NOT EXISTS match_progress_samples (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  ordinal  INTEGER NOT NULL,
+  half     INTEGER NOT NULL,
+  t_ms     INTEGER NOT NULL,
+  prog     INTEGER NOT NULL,
+  tank     INTEGER,
+  PRIMARY KEY (match_id, ordinal, half, t_ms)
+);
+-- A finished match's win line during its halves (src/winLive/finishedLine.ts):
+-- one row per 5 s of each half with a replay, plus the moments, computed once
+-- after the match ends (never on a page view). p_a is team A's chance on the
+-- plain line, p_a_form with team form (win_chance_form). model_version is
+-- winPointsVersion(); a row with another one is ignored by matchWinLine.
+CREATE TABLE IF NOT EXISTS match_win_points (
+  match_id      INTEGER NOT NULL REFERENCES matches(id),
+  ordinal       INTEGER NOT NULL,
+  half          INTEGER NOT NULL,
+  t_ms          INTEGER NOT NULL,
+  p_a           REAL NOT NULL,
+  p_a_form      REAL NOT NULL,
+  moment        TEXT,
+  model_version TEXT NOT NULL,
+  PRIMARY KEY (match_id, ordinal, half, t_ms)
+);
+-- That a match's win points were computed on a version, even when it got none
+-- (no replays, or a score that carries no line), so the reaper does not pick
+-- it again until the version changes. halves_missing counts the halves whose
+-- replay was not there (a partial line, which scripts/win-backfill.ts redoes).
+CREATE TABLE IF NOT EXISTS match_win_point_runs (
+  match_id       INTEGER PRIMARY KEY REFERENCES matches(id),
+  model_version  TEXT NOT NULL,
+  points         INTEGER NOT NULL,
+  halves_missing INTEGER NOT NULL DEFAULT 0,
+  computed_at    TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS match_replays (
   match_id  INTEGER NOT NULL REFERENCES matches(id),
   ordinal   INTEGER NOT NULL,
@@ -1661,6 +1704,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   practice_leasing: 'admins',
   practice_max_leases: '2',
   sidegames_enabled: '0',
+  // Team form on the win chance line (src/winForm.ts). Off: the line is the
+  // map-history-only one; admins see form on the match and Live pages anyway.
+  win_chance_form: '0',
+  // The win chance moving during a half (src/winLive/liveState.ts). Off: it
+  // moves only at half ends; admins see it on the Live page anyway.
+  win_chance_live: '0',
   sidegames_min_players: '4',
   // Pick a match's server by the players' measured ping (src/serverPick.ts).
   // Off by default: with it off, the admin-set pick order alone decides.

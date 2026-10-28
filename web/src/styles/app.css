@@ -4383,6 +4383,18 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .winchart__note { fill: var(--text); font-family: var(--font-label); font-size: 12px; }
 .winchart__cross { stroke: var(--border-strong); stroke-width: 1; }
 .winchart__hit { fill: transparent; cursor: crosshair; }
+/* With points during halves (win_chance_live): a faint rule between a map's
+ * halves, the biggest swing's stretch of line in the swing's gold, and the
+ * moments as small neutral icons above the plot (the glyph tells them apart,
+ * the title names them), never in a team color. */
+.winchart__halfsep { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
+.winchart__swing { fill: none; stroke: var(--rating); stroke-width: 3.5; stroke-linejoin: round; stroke-linecap: round; }
+.winchart__moment { cursor: pointer; outline: none; }
+.winchart__moment circle { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1; }
+.winchart__moment:focus-visible circle { stroke: var(--text-bright); stroke-width: 2; }
+.winchart__moment--tank_spawn circle { stroke: var(--rating); }
+.winchart__moment text { fill: var(--text-bright); font-family: var(--font-label); font-size: 10px; pointer-events: none; }
+.winchart__momentguide { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 1 3; pointer-events: none; }
 .winchart__tip {
   position: absolute; transform: translateX(-50%); pointer-events: none; z-index: 2;
   min-width: 200px; max-width: 240px; padding: var(--sp-2) var(--sp-3);
