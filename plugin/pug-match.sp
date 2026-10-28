@@ -27,7 +27,7 @@ native int Score_GetTeamCampaignScore(int team);
 native int GetTankPercent();
 native int GetWitchPercent();
 
-#define PLUGIN_VERSION "0.3.37"
+#define PLUGIN_VERSION "0.3.38"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -456,6 +456,7 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_abort", Cmd_Abort, "sm_pug_abort <token>");
 	RegServerCmd("sm_pug_dump", Cmd_Dump, "sm_pug_dump <token> [nonce]");
 	RegServerCmd("sm_pug_status", Cmd_Status, "sm_pug_status - current plugin state, for debugging");
+	RegServerCmd("sm_pug_campaigncheck", Cmd_CampaignCheck, "sm_pug_campaigncheck <mapA> <mapB> - do two maps count as one campaign, and by which rule");
 	RegAdminCmd("sm_pug_los", Cmd_Los, ADMFLAG_ROOT, "sm_pug_los <viewer> <target> - line of sight per point, bots allowed; for testing");
 	RegAdminCmd("sm_pug_los_bench", Cmd_LosBench, ADMFLAG_ROOT, "sm_pug_los_bench <count> - time RplCanSee between the first survivor and infected found");
 	RegServerCmd("sm_pug_setid", Cmd_SetId, "sm_pug_setid <token> <matchid> - backend assigns the match id for a self-started match");
@@ -2723,10 +2724,28 @@ public Action Timer_EndKick(Handle timer)
 	return Plugin_Continue;
 }
 
-/** Two map names belong to the same campaign when they share the prefix
- *  before the first digit: l4d_vs_farm01_hilltop and l4d_vs_farm04_barn are
- *  both "l4d_vs_farm". Good enough for every stock campaign; a custom
- *  campaign whose maps are not named that way ends a match at each map.
+/** Two maps belong to the same campaign when one mission file lists both in
+ *  its versus chapters. That is the game's own definition: a changelevel
+ *  inside a mission is the campaign going on, a map from another mission is
+ *  a new campaign. Read through the game filesystem like Gg_LoadMission, so
+ *  loose mission files and VPK ones count alike, and a mission chain (our
+ *  garage.txt, Passifice's thepassing.txt) is one campaign because its file
+ *  lists every map it chains.
+ *
+ *  The name rule below is the fallback for maps no mission file lists (the
+ *  read failing, or a map loaded by name outside any campaign). Until
+ *  2026-10-28 it was the only rule, and it ended a self-started match the
+ *  moment map 2 loaded on any campaign whose names it could not pair:
+ *    one4nine        l4d_149_1 .. l4d_149_5   (no letters before the digits)
+ *    Dead Before Dawn l4d_dbd_citylights, l4d_dbd_anna_is_gone (no digits)
+ *    Passifice       c6m2_bedlam -> l4d_river01_docks (two name schemes)
+ *    mirror Crash Center mc1m3_mall -> l4d_mgarage01_alleys
+ *  Matches 757, 758, 800 and 873 (one4nine) all died this way after map 1.
+ *  Every stock, L4D2 and mirror campaign installed on 2026-10-28 was swept
+ *  with the fallback rule; those four were the only failures.
+ *
+ *  The fallback: same prefix before the first digit, l4d_vs_farm01_hilltop
+ *  and l4d_vs_farm04_barn are both "l4d_vs_farm".
  *
  *  The leading "l4d_" is skipped first. Its '4' is a digit that sits before
  *  the campaign word, and until 2026-09-13 the first-digit rule stopped there
@@ -2746,6 +2765,41 @@ public Action Timer_EndKick(Handle timer)
  *    l4d_vs_hospital03_sewers vs l4d_vs_hospital04_interior   same
  *    l4d_vs_hospital05_rooftop vs l4d_vs_smalltown01_caves    different */
 bool SameCampaign(const char[] mapA, const char[] mapB)
+{
+	if (StrEqual(mapA, mapB, false)) return true;
+	// Crash Center stays a name rule as well: the chain lives in our own
+	// garage.txt inside the Dead Center VPK, and a box without that VPK would
+	// otherwise read Hotel and Alleys as two campaigns again (match 698).
+	if (IsCrashCenterMap(mapA) && IsCrashCenterMap(mapB)) return true;
+	int byMission = Gg_MissionHoldsBoth(mapA, mapB);
+	if (byMission >= 0) return byMission == 1;
+	return SameCampaignByName(mapA, mapB);
+}
+
+/** Server console: what SameCampaign says about two maps and which rule
+ *  decided it. For checking a new custom campaign before a night, since a
+ *  wrong answer here ends a self-started match after one map. */
+public Action Cmd_CampaignCheck(int args)
+{
+	if (args < 2)
+	{
+		PrintToServer("usage: sm_pug_campaigncheck <mapA> <mapB>");
+		return Plugin_Handled;
+	}
+	char a[64], b[64];
+	GetCmdArg(1, a, sizeof(a));
+	GetCmdArg(2, b, sizeof(b));
+	int byMission = Gg_MissionHoldsBoth(a, b);
+	bool byName = SameCampaignByName(a, b);
+	PrintToServer("CAMPAIGNCHECK %s %s same=%d mission=%s name=%d",
+		a, b, SameCampaign(a, b) ? 1 : 0,
+		byMission == 1 ? "same" : (byMission == 0 ? "different" : "unknown"), byName ? 1 : 0);
+	return Plugin_Handled;
+}
+
+/** The pre-2026-10-28 rule, now the fallback for maps no mission file lists.
+ *  See the comment above SameCampaign. */
+bool SameCampaignByName(const char[] mapA, const char[] mapB)
 {
 	// Crash Center: our garage.txt chains Dead Center's c1m maps into Crash
 	// Course's l4d_garage01_alleys, so the game plays them as one mission.

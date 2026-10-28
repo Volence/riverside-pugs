@@ -211,6 +211,48 @@ int Gg_ReadVersusChapters(const char[] path, char maps[GG_MAX_MISSION_MAPS][64],
 	return n;
 }
 
+/** For SameCampaign (pug-match.sp): 1 when one mission file's versus list
+ *  holds both maps, 0 when the files were read and no list holds both, -1
+ *  when neither map is in any list (or missions/ cannot be listed), which
+ *  hands the decision to the name rule there. A full scan per call, like
+ *  Gg_LoadMission: it runs on a map start and on a go-live after a finished
+ *  match, never per tick. */
+int Gg_MissionHoldsBoth(const char[] mapA, const char[] mapB)
+{
+	DirectoryListing dir = OpenDirectory("missions", true);
+	if (dir == null) return -1;
+
+	bool seenEither = false;
+	char file[PLATFORM_MAX_PATH], path[PLATFORM_MAX_PATH];
+	FileType type;
+	while (dir.GetNext(file, sizeof(file), type))
+	{
+		if (type != FileType_File) continue;
+		int len = strlen(file);
+		if (len < 5 || !StrEqual(file[len - 4], ".txt", false)) continue;
+		if (StrEqual(file, "credits.txt", false)) continue;
+		Format(path, sizeof(path), "missions/%s", file);
+
+		char maps[GG_MAX_MISSION_MAPS][64];
+		float mods[GG_MAX_MISSION_MAPS];
+		int n = Gg_ReadVersusChapters(path, maps, mods);
+		bool hasA = false, hasB = false;
+		for (int i = 0; i < n; i++)
+		{
+			if (StrEqual(maps[i], mapA, false)) hasA = true;
+			if (StrEqual(maps[i], mapB, false)) hasB = true;
+		}
+		if (hasA && hasB)
+		{
+			delete dir;
+			return 1;
+		}
+		if (hasA || hasB) seenEither = true;
+	}
+	delete dir;
+	return seenEither ? 0 : -1;
+}
+
 // ---------- the decision ----------
 
 /** Index of the last map this match scores, in g_sGgMaps; -1 if unknown. */
