@@ -15,6 +15,8 @@ import { buildProgressMap } from '../../src/winLive/progressMap.js';
 import { configureLiveWin, liveSnapshot, MAX_DECODE_BYTES } from '../../src/winLive/liveState.js';
 import { pointsVersion, winPointsVersion } from '../../src/winLive/modelVersion.js';
 import { CALIBRATION } from '../../src/winProb.js';
+import { comebackFrom } from '../../src/discord/sync.js';
+import { setSetting } from '../../src/settings.js';
 import {
   computeFinishedPoints, finishedHalfSnapshots, pendingWinPointMatches, runWinPointsPass, writeFinishedPoints, type FinishedPoint,
 } from '../../src/winLive/finishedLine.js';
@@ -121,9 +123,27 @@ describe('matchWinLine with stored points', () => {
     // Map 2 half 1 is B's, starting from 640 to 100.
     expect(l.points[5]).toMatchObject({ pA: 0.35, moment: 'saferoom', survTeam: 'b', map: 'm2', scoreA: 640, scoreB: 100 });
     expect(l.points[1]!.moment).toBeUndefined();
-    // The swing and the winner's low still name the same half-end points.
-    expect(l.points[l.turning!]).toEqual(plain.points[plain.turning!]);
-    expect(l.points[l.winnerLow!.index]).toEqual(plain.points[plain.winnerLow!.index]);
+  });
+
+  it('takes the swing and the winner\'s low over the points during halves too', () => {
+    const id = seed(FOUR);
+    // B wins: a moment where A looked all but home is B's low.
+    writeFinishedPoints(db, id, [point(0, 1, 0, 0.5), point(0, 1, 5000, 0.55), point(0, 1, 20_000, 0.97, 'tank_death')]);
+    const l = matchWinLine(db, id, model, { live: true })!;
+    expect(l.winnerLow).toEqual({ index: 3, p: expect.closeTo(0.03, 9) });
+    expect(l.turningFrom).toBeDefined();
+    expect(l.points[l.turning!]!.pA - l.points[l.turningFrom!]!.pA).not.toBe(0);
+    // A line without points during halves carries no turningFrom.
+    expect(matchWinLine(db, id, model)!.turningFrom).toBeUndefined();
+  });
+
+  it('gives the Discord comeback line the low during a half only once win_chance_live is on', () => {
+    const id = seed(FOUR);
+    writeFinishedPoints(db, id, [point(0, 1, 0, 0.5), point(0, 1, 20_000, 0.97, 'tank_death')]);
+    const halfEndLow = matchWinLine(db, id)!.winnerLow!.p;
+    expect(comebackFrom(db, id)).toBe(halfEndLow < 0.25 ? halfEndLow : null);
+    setSetting(db, 'win_chance_live', '1');
+    expect(comebackFrom(db, id)).toBeCloseTo(0.03, 9);
   });
 
   it('reads the form price when form is on', () => {

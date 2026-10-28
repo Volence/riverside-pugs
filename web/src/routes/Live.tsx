@@ -191,7 +191,7 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
  * page (src/winProb.ts): the scoreboard and the maps still to play, never
  * the ratings.
  */
-function LiveOdds({ line }: { line: WinLine }) {
+export function LiveOdds({ line }: { line: WinLine }) {
   const p = line.points[line.points.length - 1].pA;
   const pctA = Math.round(p * 1000) / 10;
   return (

@@ -412,12 +412,20 @@ export interface WinPoint {
   scoreA: number; scoreB: number;
   /** Team A's chance of winning after this half. */
   pA: number;
+  /** Set on a point during a half (win_chance_live): ms into the half. The
+   *  score is then the one the half started from. Unset on half-end points. */
+  tMs?: number;
+  /** What just happened, on a point during a half. */
+  moment?: 'tank_spawn' | 'tank_death' | 'wipe' | 'saferoom';
 }
 
 export interface WinLine {
   points: WinPoint[];
-  /** Index into points of the biggest swing, null when nothing moved. */
+  /** Index into points of the biggest swing's end, null when nothing moved. */
   turning: number | null;
+  /** Where that swing starts, sent only on a line with points during halves;
+   *  absent means the point before `turning`. */
+  turningFrom?: number;
   /** The winner's lowest chance and where; null for a draw. */
   winnerLow: { index: number; p: number } | null;
   /** How many halves of history the odds come from. */

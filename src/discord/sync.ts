@@ -28,6 +28,7 @@ const ABORT_LINE_TTL_MIN = 5;
 import type { BotTransport, MessagePayload } from './transport.js';
 import { matchWinLine } from '../winProb.js';
 import { formOption } from '../winForm.js';
+import { winLiveOption } from '../winLive/liveState.js';
 
 /** Team voice channels, plugged in by voice.ts. Kept as a narrow hook so this
  *  file does not depend on how channels are made. */
@@ -638,11 +639,14 @@ export class DiscordSync {
 }
 
 /** The winner's lowest win chance along the way when it was a real comeback
- *  (under 25%), else null. Never lets a fault in the odds stop a result card. */
-function comebackFrom(db: DB, matchId: number): number | null {
+ *  (under 25%), else null. Never lets a fault in the odds stop a result card.
+ *  Exported for its test. */
+export function comebackFrom(db: DB, matchId: number): number | null {
   try {
-    // Team form only once win_chance_form is on: the card is public.
-    const low = matchWinLine(db, matchId, undefined, { form: formOption(db) })?.winnerLow;
+    // Team form only once win_chance_form is on, and the low during a half
+    // only once win_chance_live is: the card is public, so neither takes the
+    // admin preview.
+    const low = matchWinLine(db, matchId, undefined, { form: formOption(db), live: winLiveOption(db) })?.winnerLow;
     return low && low.p < 0.25 ? low.p : null;
   } catch {
     return null;
