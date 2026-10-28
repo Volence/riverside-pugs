@@ -43,6 +43,7 @@ export function PeopleSearch() {
                     <a class="ppl-name" href={fileUrl(p.steamid)}>{p.name}</a>
                     {p.isAdmin && <span class="admin-tag">admin</span>}
                     {p.isMod && <span class="admin-tag">mod</span>}
+                    {p.steamName != null && <div class="muted">Steam: {p.steamName || '(blank)'}</div>}
                     <div class="mono muted">{p.steamid}</div>
                   </td>
                   <td><span class={`admin-status admin-status--${p.status}`}>{p.status}</span></td>

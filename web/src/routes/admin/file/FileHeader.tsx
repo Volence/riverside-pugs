@@ -29,6 +29,7 @@ export function FileHeader({ d }: { d: PlayerFileData }) {
           <span class={`admin-status admin-status--${h.status}`}>{h.status}</span>
         </h2>
         <p class="file-head__sub">
+          {h.nameOverridden && h.steamName !== undefined && <>Steam name <strong>{h.steamName || '(blank)'}</strong>{' · '}</>}
           <span class="mono">{h.steamid}</span>
           {' · '}<a href={`/player/${h.steamid}`}>public profile</a>
         </p>
