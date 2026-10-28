@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db.js';
 import { ENTITY_KIND, STATE, type EntitySample, type Frame, type PlayerSample } from '../../src/replayFormat.js';
 import { unpausedFrames } from '../../src/integrity/round.js';
-import { feedProgressPoints, halfSnapshots, progressTimeline, snapshotAt } from '../../src/winLive/snapshot.js';
+import { feedProgressPoints, halfSnapshots, progressStep, progressTimeline, snapshotAt } from '../../src/winLive/snapshot.js';
 
 const ALIVE = STATE.PRESENT | STATE.ALIVE;
 function surv(slot: number, state: number, health: number, temp = 0): PlayerSample {
@@ -24,6 +24,19 @@ function run(from: number, to: number, make: (t: number) => Frame): Frame[] {
   return out;
 }
 const standing = [surv(0, ALIVE, 60, 20), surv(1, ALIVE, 100)];
+
+describe('progressStep', () => {
+  const at = progressStep([{ tMs: 0, prog: 0 }, { tMs: 10000, prog: 30 }, { tMs: 20000, prog: 20 }, { tMs: 30000, prog: 50 }]);
+  it('steps with the running max and never looks ahead', () => {
+    expect(at(9999)).toBe(0);
+    expect(at(15000)).toBe(30);
+    expect(at(29999)).toBe(30);
+    expect(at(30000)).toBe(50);
+  });
+  it('is null before the first sample', () => {
+    expect(progressStep([{ tMs: 1000, prog: 5 }])(500)).toBeNull();
+  });
+});
 
 describe('progressTimeline', () => {
   const at = progressTimeline([{ tMs: 0, prog: 0 }, { tMs: 10000, prog: 30 }, { tMs: 20000, prog: 20 }, { tMs: 30000, prog: 50 }]);
