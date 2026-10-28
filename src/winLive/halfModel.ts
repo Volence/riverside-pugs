@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { BIN, type WinModel } from '../winProb.js';
+import { BIN, halfBase, type WinModel } from '../winProb.js';
 import { tilt } from '../winForm.js';
 import type { Snapshot } from './snapshot.js';
 
@@ -196,14 +196,16 @@ function addReweighted(
 
 /**
  * The final-score distribution of a half from its snapshot `snap` (null: no
- * live state, the base distribution exactly). `theta` is the team-form tilt
- * the half-end line uses for this half (0 without form), `half` whether the
- * team is surviving first or second on the map.
+ * live state, the base distribution exactly). The base is the half's own
+ * distribution (halfBase: the per-half one when the model was built with
+ * it), `theta` the team-form tilt the half-end line uses for this half (0
+ * without form), `half` whether the team is surviving first or second on
+ * the map.
  */
 export function predictHalf(
   model: WinModel, params: HalfModelParams, map: string, theta: number, snap: Snapshot | null, half: 1 | 2,
 ): Float64Array {
-  const base = tilt(model.dist(map), theta);
+  const base = tilt(halfBase(model, map, half), theta);
   if (!snap) return base;
   const scale = model.scale(map);
   const progs = progressCandidates(params, snap);

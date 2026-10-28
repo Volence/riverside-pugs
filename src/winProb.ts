@@ -50,7 +50,9 @@ export const CALIBRATION = 1.15;
 /** A model older than this is rebuilt on the next request. */
 const MAX_AGE_MS = 30 * 60_000;
 
-export interface HalfRow { map: string; score: number; made: boolean | null }
+/** One half of history. `half` (1 or 2, which survivor turn on the map it
+ *  was) is only read by the per-half base (BuildOpts.perHalf). */
+export interface HalfRow { map: string; score: number; made: boolean | null; half?: 1 | 2 }
 
 export interface WinModel {
   builtAt: number;
@@ -61,6 +63,21 @@ export interface WinModel {
    *  pool's), the unit the pooled shapes and the live half model use. A map
    *  with no history gets the pooled value. */
   scale(map: string): number;
+  /** The map's distribution for one survivor turn (1: the team surviving
+   *  first on the map), only on a model built with BuildOpts.perHalf. The
+   *  live line uses it (src/winLive); the public line never does. */
+  distHalf?(map: string, half: 1 | 2): Float64Array;
+}
+
+export interface BuildOpts {
+  /** Also build distHalf. dist and scale come out the same either way. */
+  perHalf?: boolean;
+}
+
+/** The base distribution of a half: the per-half one when the model has
+ *  it, else the map's. */
+export function halfBase(model: WinModel, map: string, half: 1 | 2): Float64Array {
+  return model.distHalf ? model.distHalf(map, half) : model.dist(map);
 }
 
 function median(xs: number[]): number {
@@ -81,7 +98,7 @@ function histogram(scores: Iterable<number>): Float64Array {
 }
 
 /** Build the model from raw halves. Pure, so tests can feed it directly. */
-export function buildWinModel(rows: HalfRow[], now = Date.now()): WinModel {
+export function buildWinModel(rows: HalfRow[], now = Date.now(), opts: BuildOpts = {}): WinModel {
   const byMap = new Map<string, HalfRow[]>();
   for (const r of rows) {
     const list = byMap.get(r.map);
@@ -139,7 +156,79 @@ export function buildWinModel(rows: HalfRow[], now = Date.now()): WinModel {
     cache.set(map, out);
     return out;
   };
-  return { builtAt: now, halves: rows.length, dist, scale: (map) => scale.get(map) ?? poolScale };
+  const model: WinModel = { builtAt: now, halves: rows.length, dist, scale: (map) => scale.get(map) ?? poolScale };
+  if (opts.perHalf) model.distHalf = perHalfDist(rows, byMap, scale, poolScale);
+  return model;
+}
+
+/**
+ * The per-half distributions (BuildOpts.perHalf). On the 2026-10-28 data the
+ * team surviving first on a map made the saferoom 34% of the time and the
+ * one surviving second 24%, which one distribution per map cannot show.
+ *
+ * Built in the same spirit as dist: a map's own half-h histogram, shrunk by
+ * SHRINK_ROUNDS toward a prior that is itself the map's both-halves
+ * histogram shrunk toward a pooled per-half shape. The pooled shape is
+ * dist's pooled shape made from half-h rows only, with a half-h make rate
+ * shrunk toward the pool's half-h rate. So a busy map is mostly its own
+ * half-h history, a thin map borrows the half difference from the pool, and
+ * a map never played is the pooled per-half shape outright. Rows without a
+ * half count for the map's both-halves histogram only.
+ *
+ * It lost the 2026-10-28 backtest (scripts/win-backtest.ts --part live):
+ * pooled half-end Brier 0.1761 against 0.1720 for dist, and it opened team A
+ * at 63% on the matches A won 49% of. From map 2 on the leader survives
+ * first, so most of the half 1 advantage is the better team going first,
+ * which the line already prices through the score. Kept for that record;
+ * nothing builds it outside the backtest.
+ */
+function perHalfDist(
+  rows: HalfRow[], byMap: Map<string, HalfRow[]>, scale: Map<string, number>, poolScale: number,
+): (map: string, half: 1 | 2) => Float64Array {
+  const known = rows.filter((r) => r.made !== null);
+  const allMade = known.filter((r) => r.made).length;
+  const pooled = ([1, 2] as const).map((h) => {
+    // With no row for this half, the half falls back to every known row, so
+    // both halves come out the same: no information, no difference.
+    const own = known.filter((r) => r.half === h);
+    const k = own.length ? own : known;
+    const made = k.filter((r) => r.made).length;
+    const rate = k.length ? made / k.length : known.length ? allMade / known.length : 0.4;
+    const normMade: number[] = [];
+    const normWiped: number[] = [];
+    for (const r of k) (r.made ? normMade : normWiped).push(r.score / (scale.get(r.map) ?? poolScale));
+    return { rows: own.length ? h : null, rate, normMade, normWiped };
+  });
+  const cache = new Map<string, Float64Array>();
+  return (map, half) => {
+    const key = `${half}\u0000${map}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const pool = pooled[half - 1];
+    const s = scale.get(map) ?? poolScale;
+    const all = byMap.get(map) ?? [];
+    const own = pool.rows === null ? all : all.filter((r) => r.half === half);
+    const ownKnown = own.filter((r) => r.made !== null);
+    const p = (ownKnown.filter((r) => r.made).length + pool.rate * RATE_PRIOR) / (ownKnown.length + RATE_PRIOR);
+    const made = histogram(pool.normMade.map((x) => x * s));
+    const wiped = histogram(pool.normWiped.map((x) => x * s));
+    const allHist = histogram(all.map((r) => r.score));
+    const ownHist = histogram(own.map((r) => r.score));
+    const w = all.length / (all.length + SHRINK_ROUNDS);
+    const wh = own.length / (own.length + SHRINK_ROUNDS);
+    const out = new Float64Array(NB);
+    if (pool.normMade.length + pool.normWiped.length + all.length === 0) out[0] = 1;
+    else {
+      for (let i = 0; i < NB; i++) {
+        const shape = pool.normMade.length && pool.normWiped.length
+          ? p * made[i] + (1 - p) * wiped[i]
+          : pool.normMade.length ? made[i] : wiped[i];
+        out[i] = wh * ownHist[i] + (1 - wh) * (w * allHist[i] + (1 - w) * shape);
+      }
+    }
+    cache.set(key, out);
+    return out;
+  };
 }
 
 function convolve(a: Float64Array, b: Float64Array): Float64Array {
@@ -152,9 +241,10 @@ function convolve(a: Float64Array, b: Float64Array): Float64Array {
   return out;
 }
 
-function remaining(model: WinModel, maps: string[], theta = 0): Float64Array {
+/** The distribution of the sum of these halves. */
+function remaining(dists: Float64Array[]): Float64Array {
   let d: Float64Array = new Float64Array([1]);
-  for (const m of maps) d = convolve(d, tilt(model.dist(m), theta));
+  for (const x of dists) d = convolve(d, x);
   return d;
 }
 
@@ -170,9 +260,23 @@ export interface WinChanceOpts { tiltA?: number; tiltB?: number; calibration?: n
  * once nothing is left to play.
  */
 export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: string[], opts: WinChanceOpts = {}): number {
-  if (mapsA.length === 0 && mapsB.length === 0) return gap > 0 ? 1 : gap < 0 ? 0 : 0.5;
-  const ra = remaining(model, mapsA, opts.tiltA);
-  const rb = remaining(model, mapsB, opts.tiltB);
+  return winChanceDists(
+    gap,
+    mapsA.map((m) => tilt(model.dist(m), opts.tiltA ?? 0)),
+    mapsB.map((m) => tilt(model.dist(m), opts.tiltB ?? 0)),
+    opts.calibration,
+  );
+}
+
+/**
+ * winChance from the score distributions of each team's halves still to
+ * play, for callers that price a half by something other than its map's
+ * history (the per-half base, a half in progress). Same arithmetic.
+ */
+export function winChanceDists(gap: number, distsA: Float64Array[], distsB: Float64Array[], calibration = CALIBRATION): number {
+  if (distsA.length === 0 && distsB.length === 0) return gap > 0 ? 1 : gap < 0 ? 0 : 0.5;
+  const ra = remaining(distsA);
+  const rb = remaining(distsB);
   // P(gap + RA*BIN - RB*BIN > 0), summed without building the difference
   // distribution. Each bucket stands for scores spread evenly across its
   // width, so for each RA bucket the RB buckets wholly below team A's total
@@ -192,7 +296,7 @@ export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: 
     win += ra[i] * (cumB[j0] + rb[j0] * (limit - j0 + 0.5));
   }
   const raw = Math.min(1 - 1e-9, Math.max(1e-9, win));
-  const z = (opts.calibration ?? CALIBRATION) * Math.log(raw / (1 - raw));
+  const z = calibration * Math.log(raw / (1 - raw));
   return 1 / (1 + Math.exp(-z));
 }
 

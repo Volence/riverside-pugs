@@ -3,8 +3,8 @@
 // Usage: npx tsx scripts/win-backtest.ts --db <copy of prod pug.db> --part form [--write]
 //        npx tsx scripts/win-backtest.ts --db <copy> --part live [--halves <halves.jsonl, default next to the db>] [--write]
 //
-// The split is the one from 2026-10-10: completed, unvoided PUGs ordered by
-// ended_at, the oldest 70% train and the newest 30% test. The base model
+// --part form uses the split from 2026-10-10: completed, unvoided PUGs
+// ordered by ended_at, the oldest 70% train and the newest 30% test. The base model
 // (buildWinModel) is built from train halves only, so test matches are
 // priced from history they could have had.
 //
@@ -37,18 +37,11 @@
 // from the fitting part only. SI damage stays in only if it lowers Brier on
 // that newest 30% and passes the reliability gate there.
 //
-// --part live fits the live half model (src/winLive/halfModel.ts) on the
-// train matches' half snapshots (scripts/win-dataset.ts writes them, one
-// half per line). It reads only train halves: test lines are skipped on
-// their match id before anything else is looked at. Inside train it holds
-// out the newest 20% of matches as a sanity check (class and bin log loss
-// against the base distribution, mean predicted against actual score and
-// class shares at fixed times into the half), then refits on all of train
-// for the params it prints, and with --write saves them to
-// src/winLive/halfModel.fitted.json. The full validation against the test
-// 30% is separate work on top.
+// --part live validates the live half model (src/winLive/halfModel.ts) on
+// time-ordered folds and writes its params only if it passes; see
+// scripts/win-backtest-live.ts for the folds, the checkpoints and the gate.
 //
-// --write saves the winner to src/winForm.fitted.json with "gate": "pass"
+// --part form --write saves the winner to src/winForm.fitted.json with "gate": "pass"
 // when form has lower Brier than today's model on test AND passes the gate;
 // otherwise it saves it with "gate": "fail", the Brier numbers and the bins
 // that missed, as the record of why the setting stays off (the runtime loads
@@ -63,6 +56,7 @@ import {
 } from '../src/winProb.js';
 import { halfKey, teamForm, type FormParams } from '../src/winForm.js';
 import { runLive } from './win-backtest-live.js';
+import { bootstrapDiff, f4, logLoss, report } from './win-backtest-score.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -81,10 +75,6 @@ const db: DB = new Database(dbPath, { readonly: true });
 
 /** A map needs this many train halves with feeds for its own SI damage median. */
 const SI_MIN_HALVES = 10;
-/** Reliability gate: bins with at least this many points ... */
-const GATE_MIN_N = 30;
-/** ... must be won within this many percentage points of their mean call. */
-const GATE_MAX_POINTS = 5;
 const TRAIN_SHARE = 0.7;
 
 // ---- the split -------------------------------------------------------------
@@ -93,6 +83,12 @@ const matches = db.prepare(
   `SELECT id, team_a_score AS a, team_b_score AS b FROM matches m
    WHERE ${completedPug('m')} AND m.voided_at IS NULL ORDER BY m.ended_at, m.id`,
 ).all() as { id: number; a: number; b: number }[];
+
+if (part === 'live') {
+  await runLive({ db, dbPath, write, matches, halvesPath: arg('halves') ?? resolve(dirname(dbPath), 'halves.jsonl') });
+  process.exit(0);
+}
+
 const cut = Math.round(matches.length * TRAIN_SHARE);
 const trainIds = new Set(matches.slice(0, cut).map((m) => m.id));
 
@@ -106,15 +102,6 @@ const halfRows = (db.prepare(
 const trainHalves: HalfRow[] = halfRows.filter((r) => trainIds.has(r.matchId))
   .map((r) => ({ map: r.map, score: r.score, made: r.alive === null ? null : r.alive > 0 }));
 const model: WinModel = buildWinModel(trainHalves);
-
-if (part === 'live') {
-  await runLive({
-    dbPath, model, trainIds, write,
-    matchOrder: matches.map((m) => m.id),
-    halvesPath: arg('halves') ?? resolve(dirname(dbPath), 'halves.jsonl'),
-  });
-  process.exit(0);
-}
 
 // ---- SI damage per half, normalised to the map's train median ----------------
 
@@ -196,14 +183,6 @@ function rawChances(pts: Point[], params: FormParams | null, useSi: boolean): nu
   });
 }
 const calibrate = (raw: number[], c: number) => raw.map((p) => sigmoid(c * logitOf(p)));
-function logLoss(ps: number[], pts: Point[]): number {
-  let s = 0;
-  ps.forEach((p, i) => { const q = Math.min(1 - 1e-12, Math.max(1e-12, p)); s -= pts[i].y ? Math.log(q) : Math.log(1 - q); });
-  return s / ps.length;
-}
-function brier(ps: number[], pts: Point[]): number {
-  return ps.reduce((s, p, i) => s + (p - pts[i].y) ** 2, 0) / ps.length;
-}
 /** The temperature with the lowest log loss: golden section on 0.3..3. */
 function fitCalibration(raw: number[], pts: Point[]): number {
   let lo = 0.3; let hi = 3;
@@ -254,67 +233,6 @@ function fit(pts: Point[], start: FormParams, grid: Partial<Record<keyof FormPar
     if (!moved && round > 1) break;
   }
   return best;
-}
-
-interface Bin { label: string; n: number; called: number; won: number }
-function bins(ps: number[], pts: Point[]): Bin[] {
-  const out: Bin[] = [];
-  for (let b = 0; b < 10; b++) {
-    const idx = ps.map((p, i) => [p, i] as const).filter(([p]) => (b === 9 ? p >= 0.9 : p >= b / 10 && p < (b + 1) / 10));
-    const n = idx.length;
-    out.push({
-      label: `${b * 10}-${b * 10 + 10}%`, n,
-      called: n ? idx.reduce((s, [p]) => s + p, 0) / n : NaN,
-      won: n ? idx.reduce((s, [, i]) => s + pts[i].y, 0) / n : NaN,
-    });
-  }
-  return out;
-}
-function reliability(bs: Bin[]): string {
-  const rows: string[] = ['| Called | n | Called mean | Won |', '|---|---|---|---|'];
-  for (const b of bs) {
-    rows.push(b.n === 0 ? `| ${b.label} | 0 | | |`
-      : `| ${b.label} | ${b.n} | ${(b.called * 100).toFixed(1)}% | ${(b.won * 100).toFixed(1)}% |`);
-  }
-  return rows.join('\n');
-}
-/** The bins that miss the reliability gate, described; empty is a pass. */
-function gateMisses(bs: Bin[]): string[] {
-  return bs.filter((b) => b.n >= GATE_MIN_N && Math.abs(b.called - b.won) * 100 > GATE_MAX_POINTS)
-    .map((b) => `${b.label} (n ${b.n}): called ${(b.called * 100).toFixed(1)}%, won ${(b.won * 100).toFixed(1)}%`);
-}
-
-/** 95% interval of the Brier difference (a minus b), resampling whole
- *  matches so a match's points stay together. Seeded, so reruns agree. */
-function bootstrapDiff(a: number[], b: number[], pts: Point[]): [number, number] {
-  const byMatch = new Map<number, number[]>();
-  pts.forEach((pt, i) => { const l = byMatch.get(pt.matchId); if (l) l.push(i); else byMatch.set(pt.matchId, [i]); });
-  const groups = [...byMatch.values()];
-  let seed = 12345;
-  const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
-  const diffs: number[] = [];
-  for (let r = 0; r < 2000; r++) {
-    let d = 0; let n = 0;
-    for (let g = 0; g < groups.length; g++) {
-      for (const i of groups[Math.floor(rand() * groups.length)]) { d += (a[i] - pts[i].y) ** 2 - (b[i] - pts[i].y) ** 2; n += 1; }
-    }
-    diffs.push(d / n);
-  }
-  diffs.sort((x, y) => x - y);
-  return [diffs[50], diffs[1949]];
-}
-
-const f4 = (x: number) => x.toFixed(5);
-interface Scored { brier: number; logLoss: number; gate: boolean; misses: string[] }
-function report(label: string, ps: number[], pts: Point[]): Scored {
-  const b = brier(ps, pts);
-  const l = logLoss(ps, pts);
-  const bs = bins(ps, pts);
-  const misses = gateMisses(bs);
-  const gate = misses.length === 0;
-  console.log(`\n### ${label}\n\nBrier ${f4(b)}, log loss ${f4(l)}, points ${pts.length}\n\n${reliability(bs)}`);
-  console.log(`\nGate ${gate ? 'PASS' : 'FAIL'} (bins with n >= ${GATE_MIN_N} within ${GATE_MAX_POINTS} points)${gate ? '' : `: ${misses.join('; ')}`}`);
-  return { brier: b, logLoss: l, gate, misses };
 }
 
 // ---- run ---------------------------------------------------------------------
