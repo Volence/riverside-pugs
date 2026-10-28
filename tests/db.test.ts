@@ -32,7 +32,7 @@ describe('openDb', () => {
       'match_live_players', 'match_maps', 'match_name_sightings',
       'match_pauses', 'match_player_stats', 'match_players', 'match_presence', 'match_progress_samples',
       'match_readyup_players', 'match_readyups', 'match_replays', 'match_round_feeds', 'match_round_marks', 'match_round_stats', 'match_rounds',
-      'match_si_lives', 'match_survivor_downs',
+      'match_si_lives', 'match_survivor_downs', 'match_win_point_runs', 'match_win_points',
       'matches', 'matchmaker_state',
       'mod_calls',
       'notification_prefs',

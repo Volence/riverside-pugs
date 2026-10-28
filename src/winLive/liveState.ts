@@ -89,7 +89,7 @@ export function winLiveOption(db: DB, adminViewer = false): boolean {
   return adminViewer || getSetting(db, 'win_chance_live') === '1';
 }
 
-type Moment = NonNullable<WinPoint['moment']>;
+export type Moment = NonNullable<WinPoint['moment']>;
 
 interface StoredPoint {
   tMs: number;
@@ -414,7 +414,7 @@ function read(db: DB, matchId: number, st: MatchState, t: HalfTrack, nowMs: numb
 }
 
 /** What happened between two consecutive snapshots worth marking. */
-function momentOf(prev: Snapshot | null, s: Snapshot): Moment | undefined {
+export function momentOf(prev: Snapshot | null, s: Snapshot): Moment | undefined {
   if (!prev) return undefined;
   if (s.alive <= 0 && prev.alive > 0) return 'wipe';
   if (s.tank === 'alive' && prev.tank !== 'alive') return 'tank_spawn';
@@ -520,9 +520,11 @@ function mapOfCurrent(db: DB, matchId: number): string | null {
 
 /** The pieces of a price that do not change within a half: every other
  *  half still to play, convolved per team, and the half's form tilt. */
-interface PriceCtx { othersA: Float64Array; othersB: Float64Array; theta: number; calibration: number }
+export interface PriceCtx { othersA: Float64Array; othersB: Float64Array; theta: number; calibration: number }
 
-function priceCtx(model: WinModel, played: PlayedHalf[], future: FutureHalf[], idx: number, survTeam: 'a' | 'b', form: FormParams | null): PriceCtx {
+/** `future[idx]` is the half being priced, left out of the others; `played`
+ *  the halves before it, which give the form tilt. */
+export function priceCtx(model: WinModel, played: PlayedHalf[], future: FutureHalf[], idx: number, survTeam: 'a' | 'b', form: FormParams | null): PriceCtx {
   const t = form ? teamForm(model, played, undefined, form) : { a: 0, b: 0 };
   const rest = (team: 'a' | 'b', theta: number) =>
     sumDists(future.filter((x, i) => i !== idx && x.team === team).map((x) => tilt(model.dist(x.map), theta)));
@@ -531,7 +533,7 @@ function priceCtx(model: WinModel, played: PlayedHalf[], future: FutureHalf[], i
 
 /** Team A's chance with the half `map` (surviving `survTeam`, its
  *  `half`-th turn on the map) at `snap` and the rest from `ctx`. */
-function price(model: WinModel, ctx: PriceCtx, map: string, survTeam: 'a' | 'b', half: 1 | 2, gap: number, snap: Snapshot): number {
+export function price(model: WinModel, ctx: PriceCtx, map: string, survTeam: 'a' | 'b', half: 1 | 2, gap: number, snap: Snapshot): number {
   const pred = predictHalf(model, HALF_PARAMS, map, ctx.theta, snap, half);
   return winChanceDists(
     gap,
