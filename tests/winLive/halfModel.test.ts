@@ -3,7 +3,7 @@ import { BIN, buildWinModel, winChance, type HalfRow, type WinModel } from '../.
 import { tilt } from '../../src/winForm.js';
 import type { Snapshot } from '../../src/winLive/snapshot.js';
 import {
-  FEATURES, HALF_PARAMS, predictHalf, wipeScore, type HalfModelParams,
+  FEATURES, HALF_PARAMS, predictHalf, progressMade, wipeScore, type HalfModelParams,
 } from '../../src/winLive/halfModel.js';
 
 /** Same shape as tests/winProb.test.ts: makes several times a wipe, m2
@@ -52,6 +52,17 @@ function withHalf(model: WinModel, d: Float64Array): WinModel {
 
 describe('predictHalf', () => {
   const model = buildWinModel(history());
+
+  it('counts progress made in the half: at the saferoom exit spot it is exactly the base', () => {
+    const atExit = { ...START, tMs: 0, prog: progressMade(6.2, 6.2) };
+    expect(atExit.prog).toBe(0);
+    expect(tv(predictHalf(model, PARAMS, 'm1', 0, atExit, 1), model.dist('m1'))).toBeLessThan(1e-12);
+    expect(progressMade(40, 6)).toBe(34);
+    // A sample behind the first one (map lookup noise) is no progress, not negative.
+    expect(progressMade(4, 6)).toBe(0);
+    expect(progressMade(null, 6)).toBeNull();
+    expect(progressMade(40, null)).toBeNull();
+  });
 
   it('starts from the per-half base when the model has one', () => {
     const split = buildWinModel(history().map((r, i) => ({ ...r, half: (i % 4 < 2 ? 1 : 2) as 1 | 2 })), 0, { perHalf: true });
@@ -148,10 +159,22 @@ describe('predictHalf', () => {
     }
   });
 
-  it('ships neutral params until the validated fit replaces them', () => {
+  it('ships the params that passed the backtest gate, fitted on today\'s base', () => {
     expect(HALF_PARAMS.features).toEqual([...FEATURES]);
     expect(HALF_PARAMS.weights).toHaveLength(HALF_PARAMS.classEdges.length + 1);
-    const s: Snapshot = { ...START, tMs: 200_000, prog: 70, health: 120, alive: 2, tank: 'dead' };
-    expect(tv(predictHalf(model, HALF_PARAMS, 'm2', 0, s, 1), model.dist('m2'))).toBeLessThan(1e-12);
+    for (const row of HALF_PARAMS.weights) {
+      expect(row).toHaveLength(FEATURES.length);
+      for (const w of row) expect(Number.isFinite(w)).toBe(true);
+    }
+    expect(HALF_PARAMS.wipePerProg).toBeGreaterThan(0);
+    expect(HALF_PARAMS.floorPerProg).toBeGreaterThan(0);
+    // The record the backtest writes beside the params (not read at runtime).
+    const record = HALF_PARAMS as HalfModelParams & { base?: string; gate?: string };
+    expect(record.gate).toBe('pass');
+    expect(record.base).toBe('today');
+    // The opening state is the base, and a bad state lowers the mean.
+    expect(tv(predictHalf(model, HALF_PARAMS, 'm2', 0, START, 1), model.dist('m2'))).toBeLessThan(1e-12);
+    const hurt: Snapshot = { ...START, tMs: 120_000, prog: 30, health: 150, alive: 2 };
+    expect(mean(predictHalf(model, HALF_PARAMS, 'm2', 0, hurt, 1))).toBeLessThan(mean(predictHalf(model, HALF_PARAMS, 'm2', 0, { ...hurt, health: 400, alive: 4 }, 1)));
   });
 });

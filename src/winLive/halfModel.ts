@@ -35,6 +35,12 @@ import type { Snapshot } from './snapshot.js';
  * emptied into the wipe bands above. And once nobody is alive the half is
  * over: a point mass at the wipe score.
  *
+ * Progress here is progress MADE in the half (progressMade): the route
+ * progress less the half's first known value, the saferoom exit spot, which
+ * the map lookup puts at about 6% rather than 0. Raw progress would start
+ * every half a little way along and move the line off the base at half
+ * start. Callers pass snapshots whose `prog` is already progressMade.
+ *
  * Progress the snapshot does not know (null: no feed or position yet) is
  * marginalised, never read as 0%: the prediction is averaged over quantiles
  * of where halves typically are at that time.
@@ -98,10 +104,22 @@ export const HALF_PARAMS: HalfModelParams = JSON.parse(
   readFileSync(new URL('./halfModel.fitted.json', import.meta.url), 'utf8'),
 ) as HalfModelParams;
 
+/**
+ * Progress made in the half, 0..100: `prog` less `prog0`, the half's first
+ * known progress value (where the survivors left the saferoom), never below
+ * 0 (a later sample behind the first is lookup noise, not lost ground).
+ * Unknown when either is: a half whose start was never seen cannot say how
+ * far it has come.
+ */
+export function progressMade(prog: number | null, prog0: number | null): number | null {
+  if (prog === null || prog0 === null) return null;
+  return Math.max(0, prog - prog0);
+}
+
 const TEN_MINUTES_MS = 600_000;
 const MAX_TEN_MINUTES = 2;
 
-/** The feature vector for a snapshot at progress `prog` (0..100, resolved). */
+/** The feature vector for a snapshot at progress made `prog` (0..100, resolved). */
 export function featureVector(snap: Snapshot, prog: number, half: 1 | 2): Float64Array {
   const p = prog / 100;
   const tankDone = snap.tank === 'dead' ? 1

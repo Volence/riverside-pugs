@@ -36,9 +36,13 @@
 //   - every reliability bin of the live model's mid-half calls (pooled over
 //     the checkpoints) with n >= GATE_MIN_N is won within GATE_MAX_POINTS of
 //     its mean call;
-//   - the tank spawn alone: of all spawns, the share where the live number
-//     moved more than 3 points between the last snapshot before the spawn
-//     and 10 s after it is under 5%.
+//   - the tank spawn alone (owner ruling: the spawn itself must not move
+//     the number; what the fight does in the next seconds should): of the
+//     quiet spawns, where nothing but the tank state changed beyond trivial
+//     amounts (quiet() below) between the last snapshot before the spawn
+//     and 10 s after it, the share where the live number moved more than 3
+//     points is under 5%. The share and median over all spawns are printed
+//     beside it.
 //
 // With --write and a pass, src/winLive/halfModel.fitted.json gets the newest
 // fold's params (fitted on every match but the newest block), with the base
@@ -53,7 +57,8 @@ import {
 } from '../src/winProb.js';
 import type { Snapshot } from '../src/winLive/snapshot.js';
 import {
-  classOf, classProbs, FEATURES, featureVector, predictHalf, progressCandidates, PROGRESS_FEATURES, type HalfModelParams,
+  classOf, classProbs, FEATURES, featureVector, predictHalf, progressCandidates, progressMade, PROGRESS_FEATURES,
+  type HalfModelParams,
 } from '../src/winLive/halfModel.js';
 import {
   bins, bootstrapDiff, brier, f4, GATE_MAX_POINTS, GATE_MIN_N, gateMisses, report, type Outcome,
@@ -101,12 +106,17 @@ const CHECK_TIMES_MS = [60_000, 180_000, 300_000, 480_000];
 const TANK_AFTER_MS = 10_000;
 /** A checkpoint takes the first snapshot at or after its time, if within this. */
 const SNAP_SLACK_MS = 5_000;
+/** Trivial changes for a quiet spawn: health within this many points (of
+ *  400) and progress made within this many points (of 100). Alive and down
+ *  counts must not change at all. */
+const QUIET_HEALTH = 10;
+const QUIET_PROG = 5;
 /** The tank spawn check: a move above this ... */
 const SPAWN_MOVE = 0.03;
-/** ... in no more than this share of spawns. */
+/** ... in under this share of quiet spawns. */
 const SPAWN_SHARE_MAX = 0.05;
 /** The sanity table's times into the half (newest fold, mean predicted against actual). */
-const LIVE_SANITY_TIMES_MS = [0, 60_000, 180_000, 300_000, 480_000];
+const LIVE_SANITY_TIMES_MS = [0, 30_000, 60_000, 120_000, 180_000, 300_000, 480_000];
 
 const CHECK_KINDS = [...CHECK_TIMES_MS.map((t) => `${t / 1000} s`), 'tank spawn +10 s', 'tank death +10 s'];
 
@@ -116,7 +126,8 @@ function quantile(sorted: number[], q: number): number {
 const median = (xs: number[]) => quantile([...xs].sort((x, y) => x - y), 0.5);
 const pc = (x: number) => `${(x * 100).toFixed(1)}%`;
 
-/** Every half of the dataset, keyed by match, ordinal and half. */
+/** Every half of the dataset, keyed by match, ordinal and half, with each
+ *  snapshot's `prog` turned into progress made in the half (progressMade). */
 async function readHalves(path: string): Promise<{ halves: Map<string, DatasetHalf>; unreadable: number }> {
   const halves = new Map<string, DatasetHalf>();
   let unreadable = 0;
@@ -126,6 +137,10 @@ async function readHalves(path: string): Promise<{ halves: Map<string, DatasetHa
     let h: DatasetHalf;
     try { h = JSON.parse(line) as DatasetHalf; } catch { unreadable += 1; continue; }
     if (!Number.isInteger(h.matchId)) { unreadable += 1; continue; }
+    // Everything downstream (the fit, its progress rules and quantiles, the
+    // checkpoints, the sanity table) sees progress made in the half.
+    const prog0 = h.snaps.find((x) => x.prog !== null)?.prog ?? null;
+    h.snaps = h.snaps.map((x) => ({ ...x, prog: progressMade(x.prog, prog0) }));
     halves.set(halfId(h.matchId, h.ordinal, h.half), h);
   }
   return { halves, unreadable };
@@ -322,10 +337,11 @@ interface MidPoint extends Outcome {
 interface SpawnMove { move: number; quiet: boolean }
 
 /** Whether two snapshots differ only trivially apart from the tank: the
- *  same alive and down counts, health within 10, progress within 5. */
+ *  same alive and down counts, health within QUIET_HEALTH, progress made
+ *  within QUIET_PROG (or unknown in both). Time moves on regardless. */
 function quiet(a: Snapshot, b: Snapshot): boolean {
-  const prog = a.prog === null || b.prog === null ? a.prog === b.prog : Math.abs(a.prog - b.prog) <= 5;
-  return a.alive === b.alive && a.down === b.down && Math.abs(a.health - b.health) <= 10 && prog;
+  const prog = a.prog === null || b.prog === null ? a.prog === b.prog : Math.abs(a.prog - b.prog) <= QUIET_PROG;
+  return a.alive === b.alive && a.down === b.down && Math.abs(a.health - b.health) <= QUIET_HEALTH && prog;
 }
 
 function at(snaps: Snapshot[], t: number): Snapshot | null {
@@ -495,11 +511,12 @@ export async function runLive({ db, dbPath, matches, halvesPath, write }: LiveCo
 
   // The tank spawn alone.
   const over = spawns.filter((s) => s.move > SPAWN_MOVE).length;
-  const share = spawns.length ? over / spawns.length : 0;
   const quietOnes = spawns.filter((s) => s.quiet);
+  const quietOver = quietOnes.filter((s) => s.move > SPAWN_MOVE).length;
+  const share = quietOnes.length ? quietOver / quietOnes.length : 0;
   console.log(`\n## Tank spawn\n\nLast snapshot before the spawn against 10 s after it, live model, ${spawns.length} spawns in the test halves.`);
-  console.log(`- All spawns: moved more than ${SPAWN_MOVE * 100} points in ${over} (${pc(share)}); median move ${(median(spawns.map((s) => s.move)) * 100).toFixed(2)} points.`);
-  console.log(`- Quiet spawns only (same alive and down, health within 10, progress within 5): ${quietOnes.length}, moved more than ${SPAWN_MOVE * 100} points in ${quietOnes.filter((s) => s.move > SPAWN_MOVE).length} (${pc(quietOnes.length ? quietOnes.filter((s) => s.move > SPAWN_MOVE).length / quietOnes.length : 0)}); median ${(median(quietOnes.map((s) => s.move)) * 100).toFixed(2)} points.`);
+  console.log(`- Quiet spawns (the gate: same alive and down, health within ${QUIET_HEALTH}, progress made within ${QUIET_PROG}): ${quietOnes.length}, moved more than ${SPAWN_MOVE * 100} points in ${quietOver} (${pc(share)}); median ${(median(quietOnes.map((s) => s.move)) * 100).toFixed(2)} points.`);
+  console.log(`- All spawns, fight included: moved more than ${SPAWN_MOVE * 100} points in ${over} (${pc(spawns.length ? over / spawns.length : 0)}); median move ${(median(spawns.map((s) => s.move)) * 100).toFixed(2)} points.`);
 
   if (newest) {
     liveSanity(newest.model, `Newest fold (${FOLDS}), base distribution`, newest.halves, { ...LIVE_NEUTRAL, progByTime: newest.params.progByTime });
@@ -513,7 +530,7 @@ export async function runLive({ db, dbPath, matches, halvesPath, write }: LiveCo
   console.log(`\n## Gate: ${pass ? 'PASS' : 'FAIL'}\n`);
   console.log(`- Live beats frozen at every checkpoint: ${losing.length === 0 ? 'yes' : `no (${losing.join(', ')})`}`);
   console.log(`- Reliability (bins with n >= ${GATE_MIN_N} within ${GATE_MAX_POINTS} points): ${liveAll.gate ? 'PASS' : `FAIL: ${liveAll.misses.join('; ')}`}`);
-  console.log(`- Tank spawn moves over ${SPAWN_MOVE * 100} points under ${SPAWN_SHARE_MAX * 100}%: ${spawnOk ? 'yes' : 'no'} (${pc(share)})`);
+  console.log(`- Quiet tank spawns moving over ${SPAWN_MOVE * 100} points under ${SPAWN_SHARE_MAX * 100}%: ${spawnOk ? 'yes' : 'no'} (${pc(share)})`);
   if (newest) console.log(`\nNewest fold's params (fitted on blocks 0 to ${FOLDS - 1}): ${JSON.stringify({ ...newest.params, progByTime: '(omitted)' })}`);
   if (write && pass && newest) {
     const saved = {
