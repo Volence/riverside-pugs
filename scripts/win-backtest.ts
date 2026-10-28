@@ -12,6 +12,14 @@
 // there; it is 1 or 0 for every model). Drawn matches are left out. Matches
 // whose score cannot carry a line (matchWinLine null) are left out too.
 //
+// The reliability gate: every 10%-wide bin of calls with at least
+// GATE_MIN_N points must have been won within GATE_MAX_POINTS of its mean
+// call. Each model scored prints PASS or FAIL with the bins that miss.
+//
+// Train points are priced by a base model built from those same halves, so
+// their percentiles are in-sample. That biases the fitted strengths only;
+// test scoring uses a model that never saw the test halves.
+//
 // --part form fits FormParams (src/winForm.ts) on train by maximum likelihood,
 // a coarse grid then coordinate descent, and prints Brier, log loss and a
 // 10-bin reliability table on test for: today's model, today's model with
@@ -26,8 +34,13 @@
 // temperature, for form alone as well, so recalibration on newer matches is
 // not mistaken for SI damage), the newest 30% judge it. The SI medians come
 // from the fitting part only. SI damage stays in only if it lowers Brier on
-// that newest 30%. --write saves the winner to src/winForm.fitted.json; it is
-// never written when form does not beat today's model on test.
+// that newest 30% and passes the reliability gate there.
+//
+// --write saves the winner to src/winForm.fitted.json with "gate": "pass"
+// when form has lower Brier than today's model on test AND passes the gate;
+// otherwise it saves it with "gate": "fail", the Brier numbers and the bins
+// that missed, as the record of why the setting stays off (the runtime loads
+// the params either way; the win_chance_form setting is the guard).
 import Database from 'better-sqlite3';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -55,6 +68,10 @@ const db: DB = new Database(dbPath, { readonly: true });
 
 /** A map needs this many train halves with feeds for its own SI damage median. */
 const SI_MIN_HALVES = 10;
+/** Reliability gate: bins with at least this many points ... */
+const GATE_MIN_N = 30;
+/** ... must be won within this many percentage points of their mean call. */
+const GATE_MAX_POINTS = 5;
 const TRAIN_SHARE = 0.7;
 
 // ---- the split -------------------------------------------------------------
@@ -217,16 +234,32 @@ function fit(pts: Point[], start: FormParams, grid: Partial<Record<keyof FormPar
   return best;
 }
 
-function reliability(ps: number[], pts: Point[]): string {
-  const rows: string[] = ['| Called | n | Called mean | Won |', '|---|---|---|---|'];
+interface Bin { label: string; n: number; called: number; won: number }
+function bins(ps: number[], pts: Point[]): Bin[] {
+  const out: Bin[] = [];
   for (let b = 0; b < 10; b++) {
     const idx = ps.map((p, i) => [p, i] as const).filter(([p]) => (b === 9 ? p >= 0.9 : p >= b / 10 && p < (b + 1) / 10));
-    if (idx.length === 0) { rows.push(`| ${b * 10}-${b * 10 + 10}% | 0 | | |`); continue; }
-    const called = idx.reduce((s, [p]) => s + p, 0) / idx.length;
-    const won = idx.reduce((s, [, i]) => s + pts[i].y, 0) / idx.length;
-    rows.push(`| ${b * 10}-${b * 10 + 10}% | ${idx.length} | ${(called * 100).toFixed(1)}% | ${(won * 100).toFixed(1)}% |`);
+    const n = idx.length;
+    out.push({
+      label: `${b * 10}-${b * 10 + 10}%`, n,
+      called: n ? idx.reduce((s, [p]) => s + p, 0) / n : NaN,
+      won: n ? idx.reduce((s, [, i]) => s + pts[i].y, 0) / n : NaN,
+    });
+  }
+  return out;
+}
+function reliability(bs: Bin[]): string {
+  const rows: string[] = ['| Called | n | Called mean | Won |', '|---|---|---|---|'];
+  for (const b of bs) {
+    rows.push(b.n === 0 ? `| ${b.label} | 0 | | |`
+      : `| ${b.label} | ${b.n} | ${(b.called * 100).toFixed(1)}% | ${(b.won * 100).toFixed(1)}% |`);
   }
   return rows.join('\n');
+}
+/** The bins that miss the reliability gate, described; empty is a pass. */
+function gateMisses(bs: Bin[]): string[] {
+  return bs.filter((b) => b.n >= GATE_MIN_N && Math.abs(b.called - b.won) * 100 > GATE_MAX_POINTS)
+    .map((b) => `${b.label} (n ${b.n}): called ${(b.called * 100).toFixed(1)}%, won ${(b.won * 100).toFixed(1)}%`);
 }
 
 /** 95% interval of the Brier difference (a minus b), resampling whole
@@ -250,11 +283,16 @@ function bootstrapDiff(a: number[], b: number[], pts: Point[]): [number, number]
 }
 
 const f4 = (x: number) => x.toFixed(5);
-function report(label: string, ps: number[], pts: Point[]): { brier: number; logLoss: number } {
+interface Scored { brier: number; logLoss: number; gate: boolean; misses: string[] }
+function report(label: string, ps: number[], pts: Point[]): Scored {
   const b = brier(ps, pts);
   const l = logLoss(ps, pts);
-  console.log(`\n### ${label}\n\nBrier ${f4(b)}, log loss ${f4(l)}, points ${pts.length}\n\n${reliability(ps, pts)}`);
-  return { brier: b, logLoss: l };
+  const bs = bins(ps, pts);
+  const misses = gateMisses(bs);
+  const gate = misses.length === 0;
+  console.log(`\n### ${label}\n\nBrier ${f4(b)}, log loss ${f4(l)}, points ${pts.length}\n\n${reliability(bs)}`);
+  console.log(`\nGate ${gate ? 'PASS' : 'FAIL'} (bins with n >= ${GATE_MIN_N} within ${GATE_MAX_POINTS} points)${gate ? '' : `: ${misses.join('; ')}`}`);
+  return { brier: b, logLoss: l, gate, misses };
 }
 
 // ---- run ---------------------------------------------------------------------
@@ -300,14 +338,20 @@ const formFeeds = report(`Form, no SI damage, temperature refitted on the SI fit
   calibrate(rawChances(siTest, formRefit.params, false), formRefit.params.calibration), siTest);
 const formSiFeeds = report('Form with SI damage', calibrate(rawChances(siTest, formSi.params, true), formSi.params.calibration), siTest);
 
-const keepSi = formSiFeeds.brier < formFeeds.brier;
+// SI damage stays only if it lowers Brier on its own held-out matches and
+// passes the gate there.
+const keepSi = formSiFeeds.brier < formFeeds.brier && formSiFeeds.gate;
 const winner = keepSi ? formSi.params : form.params;
-const beats = formTest.brier < today.brier;
-console.log(`\nForm ${beats ? 'beats' : 'does NOT beat'} today's model on test (${f4(formTest.brier)} vs ${f4(today.brier)}). SI damage ${keepSi ? 'kept' : 'left out'} (${f4(formSiFeeds.brier)} vs ${f4(formFeeds.brier)} on the SI test matches).`);
-console.log(`Winner: ${JSON.stringify(winner)}`);
-if (write && beats) {
-  writeFileSync(new URL('../src/winForm.fitted.json', import.meta.url), `${JSON.stringify(winner, null, 2)}\n`);
-  console.log('Wrote src/winForm.fitted.json');
-} else if (write) {
-  console.log('Not written: form does not beat today\'s model.');
+const beats = formTest.brier < today.brier && formTest.gate;
+console.log(`\nForm ${beats ? 'PASSES' : 'FAILS'}: Brier ${f4(formTest.brier)} vs today's ${f4(today.brier)} on test (${formTest.brier < today.brier ? 'lower' : 'not lower'}), reliability gate ${formTest.gate ? 'PASS' : 'FAIL'}. SI damage ${keepSi ? 'kept' : 'left out'} (Brier ${f4(formSiFeeds.brier)} vs ${f4(formFeeds.brier)} on the SI test matches, gate ${formSiFeeds.gate ? 'PASS' : 'FAIL'}).`);
+const saved = {
+  ...winner,
+  gate: beats ? 'pass' : 'fail',
+  testBrier: { today: Number(f4(today.brier)), form: Number(f4(formTest.brier)) },
+  ...(beats ? {} : { failingBins: formTest.misses }),
+};
+console.log(`Winner: ${JSON.stringify(saved)}`);
+if (write) {
+  writeFileSync(new URL('../src/winForm.fitted.json', import.meta.url), `${JSON.stringify(saved, null, 2)}\n`);
+  console.log(`Wrote src/winForm.fitted.json (gate ${saved.gate})`);
 }

@@ -263,6 +263,12 @@ describe('team form on the line', () => {
     expect(withForm.points.at(-1)!.pA).toBe(1);
   });
 
+  it('opens at 50% even with a form temperature other than CALIBRATION', () => {
+    const cooler: FormParams = { ...form, calibration: 0.938 };
+    expect(cooler.calibration).not.toBe(CALIBRATION);
+    expect(matchWinLine(db, seed(), model, { form: cooler })!.points[0].pA).toBeCloseTo(0.5, 9);
+  });
+
   it('is the same line as today with every strength at zero and today\'s temperature', () => {
     const id = seed();
     const zero: FormParams = { survivor: 0, infected: 0, siDamage: 0, shrink: 2, calibration: CALIBRATION };

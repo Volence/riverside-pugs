@@ -3,5 +3,15 @@
   "infected": 0,
   "siDamage": 0,
   "shrink": 4.96875,
-  "calibration": 0.938
+  "calibration": 0.938,
+  "gate": "fail",
+  "testBrier": {
+    "today": 0.16609,
+    "form": 0.16606
+  },
+  "failingBins": [
+    "60-70% (n 129): called 64.9%, won 72.1%",
+    "70-80% (n 155): called 74.8%, won 83.2%",
+    "80-90% (n 129): called 84.7%, won 92.2%"
+  ]
 }
