@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { WinLine, WinPoint } from '../api';
-import { chartSlots, describePoint, fmtChance, wholePercent, winSummary } from './WinChart';
+import { chartSlots, describePoint, scoreCaption, fmtChance, wholePercent, winSummary } from './WinChart';
 
 const pt = (o: number | null, half: number | null, t: 'a' | 'b' | null, a: number, b: number, pA: number): WinPoint =>
   ({ ordinal: o, half, survTeam: t, map: o === null ? null : 'l4d_vs_airport02_offices', scoreA: a, scoreB: b, pA });
@@ -145,5 +145,12 @@ describe('winSummary with points during halves', () => {
   it('describes a point during a half by its time and moment', () => {
     expect(describePoint(points[6]!)).toBe('Map 3 The Crane, Team B survivors, 2:00 in: tank spawned');
     expect(describePoint(points[5]!)).toBe('Map 3 The Crane, Team B survivors, 1:55 in');
+  });
+});
+
+describe('scoreCaption', () => {
+  it('says start of the half for a point during a half, the plain score for a half end (merged tooltip too)', () => {
+    expect(scoreCaption({ ...pt(1, 1, 'a', 10, 0, 0.5), tMs: 30_000 })).toBe('Score at the start of the half');
+    expect(scoreCaption(pt(1, 1, 'a', 10, 0, 0.5))).toBe('Score');
   });
 });

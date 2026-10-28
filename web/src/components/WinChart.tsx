@@ -176,6 +176,12 @@ function describeShort(pt: WinPoint, names: Record<Team, string>): string {
 
 const H = 220;
 const PAD = { top: 14, right: 12, bottom: 34, left: 64 };
+/** The caption over a hovered point's score: a point during a half carries
+ *  the score the half started with; a half-end point, the score at its end. */
+export function scoreCaption(pt: WinPoint): string {
+  return pt.tMs !== undefined ? 'Score at the start of the half' : 'Score';
+}
+
 /** The top margin when the line marks moments: their icons sit above the plot. */
 const MOMENT_TOP = 32;
 /** Moment icons (14 px across) closer than this share one, so none touch. */
@@ -398,12 +404,12 @@ export function WinChart({ line, names = TEAM_NAME, short = names }: { line: Win
                     <div>{names.a} {fmtChance(pts[i].pA)}{' · '}{names.b} {fmtChance(1 - pts[i].pA)}</div>
                   </div>
                 ))}
-                <div>Score at the start of the half {hovered.scoreA} - {hovered.scoreB}</div>
+                <div>{scoreCaption(hovered)} {hovered.scoreA} - {hovered.scoreB}</div>
               </>
             ) : (
               <>
                 <div class="winchart__tiphead">{describePoint(hovered, pts[hover - 1], names)}</div>
-                <div>{hovered.tMs !== undefined ? 'Score at the start of the half' : 'Score'} {hovered.scoreA} - {hovered.scoreB}</div>
+                <div>{scoreCaption(hovered)} {hovered.scoreA} - {hovered.scoreB}</div>
                 <div>
                   {names.a} {fmtChance(hovered.pA, exactAt(hover))}
                   {' · '}{names.b} {fmtChance(1 - hovered.pA, exactAt(hover))}

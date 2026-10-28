@@ -12,6 +12,7 @@ import { invalidateCampaignCache, setMissionsDirs } from '../../src/campaignRegi
 import { decodeRoundReplay } from '../../src/metrics/replayRound.js';
 import type { RoundKey, RoundReplay } from '../../src/metrics/types.js';
 import { buildProgressMap } from '../../src/winLive/progressMap.js';
+import { mapThenFallback } from '../../src/winLive/snapshot.js';
 import { configureLiveWin, liveSnapshot, MAX_DECODE_BYTES } from '../../src/winLive/liveState.js';
 import { pointsVersion, winPointsVersion } from '../../src/winLive/modelVersion.js';
 import { CALIBRATION } from '../../src/winProb.js';
@@ -368,5 +369,29 @@ describe('parity with the live line', () => {
     }
     // The down at 45 s moved it: the points are not all the opening value.
     expect(new Set(live.map((p) => p.pA.toFixed(6))).size).toBeGreaterThan(2);
+  });
+});
+
+describe('progress on a mapped map before its first mapped frame', () => {
+  it('stands on the stored samples until the map maps, then on the map, never lower than where it switched', () => {
+    const key: RoundKey = { matchId: seed(FOUR), ordinal: 0, half: 1 };
+    const ins = db.prepare('INSERT INTO match_progress_samples (match_id, ordinal, half, t_ms, prog) VALUES (?, 0, 1, ?, ?)');
+    ins.run(key.matchId, 1000, 5);
+    const pm = buildProgressMap('m1', [{ x: 600, y: 0, z: 0, prog: 50 }]);
+    const snaps = finishedHalfSnapshots(db, key, 'm1', replayOf(frames(60_000)), new Map([['m1', pm]]));
+    const progAt = (t: number) => snaps.find((p) => p.snap.tMs === t)!.snap.prog;
+    expect(progAt(10_000)).toBe(0);
+    expect(progAt(60_000)).toBe(45);
+  });
+});
+
+describe('mapThenFallback', () => {
+  it('uses the fallback before the first mapped time and never goes below it after', () => {
+    const fb = (t: number) => (t < 1000 ? null : 40);
+    const f = mapThenFallback((t) => (t >= 5000 ? 10 : null), 5000, fb);
+    expect(f(500)).toBeNull();
+    expect(f(2000)).toBe(40);
+    expect(f(5000)).toBe(40);
+    expect(mapThenFallback(() => null, null, fb)(2000)).toBe(40);
   });
 });

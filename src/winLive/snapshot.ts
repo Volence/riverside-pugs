@@ -70,6 +70,25 @@ export function progressTimeline(points: { tMs: number; prog: number }[]): (tMs:
   };
 }
 
+/**
+ * A trusted progress map that has not mapped any frame yet knows nothing, so
+ * until its first mapped frame (`firstMapTMs`, null while none) the half's
+ * progress is the fallback's (LIVEHUD or stored samples). From that frame on
+ * the map is used, never lower than the fallback stood at that frame, so the
+ * combined running max cannot go backwards at the switch.
+ */
+export function mapThenFallback(
+  map: (tMs: number) => number | null, firstMapTMs: number | null, fallback: (tMs: number) => number | null,
+): (tMs: number) => number | null {
+  if (firstMapTMs === null) return fallback;
+  const floor = fallback(firstMapTMs);
+  return (tMs) => {
+    if (tMs < firstMapTMs) return fallback(tMs);
+    const m = map(tMs);
+    return m === null ? null : floor === null ? m : Math.max(m, floor);
+  };
+}
+
 /** Progress as a backward-looking step: the largest sample at or before the
  *  asked time, no interpolation, null before the first sample. Unlike
  *  `progressTimeline` it never uses a later sample, so it only knows what a

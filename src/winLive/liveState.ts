@@ -11,7 +11,7 @@ import { liveHudStore, type LiveHudSample, type LiveHudStore } from '../cast/liv
 import { CALIBRATION, provideInHalfPoints, sumDists, winChanceDists, type FutureHalf, type PlayedHalf, type WinModel, type WinPoint } from '../winProb.js';
 import { teamForm, tilt, type FormParams } from '../winForm.js';
 import { HALF_PARAMS, predictHalf, progressMade } from './halfModel.js';
-import { progressStep, SnapshotWalker, SNAPSHOT_EVERY_MS, type Snapshot } from './snapshot.js';
+import { mapThenFallback, progressStep, SnapshotWalker, SNAPSHOT_EVERY_MS, type Snapshot } from './snapshot.js';
 import { furthestProg, type ProgressMap } from './progressMap.js';
 
 /**
@@ -356,11 +356,14 @@ function read(db: DB, matchId: number, st: MatchState, t: HalfTrack, nowMs: numb
   const clock = halfClock(db, matchId, t.ordinal, t.half, origin);
   const samples = sources.hud.history(t.token, t.ordinal, t.half);
   const placed = samples.map((sm) => ({ tMs: clock(sm.at), sm }));
-  if (t.pm) t.prog = (tMs) => stepAt(t.progTs, t.progPs, tMs);
-  else {
-    // No trusted progress map: LIVEHUD's progress, on the half clock.
-    t.prog = progressStep(placed.map((x) => ({ tMs: x.tMs, prog: x.sm.prog })));
-  }
+  // LIVEHUD's progress, on the half clock: the whole answer without a trusted
+  // progress map, and the stand-in on one until a frame maps.
+  const hudProg = progressStep(placed.map((x) => ({ tMs: x.tMs, prog: x.sm.prog })));
+  if (t.pm) {
+    // Asked per call: frames pushed below extend progTs, and the first mapped
+    // frame ends the fallback.
+    t.prog = (tMs) => mapThenFallback((u) => stepAt(t.progTs, t.progPs, u), t.progTs.length > 0 ? t.progTs[0]! : null, hudProg)(tMs);
+  } else t.prog = hudProg;
 
   // One stat for both: the mtime is then the write that made the file this
   // long, never a later one than the bytes read (which would put a clock
