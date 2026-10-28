@@ -69,6 +69,19 @@ describe('discord buttons', () => {
     expect(body(await press(0, 'q:leave'))).toMatch(/not in the queue/i);
   });
 
+  it('a joiner new to the downloaded campaigns gets the get-the-maps line and a download link', async () => {
+    const r = await press(0, 'q:join');
+    expect(body(r)).toMatch(/get the maps first/i);
+    const btn = r.payload.components.flat().find((b) => b.kind === 'link');
+    expect(btn && btn.kind === 'link' && btn.url).toBe(`${URL_}/custom-campaigns`);
+    await press(0, 'q:leave');
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign) VALUES (1, 1, 'completed', 'dead_center')").run();
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (1, ?, 'a')").run(IDS[0]);
+    const again = await press(0, 'q:join');
+    expect(body(again)).not.toMatch(/get the maps first/i);
+    expect(again.payload.components).toEqual([]);
+  });
+
   it('q:side from an old card while side games are off says so and opts nobody in', async () => {
     await press(0, 'q:join');
     const r = await press(0, 'q:side');
