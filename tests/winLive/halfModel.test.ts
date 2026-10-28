@@ -33,7 +33,7 @@ const PARAMS: HalfModelParams = {
   wipePerProg: 0.13,
   floorPerProg: 0.05,
   wipeTop: 0.25,
-  progByTime: { stepMs: 60_000, quantiles: [[0, 0, 0, 0, 0], [5, 10, 15, 20, 25], [10, 20, 30, 40, 50]] },
+  progByTime: { stepMs: 60_000, quantiles: [[2, 4, 6, 8, 10], [5, 10, 15, 20, 25], [10, 20, 30, 40, 50]] },
 };
 
 const START: Snapshot = {
@@ -54,27 +54,35 @@ describe('predictHalf', () => {
   const model = buildWinModel(history());
 
   it('is the tilted base distribution exactly with no snapshot', () => {
-    expect([...predictHalf(model, PARAMS, 'm1', 0, null)]).toEqual([...model.dist('m1')]);
-    expect([...predictHalf(model, PARAMS, 'm1', 0.4, null)]).toEqual([...tilt(model.dist('m1'), 0.4)]);
+    expect([...predictHalf(model, PARAMS, 'm1', 0, null, 1)]).toEqual([...model.dist('m1')]);
+    expect([...predictHalf(model, PARAMS, 'm1', 0.4, null, 1)]).toEqual([...tilt(model.dist('m1'), 0.4)]);
   });
 
   it('stays on the base distribution at the start of the half', () => {
     for (const theta of [0, 0.3]) {
-      const base = predictHalf(model, PARAMS, 'm1', theta, null);
-      expect(tv(predictHalf(model, PARAMS, 'm1', theta, START), base)).toBeLessThan(0.02);
+      const base = predictHalf(model, PARAMS, 'm1', theta, null, 1);
+      expect(tv(predictHalf(model, PARAMS, 'm1', theta, START, 1), base)).toBeLessThan(1e-12);
+    }
+  });
+
+  it('stays exactly on the base when a half goes live before its first progress sample', () => {
+    const base = predictHalf(model, PARAMS, 'm1', 0, null, 1);
+    for (const tMs of [0, 100, 59_999]) {
+      const d = predictHalf(model, PARAMS, 'm1', 0, { ...START, tMs, prog: null }, 1);
+      expect(tv(d, base)).toBeLessThan(1e-12);
     }
   });
 
   it('barely moves when the tank spawns at full health', () => {
     const before = { ...START, prog: 40, health: 350 };
     const after: Snapshot = { ...before, tank: 'alive', tankHealthFrac: 1 };
-    const chance = (s: Snapshot) => winChance(withHalf(model, predictHalf(model, PARAMS, 'm1', 0, s)), 0, ['live'], ['m1']);
+    const chance = (s: Snapshot) => winChance(withHalf(model, predictHalf(model, PARAMS, 'm1', 0, s, 1)), 0, ['live'], ['m1']);
     expect(Math.abs(chance(after) - chance(before))).toBeLessThan(0.03);
   });
 
   it('moves with the state: less health lowers the mean, more progress raises it', () => {
     const mid = { ...START, prog: 50, health: 320 };
-    const at = (s: Snapshot) => mean(predictHalf(model, PARAMS, 'm1', 0, s));
+    const at = (s: Snapshot) => mean(predictHalf(model, PARAMS, 'm1', 0, s, 1));
     expect(at({ ...mid, health: 150 })).toBeLessThan(at(mid));
     expect(at({ ...mid, prog: 80 })).toBeGreaterThan(at(mid));
     expect(at({ ...mid, alive: 3, health: 240 })).toBeLessThan(at(mid));
@@ -82,20 +90,28 @@ describe('predictHalf', () => {
   });
 
   it('keeps a distribution', () => {
-    const d = predictHalf(model, PARAMS, 'm1', 0.2, { ...START, prog: 70, health: 90, alive: 2, down: 1, tank: 'alive', tankHealthFrac: 0.4 });
+    const d = predictHalf(model, PARAMS, 'm1', 0.2, { ...START, prog: 70, health: 90, alive: 2, down: 1, tank: 'alive', tankHealthFrac: 0.4 }, 1);
     expect(sum(d)).toBeCloseTo(1, 9);
     expect([...d].every((p) => p >= 0)).toBe(true);
   });
 
   it('never leaves a wiped score below what the distance already reached guarantees', () => {
     const prog = 80;
-    const d = predictHalf(model, PARAMS, 'm1', 0, { ...START, prog, health: 60, alive: 1 });
+    const d = predictHalf(model, PARAMS, 'm1', 0, { ...START, prog, health: 60, alive: 1 }, 1);
     const floorBin = Math.floor((PARAMS.floorPerProg * prog / 100) * model.scale('m1') / BIN);
     for (let i = 0; i < floorBin; i++) expect(d[i]).toBe(0);
   });
 
+  it('keeps a distribution when the floor lies past the wipe bands or past the end of the scale', () => {
+    for (const floorPerProg of [0.5, 50]) {
+      const d = predictHalf(model, { ...PARAMS, floorPerProg }, 'm1', 0, { ...START, prog: 90, health: 200 }, 1);
+      expect(sum(d)).toBeCloseTo(1, 9);
+      expect([...d].every((p) => Number.isFinite(p) && p >= 0)).toBe(true);
+    }
+  });
+
   it('is a point mass at the wipe score for its progress once everyone is dead', () => {
-    const d = predictHalf(model, PARAMS, 'm1', 0, { ...START, prog: 60, alive: 0, health: 0 });
+    const d = predictHalf(model, PARAMS, 'm1', 0, { ...START, prog: 60, alive: 0, health: 0 }, 1);
     const peak = d.indexOf(Math.max(...d));
     expect(d[peak]).toBeCloseTo(1, 9);
     expect(Math.abs(peak * BIN - wipeScore(model, PARAMS, 'm1', 60))).toBeLessThanOrEqual(BIN);
@@ -103,17 +119,17 @@ describe('predictHalf', () => {
 
   it('marginalises progress it does not know rather than calling it 0%', () => {
     const late = { ...START, tMs: 120_000, health: 380 };
-    const unknown = mean(predictHalf(model, PARAMS, 'm1', 0, { ...late, prog: null }));
-    const zero = mean(predictHalf(model, PARAMS, 'm1', 0, { ...late, prog: 0 }));
-    const known = mean(predictHalf(model, PARAMS, 'm1', 0, { ...late, prog: 30 }));
+    const unknown = mean(predictHalf(model, PARAMS, 'm1', 0, { ...late, prog: null }, 1));
+    const zero = mean(predictHalf(model, PARAMS, 'm1', 0, { ...late, prog: 0 }, 1));
+    const known = mean(predictHalf(model, PARAMS, 'm1', 0, { ...late, prog: 30 }, 1));
     expect(unknown).toBeGreaterThan(zero);
     expect(unknown).toBeCloseTo(known, -1);
   });
 
   it('uses the pooled shape for a map with no history and does not throw', () => {
-    const d = predictHalf(model, PARAMS, 'unknown_map', 0, { ...START, prog: 50, health: 300 });
+    const d = predictHalf(model, PARAMS, 'unknown_map', 0, { ...START, prog: 50, health: 300 }, 1);
     expect(sum(d)).toBeCloseTo(1, 9);
-    expect([...predictHalf(model, PARAMS, 'unknown_map', 0, null)]).toEqual([...model.dist('unknown_map')]);
+    expect([...predictHalf(model, PARAMS, 'unknown_map', 0, null, 1)]).toEqual([...model.dist('unknown_map')]);
   });
 
   it('returns the base for every snapshot when all weights are zero and the wipe rules are off', () => {
@@ -122,7 +138,7 @@ describe('predictHalf', () => {
     };
     const base = model.dist('m1');
     for (const s of [START, { ...START, prog: 90, alive: 0, health: 0 }, { ...START, prog: null, tMs: 90_000 }]) {
-      expect(tv(predictHalf(model, neutral, 'm1', 0, s), base)).toBeLessThan(1e-12);
+      expect(tv(predictHalf(model, neutral, 'm1', 0, s, 1), base)).toBeLessThan(1e-12);
     }
   });
 
@@ -130,6 +146,6 @@ describe('predictHalf', () => {
     expect(HALF_PARAMS.features).toEqual([...FEATURES]);
     expect(HALF_PARAMS.weights).toHaveLength(HALF_PARAMS.classEdges.length + 1);
     const s: Snapshot = { ...START, tMs: 200_000, prog: 70, health: 120, alive: 2, tank: 'dead' };
-    expect(tv(predictHalf(model, HALF_PARAMS, 'm2', 0, s), model.dist('m2'))).toBeLessThan(1e-12);
+    expect(tv(predictHalf(model, HALF_PARAMS, 'm2', 0, s, 1), model.dist('m2'))).toBeLessThan(1e-12);
   });
 });
