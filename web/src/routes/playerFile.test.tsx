@@ -7,7 +7,7 @@ const { mockPeople, mockAdmin, mockMod } = vi.hoisted(() => ({
   mockPeople: { people: vi.fn(), file: vi.fn(), review: vi.fn(), bans: vi.fn(), note: vi.fn(), lookedAt: vi.fn() },
   mockAdmin: {
     ban: vi.fn(), unban: vi.fn(), activate: vi.fn(), setAdmin: vi.fn(), setMod: vi.fn(),
-    signOutPlayer: vi.fn(), clearPenalties: vi.fn(), clearPenalty: vi.fn(), unlinkDiscord: vi.fn(),
+    signOutPlayer: vi.fn(), clearPenalties: vi.fn(), clearPenalty: vi.fn(), liftTimeout: vi.fn(), unlinkDiscord: vi.fn(),
     mergePlayer: vi.fn(), unaliasPlayer: vi.fn(), steamRefresh: vi.fn(), integrityReview: vi.fn(),
   },
   mockMod: { open: vi.fn() },
@@ -245,6 +245,30 @@ describe('the Player File', () => {
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Unban' }));
     await waitFor(() => expect(mockAdmin.unban).toHaveBeenCalledWith(P));
+  });
+
+  // The timeout banner lifts the timeout itself; the owner went looking for
+  // the control on 2026-10-28 and found only "Ban this player" there.
+  it('puts Lift timeout on the standing banner for a player on queue timeout', async () => {
+    const base = file();
+    mockPeople.file.mockResolvedValue(file({ sections: { ...base.sections, standing: { ...base.sections.standing,
+      timeout: { until: '2026-10-28T06:15:40.000Z', offenses: 1, kind: 'no_show' } } } }));
+    render(<><PlayerFile steamid={P} me="76561199000000009" /><ConfirmHost /></>);
+    await screen.findByRole('heading', { name: /griefer/ });
+    const banner = document.querySelector('.file-standing--timeout') as HTMLElement;
+    expect(banner.textContent).toContain('On queue timeout');
+    expect(within(banner).getByRole('button', { name: 'Ban this player' })).toBeTruthy();
+    fireEvent.click(within(banner).getByRole('button', { name: 'Lift timeout' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    expect(dialog.textContent).toContain('no-show');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Lift timeout' }));
+    await waitFor(() => expect(mockAdmin.liftTimeout).toHaveBeenCalledWith(P));
+  });
+
+  it('shows no Lift timeout when there is no timeout', async () => {
+    render(<PlayerFile steamid={P} me="76561199000000009" />);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.queryByRole('button', { name: 'Lift timeout' })).toBeNull();
   });
 
   it('writes a note and marks the file looked at', async () => {

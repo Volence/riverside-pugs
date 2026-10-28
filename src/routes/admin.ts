@@ -19,7 +19,7 @@ import {
 } from '../admin/players.js';
 import { activatePlayer, getPlayer, unlinkDiscord } from '../players.js';
 import { poolableCampaigns } from '../campaignRegistry.js';
-import { clearPenalties, clearPenalty } from '../penalties.js';
+import { clearPenalties, clearPenalty, liftTimeout } from '../penalties.js';
 import { listSeasons, renameSeason, startNewSeason } from '../seasons.js';
 import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
@@ -322,6 +322,17 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     }
     logAdmin(db, t.adminId, 'clear_penalty', t.steamid, { penaltyId: id });
     return { ok: true };
+  });
+
+  /** The banner's Lift timeout: the offenses keeping them out of the queue
+   *  right now, and only those. 404 when no timeout is running. */
+  app.post('/api/admin/players/:steamid/lift-timeout', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const r = liftTimeout(db, t.steamid, t.adminId);
+    if (r.kinds.length === 0) return reply.code(404).send({ error: 'no queue timeout is running' });
+    logAdmin(db, t.adminId, 'lift_timeout', t.steamid, r);
+    return { ok: true, cleared: r.cleared };
   });
 
   app.post('/api/admin/players/:steamid/clear-penalties', async (req, reply) => {

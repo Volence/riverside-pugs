@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { adminApi, type FileAction, type PlayerFileData } from '../../../api';
 import { Panel } from '../../../components/bits';
 import { fmtTime, type Run } from '../useAction';
-import { timeoutOffenses } from '../../../format';
+import { timeoutCause, timeoutOffenses } from '../../../format';
 import { sanctionText } from '../AdminTicket';
 import { RestoreRating, abandonOutcome, restoredText } from '../RestoreRating';
 
@@ -102,6 +102,18 @@ export function StandingBanner({ d, busy, run, can }: Props) {
         </form>
       ) : (
         <div class="file-standing__acts">
+          {/* The timeout's own control sits beside it, as Unban does for a
+              ban: the owner went looking for it on 2026-10-28 and found only
+              the Penalties list further down. It clears what is keeping
+              them out right now; the per-row Clear below is for one offense. */}
+          {s.timeout && can('timeout') && (
+            <button class="btn" type="button" disabled={busy}
+              onClick={() => run(() => adminApi.liftTimeout(d.steamid), {
+                title: `Lift ${d.header.name}'s queue timeout?`,
+                body: `They can queue again at once. The ${timeoutOffenses(s.timeout!)} for ${timeoutCause(s.timeout!.kind)} behind it are cleared; anything outside the penalty window stays on the record.`,
+                confirmLabel: 'Lift timeout',
+              })}>Lift timeout</button>
+          )}
           <button class="btn btn--ghost file-standing__open" type="button" onClick={() => setOpen(true)}>Ban this player</button>
         </div>
       ))}
