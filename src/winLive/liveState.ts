@@ -1,7 +1,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
-import { decodeFrames, decodeHeader, ENTITY_KIND, frameBytes, HEADER_BYTES, slotInfected, VERSION, type Frame } from '../replayFormat.js';
+import { decodeFrames, decodeHeader, frameBytes, HEADER_BYTES, slotInfected, VERSION, type Frame } from '../replayFormat.js';
 import { releasableFrames } from '../replayTail.js';
 import { resolveFurther } from '../replaySessions.js';
 import { liveFileName } from '../replayPush.js';
@@ -11,7 +11,7 @@ import { liveHudStore, type LiveHudSample, type LiveHudStore } from '../cast/liv
 import { CALIBRATION, provideInHalfPoints, sumDists, winChanceDists, type FutureHalf, type PlayedHalf, type WinModel, type WinPoint } from '../winProb.js';
 import { teamForm, tilt, type FormParams } from '../winForm.js';
 import { HALF_PARAMS, predictHalf, progressMade } from './halfModel.js';
-import { halfSnapshots, progressStep, SNAPSHOT_EVERY_MS, type Snapshot } from './snapshot.js';
+import { progressStep, SnapshotWalker, SNAPSHOT_EVERY_MS, type Snapshot } from './snapshot.js';
 import { furthestProg, type ProgressMap } from './progressMap.js';
 
 /**
@@ -92,13 +92,24 @@ interface StoredPoint {
   /** The snapshot, its prog already progress made in the half. */
   snap: Snapshot;
   moment?: Moment;
-  /** The newest LIVEHUD sample the point stands on (this process's clock). */
+  /** The LIVEHUD sample the point stands on (this process's clock). */
   hudAt: number;
+  /** The newest moment anything the point stands on was seen: its sample,
+   *  or its frame (the half clock's wall time for its tMs). A public viewer
+   *  sees the point only once this is the delay old. */
+  seenAt: number;
   /** Team A's chance, per form variant (null: no form), priced once. */
   prices: Map<FormParams | null, number>;
 }
 
-/** The half being read: the decoded frames so far and what came of them. */
+/** Where the half clock (RoundMs, game time, which stops in a pause) stood
+ *  against this process's clock: at wall time `wall` (the file's mtime),
+ *  tMs 0 was at `zero`. Game time stops during a pause, so `zero` only grows. */
+interface ClockMark { wall: number; zero: number }
+
+/** The half being read. Frames are not kept: a SnapshotWalker carries the
+ *  snapshot state forward, and only each frame's time stays (the public
+ *  cutoff, releasableFrames, reads nothing else). */
 interface HalfTrack {
   token: string;
   ordinal: number;
@@ -108,17 +119,25 @@ interface HalfTrack {
   sideOf: (slot: number) => boolean;
   /** File offset of the next undecoded frame. */
   offset: number;
-  /** Kept frames, slimmed to what snapshots read (players, AI tanks). */
-  frames: Frame[];
-  /** Furthest survivor progress per frame, on a trusted map only. */
-  mapPts: { tMs: number; prog: number }[];
+  /** Each kept frame's time, as a bare frame. */
+  times: Frame[];
+  walker: SnapshotWalker;
+  /** Running max of the furthest survivor's mapped progress (trusted map),
+   *  or the LIVEHUD fallback, as of the frames pushed so far. */
+  prog: (tMs: number) => number | null;
+  progTs: number[];
+  progPs: number[];
   pm: ProgressMap | null;
+  /** Snapshots out of the walker not yet made into points (they wait for
+   *  the half's first LIVEHUD sample). */
+  queue: Snapshot[];
   /** The file's mtime, read after the bytes that were decoded. */
   mtimeMs: number;
+  marks: ClockMark[];
   updatedAt: number;
   /** The half's first known progress (progressMade's prog0), raw. */
   prog0: number | null;
-  /** The newest snapshot already turned into a point (or skipped). */
+  /** The newest snapshot already made into a point. */
   doneTMs: number;
   prev: Snapshot | null;
 }
@@ -126,15 +145,21 @@ interface HalfTrack {
 interface MatchState {
   track: HalfTrack | null;
   points: Map<string, StoredPoint[]>;
+  /** The last failed read of a half's file, so a missing file, an abandoned
+   *  attempt or unknown sides are not looked at again for RECOMPUTE_MS. */
+  miss: { ordinal: number; half: number; at: number } | null;
+  /** Abandoned attempts already logged, by half and start. */
+  warned: Set<string>;
   usedAt: number;
 }
 
 const matches = new Map<number, MatchState>();
 const halfKey = (ordinal: number, half: number) => `${ordinal}:${half}`;
+const EMPTY: never[] = [];
 
 function stateOf(matchId: number, nowMs: number): MatchState {
   let st = matches.get(matchId);
-  if (!st) { st = { track: null, points: new Map(), usedAt: nowMs }; matches.set(matchId, st); }
+  if (!st) { st = { track: null, points: new Map(), miss: null, warned: new Set(), usedAt: nowMs }; matches.set(matchId, st); }
   st.usedAt = nowMs;
   for (const [id, s] of matches) if (nowMs - s.usedAt > FORGET_MS) matches.delete(id);
   return st;
@@ -146,6 +171,7 @@ export function resetLiveWin(matchId: number, ordinal: number, half: number): vo
   if (!st) return;
   st.points.delete(halfKey(ordinal, half));
   if (st.track && st.track.ordinal === ordinal && st.track.half === half) st.track = null;
+  st.miss = null;
 }
 
 /** The match ended: forget it. */
@@ -182,20 +208,59 @@ function readBytes(path: string, at: number, len: number): Uint8Array | null {
   }
 }
 
-/** The frame cut to what a snapshot reads: every player, and only the AI
- *  tanks among the entities (commons and the rest would only cost memory). */
-function slim(f: Frame): Frame {
-  return { tMs: f.tMs, offset: 0, players: f.players, entities: f.entities.filter((e) => e.kind === ENTITY_KIND.TANK_AI) };
+const sqliteMs = (s: string) => Date.parse(`${s.replace(' ', 'T')}Z`);
+
+/**
+ * This process's time turned into the half's clock (RoundMs: game time since
+ * the half went live, which stops in a pause, the clock replay frames carry).
+ * `origin` is when the half went live on this process's clock.
+ *
+ * With a track of the half, the newest clock mark at or before the time
+ * says where tMs 0 stood (the mtime of the file less its newest frame's
+ * time, so every pause up to then is in it). A pause after that mark is not
+ * yet, so the time only ever lands later than it happened, never early. A
+ * mark carries the push's lag too (the file is written a little after the
+ * frame), a fraction of a second the other way. Before the first mark, or
+ * with no track, the half's pauses (match_pauses) are taken off instead.
+ */
+function halfClock(db: DB, matchId: number, ordinal: number, half: number, origin: number): (at: number) => number {
+  const t = matches.get(matchId)?.track;
+  const marks = t && t.ordinal === ordinal && t.half === half ? t.marks : EMPTY as ClockMark[];
+  const pauses = (db.prepare(
+    'SELECT started_at AS s, ended_at AS e FROM match_pauses WHERE match_id = ? AND map_ordinal = ? AND half = ?',
+  ).all(matchId, ordinal, half) as { s: string; e: string | null }[])
+    .map((r) => ({ from: sqliteMs(r.s), to: r.e === null ? Infinity : sqliteMs(r.e) }))
+    // A pause of an abandoned attempt (before this one went live) is not this half's.
+    .filter((r) => Number.isFinite(r.from) && r.to > origin);
+  return (at) => {
+    for (let i = marks.length - 1; i >= 0; i--) if (marks[i]!.wall <= at) return at - marks[i]!.zero;
+    let paused = 0;
+    for (const p of pauses) paused += Math.max(0, Math.min(p.to, at) - Math.max(p.from, origin));
+    return at - origin - paused;
+  };
 }
 
-/** Open (or keep) the track for this half's file and decode what was added.
- *  Null when there is no file, it cannot be read, its sides are unknown, or
- *  it is the abandoned attempt of a restarted half. */
+/** Open (or keep) the track for this half's file and read what was added,
+ *  turning new snapshots into points. Null when there is no file, it cannot
+ *  be read, its sides are unknown, or it is the abandoned attempt of a
+ *  restarted half; a failure is not tried again for RECOMPUTE_MS. */
 function advance(
   db: DB, matchId: number, st: MatchState, cur: { token: string; ordinal: number; half: 1 | 2 }, map: string, nowMs: number,
 ): HalfTrack | null {
   const held = st.track;
   if (held && held.ordinal === cur.ordinal && held.half === cur.half && nowMs - held.updatedAt < RECOMPUTE_MS) return held;
+  if (st.miss && st.miss.ordinal === cur.ordinal && st.miss.half === cur.half && nowMs - st.miss.at < RECOMPUTE_MS) return null;
+  const t = open(db, matchId, st, cur, map, nowMs);
+  if (!t) { st.miss = { ordinal: cur.ordinal, half: cur.half, at: nowMs }; return null; }
+  st.miss = null;
+  read(db, matchId, st, t, nowMs);
+  return t;
+}
+
+/** The track for the half's file as it is now, new or kept. */
+function open(
+  db: DB, matchId: number, st: MatchState, cur: { token: string; ordinal: number; half: 1 | 2 }, map: string, nowMs: number,
+): HalfTrack | null {
   const found = resolveFurther(sources.replayDir, sources.liveDir, liveFileName(cur.token, cur.ordinal, cur.half), nowMs);
   if (!found) return null;
   let size: number;
@@ -204,7 +269,17 @@ function advance(
   const header = head && head.length === HEADER_BYTES ? decodeHeader(head) : null;
   if (!header || header.version > VERSION) return null;
   const startedAt = sources.hud.halfStartedAt(cur.token, cur.ordinal, cur.half);
-  if (startedAt !== null && header.startedUnix * 1000 < startedAt - STALE_ATTEMPT_MS) return null;
+  if (startedAt !== null && header.startedUnix * 1000 < startedAt - STALE_ATTEMPT_MS) {
+    // Either the file is the attempt before a restart (its new file is not
+    // here yet), or the game server's clock is that far behind this one, in
+    // which case no half on that box ever gets points: worth a line.
+    const k = `${halfKey(cur.ordinal, cur.half)}:${header.startedUnix}`;
+    if (!st.warned.has(k)) {
+      st.warned.add(k);
+      console.warn(`[win-live] match ${matchId} map ${cur.ordinal} half ${cur.half}: the replay file went live ${Math.round(startedAt / 1000 - header.startedUnix)} s before ROUND_START; read as an abandoned attempt (or the server clock is behind)`);
+    }
+    return null;
+  }
 
   let t = st.track;
   if (t && (t.ordinal !== cur.ordinal || t.half !== cur.half)) t = null;
@@ -214,29 +289,61 @@ function advance(
     if (t.startedUnix !== header.startedUnix) st.points.delete(halfKey(cur.ordinal, cur.half));
     t = null;
   }
-  if (!t) {
-    let sideOf: (slot: number) => boolean;
-    if (header.sidesKnown) sideOf = (s) => slotInfected(header, s);
-    else {
-      const mask = infectedMaskForHeader(db, Buffer.from(head!), matchId, cur.ordinal, cur.half);
-      if (mask === null) return null;
-      sideOf = (s) => ((mask >> s) & 1) === 1;
-    }
-    // Points already made for this half (a track dropped and read again)
-    // are not made twice.
-    const made = st.points.get(halfKey(cur.ordinal, cur.half));
-    t = {
-      token: cur.token, ordinal: cur.ordinal, half: cur.half, path: found.path, startedUnix: header.startedUnix, sideOf,
-      offset: HEADER_BYTES, frames: [], mapPts: [], pm: sources.progressMaps.get(map.toLowerCase()) ?? null,
-      mtimeMs: 0, updatedAt: -Infinity, prog0: null, doneTMs: made && made.length > 0 ? made[made.length - 1]!.tMs : -Infinity, prev: null,
-    };
-    st.track = t;
+  if (t) return t;
+  let sideOf: (slot: number) => boolean;
+  if (header.sidesKnown) sideOf = (sl) => slotInfected(header, sl);
+  else {
+    const mask = infectedMaskForHeader(db, Buffer.from(head!), matchId, cur.ordinal, cur.half);
+    if (mask === null) return null;
+    sideOf = (sl) => ((mask >> sl) & 1) === 1;
+  }
+  // Points already made for this half (a track dropped and read again) are
+  // not made twice.
+  const made = st.points.get(halfKey(cur.ordinal, cur.half));
+  const fresh: HalfTrack = {
+    token: cur.token, ordinal: cur.ordinal, half: cur.half, path: found.path, startedUnix: header.startedUnix, sideOf,
+    offset: HEADER_BYTES, times: [], walker: null!, prog: () => null, progTs: [], progPs: [],
+    pm: sources.progressMaps.get(map.toLowerCase()) ?? null, queue: [], mtimeMs: 0, marks: [],
+    updatedAt: -Infinity, prog0: null, doneTMs: made && made.length > 0 ? made[made.length - 1]!.tMs : -Infinity, prev: null,
+  };
+  // The walker asks the track's current progress function, so the LIVEHUD
+  // fallback can be rebuilt each read.
+  fresh.walker = new SnapshotWalker((tMs) => fresh.prog(tMs), null);
+  st.track = fresh;
+  return fresh;
+}
+
+/** The running max at or before `tMs` from parallel sorted arrays, or null. */
+function stepAt(ts: number[], ps: number[], tMs: number): number | null {
+  let lo = 0, hi = ts.length - 1, best: number | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (ts[mid]! <= tMs) { best = ps[mid]!; lo = mid + 1; } else hi = mid - 1;
+  }
+  return best;
+}
+
+/** One read: decode what was added (at most MAX_DECODE_BYTES), feed the
+ *  frames to the walker, and make points of the snapshots. */
+function read(db: DB, matchId: number, st: MatchState, t: HalfTrack, nowMs: number): void {
+  const origin = sources.hud.halfStartedAt(t.token, t.ordinal, t.half) ?? t.startedUnix * 1000;
+  const clock = halfClock(db, matchId, t.ordinal, t.half, origin);
+  const samples = sources.hud.history(t.token, t.ordinal, t.half);
+  const placed = samples.map((sm) => ({ tMs: clock(sm.at), sm }));
+  if (t.pm) t.prog = (tMs) => stepAt(t.progTs, t.progPs, tMs);
+  else {
+    // No trusted progress map: LIVEHUD's progress, on the half clock.
+    t.prog = progressStep(placed.map((x) => ({ tMs: x.tMs, prog: x.sm.prog })));
   }
 
-  const end = header.indexOffset > 0 && header.indexOffset <= size ? header.indexOffset : size;
+  let size = 0;
+  try { size = statSync(t.path).size; } catch { /* nothing to read */ }
+  const head = readBytes(t.path, 0, HEADER_BYTES);
+  const header = head && head.length === HEADER_BYTES ? decodeHeader(head) : null;
+  const end = header && header.indexOffset > 0 && header.indexOffset <= size ? header.indexOffset : size;
   const len = Math.min(end - t.offset, MAX_DECODE_BYTES);
   if (len > 0) {
-    const chunk = readBytes(found.path, t.offset, len);
+    const chunk = readBytes(t.path, t.offset, len);
     if (chunk) {
       const { frames } = decodeFrames(chunk, 0, chunk.length, t.sideOf);
       if (frames.length > 0) {
@@ -245,33 +352,34 @@ function advance(
       }
       // The unpausedFrames rule, applied as the frames arrive: a frame is
       // kept only when its clock is past the last kept one.
-      let lastT = t.frames.length > 0 ? t.frames[t.frames.length - 1]!.tMs : -Infinity;
+      let lastT = t.times.length > 0 ? t.times[t.times.length - 1]!.tMs : -Infinity;
       for (const f of frames) {
         if (f.tMs <= lastT) continue;
         lastT = f.tMs;
-        t.frames.push(slim(f));
+        t.times.push({ tMs: f.tMs, offset: 0, players: EMPTY, entities: EMPTY });
         if (t.pm) {
           const v = furthestProg(t.pm, f);
-          if (v !== null) t.mapPts.push({ tMs: f.tMs, prog: v });
+          if (v !== null) {
+            t.progTs.push(f.tMs);
+            t.progPs.push(Math.max(v, t.progPs.length > 0 ? t.progPs[t.progPs.length - 1]! : -Infinity));
+          }
         }
+        t.queue.push(...t.walker.push(f));
       }
     }
   }
   // After the read: an mtime newer than the bytes decoded only holds frames
   // back (see releasableFrames), one older would release them early.
-  try { t.mtimeMs = statSync(found.path).mtimeMs; } catch { t.mtimeMs = 0; }
-  t.updatedAt = nowMs;
-  return t;
-}
-
-/** The newest sample at or before `at`, or null. */
-function sampleAt(samples: LiveHudSample[], at: number): LiveHudSample | null {
-  let lo = 0, hi = samples.length - 1, best: LiveHudSample | null = null;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (samples[mid]!.at <= at) { best = samples[mid]!; lo = mid + 1; } else hi = mid - 1;
+  try { t.mtimeMs = statSync(t.path).mtimeMs; } catch { t.mtimeMs = 0; }
+  // A clock mark, once the whole file has been read (a mark from the middle
+  // of a catch-up would put tMs 0 far too late).
+  const newest = t.times[t.times.length - 1];
+  const lastMark = t.marks[t.marks.length - 1];
+  if (newest && t.offset >= end && t.mtimeMs > 0 && (!lastMark || t.mtimeMs > lastMark.wall)) {
+    t.marks.push({ wall: t.mtimeMs, zero: Math.max(lastMark?.zero ?? -Infinity, t.mtimeMs - newest.tMs) });
   }
-  return best;
+  t.updatedAt = nowMs;
+  makePoints(st, t, placed, nowMs);
 }
 
 /** What happened between two consecutive snapshots worth marking. */
@@ -283,41 +391,36 @@ function momentOf(prev: Snapshot | null, s: Snapshot): Moment | undefined {
   return undefined;
 }
 
-/** The half's snapshots from every decoded frame, raw progress (not yet
- *  progress made). `wallOf` turns a snapshot time into this process's clock. */
-function snapshotsOf(t: HalfTrack, samples: LiveHudSample[], wallOf: (tMs: number) => number): Snapshot[] {
-  let prog: (tMs: number) => number | null;
-  if (t.pm) prog = progressStep(t.mapPts);
-  else {
-    // No trusted progress map: LIVEHUD's progress, placed on the half's clock
-    // by its arrival time. A pause makes that time run ahead of the game
-    // clock, so a sample only ever lands later than it happened, never early.
-    const origin = wallOf(0);
-    prog = progressStep(samples.map((s) => ({ tMs: s.at - origin, prog: s.prog })));
-  }
-  return halfSnapshots({ frames: t.frames, durationMs: 0, slots: [] }, prog, null);
-}
-
-/** Bring the half's points up to date: one per new snapshot that has a
- *  LIVEHUD sample at or before it. */
-function extendPoints(st: MatchState, t: HalfTrack, snaps: Snapshot[], samples: LiveHudSample[], wallOf: (tMs: number) => number): void {
+/** The queued snapshots as points. Each stands on the newest LIVEHUD sample
+ *  at or before it on the half clock, or the half's first sample when none
+ *  is (the opening seconds, before the first one arrived). With no sample
+ *  at all yet they wait: a half without LIVEHUD gets no points. */
+function makePoints(st: MatchState, t: HalfTrack, placed: { tMs: number; sm: LiveHudSample }[], nowMs: number): void {
+  if (placed.length === 0 || t.queue.length === 0) return;
   const k = halfKey(t.ordinal, t.half);
   let list = st.points.get(k);
   if (!list) { list = []; st.points.set(k, list); }
-  for (const s of snaps) {
+  // When the frame was seen: from the newest clock mark (every pause so far
+  // is in it, so an older frame only reads as seen later); in the middle of
+  // a catch-up there is none, and now is the safe answer.
+  const mark = t.marks[t.marks.length - 1];
+  const seenOf = (tMs: number) => (mark ? mark.zero + tMs : nowMs);
+  for (const s of t.queue) {
     if (t.prog0 === null && s.prog !== null) t.prog0 = s.prog;
     if (s.tMs <= t.doneTMs) continue;
     t.doneTMs = s.tMs;
     const prev = t.prev;
     t.prev = s;
-    const hud = sampleAt(samples, wallOf(s.tMs));
-    if (!hud) continue;
+    let hud = placed[0]!.sm;
+    for (let i = placed.length - 1; i >= 0; i--) if (placed[i]!.tMs <= s.tMs) { hud = placed[i]!.sm; break; }
     const moment = momentOf(prev, s);
     list.push({
-      tMs: s.tMs, snap: { ...s, prog: progressMade(s.prog, t.prog0) }, hudAt: hud.at, prices: new Map(),
+      tMs: s.tMs, snap: { ...s, prog: progressMade(s.prog, t.prog0) }, hudAt: hud.at,
+      seenAt: Math.max(hud.at, seenOf(s.tMs)), prices: new Map(),
       ...(moment ? { moment } : {}),
     });
   }
+  t.queue = [];
 }
 
 /** Update the match's current half (at most once per RECOMPUTE_MS) and say
@@ -328,24 +431,15 @@ function refresh(db: DB, matchId: number, map: string, nowMs: number, delayMs: n
   const none = { st, cur: null, visible: () => false };
   const cur = currentHalf(db, matchId);
   if (!cur) { st.track = null; return none; }
-  const before = st.track?.updatedAt;
   const t = advance(db, matchId, st, cur, map, nowMs);
   if (!t) return { ...none, cur };
-  if (t.updatedAt !== before) {
-    // The half's clock on this process's: from when it was seen going live,
-    // else from the file's own start.
-    const origin = sources.hud.halfStartedAt(cur.token, cur.ordinal, cur.half) ?? t.startedUnix * 1000;
-    const wallOf = (tMs: number) => origin + tMs;
-    const samples = sources.hud.history(cur.token, cur.ordinal, cur.half);
-    extendPoints(st, t, snapshotsOf(t, samples, wallOf), samples, wallOf);
-  }
   let cutoffTMs = Infinity;
   if (delayMs > 0) {
-    const released = releasableFrames(t.frames, t.startedUnix * 1000, nowMs, delayMs, t.mtimeMs);
+    const released = releasableFrames(t.times, t.startedUnix * 1000, nowMs, delayMs, t.mtimeMs);
     cutoffTMs = released.length > 0 ? released[released.length - 1]!.tMs : -Infinity;
   }
-  const hudCutoff = nowMs - Math.max(0, delayMs);
-  return { st, cur, visible: (p) => p.tMs <= cutoffTMs && p.hudAt <= hudCutoff };
+  const seenCutoff = nowMs - Math.max(0, delayMs);
+  return { st, cur, visible: (p) => p.tMs <= cutoffTMs && p.hudAt <= seenCutoff && p.seenAt <= seenCutoff };
 }
 
 /**
@@ -371,9 +465,9 @@ export function liveSnapshot(
   const samples = sources.hud.history(cur.token, cur.ordinal, cur.half);
   let tankFlow: number | null = null;
   for (let i = samples.length - 1; i >= 0; i--) {
-    const s = samples[i]!;
-    if (s.at > p.hudAt) continue;
-    if (s.tank >= 0 && s.tank <= 100) { tankFlow = s.tank; break; }
+    const sm = samples[i]!;
+    if (sm.at > p.hudAt) continue;
+    if (sm.tank >= 0 && sm.tank <= 100) { tankFlow = sm.tank; break; }
   }
   return { ordinal: cur.ordinal, half: cur.half, snap: p.snap, tankFlow };
 }
@@ -431,7 +525,9 @@ export function inHalfPoints(
     : refresh(db, matchId, nextMap, opts.nowMs, opts.delayMs);
 
   // Halves already played keep whatever points they had, the last one
-  // marked when the survivors made it to the saferoom.
+  // marked when the survivors made it to the saferoom. A public viewer is
+  // still the delay behind the half's end, so its last seconds wait.
+  const seenCutoff = opts.nowMs - Math.max(0, opts.delayMs);
   const aliveOf = db.prepare('SELECT survivors_alive AS alive FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?');
   // The score each half started from.
   let runA = 0, runB = 0;
@@ -440,7 +536,7 @@ export function inHalfPoints(
     if (r.survTeam === 'a') runA += r.score; else runB += r.score;
     const list = st.points.get(halfKey(r.ordinal, r.half));
     if (!list || list.length === 0) continue;
-    const pts: WinPoint[] = list.filter((p) => p.prices.has(form)).map((p) => ({
+    const pts: WinPoint[] = list.filter((p) => p.prices.has(form) && p.seenAt <= seenCutoff).map((p) => ({
       ordinal: r.ordinal, half: r.half, survTeam: r.survTeam, map: r.map, scoreA: fromA, scoreB: fromB, pA: p.prices.get(form)!,
       tMs: p.tMs, ...(p.moment ? { moment: p.moment } : {}),
     }));
@@ -481,8 +577,10 @@ export function inHalfPoints(
  * (the first in each 10 s window with a known progress), replacing anything
  * stored for the half before. Called by the round-end handler only: the
  * samples are undelayed, so they reach the database once the half is over.
- * `startedAt` is when the half went live on this process's clock; without
- * it the round row's started_at stands in. Returns the rows written.
+ * Times are on the half clock (RoundMs, pauses excluded, the clock of replay
+ * frames and the data feeds; see halfClock). `startedAt` is when the half
+ * went live on this process's clock; without it the round row's started_at
+ * stands in. Returns the rows written.
  */
 export function writeProgressSamples(
   db: DB, matchId: number, ordinal: number, half: number, samples: LiveHudSample[], startedAt: number | null,
@@ -491,14 +589,18 @@ export function writeProgressSamples(
   if (origin === null) {
     const row = db.prepare('SELECT started_at AS s FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?')
       .get(matchId, ordinal, half) as { s: string | null } | undefined;
-    origin = row?.s ? Date.parse(`${row.s.replace(' ', 'T')}Z`) : null;
+    origin = row?.s ? sqliteMs(row.s) : null;
   }
   const rows: { t: number; prog: number; tank: number | null }[] = [];
   if (origin !== null && Number.isFinite(origin)) {
+    const clock = halfClock(db, matchId, ordinal, half, origin);
+    const placed = samples
+      .filter((s) => s.prog >= 0 && s.prog <= 100)
+      .map((s) => ({ t: Math.round(clock(s.at)), s }))
+      .filter((x) => x.t >= 0)
+      .sort((x, y) => x.t - y.t);
     let window = -1;
-    for (const s of samples) {
-      const t = s.at - origin;
-      if (t < 0 || s.prog < 0 || s.prog > 100) continue;
+    for (const { t, s } of placed) {
       const w = Math.floor(t / PROGRESS_SAMPLE_MS);
       if (w <= window) continue;
       window = w;
