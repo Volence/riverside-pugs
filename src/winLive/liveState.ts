@@ -56,7 +56,7 @@ export const PROGRESS_MAPS: ReadonlyMap<string, ProgressMap> = new Map(
 /** Snapshots and points are recomputed at most this often per match. */
 export const RECOMPUTE_MS = SNAPSHOT_EVERY_MS;
 /** At most this much of the file is decoded per update. */
-const MAX_DECODE_BYTES = 2 * 1024 * 1024;
+export const MAX_DECODE_BYTES = 2 * 1024 * 1024;
 /** A match nobody has asked about for this long is forgotten. */
 const FORGET_MS = 10 * 60_000;
 /** A file that went live this much earlier than the half's ROUND_START is
@@ -68,9 +68,13 @@ export interface LiveWinSources {
   liveDir: string;
   hud: LiveHudStore;
   progressMaps: ReadonlyMap<string, ProgressMap>;
+  /** At most this much of a file per read (MAX_DECODE_BYTES; tests shrink it). */
+  maxDecodeBytes: number;
 }
 
-let sources: LiveWinSources = { replayDir: '', liveDir: '', hud: liveHudStore, progressMaps: PROGRESS_MAPS };
+let sources: LiveWinSources = {
+  replayDir: '', liveDir: '', hud: liveHudStore, progressMaps: PROGRESS_MAPS, maxDecodeBytes: MAX_DECODE_BYTES,
+};
 
 /** Where the live replay files are (set once at server start) and, for
  *  tests, which LIVEHUD store and progress maps to read. Forgets every match. */
@@ -103,9 +107,19 @@ interface StoredPoint {
 }
 
 /** Where the half clock (RoundMs, game time, which stops in a pause) stood
- *  against this process's clock: at wall time `wall` (the file's mtime),
- *  tMs 0 was at `zero`. Game time stops during a pause, so `zero` only grows. */
-interface ClockMark { wall: number; zero: number }
+ *  against this process's clock, from one read that reached the end of the
+ *  file: at wall time `wall` (the file's mtime) its newest frame was at
+ *  `upToTMs`, so tMs 0 was at `zero` = wall - upToTMs, every pause so far
+ *  included. The file is written a little after its frames (the push's
+ *  lag), so `zero` is never early: for any frame up to `upToTMs`, zero +
+ *  its tMs is no earlier than it really happened. Past `upToTMs` a mark
+ *  says nothing (a pause may have come since). */
+interface ClockMark { wall: number; zero: number; upToTMs: number }
+
+/** How many recent marks a time is read against. The smallest zero of them
+ *  wins: one read with a lag spike (or a write between the stat and the
+ *  read) does not hold the clock late for the rest of the half. */
+const MARKS_KEPT = 3;
 
 /** The half being read. Frames are not kept: a SnapshotWalker carries the
  *  snapshot state forward, and only each frame's time stays (the public
@@ -215,13 +229,14 @@ const sqliteMs = (s: string) => Date.parse(`${s.replace(' ', 'T')}Z`);
  * the half went live, which stops in a pause, the clock replay frames carry).
  * `origin` is when the half went live on this process's clock.
  *
- * With a track of the half, the newest clock mark at or before the time
- * says where tMs 0 stood (the mtime of the file less its newest frame's
- * time, so every pause up to then is in it). A pause after that mark is not
- * yet, so the time only ever lands later than it happened, never early. A
- * mark carries the push's lag too (the file is written a little after the
- * frame), a fraction of a second the other way. Before the first mark, or
- * with no track, the half's pauses (match_pauses) are taken off instead.
+ * With a track of the half, the recent clock marks at or before the time
+ * say where tMs 0 stood (the smallest zero of the last MARKS_KEPT of them,
+ * none from before a pause that has ended: match_pauses says when). A
+ * pause after them is not in it yet, so the time only ever lands later than
+ * it happened. A mark carries the push's lag (a fraction of a second the
+ * other way), which taking the smallest of a few keeps from latching.
+ * Before the first mark, or with no track, the half's pauses
+ * (match_pauses) are taken off instead.
  */
 function halfClock(db: DB, matchId: number, ordinal: number, half: number, origin: number): (at: number) => number {
   const t = matches.get(matchId)?.track;
@@ -233,7 +248,18 @@ function halfClock(db: DB, matchId: number, ordinal: number, half: number, origi
     // A pause of an abandoned attempt (before this one went live) is not this half's.
     .filter((r) => Number.isFinite(r.from) && r.to > origin);
   return (at) => {
-    for (let i = marks.length - 1; i >= 0; i--) if (marks[i]!.wall <= at) return at - marks[i]!.zero;
+    // A mark from before the newest pause that had ended by `at` predates
+    // that pause: it would put the time a whole pause late.
+    let pausedUntil = -Infinity;
+    for (const p of pauses) if (p.to <= at) pausedUntil = Math.max(pausedUntil, p.to);
+    let zero = Infinity;
+    for (let i = marks.length - 1, n = 0; i >= 0 && n < MARKS_KEPT; i--) {
+      if (marks[i]!.wall > at) continue;
+      if (marks[i]!.wall < pausedUntil) break;
+      zero = Math.min(zero, marks[i]!.zero);
+      n++;
+    }
+    if (zero !== Infinity) return at - zero;
     let paused = 0;
     for (const p of pauses) paused += Math.max(0, Math.min(p.to, at) - Math.max(p.from, origin));
     return at - origin - paused;
@@ -336,12 +362,18 @@ function read(db: DB, matchId: number, st: MatchState, t: HalfTrack, nowMs: numb
     t.prog = progressStep(placed.map((x) => ({ tMs: x.tMs, prog: x.sm.prog })));
   }
 
+  // One stat for both: the mtime is then the write that made the file this
+  // long, never a later one than the bytes read (which would put a clock
+  // mark late) nor an earlier one (which would release frames early, see
+  // releasableFrames). A capped read leaves newer frames unread; that only
+  // holds frames back.
   let size = 0;
-  try { size = statSync(t.path).size; } catch { /* nothing to read */ }
+  t.mtimeMs = 0;
+  try { const stt = statSync(t.path); size = stt.size; t.mtimeMs = stt.mtimeMs; } catch { /* nothing to read */ }
   const head = readBytes(t.path, 0, HEADER_BYTES);
   const header = head && head.length === HEADER_BYTES ? decodeHeader(head) : null;
   const end = header && header.indexOffset > 0 && header.indexOffset <= size ? header.indexOffset : size;
-  const len = Math.min(end - t.offset, MAX_DECODE_BYTES);
+  const len = Math.min(end - t.offset, sources.maxDecodeBytes);
   if (len > 0) {
     const chunk = readBytes(t.path, t.offset, len);
     if (chunk) {
@@ -368,15 +400,14 @@ function read(db: DB, matchId: number, st: MatchState, t: HalfTrack, nowMs: numb
       }
     }
   }
-  // After the read: an mtime newer than the bytes decoded only holds frames
-  // back (see releasableFrames), one older would release them early.
-  try { t.mtimeMs = statSync(t.path).mtimeMs; } catch { t.mtimeMs = 0; }
-  // A clock mark, once the whole file has been read (a mark from the middle
-  // of a catch-up would put tMs 0 far too late).
+  // A clock mark, once the whole file has been read (the mtime belongs to
+  // its last frame, not to one in the middle of a catch-up).
   const newest = t.times[t.times.length - 1];
   const lastMark = t.marks[t.marks.length - 1];
   if (newest && t.offset >= end && t.mtimeMs > 0 && (!lastMark || t.mtimeMs > lastMark.wall)) {
-    t.marks.push({ wall: t.mtimeMs, zero: Math.max(lastMark?.zero ?? -Infinity, t.mtimeMs - newest.tMs) });
+    t.marks.push({ wall: t.mtimeMs, zero: t.mtimeMs - newest.tMs, upToTMs: newest.tMs });
+    // An hour of reads; older samples fall back to match_pauses.
+    if (t.marks.length > 720) t.marks.splice(0, t.marks.length - 720);
   }
   t.updatedAt = nowMs;
   makePoints(st, t, placed, nowMs);
@@ -400,11 +431,16 @@ function makePoints(st: MatchState, t: HalfTrack, placed: { tMs: number; sm: Liv
   const k = halfKey(t.ordinal, t.half);
   let list = st.points.get(k);
   if (!list) { list = []; st.points.set(k, list); }
-  // When the frame was seen: from the newest clock mark (every pause so far
-  // is in it, so an older frame only reads as seen later); in the middle of
-  // a catch-up there is none, and now is the safe answer.
-  const mark = t.marks[t.marks.length - 1];
-  const seenOf = (tMs: number) => (mark ? mark.zero + tMs : nowMs);
+  // When the frame was seen: zero + tMs from a recent clock mark that covers
+  // it (its newest frame at or past it), the smallest of them; a frame past
+  // every mark (read in a capped catch-up, a pause may have come since) was
+  // seen now, the safe answer. Points already made keep their seenAt.
+  const recent = t.marks.slice(-MARKS_KEPT);
+  const seenOf = (tMs: number) => {
+    let best = Infinity;
+    for (const m of recent) if (m.upToTMs >= tMs) best = Math.min(best, m.zero + tMs);
+    return best === Infinity ? nowMs : Math.min(best, nowMs);
+  };
   for (const s of t.queue) {
     if (t.prog0 === null && s.prog !== null) t.prog0 = s.prog;
     if (s.tMs <= t.doneTMs) continue;
@@ -493,6 +529,18 @@ function priceCtx(model: WinModel, played: PlayedHalf[], future: FutureHalf[], i
   return { othersA: rest('a', t.a), othersB: rest('b', t.b), theta: t[survTeam], calibration: form?.calibration ?? CALIBRATION };
 }
 
+/** Team A's chance with the half `map` (surviving `survTeam`, its
+ *  `half`-th turn on the map) at `snap` and the rest from `ctx`. */
+function price(model: WinModel, ctx: PriceCtx, map: string, survTeam: 'a' | 'b', half: 1 | 2, gap: number, snap: Snapshot): number {
+  const pred = predictHalf(model, HALF_PARAMS, map, ctx.theta, snap, half);
+  return winChanceDists(
+    gap,
+    survTeam === 'a' ? [ctx.othersA, pred] : [ctx.othersA],
+    survTeam === 'b' ? [ctx.othersB, pred] : [ctx.othersB],
+    ctx.calibration,
+  );
+}
+
 export interface InHalfOpts {
   form?: FormParams;
   nowMs: number;
@@ -506,8 +554,10 @@ export interface InHalfOpts {
  * line's own; the half in progress is the future half its surviving team
  * plays on its map, and it is priced against the rest exactly as the
  * half-end line prices it, so the opening snapshot sits on the line's last
- * point. A point is shown only in the form variant it was priced in while
- * its half was live.
+ * point. A played half's points are priced the same way against the line
+ * as it stood when that half began, so a point nobody asked for while its
+ * half was live (or a form variant nobody asked for) is priced afterwards
+ * to the same value.
  */
 export function inHalfPoints(
   db: DB, matchId: number, model: WinModel, played: PlayedHalf[], future: FutureHalf[], opts: InHalfOpts,
@@ -529,21 +579,32 @@ export function inHalfPoints(
   // still the delay behind the half's end, so its last seconds wait.
   const seenCutoff = opts.nowMs - Math.max(0, opts.delayMs);
   const aliveOf = db.prepare('SELECT survivors_alive AS alive FROM match_rounds WHERE match_id = ? AND ordinal = ? AND half = ?');
-  // The score each half started from.
+  // The score each half started from, and the halves still to play then
+  // (this one first).
+  const slots: FutureHalf[] = [...played.map((r) => ({ team: r.survTeam, map: r.map })), ...future];
   let runA = 0, runB = 0;
-  for (const r of played) {
+  played.forEach((r, j) => {
     const [fromA, fromB] = [runA, runB];
     if (r.survTeam === 'a') runA += r.score; else runB += r.score;
     const list = st.points.get(halfKey(r.ordinal, r.half));
-    if (!list || list.length === 0) continue;
-    const pts: WinPoint[] = list.filter((p) => p.prices.has(form) && p.seenAt <= seenCutoff).map((p) => ({
-      ordinal: r.ordinal, half: r.half, survTeam: r.survTeam, map: r.map, scoreA: fromA, scoreB: fromB, pA: p.prices.get(form)!,
-      tMs: p.tMs, ...(p.moment ? { moment: p.moment } : {}),
-    }));
+    if (!list || list.length === 0) return;
+    let ctx: PriceCtx | null = null;
+    const pts: WinPoint[] = list.filter((p) => p.seenAt <= seenCutoff).map((p) => {
+      let pA = p.prices.get(form);
+      if (pA === undefined) {
+        ctx ??= priceCtx(model, played.slice(0, j), slots.slice(j), 0, r.survTeam, form);
+        pA = price(model, ctx, r.map, r.survTeam, r.half as 1 | 2, fromA - fromB, p.snap);
+        p.prices.set(form, pA);
+      }
+      return {
+        ordinal: r.ordinal, half: r.half, survTeam: r.survTeam, map: r.map, scoreA: fromA, scoreB: fromB, pA,
+        tMs: p.tMs, ...(p.moment ? { moment: p.moment } : {}),
+      };
+    });
     const alive = (aliveOf.get(matchId, r.ordinal, r.half) as { alive: number | null } | undefined)?.alive ?? null;
     if (pts.length > 0 && alive !== null && alive > 0) pts[pts.length - 1] = { ...pts[pts.length - 1]!, moment: 'saferoom' };
     if (pts.length > 0) out.finished.set(halfKey(r.ordinal, r.half), pts);
-  }
+  });
 
   if (!cur || cur.ordinal !== next.ordinal || cur.half !== next.half || nextMap === null) return out;
   const idx = future.findIndex((x) => x.team === cur.survTeam && x.map === nextMap);
@@ -555,13 +616,7 @@ export function inHalfPoints(
     let pA = p.prices.get(form);
     if (pA === undefined) {
       ctx ??= priceCtx(model, played, future, idx, cur.survTeam, form);
-      const pred = predictHalf(model, HALF_PARAMS, nextMap, ctx.theta, p.snap, cur.half);
-      pA = winChanceDists(
-        scoreA - scoreB,
-        cur.survTeam === 'a' ? [ctx.othersA, pred] : [ctx.othersA],
-        cur.survTeam === 'b' ? [ctx.othersB, pred] : [ctx.othersB],
-        ctx.calibration,
-      );
+      pA = price(model, ctx, nextMap, cur.survTeam, cur.half, scoreA - scoreB, p.snap);
       p.prices.set(form, pA);
     }
     out.current.push({

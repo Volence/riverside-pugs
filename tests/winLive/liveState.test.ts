@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type DB } from '../../src/db.js';
-import { encodeFrame, encodeHeader, STATE, VERSION, type Frame, type PlayerSample } from '../../src/replayFormat.js';
+import { encodeFrame, encodeHeader, frameBytes, STATE, VERSION, type Frame, type PlayerSample } from '../../src/replayFormat.js';
 import { LiveHudStore, type LiveHudLine } from '../../src/cast/liveHud.js';
 import { buildWinModel, liveWinLine, type HalfRow } from '../../src/winProb.js';
 import { insertDraft, publishCampaign } from '../../src/customCampaigns.js';
@@ -19,7 +19,7 @@ import { halfSnapshots, progressStep } from '../../src/winLive/snapshot.js';
 import { buildProgressMap, furthestProg } from '../../src/winLive/progressMap.js';
 import { progressMade } from '../../src/winLive/halfModel.js';
 import {
-  configureLiveWin, liveSnapshot, PROGRESS_MAPS, RECOMPUTE_MS, resetLiveWin, winLiveOption, writeProgressSamples,
+  configureLiveWin, liveSnapshot, MAX_DECODE_BYTES, PROGRESS_MAPS, RECOMPUTE_MS, resetLiveWin, winLiveOption, writeProgressSamples,
 } from '../../src/winLive/liveState.js';
 
 const TOKEN = 'c'.repeat(32);
@@ -94,7 +94,7 @@ beforeEach(() => {
   db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, reliable, started_at) VALUES (?, 0, 1, 'a', 1, datetime('now'))").run(id);
   liveDir = mkdtempSync(join(tmpdir(), 'winlive-'));
   hud = new LiveHudStore();
-  configureLiveWin({ replayDir: '', liveDir, hud, progressMaps: new Map() });
+  configureLiveWin({ replayDir: '', liveDir, hud, progressMaps: new Map(), maxDecodeBytes: MAX_DECODE_BYTES });
   hud.resetReach(TOKEN, 0, 1, START);
 });
 afterEach(() => {
@@ -247,6 +247,19 @@ describe('liveWinLine with points during a half', () => {
     expect(tms(live(10_000, NOW + 9500)).at(-1)).toBe(60_000);
   });
 
+  it('prices a finished half\'s points nobody asked for while it was live to the values they would have had', () => {
+    writeHalf(frames(60_000));
+    sample(START + 1500, 5);
+    const during = live(0).points.slice(1);
+    // The same half again, read but never priced while live.
+    configureLiveWin({});
+    liveSnapshot(db, id, NOW, 0);
+    db.prepare("UPDATE match_rounds SET score = 640, ended_at = datetime('now'), survivors_alive = 0 WHERE match_id = ?").run(id);
+    const after = live(0, NOW + 6000).points.slice(1, -1);
+    expect(after.map((p) => p.tMs)).toEqual(during.map((p) => p.tMs));
+    after.forEach((p, i) => expect(p.pA).toBeCloseTo(during[i]!.pA, 12));
+  });
+
   it('keeps a finished half\'s points before its half-end point, the last marked when they made the saferoom', () => {
     writeHalf(frames(60_000));
     sample(START + 1500, 5);
@@ -268,6 +281,8 @@ describe('the half clock across a pause', () => {
 
   it('puts LIVEHUD samples after a pause on the frames\' clock (game time, which stood still)', () => {
     // Game time runs 0 to 30 s, a 20 s pause (wall 30 to 50 s), then on.
+    db.prepare('INSERT INTO match_pauses (match_id, map_ordinal, half, started_at, ended_at) VALUES (?, 0, 1, ?, ?)')
+      .run(id, sqlite(START + 30_000), sqlite(START + 50_000));
     sample(START + 1000, 5);
     writeHalf(frames(29_500), START, 'm1', START + 30_000);
     expect(liveSnapshot(db, id, START + 30_000, 0)).not.toBeNull();
@@ -279,6 +294,41 @@ describe('the half clock across a pause', () => {
     const s = liveSnapshot(db, id, START + 65_000, 0)!;
     expect(s.snap.tMs).toBe(40_000);
     expect(s.snap.prog).toBe(40 - 5);
+  });
+
+  it('a frame read past the last clock mark (a capped catch-up across a pause) counts as seen at the read', () => {
+    // Reads of at most 40 frames (20 s).
+    configureLiveWin({ maxDecodeBytes: 40 * frameBytes(0) });
+    sample(START + 1500, 5);
+    writeHalf(frames(19_000), START, 'm1', START + 19_500);
+    liveSnapshot(db, id, START + 19_500, 0); // the whole file: a mark, frame 19.5 s seen at wall 19.5 s
+    // A 20 s pause, then 40 s more play; the next read only gets to 39.5 s.
+    sample(START + 15_000, 5);
+    writeHalf(frames(59_500), START, 'm1', START + 80_000);
+    const READ = START + 80_000;
+    liveSnapshot(db, id, READ, 0);
+    db.prepare("UPDATE match_rounds SET score = 640, ended_at = datetime('now'), survivors_alive = 3 WHERE match_id = ?").run(id);
+    const last = (nowMs: number, delayMs: number) =>
+      liveWinLine(db, id, 'five', model, { live: true, nowMs, delayMs })!.points.filter((p) => p.tMs !== undefined).at(-1)?.tMs;
+    expect(last(READ + 1000, 0)).toBe(35_000);
+    // Frames to 19.5 s were covered by the mark; 20 to 35 s only by the read.
+    expect(last(READ + 9000, 10_000)).toBe(15_000);
+    expect(last(READ + 10_000, 10_000)).toBe(35_000);
+  });
+
+  it('one read with a push lag spike does not put later LIVEHUD samples early on the clock', () => {
+    sample(START + 1500, 5);
+    writeHalf(frames(29_500), START, 'm1', START + 30_000);
+    liveSnapshot(db, id, START + 30_000, 0);
+    // The file for 35 s lands 3 s late.
+    writeHalf(frames(34_500), START, 'm1', START + 38_000);
+    liveSnapshot(db, id, START + 35_000, 0);
+    // At wall 41 s (game 41 s) progress jumps; the 40 s snapshot must not see it.
+    sample(START + 41_000, 40);
+    writeHalf(frames(40_000), START, 'm1', START + 41_500);
+    const s = liveSnapshot(db, id, START + 41_500, 0)!;
+    expect(s.snap.tMs).toBe(40_000);
+    expect(s.snap.prog).toBe(0);
   });
 
   it('stores progress samples on the game clock, taking off the half\'s pauses when no replay was read', () => {
