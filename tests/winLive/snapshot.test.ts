@@ -17,6 +17,12 @@ function tankEnt(ref: number, health: number): EntitySample {
 function frame(tMs: number, players: PlayerSample[] = [], entities: EntitySample[] = []): Frame {
   return { tMs, players, entities, offset: 0 };
 }
+/** Frames every second from `from` to `to`, built by `make` from the time. */
+function run(from: number, to: number, make: (t: number) => Frame): Frame[] {
+  const out: Frame[] = [];
+  for (let t = from; t <= to; t += 1000) out.push(make(t));
+  return out;
+}
 const standing = [surv(0, ALIVE, 60, 20), surv(1, ALIVE, 100)];
 
 describe('progressTimeline', () => {
@@ -74,12 +80,10 @@ describe('halfSnapshots', () => {
   const rr = (frames: Frame[]) => ({ frames, durationMs: 0, slots: [] });
   it('goes pending, alive with spawn health, then dead', () => {
     const frames = [
-      frame(0, standing),
-      frame(5000, standing),
-      frame(10000, standing, [tankEnt(7, 6000)]),
-      frame(12000, standing, [tankEnt(7, 3000)]),
+      ...run(0, 9000, (t) => frame(t, standing)),
+      ...run(10000, 14000, (t) => frame(t, standing, [tankEnt(7, t < 12000 ? 6000 : t < 15000 ? 3000 : 1500)])),
       frame(15000, standing, [tankEnt(7, 1500)]),
-      frame(20000, standing),
+      ...run(16000, 20000, (t) => frame(t, standing)),
     ];
     const s = halfSnapshots(rr(frames), () => null, 40);
     expect(s.map((x) => [x.tMs, x.tank, x.tankHealthFrac])).toEqual([
@@ -95,22 +99,64 @@ describe('halfSnapshots', () => {
     const s = halfSnapshots(rr(frames), () => null, null);
     expect(s.map((x) => [x.tMs, x.health])).toEqual([[0, 180], [4900, 10]]);
   });
-  it('keeps the pause clock: feed samples pair with frames by tMs', () => {
-    // 20 s of pause between 30000 and 50000: those frames were dropped, and
-    // the clock after the gap is NOT renumbered.
+  it('keeps the pause clock: a feed sample pairs with the frame at its own tMs', () => {
+    // Frames every 1 s to 20000, a 20 s pause, then 40000 onward. The clock is
+    // not renumbered, so the frame after the gap still says 40000.
     const raw: Frame[] = [];
-    for (let t = 0; t <= 80000; t += 1000) raw.push(frame(t, standing));
+    for (let t = 0; t <= 20000; t += 1000) raw.push(frame(t, standing));
+    for (let t = 40000; t <= 80000; t += 1000) raw.push(frame(t, standing));
     raw.push(frame(40000, standing)); // a stalled clock step, dropped
-    const kept = unpausedFrames(raw.filter((f) => f.tMs <= 30000 || f.tMs >= 50000));
-    const prog = progressTimeline([{ tMs: 0, prog: 0 }, { tMs: 40000, prog: 40 }, { tMs: 80000, prog: 80 }]);
+    const kept = unpausedFrames(raw);
+    const prog = progressTimeline([{ tMs: 0, prog: 0 }, { tMs: 20000, prog: 20 }, { tMs: 40000, prog: 70 }, { tMs: 80000, prog: 90 }]);
     const s = halfSnapshots(rr(kept), prog, null, 10000);
-    const at40 = s.find((x) => x.tMs === 40000);
-    expect(at40).toBeUndefined(); // no frame exists at 40 s: it was paused
-    const at50 = s.find((x) => x.tMs === 50000)!;
-    expect(at50.prog).toBe(50);
-    expect(s.find((x) => x.tMs === 80000)!.prog).toBe(80);
-    // Pairing by index would make the 40th kept frame (tMs 59000) read prog 40.
-    expect(s.find((x) => x.tMs === 60000)!.prog).toBe(60);
+    // 30000 falls in the hole and is skipped.
+    expect(s.map((x) => x.tMs)).toEqual([0, 10000, 20000, 40000, 50000, 60000, 70000, 80000]);
+    expect(s.find((x) => x.tMs === 40000)!.prog).toBe(70);
+    // Pairing by index would put the 41st kept frame (tMs 60000) at prog 40.
+    expect(s.find((x) => x.tMs === 60000)!.prog).toBe(80);
+  });
+  it('keeps a ghost tank pending', () => {
+    const ghost = { ...tankPlayer(4, 6000), state: ALIVE | STATE.GHOST };
+    const s = halfSnapshots(rr([frame(0, [...standing, ghost]), frame(5000, [...standing, ghost])]), () => null, 40);
+    expect(s.map((x) => x.tank)).toEqual(['pending', 'pending']);
+  });
+  it('carries the tank through a pass, so health stays a continuous fraction', () => {
+    const frames = [
+      ...run(0, 4000, (t) => frame(t, standing, [tankEnt(7, 6000)])),
+      ...run(5000, 9000, (t) => frame(t, [...standing, tankPlayer(4, 3000)])),
+      ...run(10000, 10000, (t) => frame(t, [...standing, tankPlayer(5, 1500)])),
+    ];
+    const s = halfSnapshots(rr(frames), () => null, null);
+    expect(s.map((x) => [x.tank, x.tankHealthFrac])).toEqual([['alive', 1], ['alive', 0.5], ['alive', 0.25]]);
+  });
+  it('does not call a one-frame gap a death, and has no flow gap then', () => {
+    const frames = [
+      ...run(0, 4000, (t) => frame(t, standing, [tankEnt(7, 6000)])),
+      frame(5000, standing),
+      ...run(6000, 10000, (t) => frame(t, standing, [tankEnt(7, 3000)])),
+    ];
+    const s = halfSnapshots(rr(frames), () => 10, 50);
+    expect(s.map((x) => [x.tank, x.tankHealthFrac, x.tankFlowGap])).toEqual([
+      ['alive', 1, null], ['alive', null, null], ['alive', 0.5, null]]);
+  });
+  it('has a null flow gap once dead, and a later tank starts a fresh life', () => {
+    const frames = [
+      ...run(0, 4000, (t) => frame(t, standing, [tankEnt(7, 6000)])),
+      ...run(5000, 14000, (t) => frame(t, standing)),
+      ...run(15000, 15000, (t) => frame(t, standing, [tankEnt(8, 4000)])),
+    ];
+    const s = halfSnapshots(rr(frames), () => 10, 50);
+    expect(s.map((x) => [x.tMs, x.tank, x.tankHealthFrac, x.tankFlowGap])).toEqual([
+      [0, 'alive', 1, null], [5000, 'alive', null, null], [10000, 'dead', null, null], [15000, 'alive', 1, null]]);
+  });
+  it('divides by the health seen so far, not a later peak', () => {
+    const frames = [
+      ...run(0, 4000, (t) => frame(t, standing, [tankEnt(7, 3000)])),
+      ...run(5000, 9000, (t) => frame(t, standing, [tankEnt(7, 6000)])),
+      frame(10000, standing, [tankEnt(7, 3000)]),
+    ];
+    const s = halfSnapshots(rr(frames), () => null, null);
+    expect(s.map((x) => x.tankHealthFrac)).toEqual([1, 1, 0.5]);
   });
 });
 

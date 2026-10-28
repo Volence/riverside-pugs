@@ -37,6 +37,8 @@ export interface Snapshot {
 const TANK_CLS = 5;
 const SURVIVOR_HEALTH_CAP = 100;
 export const SNAPSHOT_EVERY_MS = 5000;
+/** No tank in the frames for longer than this means the tank is dead. */
+export const TANK_GONE_MS = 2000;
 
 /** Progress as a function of half time: furthest so far (monotone max),
  *  linear between samples, null before the first sample. Samples outside
@@ -112,8 +114,14 @@ export function snapshotAt(
 }
 
 /** A snapshot every `everyMs` of half time, each from the latest frame at or
- *  before that time (its `tMs` is that frame's). Walks every frame so the tank's spawn health (the most
- *  health it was seen with) and its death are known even between samples. */
+ *  before that time (its `tMs` is that frame's).
+ *
+ *  Walks every frame, but only ever looks backwards: the tank's spawn health is
+ *  the most health seen so far in the current tank life, never a later peak, so
+ *  a training row holds only what a live reader would have known. A tank life
+ *  survives a pass (AI to player, player to player) and a short gap in the
+ *  frames; it ends when no tank has been seen for more than TANK_GONE_MS, and
+ *  a tank after that starts a new life with fresh spawn health. */
 export function halfSnapshots(
   rr: RoundReplay,
   prog: (tMs: number) => number | null,
@@ -123,15 +131,20 @@ export function halfSnapshots(
   const frames = rr.frames;
   if (frames.length === 0) return [];
   const out: Snapshot[] = [];
-  const spawnHealth = new Map<string, number>();
-  let tankSeen = false;
+  let lifeMax = 0;
+  let lastSeenMs: number | null = null;
+  let gone = false;
   let next = frames[0].tMs;
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i];
     const tank = liveTank(f);
+    // Death is judged on frames that lack a tank, so a coarse frame spacing
+    // never reads as an absence.
+    if (!tank && lastSeenMs !== null && f.tMs - lastSeenMs > TANK_GONE_MS) gone = true;
     if (tank) {
-      tankSeen = true;
-      spawnHealth.set(tank.key, Math.max(spawnHealth.get(tank.key) ?? 0, tank.health));
+      if (gone) { lifeMax = 0; gone = false; }
+      lifeMax = Math.max(lifeMax, tank.health);
+      lastSeenMs = f.tMs;
     }
     // The frame stands for every sample time up to the next frame's time; the
     // last one stands only for its own time. A sample time that falls in a
@@ -140,8 +153,12 @@ export function halfSnapshots(
     const until = i + 1 < frames.length ? frames[i + 1].tMs : f.tMs + 1;
     for (; next < until; next += everyMs) {
       if (next - f.tMs > FRAME_DT_CAP_MS) continue;
-      const s = snapshotAt(f, prog(f.tMs), tankFlow, tank ? spawnHealth.get(tank.key) ?? null : null);
-      if (!tank && tankSeen) { s.tank = 'dead'; s.tankFlowGap = null; }
+      const s = snapshotAt(f, prog(f.tMs), tankFlow, tank && lifeMax > 0 ? lifeMax : null);
+      if (!tank && lastSeenMs !== null) {
+        // A brief absence is still the same tank; a long one is its death.
+        s.tank = gone ? 'dead' : 'alive';
+        s.tankFlowGap = null;
+      }
       out.push(s);
     }
   }
