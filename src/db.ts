@@ -983,6 +983,21 @@ CREATE TABLE IF NOT EXISTS match_demos (
 -- as discoverMatchDemos works, because the filename already carries the
 -- match link by construction and a lost datagram would otherwise leave a
 -- real file permanently unindexed.
+-- LIVEHUD progress through a half, one sample per 10 s of half time (t_ms
+-- since the half went live, pauses included like the plugin's RoundMs),
+-- written once the half has ended (src/winLive/liveState.ts
+-- writeProgressSamples) so later retraining of the live win chance has true
+-- progress. Never written while a half is live: the samples are undelayed.
+-- tank is the tank flow %, NULL when the plugin did not know it.
+CREATE TABLE IF NOT EXISTS match_progress_samples (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  ordinal  INTEGER NOT NULL,
+  half     INTEGER NOT NULL,
+  t_ms     INTEGER NOT NULL,
+  prog     INTEGER NOT NULL,
+  tank     INTEGER,
+  PRIMARY KEY (match_id, ordinal, half, t_ms)
+);
 CREATE TABLE IF NOT EXISTS match_replays (
   match_id  INTEGER NOT NULL REFERENCES matches(id),
   ordinal   INTEGER NOT NULL,
@@ -1664,6 +1679,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Team form on the win chance line (src/winForm.ts). Off: the line is the
   // map-history-only one; admins see form on the match and Live pages anyway.
   win_chance_form: '0',
+  // The win chance moving during a half (src/winLive/liveState.ts). Off: it
+  // moves only at half ends; admins see it on the Live page anyway.
+  win_chance_live: '0',
   sidegames_min_players: '4',
   // Pick a match's server by the players' measured ping (src/serverPick.ts).
   // Off by default: with it off, the admin-set pick order alone decides.

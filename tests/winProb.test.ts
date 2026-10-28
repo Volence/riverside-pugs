@@ -225,6 +225,15 @@ describe('liveWinLine', () => {
     expect(liveWinLine(db, id, 'five', model)).toBeNull();
   });
 
+  it('with live points asked for but no half being read, is the same line', () => {
+    playMap(0, 'm1');
+    half(0, 1, 'a', 640);
+    half(0, 2, 'b', null);
+    expect(liveWinLine(db, id, 'five', model, { live: true })).toEqual(liveWinLine(db, id, 'five', model));
+    const pts = liveWinLine(db, id, 'five', model, { live: true })!.points;
+    expect(pts.every((p) => p.tMs === undefined && p.moment === undefined)).toBe(true);
+  });
+
   it('is null when the maps played do not follow the plan, or the plan is unknown', () => {
     playMap(0, 'somewhere_else');
     half(0, 1, 'a', 100);

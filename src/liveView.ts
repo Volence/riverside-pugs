@@ -9,6 +9,7 @@ import { archiveAborted } from './matchArchive.js';
 import { noteMatchAborted } from './matchAborts.js';
 import { liveWinLine, type WinLine } from './winProb.js';
 import type { FormParams } from './winForm.js';
+import { DEFAULT_DELAY_MS } from './replayTail.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
  *  emits one every 30s, so this tolerates three consecutive losses on a lossy
@@ -116,10 +117,11 @@ export interface LiveMatch {
 }
 
 /** The odds are decoration on the live page: a fault in them must never take
- *  the page down with it. */
-function safeWinLine(db: DB, matchId: number, campaign: string, form?: FormParams): WinLine | null {
+ *  the page down with it. The page is public, so points during a half come
+ *  only from state as old as the live viewer's delay. */
+function safeWinLine(db: DB, matchId: number, campaign: string, form?: FormParams, live = false): WinLine | null {
   try {
-    return liveWinLine(db, matchId, campaign, undefined, { form });
+    return liveWinLine(db, matchId, campaign, undefined, { form, live, delayMs: DEFAULT_DELAY_MS });
   } catch (err) {
     console.warn(`[live] win line for match ${matchId} failed:`, err);
     return null;
@@ -653,7 +655,7 @@ export function recordRoundStart(
  *  Falls back to the count when the name is absent (older plugin) or unknown
  *  (the map row has not been written yet, which is the normal case for a
  *  half-1 round). */
-function ordinalForRoundEnd(db: DB, matchId: number, map: string | null): number {
+export function ordinalForRoundEnd(db: DB, matchId: number, map: string | null): number {
   if (map !== null) {
     const row = db
       .prepare('SELECT ordinal FROM match_live_maps WHERE match_id = ? AND map = ?')
@@ -931,8 +933,9 @@ export function eventsFor(db: DB, matchId: number, limit = LIVE_EVENT_LIMIT): {
  *  standing (see routes/guards.ts makeOptionalViewer / standing.ts
  *  inGoodStanding); this function never re-derives that itself. `form` is
  *  the same: the route decides whether the win line carries team form
- *  (src/winForm.ts formOption). */
-export function getLiveMatches(db: DB, showDiscordNames = false, form?: FormParams): LiveMatch[] {
+ *  (src/winForm.ts formOption), and `live` whether it carries points during
+ *  a half (src/winLive/liveState.ts winLiveOption). */
+export function getLiveMatches(db: DB, showDiscordNames = false, form?: FormParams, live = false): LiveMatch[] {
   const matches = db
     .prepare(
       `SELECT m.id, m.campaign, m.server_id AS serverId, l.current_map AS currentMap, l.last_seen AS lastSeen
@@ -996,7 +999,7 @@ export function getLiveMatches(db: DB, showDiscordNames = false, form?: FormPara
       maps,
       teamAScore: maps.reduce((t, x) => t + x.teamAScore, 0),
       teamBScore: maps.reduce((t, x) => t + x.teamBScore, 0),
-      winLine: safeWinLine(db, m.id, m.campaign, form),
+      winLine: safeWinLine(db, m.id, m.campaign, form, live),
       demos: demosOf.all(m.id) as LiveDemo[],
       events: (eventsOf.all(m.id, LIVE_EVENT_LIMIT) as {
         seq: number; kind: string; actor: string; target: string | null;

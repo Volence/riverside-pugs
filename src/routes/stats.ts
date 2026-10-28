@@ -34,6 +34,7 @@ import { abortCauseOf, abortParties } from '../matchAborts.js';
 import { isActiveStaff } from '../serverChat.js';
 import { matchWinLine } from '../winProb.js';
 import { formOption } from '../winForm.js';
+import { winLiveOption } from '../winLive/liveState.js';
 import { bookedSidesFor } from '../matchSides.js';
 
 /** A face on the recent-matches list. */
@@ -178,8 +179,10 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
   app.get('/api/live', async (req) => {
     const viewer = viewerOf(req);
     // Team form on the win chance line is the win_chance_form setting, or an
-    // admin viewer, who sees it before it goes public (src/winForm.ts).
-    return { matches: getLiveMatches(db, viewer !== null, formOption(db, viewer !== null && isAdminViewer(viewer))) };
+    // admin viewer, who sees it before it goes public (src/winForm.ts). The
+    // same for the line moving during a half (win_chance_live).
+    const admin = viewer !== null && isAdminViewer(viewer);
+    return { matches: getLiveMatches(db, viewer !== null, formOption(db, admin), winLiveOption(db, admin)) };
   });
 
   /** Every map that has been played, so the map pages are discoverable. */
