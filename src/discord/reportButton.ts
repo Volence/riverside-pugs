@@ -53,15 +53,18 @@ export function resolveByName(db: DB, typed: string, limit = 6): Candidate[] {
   const name = typed.trim();
   if (!name) return [];
   const exact = db.prepare(
-    'SELECT steamid, name FROM players WHERE lower(name) = lower(?) ORDER BY name LIMIT ?',
-  ).all(name, limit) as Candidate[];
+    // The Steam name too: a reporter types what they saw in game, and a
+    // display name an admin set is not that.
+    'SELECT steamid, name FROM players WHERE lower(name) = lower(@name) OR lower(steam_name) = lower(@name) ORDER BY name LIMIT @limit',
+  ).all({ name, limit }) as Candidate[];
   if (exact.length > 0) return exact;
   const escaped = name.replace(/[\\%_]/g, (c) => `\\${c}`);
   return db.prepare(
     `SELECT steamid, name FROM players
-      WHERE lower(name) LIKE '%' || lower(?) || '%' ESCAPE '\\'
-      ORDER BY name LIMIT ?`,
-  ).all(escaped, limit) as Candidate[];
+      WHERE lower(name) LIKE '%' || lower(@q) || '%' ESCAPE '\\'
+         OR lower(steam_name) LIKE '%' || lower(@q) || '%' ESCAPE '\\'
+      ORDER BY name LIMIT @limit`,
+  ).all({ q: escaped, limit }) as Candidate[];
 }
 
 /** Custom id prefix. 'r:' is the admin feed and 't:' is tickets. */

@@ -23,8 +23,11 @@ export async function backfillPersonas(db: DB, apiKey: string | null, fetchFn?: 
   const personas = await fetchPersonas(rows.map((r) => r.steamid), apiKey, fetchFn);
   if (personas.size === 0) return 0;
 
-  const updateBoth = db.prepare('UPDATE players SET name = ?, avatar = ? WHERE steamid = ?');
-  const updateName = db.prepare('UPDATE players SET name = ? WHERE steamid = ?');
+  // An admin's display name outranks the persona; the persona is still kept.
+  const updateBoth = db.prepare(
+    'UPDATE players SET steam_name = @name, name = COALESCE(name_override, @name), avatar = @avatar WHERE steamid = @steamid');
+  const updateName = db.prepare(
+    'UPDATE players SET steam_name = @name, name = COALESCE(name_override, @name) WHERE steamid = @steamid');
   const updateAvatar = db.prepare('UPDATE players SET avatar = ? WHERE steamid = ?');
   let n = 0;
   db.transaction(() => {
@@ -32,9 +35,9 @@ export async function backfillPersonas(db: DB, apiKey: string | null, fetchFn?: 
       if (p.name === null && p.avatar === null) continue;
 
       if (p.name !== null && p.avatar !== null) {
-        n += updateBoth.run(p.name, p.avatar, steamid).changes;
+        n += updateBoth.run({ name: p.name, avatar: p.avatar, steamid }).changes;
       } else if (p.name !== null) {
-        n += updateName.run(p.name, steamid).changes;
+        n += updateName.run({ name: p.name, steamid }).changes;
       } else {
         n += updateAvatar.run(p.avatar, steamid).changes;
       }

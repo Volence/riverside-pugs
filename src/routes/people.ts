@@ -13,6 +13,7 @@ import { playerFile } from '../admin/playerFile.js';
 import { markLookedAt } from '../admin/reviews.js';
 import { getPlayer } from '../players.js';
 import { resolveAlias } from '../aliases.js';
+import { setDisplayName, validateDisplayName } from '../displayName.js';
 import { pingPickEnabled, pingTable } from '../serverPick.js';
 import { altClusters, altHolds, banFromHold, holdById, liftAltHold } from '../altHolds.js';
 import { ipWatchView, unwatch, watchAddress } from '../ipWatch.js';
@@ -401,6 +402,24 @@ export async function peopleRoutes(app: FastifyInstance, opts: PeopleRouteOpts):
     // those who can open their file.
     logAdmin(db, t.me, 'note', t.steamid, hasStaffFlag(db, t.steamid) ? {} : { text: text.trim() });
     return { ok: true };
+  });
+
+  /** Set or clear the name shown on the website and in Discord. Null (or an
+   *  empty string) puts the Steam name back. In game nothing changes. */
+  app.post('/api/admin/people/:steamid/display-name', async (req, reply) => {
+    const t = onFile(req, reply, 'rename');
+    if (!t) return reply;
+    const { name } = (req.body ?? {}) as { name?: unknown };
+    let next: string | null = null;
+    if (name !== null && name !== undefined && !(typeof name === 'string' && name.trim() === '')) {
+      const v = validateDisplayName(name);
+      if (!v.ok) return reply.code(400).send({ error: v.error });
+      next = v.name;
+    }
+    const change = setDisplayName(db, t.steamid, next)!;
+    logAdmin(db, t.me, next === null ? 'clear_display_name' : 'set_display_name', t.steamid,
+      { from: change.from, to: change.to, steamName: change.steamName });
+    return { ok: true, name: change.to };
   });
 
   app.post('/api/admin/people/:steamid/looked-at', async (req, reply) => {

@@ -1989,6 +1989,13 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'twitch_id', 'TEXT');
   ensureColumn(db, 'players', 'twitch_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_twitch_id ON players(twitch_id) WHERE twitch_id IS NOT NULL');
+  // Display name an admin set (src/displayName.ts). `name` stays the column
+  // every page reads and always holds what to show: the override when there
+  // is one, otherwise the Steam persona, which is kept in `steam_name` so a
+  // sign-in can refresh it without undoing the rename. A NULL steam_name on
+  // an old row means `name` is still the persona.
+  ensureColumn(db, 'players', 'steam_name', 'TEXT');
+  ensureColumn(db, 'players', 'name_override', 'TEXT');
   // Second Steam accounts, pointed at the one account their owner really is.
   // Written by a merge and read on every line the game server sends, so a
   // reconnect on the alt is rostered as the person rather than as a new

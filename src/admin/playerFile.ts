@@ -2,7 +2,7 @@ import type { DB } from '../db.js';
 import { abandonsOfPlayer, type AbandonRecord } from './matches.js';
 import { aliasesOf, resolveAlias } from '../aliases.js';
 import { nameHistory } from '../playerNames.js';
-import { discordHistoryOf, getPlayer } from '../players.js';
+import { discordHistoryOf, getPlayer, steamNameOf } from '../players.js';
 import { penaltyHistory, activeTimeout, type PenaltyKind } from '../penalties.js';
 import { networksOf, sharesAddressWith } from '../playerNetworks.js';
 import { capsForPlayer, detectionsForPlayer } from '../inputBursts.js';
@@ -34,6 +34,10 @@ export interface PlayerFile {
   header: {
     steamid: string;
     name: string;
+    /** The Steam persona behind `name`, and whether `name` is a display
+     *  name an admin set rather than that persona. */
+    steamName: string;
+    nameOverridden: boolean;
     avatar: string | null;
     status: string;
     isAdmin: boolean;
@@ -153,6 +157,8 @@ export function playerFile(
     header: {
       steamid: canonical,
       name: player.name,
+      steamName: steamNameOf(player),
+      nameOverridden: player.name_override !== null,
       avatar: player.avatar,
       status: player.status,
       isAdmin: player.is_admin === 1,

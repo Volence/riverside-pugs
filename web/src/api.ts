@@ -868,6 +868,9 @@ export interface AdminPlayerRow {
   isAdmin: boolean;
   isMod: boolean;
   discordName: string | null;
+  /** The Steam persona, only when an admin's display name is covering it.
+   *  Optional for a browser holding new JS against an older server. */
+  steamName?: string | null;
   sr: number | null;
   games: number;
   createdAt: string;
@@ -1600,7 +1603,7 @@ export interface TimelineItem {
  *  too: it gates the Steam account panel's "Check now". */
 export type FileAction =
   | 'note' | 'looked_at' | 'open_ticket'
-  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
+  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh' | 'rename';
 
 export type InfectedClass = 'smoker' | 'boomer' | 'hunter';
 export interface ClassScores { hiddenShare: number | null; hiddenOccZ: number | null; revealShare: number | null }
@@ -1647,6 +1650,9 @@ export interface PlayerFileData {
     steamid: string; name: string; avatar: string | null; status: string;
     isAdmin: boolean; isMod: boolean; isCaster: boolean; discordName: string | null;
     sr: number | null; games: number; createdAt: string;
+    /** The Steam persona, and whether `name` is a display name an admin set.
+     *  Optional for a browser holding new JS against an older server. */
+    steamName?: string; nameOverridden?: boolean;
   };
   glance: FileSummaryData;
   timeline: TimelineItem[];
@@ -1751,6 +1757,9 @@ export const peopleApi = {
     get<{ bans: PeopleBan[] }>(`/api/admin/people/bans?filter=${filter}&q=${encodeURIComponent(q)}`, signal),
   note: (steamid: string, text: string) =>
     post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/notes`, { text }),
+  /** Admin only (the file's `rename` action). Null puts the Steam name back. */
+  setDisplayName: (steamid: string, name: string | null) =>
+    post<{ ok: true; name: string }>(`/api/admin/people/${encodeURIComponent(steamid)}/display-name`, { name }),
   lookedAt: (steamid: string, note: string) =>
     post<{ ok: true; review: FileReview }>(`/api/admin/people/${encodeURIComponent(steamid)}/looked-at`, { note }),
   chat: (matchId: number, signal?: AbortSignal) =>

@@ -474,6 +474,11 @@ export class AdminFeedPoster {
       case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;
       case 'set_caster': return `${who} ${d.isCaster ? 'made' : 'removed'} ${target} ${d.isCaster ? 'a caster' : 'as caster'}`;
       case 'unlink_discord': return `${who} unlinked ${target}'s Discord`;
+      // Named by the Steam name: by now `target` already reads as the new name.
+      case 'set_display_name':
+        return `${who} set the display name of **${escapeName(String(d.steamName ?? ''))}** (${e.target}) to **${escapeName(String(d.to ?? ''))}** (was ${escapeName(String(d.from ?? ''))})`;
+      case 'clear_display_name':
+        return `${who} cleared the display name **${escapeName(String(d.from ?? ''))}** from ${target}, back to their Steam name`;
       case 'note': {
         // The note's own words, quoted, so the channel shows what was written
         // rather than that something was. Not for a note about a member of

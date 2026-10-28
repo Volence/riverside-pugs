@@ -25,6 +25,7 @@ export function IdentitySection(
   const [planError, setPlanError] = useState('');
   const [personChoice, setPersonChoice] = useState('');
   const [newLabel, setNewLabel] = useState('');
+  const [displayName, setDisplayName] = useState(d.header.nameOverridden ? d.header.name : '');
   const countries = [...new Set(id.networks.map((n) => n.country).filter(Boolean))].map(countryName);
 
   const preview = async () => {
@@ -41,6 +42,34 @@ export function IdentitySection(
   return (
     <Panel class="file-section">
       <h3 id="identity">Identity</h3>
+
+      {can('rename') && (
+        <>
+          <h4>Display name</h4>
+          <p class="file-help">
+            The name shown on the website and in Discord, for a Steam name that is blank, unreadable or not
+            what anyone calls them. In game they keep their Steam name
+            ({d.header.steamName ?? d.header.name}).
+          </p>
+          <form class="admin-merge" onSubmit={(e) => {
+            e.preventDefault();
+            const next = displayName.trim();
+            void run(() => peopleApi.setDisplayName(d.steamid, next), `Show ${d.header.name} as ${next} on the website and in Discord?`);
+          }}>
+            <input value={displayName} placeholder="Display name" aria-label="Display name" maxLength={32}
+              onInput={(e) => setDisplayName((e.target as HTMLInputElement).value)} />
+            <button class="btn" type="submit"
+              disabled={busy || !displayName.trim() || displayName.trim() === d.header.name}>Save</button>
+            {d.header.nameOverridden && (
+              <button class="chip" type="button" disabled={busy}
+                onClick={() => run(
+                  () => peopleApi.setDisplayName(d.steamid, null),
+                  `Clear ${d.header.name}'s display name and go back to their Steam name?`,
+                ).then(() => setDisplayName(''))}>Use Steam name</button>
+            )}
+          </form>
+        </>
+      )}
 
       {(id.names?.length ?? 0) > 0 && (
         <>
