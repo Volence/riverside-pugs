@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { buildWinModel, winChance, matchWinLine, liveWinLine, winModel, type HalfRow } from '../src/winProb.js';
+import { buildWinModel, winChance, matchWinLine, liveWinLine, winModel, CALIBRATION, type HalfRow } from '../src/winProb.js';
+import { FORM_PARAMS, formOption, type FormParams } from '../src/winForm.js';
+import { setSetting } from '../src/settings.js';
 import { insertDraft, publishCampaign } from '../src/customCampaigns.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
@@ -226,5 +228,59 @@ describe('liveWinLine', () => {
     half(0, 1, 'a', 100);
     expect(liveWinLine(db, id, 'five', model)).toBeNull();
     expect(liveWinLine(db, id, 'no_such_campaign', model)).toBeNull();
+  });
+});
+
+describe('team form on the line', () => {
+  let db: DB;
+  beforeEach(() => { db = openDb(':memory:'); });
+  const model = buildWinModel(history());
+  const form: FormParams = { survivor: 0.5, infected: 0, siDamage: 0, shrink: 2, calibration: 1.15 };
+
+  /** A finished two-map match where A makes both saferooms big and B
+   *  scrapes, maps m1 then m2. */
+  function seed(): number {
+    const id = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, winner, team_a_score, team_b_score) VALUES (1, 'completed', 'no_mercy', 'a', 1680, 900)",
+    ).run().lastInsertRowid);
+    const ins = db.prepare(
+      "INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, survivors_alive, ended_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+    );
+    db.prepare("INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, 0, 'm1', 720, 300)").run(id);
+    db.prepare("INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, 1, 'm2', 960, 600)").run(id);
+    ins.run(id, 0, 1, 'a', 720, 4); ins.run(id, 0, 2, 'b', 300, 0);
+    ins.run(id, 1, 1, 'b', 600, 0); ins.run(id, 1, 2, 'a', 960, 4);
+    return id;
+  }
+
+  it('leaves the opening point alone and moves the later ones toward the team in form', () => {
+    const id = seed();
+    const plain = matchWinLine(db, id, model)!;
+    const withForm = matchWinLine(db, id, model, { form })!;
+    expect(withForm.points[0].pA).toBeCloseTo(plain.points[0].pA, 9);
+    // After A's top half on m1 and B's poor one, A's halves to come lean up.
+    expect(withForm.points[2].pA).toBeGreaterThan(plain.points[2].pA);
+    expect(withForm.points.at(-1)!.pA).toBe(1);
+  });
+
+  it('is the same line as today with every strength at zero and today\'s temperature', () => {
+    const id = seed();
+    const zero: FormParams = { survivor: 0, infected: 0, siDamage: 0, shrink: 2, calibration: CALIBRATION };
+    expect(matchWinLine(db, id, model, { form: zero })!.points.map((p) => p.pA))
+      .toEqual(matchWinLine(db, id, model)!.points.map((p) => p.pA));
+  });
+
+  it('is off until win_chance_form is turned on, except for an admin viewer', () => {
+    expect(formOption(db)).toBeUndefined();
+    expect(formOption(db, true)).toBe(FORM_PARAMS);
+    setSetting(db, 'win_chance_form', '1');
+    expect(formOption(db)).toBe(FORM_PARAMS);
+  });
+
+  it('ships fitted parameters that are numbers', () => {
+    for (const k of ['survivor', 'infected', 'siDamage', 'shrink', 'calibration'] as const) {
+      expect(Number.isFinite(FORM_PARAMS[k]), k).toBe(true);
+    }
+    expect(FORM_PARAMS.shrink).toBeGreaterThanOrEqual(0);
   });
 });

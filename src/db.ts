@@ -1661,6 +1661,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   practice_leasing: 'admins',
   practice_max_leases: '2',
   sidegames_enabled: '0',
+  // Team form on the win chance line (src/winForm.ts). Off: the line is the
+  // map-history-only one; admins see form on the match and Live pages anyway.
+  win_chance_form: '0',
   sidegames_min_players: '4',
   // Pick a match's server by the players' measured ping (src/serverPick.ts).
   // Off by default: with it off, the admin-set pick order alone decides.
