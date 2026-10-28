@@ -159,8 +159,22 @@ function swingSentence(
       fmtChance(chanceOf(t, before.pA))} to ${fmtChance(chanceOf(t, at.pA), exact)} for ${names[t]}.`;
   }
   const toward: Team = at.pA > before.pA ? 'a' : 'b';
-  return `${lead}: ${describeShort(at, names)}, which took ${names[toward]} from ${
-    fmtChance(chanceOf(toward, before.pA))} to ${fmtChance(chanceOf(toward, at.pA), exact)}.`;
+  const from = fmtChance(chanceOf(toward, before.pA));
+  const to = fmtChance(chanceOf(toward, at.pA), exact);
+  // A swing inside a half is a short window, not the whole half: say where
+  // and when it happened and how long it took. "Biggest swing: map 1 (The
+  // Turnpike), Team A survivors 2:10 in, Team B 40% to 57% in 25 seconds."
+  const inside = at.tMs !== undefined ? at : before.tMs !== undefined ? before : null;
+  if (inside && inside.ordinal !== null && inside.survTeam !== null) {
+    const map = inside.map ? ` (${mapName(inside.map)})` : '';
+    const startMs = before.tMs ?? 0;
+    const when = at.tMs !== undefined
+      ? `in ${Math.max(1, Math.round((at.tMs - startMs) / 1000))} seconds`
+      : 'as the half ended';
+    return `${lead}: map ${inside.ordinal + 1}${map}, ${names[inside.survTeam]} survivors ${
+      fmtClock(startMs / 1000)} in, ${names[toward]} ${from} to ${to} ${when}.`;
+  }
+  return `${lead}: ${describeShort(at, names)}, which took ${names[toward]} from ${from} to ${to}.`;
 }
 
 /** "Team B's", "Poop Packers'". */
