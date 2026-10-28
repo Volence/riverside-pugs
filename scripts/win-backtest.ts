@@ -1,6 +1,7 @@
 // scripts/win-backtest.ts
 // Backtest the win chance line on a copy of the prod DB.
 // Usage: npx tsx scripts/win-backtest.ts --db <copy of prod pug.db> --part form [--write]
+//        npx tsx scripts/win-backtest.ts --db <copy> --part live [--halves <halves.jsonl, default next to the db>] [--write]
 //
 // The split is the one from 2026-10-10: completed, unvoided PUGs ordered by
 // ended_at, the oldest 70% train and the newest 30% test. The base model
@@ -36,6 +37,17 @@
 // from the fitting part only. SI damage stays in only if it lowers Brier on
 // that newest 30% and passes the reliability gate there.
 //
+// --part live fits the live half model (src/winLive/halfModel.ts) on the
+// train matches' half snapshots (scripts/win-dataset.ts writes them, one
+// half per line). It reads only train halves: test lines are skipped on
+// their match id before anything else is looked at. Inside train it holds
+// out the newest 20% of matches as a sanity check (class and bin log loss
+// against the base distribution, mean predicted against actual score and
+// class shares at fixed times into the half), then refits on all of train
+// for the params it prints, and with --write saves them to
+// src/winLive/halfModel.fitted.json. The full validation against the test
+// 30% is separate work on top.
+//
 // --write saves the winner to src/winForm.fitted.json with "gate": "pass"
 // when form has lower Brier than today's model on test AND passes the gate;
 // otherwise it saves it with "gate": "fail", the Brier numbers and the bins
@@ -43,13 +55,14 @@
 // the params either way; the win_chance_form setting is the guard).
 import Database from 'better-sqlite3';
 import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import type { DB } from '../src/db.js';
 import { completedPug } from '../src/matchKinds.js';
 import {
   buildWinModel, CALIBRATION, matchWinLine, winChance, type HalfRow, type PlayedHalf, type WinModel,
 } from '../src/winProb.js';
 import { halfKey, teamForm, type FormParams } from '../src/winForm.js';
+import { runLive } from './win-backtest-live.js';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -58,8 +71,8 @@ function arg(name: string): string | undefined {
 
 const dbPath = arg('db');
 const part = arg('part');
-if (!dbPath || part !== 'form') {
-  console.error('usage: tsx scripts/win-backtest.ts --db <copy of prod pug.db> --part form [--write]');
+if (!dbPath || (part !== 'form' && part !== 'live')) {
+  console.error('usage: tsx scripts/win-backtest.ts --db <copy of prod pug.db> --part form|live [--write]');
   process.exit(1);
 }
 if (resolve(dbPath).endsWith('/data/pug.db')) { console.error('refusing to run against data/pug.db; pass a copy with --db'); process.exit(1); }
@@ -93,6 +106,15 @@ const halfRows = (db.prepare(
 const trainHalves: HalfRow[] = halfRows.filter((r) => trainIds.has(r.matchId))
   .map((r) => ({ map: r.map, score: r.score, made: r.alive === null ? null : r.alive > 0 }));
 const model: WinModel = buildWinModel(trainHalves);
+
+if (part === 'live') {
+  await runLive({
+    dbPath, model, trainIds, write,
+    matchOrder: matches.map((m) => m.id),
+    halvesPath: arg('halves') ?? resolve(dirname(dbPath), 'halves.jsonl'),
+  });
+  process.exit(0);
+}
 
 // ---- SI damage per half, normalised to the map's train median ----------------
 
