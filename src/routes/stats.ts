@@ -389,10 +389,12 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // Win chance after every half, from the scoreboard alone (both teams start
     // at 50%, ratings play no part), so unlike the forecast above it is
     // public. Null when the score cannot carry a line; see matchWinLine.
-    // Team form is in it when win_chance_form is on, or for an admin viewer.
+    // Team form is in it when win_chance_form is on, or for an admin viewer,
+    // and so are the stored points during halves with win_chance_live.
     let winLine: ReturnType<typeof matchWinLine> = null;
     try {
-      winLine = matchWinLine(db, id, undefined, { form: formOption(db, viewer !== null && isAdminViewer(viewer)) });
+      const admin = viewer !== null && isAdminViewer(viewer);
+      winLine = matchWinLine(db, id, undefined, { form: formOption(db, admin), live: winLiveOption(db, admin) });
     } catch (err) {
       req.log.warn({ err, matchId: id }, 'win line failed');
     }

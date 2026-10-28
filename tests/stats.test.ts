@@ -11,6 +11,7 @@ import { statDef, STAT_DEFS } from '../src/statKeys.js';
 import { getSetting, setSetting } from '../src/settings.js';
 import { banPlayer } from '../src/admin/players.js';
 import { hashIp, recordPlayerNet } from '../src/playerNetworks.js';
+import { writeFinishedPoints } from '../src/winLive/finishedLine.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119900000000${i}`);
 const ME = IDS[0];
@@ -335,6 +336,24 @@ describe('stats routes', () => {
     expect(winnerPlayer.team).toBe('b');
     expect(winnerPlayer.srDelta).toBeGreaterThan(0);
     expect((await app.inject({ method: 'GET', url: '/api/matches/999', cookies })).statusCode).toBe(404);
+  });
+
+  it('match detail adds the stored win points during halves with win_chance_live, or for an admin', async () => {
+    const matchId = playCompletedMatch(db, 'b');
+    const ins = db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, ended_at) VALUES (?, 0, ?, ?, ?, 1, datetime('now'))");
+    ins.run(matchId, 1, 'a', 200);
+    ins.run(matchId, 2, 'b', 300);
+    writeFinishedPoints(db, matchId, [{ ordinal: 0, half: 1, tMs: 5000, pA: 0.4, pAForm: 0.4, moment: null }]);
+    const inHalf = async (opts: { cookies?: Record<string, string> }) =>
+      ((await app.inject({ method: 'GET', url: `/api/matches/${matchId}`, ...opts })).json().winLine.points as { tMs?: number }[])
+        .filter((p) => p.tMs !== undefined).length;
+    expect(await inHalf({})).toBe(0);
+    expect(await inHalf({ cookies })).toBe(0);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ME);
+    expect(await inHalf({ cookies })).toBe(1);
+    expect(await inHalf({})).toBe(0);
+    setSetting(db, 'win_chance_live', '1');
+    expect(await inHalf({})).toBe(1);
   });
 
   // A player the rating never touched (unrated, or a match rated before they

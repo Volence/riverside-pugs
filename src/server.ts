@@ -145,6 +145,7 @@ import { serverChatRoutes } from './routes/serverChat.js';
 import { castRoutes } from './routes/cast.js';
 import { liveHudStore } from './cast/liveHud.js';
 import { clearProgressSamples, configureLiveWin, forgetLiveWin, resetLiveWin, writeProgressSamples } from './winLive/liveState.js';
+import { runWinPointsPass } from './winLive/finishedLine.js';
 import { NoTankWatch, noTankText } from './noTankWatch.js';
 import { castStudioRoutes } from './routes/castStudio.js';
 import { statsRoutes } from './routes/stats.js';
@@ -1715,6 +1716,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     a2s: a2sInfo,
   });
 
+  /** A win points pass is still running (see the reaper below). */
+  let winPointsBusy = false;
   const reaper = setInterval(() => {
     // Before the orphan reaper, so a match is alerted on while still live.
     if (serverLostWatch) void serverLostWatch.tick();
@@ -1788,6 +1791,17 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       runMetricsPass(deps.db, deps.config.replayDir, { limit: reaperRoundLimit(deps.db) });
     } catch (err) {
       console.error('[metrics] pass failed', err);
+    }
+    // A finished match's win line during its halves: one match per minute,
+    // once its replays are on disk (src/winLive/finishedLine.ts). Never on a
+    // page view, and never in the way of recording a result.
+    // It yields between halves, and a tick that finds the last one still
+    // running skips.
+    if (!winPointsBusy) {
+      winPointsBusy = true;
+      void runWinPointsPass(deps.db, deps.config.replayDir, { limit: 1 })
+        .catch((err) => console.error('[win-points] pass failed', err))
+        .finally(() => { winPointsBusy = false; });
     }
   }, 60_000);
   reaper.unref();

@@ -34,6 +34,7 @@ import { campaignRegistry } from './campaignRegistry.js';
 import { stopAfterMap } from './stopPoint.js';
 import { teamForm, tilt, type FormParams } from './winForm.js';
 import { DEFAULT_DELAY_MS } from './replayTail.js';
+import { WIN_POINTS_VERSION } from './winLive/modelVersion.js';
 
 /** Score bucket width. Half scores run 0 to about 1,800; 20 keeps every
  *  convolution small without blurring a lead that decides a match. */
@@ -443,11 +444,11 @@ function wellFormed(rounds: PlayedHalf[], openEnd: boolean): boolean {
 }
 
 /**
- * The line for one finished match, or null when its score cannot carry one:
- * not completed, a map without both halves, or a map whose stored score is
- * not a result (see unrecordedOrdinals).
+ * A finished match's survivor halves in play order, or null when its score
+ * cannot carry a line: not completed, a map without both halves, or a map
+ * whose stored score is not a result (see unrecordedOrdinals).
  */
-export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db), opts: WinLineOpts = {}): WinLine | null {
+export function finishedPlayed(db: DB, matchId: number): PlayedHalf[] | null {
   const match = db.prepare(
     'SELECT state, team_a_score AS a, team_b_score AS b FROM matches WHERE id = ?',
   ).get(matchId) as { state: string; a: number; b: number } | undefined;
@@ -463,7 +464,55 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
   // The rounds have to add up to the result the page shows, or the line
   // would end somewhere the scoreboard does not.
   if (sumA !== match.a || sumB !== match.b) return null;
-  return winLineFrom(model, rounds, [], opts);
+  return rounds.map(({ ordinal, half, survTeam, score, map }) => ({ ordinal, half, survTeam, score, map }));
+}
+
+/** matchWinLine's options: `live` adds the stored points during halves
+ *  (match_win_points, src/winLive/finishedLine.ts; the win_chance_live
+ *  setting, winLiveOption), the form price when `form` is given. */
+export interface FinishedLineOpts extends WinLineOpts { live?: boolean }
+
+/**
+ * The line for one finished match, or null when its score cannot carry one
+ * (see finishedPlayed). With `live`, each half's stored in-half points (on
+ * the current WIN_POINTS_VERSION; rows on another are ignored) go just
+ * before its half-end point; with none stored it is the half-end line.
+ */
+export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db), opts: FinishedLineOpts = {}): WinLine | null {
+  const played = finishedPlayed(db, matchId);
+  if (!played) return null;
+  const line = winLineFrom(model, played, [], opts);
+  if (!opts.live) return line;
+  return withInHalf(line, storedInHalfPoints(db, matchId, played, opts.form !== undefined), []);
+}
+
+/** The stored in-half points of a finished match by `${ordinal}:${half}`,
+ *  each with the score its half started from. */
+function storedInHalfPoints(db: DB, matchId: number, played: PlayedHalf[], form: boolean): Map<string, WinPoint[]> {
+  const rows = db.prepare(
+    `SELECT ordinal, half, t_ms AS tMs, p_a AS pA, p_a_form AS pAForm, moment FROM match_win_points
+     WHERE match_id = ? AND model_version = ? ORDER BY ordinal, half, t_ms`,
+  ).all(matchId, WIN_POINTS_VERSION) as { ordinal: number; half: number; tMs: number; pA: number; pAForm: number; moment: WinPoint['moment'] | null }[];
+  const out = new Map<string, WinPoint[]>();
+  if (rows.length === 0) return out;
+  const halves = new Map<string, { r: PlayedHalf; scoreA: number; scoreB: number }>();
+  let a = 0, b = 0;
+  for (const r of played) {
+    halves.set(`${r.ordinal}:${r.half}`, { r, scoreA: a, scoreB: b });
+    if (r.survTeam === 'a') a += r.score; else b += r.score;
+  }
+  for (const row of rows) {
+    const k = `${row.ordinal}:${row.half}`;
+    const h = halves.get(k);
+    if (!h) continue;
+    const list = out.get(k) ?? [];
+    list.push({
+      ordinal: row.ordinal, half: row.half, survTeam: h.r.survTeam, map: h.r.map, scoreA: h.scoreA, scoreB: h.scoreB,
+      pA: form ? row.pAForm : row.pA, tMs: row.tMs, ...(row.moment ? { moment: row.moment } : {}),
+    });
+    out.set(k, list);
+  }
+  return out;
 }
 
 /** liveWinLine's options: `live` adds the points during halves
