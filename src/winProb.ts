@@ -34,7 +34,7 @@ import { campaignRegistry } from './campaignRegistry.js';
 import { stopAfterMap } from './stopPoint.js';
 import { teamForm, tilt, type FormParams } from './winForm.js';
 import { DEFAULT_DELAY_MS } from './replayTail.js';
-import { WIN_POINTS_VERSION } from './winLive/modelVersion.js';
+import { winPointsVersion } from './winLive/modelVersion.js';
 
 /** Score bucket width. Half scores run 0 to about 1,800; 20 keeps every
  *  convolution small without blurring a lead that decides a match. */
@@ -475,7 +475,7 @@ export interface FinishedLineOpts extends WinLineOpts { live?: boolean }
 /**
  * The line for one finished match, or null when its score cannot carry one
  * (see finishedPlayed). With `live`, each half's stored in-half points (on
- * the current WIN_POINTS_VERSION; rows on another are ignored) go just
+ * the current winPointsVersion(); rows on another are ignored) go just
  * before its half-end point; with none stored it is the half-end line.
  */
 export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db), opts: FinishedLineOpts = {}): WinLine | null {
@@ -492,7 +492,7 @@ function storedInHalfPoints(db: DB, matchId: number, played: PlayedHalf[], form:
   const rows = db.prepare(
     `SELECT ordinal, half, t_ms AS tMs, p_a AS pA, p_a_form AS pAForm, moment FROM match_win_points
      WHERE match_id = ? AND model_version = ? ORDER BY ordinal, half, t_ms`,
-  ).all(matchId, WIN_POINTS_VERSION) as { ordinal: number; half: number; tMs: number; pA: number; pAForm: number; moment: WinPoint['moment'] | null }[];
+  ).all(matchId, winPointsVersion()) as { ordinal: number; half: number; tMs: number; pA: number; pAForm: number; moment: WinPoint['moment'] | null }[];
   const out = new Map<string, WinPoint[]>();
   if (rows.length === 0) return out;
   const halves = new Map<string, { r: PlayedHalf; scoreA: number; scoreB: number }>();

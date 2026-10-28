@@ -7,7 +7,7 @@ import { finishedPlayed, winModel, type FutureHalf, type PlayedHalf, type WinMod
 import { FORM_PARAMS } from '../winForm.js';
 import { progressMade } from './halfModel.js';
 import { momentOf, price, priceCtx, PROGRESS_MAPS, type Moment } from './liveState.js';
-import { WIN_POINTS_VERSION } from './modelVersion.js';
+import { winPointsVersion } from './modelVersion.js';
 import { feedProgressPoints, halfSnapshots, progressStep, type Snapshot } from './snapshot.js';
 import { furthestProg, type ProgressMap } from './progressMap.js';
 
@@ -100,16 +100,19 @@ export function finishedHalfSnapshots(
   return out;
 }
 
+/** One half of finishedPointsByHalf: its points, or null when its replay
+ *  could not be had. */
+export interface HalfPoints { ordinal: number; half: 1 | 2; points: FinishedPoint[] | null }
+
 /**
- * The in-half points of a finished match, one half at a time (each item is
- * one half's points), so a caller on the server's event loop can yield
- * between halves. Nothing when its score carries no line (finishedPlayed).
- * A half whose replay `loadReplay` cannot give (none, pruned, unreadable, or
- * it threw) has no points. Computes, writes nothing.
+ * The in-half points of a finished match, one half at a time, so a caller
+ * on the server's event loop can yield between halves. A half whose replay
+ * `loadReplay` cannot give (none yet, pruned, unreadable, or it threw) comes
+ * back with null points. Computes, writes nothing.
  */
 export function* finishedPointsByHalf(
   db: DB, matchId: number, played: PlayedHalf[], loadReplay: (key: RoundKey) => RoundReplay | null, opts: FinishedOpts = {},
-): Generator<FinishedPoint[]> {
+): Generator<HalfPoints> {
   const model = opts.model ?? winModel(db);
   const maps = opts.progressMaps ?? PROGRESS_MAPS;
   const slots: FutureHalf[] = played.map((r) => ({ team: r.survTeam, map: r.map }));
@@ -120,46 +123,61 @@ export function* finishedPointsByHalf(
     const key: RoundKey = { matchId, ordinal: r.ordinal, half: r.half as 1 | 2 };
     let rr: RoundReplay | null;
     try { rr = loadReplay(key); } catch { rr = null; }
-    if (!rr) continue;
+    if (!rr) { yield { ordinal: r.ordinal, half: key.half, points: null }; continue; }
     const pts = finishedHalfSnapshots(db, key, r.map, rr, maps);
-    if (pts.length === 0) continue;
     // Priced as the live side prices a played half: against the line as it
     // stood when the half began (this half first among those still to play).
     const plain = priceCtx(model, played.slice(0, j), slots.slice(j), 0, r.survTeam, null);
     const form = priceCtx(model, played.slice(0, j), slots.slice(j), 0, r.survTeam, FORM_PARAMS);
-    yield pts.map((p) => ({
-      ordinal: r.ordinal, half: key.half, tMs: p.snap.tMs,
-      pA: price(model, plain, r.map, r.survTeam, key.half, gap, p.snap),
-      pAForm: price(model, form, r.map, r.survTeam, key.half, gap, p.snap),
-      moment: p.moment,
-    }));
+    yield {
+      ordinal: r.ordinal, half: key.half,
+      points: pts.map((p) => ({
+        ordinal: r.ordinal, half: key.half, tMs: p.snap.tMs,
+        pA: price(model, plain, r.map, r.survTeam, key.half, gap, p.snap),
+        pAForm: price(model, form, r.map, r.survTeam, key.half, gap, p.snap),
+        moment: p.moment,
+      })),
+    };
   }
 }
 
+/** A match's points and how many of its halves had no replay to give them. */
+export interface FinishedResult { points: FinishedPoint[]; halvesMissing: number }
+
 /** All of finishedPointsByHalf at once, or null when the match's score
- *  carries no line. */
+ *  carries no line (finishedPlayed). */
 export function finishedPoints(
   db: DB, matchId: number, loadReplay: (key: RoundKey) => RoundReplay | null, opts: FinishedOpts = {},
-): FinishedPoint[] | null {
+): FinishedResult | null {
   const played = finishedPlayed(db, matchId);
   if (!played) return null;
-  return [...finishedPointsByHalf(db, matchId, played, loadReplay, opts)].flat();
+  const out: FinishedResult = { points: [], halvesMissing: 0 };
+  for (const h of finishedPointsByHalf(db, matchId, played, loadReplay, opts)) {
+    if (h.points) out.points.push(...h.points); else out.halvesMissing++;
+  }
+  return out;
 }
 
 /** Store a match's points on the current version, replacing whatever it had,
- *  and record the run (so a match with none is not picked again). */
-export function writeFinishedPoints(db: DB, matchId: number, points: FinishedPoint[], now = sqliteNow()): void {
+ *  and record the run (so a match with none is not picked again by the
+ *  reaper). `halvesMissing` counts the halves with no replay: a partial line,
+ *  which scripts/win-backfill.ts picks up again. */
+export function writeFinishedPoints(
+  db: DB, matchId: number, points: FinishedPoint[], opts: { halvesMissing?: number; now?: string } = {},
+): void {
   const ins = db.prepare(
     `INSERT INTO match_win_points (match_id, ordinal, half, t_ms, p_a, p_a_form, moment, model_version)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const version = winPointsVersion();
   db.transaction(() => {
     db.prepare('DELETE FROM match_win_points WHERE match_id = ?').run(matchId);
-    for (const p of points) ins.run(matchId, p.ordinal, p.half, p.tMs, p.pA, p.pAForm, p.moment, WIN_POINTS_VERSION);
+    for (const p of points) ins.run(matchId, p.ordinal, p.half, p.tMs, p.pA, p.pAForm, p.moment, version);
     db.prepare(
-      `INSERT INTO match_win_point_runs (match_id, model_version, points, computed_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT (match_id) DO UPDATE SET model_version = excluded.model_version, points = excluded.points, computed_at = excluded.computed_at`,
-    ).run(matchId, WIN_POINTS_VERSION, points.length, now);
+      `INSERT INTO match_win_point_runs (match_id, model_version, points, halves_missing, computed_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (match_id) DO UPDATE SET model_version = excluded.model_version, points = excluded.points,
+         halves_missing = excluded.halves_missing, computed_at = excluded.computed_at`,
+    ).run(matchId, version, points.length, opts.halvesMissing ?? 0, opts.now ?? sqliteNow());
   })();
 }
 
@@ -169,9 +187,9 @@ export function writeFinishedPoints(db: DB, matchId: number, points: FinishedPoi
 export function computeFinishedPoints(
   db: DB, matchId: number, loadReplay: (key: RoundKey) => RoundReplay | null, opts: FinishedOpts = {},
 ): number {
-  const points = finishedPoints(db, matchId, loadReplay, opts) ?? [];
-  writeFinishedPoints(db, matchId, points, opts.now);
-  return points.length;
+  const res = finishedPoints(db, matchId, loadReplay, opts) ?? { points: [], halvesMissing: 0 };
+  writeFinishedPoints(db, matchId, res.points, { halvesMissing: res.halvesMissing, now: opts.now });
+  return res.points.length;
 }
 
 /** The reaper looks back this far; older matches are scripts/win-backfill.ts's. */
@@ -196,45 +214,59 @@ export function pendingWinPointMatches(db: DB, opts: { limit: number; now?: stri
         WHERE r.match_id = m.id AND NOT EXISTS (
           SELECT 1 FROM match_replays rp WHERE rp.match_id = r.match_id AND rp.ordinal = r.ordinal AND rp.half = r.half)))
     ORDER BY m.ended_at DESC, m.id DESC
-    LIMIT ?`).all(WIN_POINTS_VERSION, now, WIN_POINTS_RECENT_DAYS, now, REPLAY_WAIT_MIN, opts.limit) as { id: number }[])
+    LIMIT ?`).all(winPointsVersion(), now, WIN_POINTS_RECENT_DAYS, now, REPLAY_WAIT_MIN, opts.limit) as { id: number }[])
     .map((r) => r.id);
 }
 
 /** Let the event loop run (a UDP line, a request) between halves. */
 const yieldToLoop = () => new Promise<void>((r) => setImmediate(r));
 
+/** A match whose computation threw is skipped by the reaper for this long
+ *  (in this process), so it neither spins every tick nor holds up the
+ *  matches behind it; no run is recorded, so it is tried again after. */
+const FAILED_RETRY_MS = 60 * 60_000;
+const failedAt = new Map<number, number>();
+
 /**
  * One reaper pass: compute and store the points of up to `limit` pending
  * matches from their local replays, yielding to the event loop between
  * halves (a half is about 20 ms of decoding and pricing; a whole match was
  * 150 to 180 ms on the 2026-10-28 data). A match that throws is logged and
- * recorded with no points, so it is not retried every tick; the pass never
- * rejects. Returns the matches done.
+ * left without a run (a transient failure must not become permanent; the
+ * recent window bounds the retries), skipped for FAILED_RETRY_MS. The pass
+ * never rejects. Returns the matches whose points were stored.
  */
 export async function runWinPointsPass(db: DB, replayDir: string, opts: {
-  limit: number; now?: string; load?: (key: RoundKey) => RoundReplay | null;
+  limit: number; now?: string; nowMs?: number; load?: (key: RoundKey) => RoundReplay | null;
 }): Promise<number> {
+  const nowMs = opts.nowMs ?? Date.now();
+  for (const [id, at] of failedAt) if (nowMs - at >= FAILED_RETRY_MS) failedAt.delete(id);
   let ids: number[];
-  try { ids = pendingWinPointMatches(db, opts); } catch (err) {
+  try {
+    ids = pendingWinPointMatches(db, { limit: opts.limit + failedAt.size, now: opts.now })
+      .filter((id) => !failedAt.has(id)).slice(0, opts.limit);
+  } catch (err) {
     console.error('[win-points] pending query failed', err);
     return 0;
   }
   const load = opts.load ?? ((key: RoundKey) => loadRoundReplay(db, key, replayDir));
+  let done = 0;
   for (const id of ids) {
     try {
       const played = finishedPlayed(db, id);
-      const points: FinishedPoint[] = [];
+      const res: FinishedResult = { points: [], halvesMissing: 0 };
       if (played) {
-        for (const half of finishedPointsByHalf(db, id, played, load)) {
-          points.push(...half);
+        for (const h of finishedPointsByHalf(db, id, played, load)) {
+          if (h.points) res.points.push(...h.points); else res.halvesMissing++;
           await yieldToLoop();
         }
       }
-      writeFinishedPoints(db, id, points, opts.now);
+      writeFinishedPoints(db, id, res.points, { halvesMissing: res.halvesMissing, now: opts.now });
+      done++;
     } catch (err) {
       console.error(`[win-points] match ${id} failed`, err);
-      try { writeFinishedPoints(db, id, [], opts.now); } catch { /* picked again next tick */ }
+      failedAt.set(id, nowMs);
     }
   }
-  return ids.length;
+  return done;
 }

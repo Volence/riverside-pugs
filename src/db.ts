@@ -1003,7 +1003,7 @@ CREATE TABLE IF NOT EXISTS match_progress_samples (
 -- one row per 5 s of each half with a replay, plus the moments, computed once
 -- after the match ends (never on a page view). p_a is team A's chance on the
 -- plain line, p_a_form with team form (win_chance_form). model_version is
--- WIN_POINTS_VERSION; a row with another one is ignored by matchWinLine.
+-- winPointsVersion(); a row with another one is ignored by matchWinLine.
 CREATE TABLE IF NOT EXISTS match_win_points (
   match_id      INTEGER NOT NULL REFERENCES matches(id),
   ordinal       INTEGER NOT NULL,
@@ -1017,12 +1017,14 @@ CREATE TABLE IF NOT EXISTS match_win_points (
 );
 -- That a match's win points were computed on a version, even when it got none
 -- (no replays, or a score that carries no line), so the reaper does not pick
--- it again until the version changes.
+-- it again until the version changes. halves_missing counts the halves whose
+-- replay was not there (a partial line, which scripts/win-backfill.ts redoes).
 CREATE TABLE IF NOT EXISTS match_win_point_runs (
-  match_id      INTEGER PRIMARY KEY REFERENCES matches(id),
-  model_version TEXT NOT NULL,
-  points        INTEGER NOT NULL,
-  computed_at   TEXT NOT NULL
+  match_id       INTEGER PRIMARY KEY REFERENCES matches(id),
+  model_version  TEXT NOT NULL,
+  points         INTEGER NOT NULL,
+  halves_missing INTEGER NOT NULL DEFAULT 0,
+  computed_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS match_replays (
   match_id  INTEGER NOT NULL REFERENCES matches(id),

@@ -1,13 +1,15 @@
 // scripts/win-backfill.ts
 // Store the win line during halves (match_win_points) for finished matches
 // the reaper will not reach: every completed, unvoided PUG without points on
-// the current WIN_POINTS_VERSION (src/winLive/finishedLine.ts).
+// the current winPointsVersion() (src/winLive/finishedLine.ts), and every one
+// whose run on it is partial (halves whose replay was missing at the time).
 // Usage: npx tsx scripts/win-backfill.ts --db <path> [--commit] [--limit N] [--since-match N] [--cache DIR]
 //
 // Dry run by default: the DB is opened read-only and the points are computed
 // and counted, nothing is written. --commit writes them. Replays come from the
 // public R2 URL and are cached under --cache as <match>_<ordinal>_<half>.rpl
-// (the naming scripts/win-dataset.ts uses, so its cache is reused).
+// (the naming scripts/win-dataset.ts uses, so its cache is reused). The
+// default cache is data/win-dataset/rpl under the working directory.
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -19,7 +21,7 @@ import { infectedMaskForHeader } from '../src/replaySides.js';
 import { HEADER_BYTES } from '../src/replayFormat.js';
 import { winModel } from '../src/winProb.js';
 import { finishedPoints, writeFinishedPoints } from '../src/winLive/finishedLine.js';
-import { WIN_POINTS_VERSION } from '../src/winLive/modelVersion.js';
+import { winPointsVersion } from '../src/winLive/modelVersion.js';
 
 const R2_BASE = 'https://assets.riversidepug.com/';
 const CONCURRENCY = 4;
@@ -36,7 +38,7 @@ if (!dbPath) { console.error(usage); process.exit(1); }
 const commit = process.argv.includes('--commit');
 const limit = arg('limit') ? Number(arg('limit')) : Infinity;
 const since = arg('since-match') ? Number(arg('since-match')) : 0;
-const cacheDir = resolve(arg('cache') ?? '/home/volence/l4d/pug/data/win-dataset/rpl');
+const cacheDir = resolve(arg('cache') ?? 'data/win-dataset/rpl');
 if (!Number.isFinite(since) || !(limit > 0)) { console.error(usage); process.exit(1); }
 mkdirSync(cacheDir, { recursive: true });
 
@@ -55,8 +57,8 @@ const hasRuns = hasTable('match_win_point_runs');
 const ids = (db.prepare(`
   SELECT m.id FROM matches m
   WHERE ${completedPug('m')} AND m.voided_at IS NULL AND m.id >= ?
-    ${hasRuns ? 'AND NOT EXISTS (SELECT 1 FROM match_win_point_runs w WHERE w.match_id = m.id AND w.model_version = ?)' : ''}
-  ORDER BY m.id`).all(...(hasRuns ? [since, WIN_POINTS_VERSION] : [since])) as { id: number }[])
+    ${hasRuns ? 'AND NOT EXISTS (SELECT 1 FROM match_win_point_runs w WHERE w.match_id = m.id AND w.model_version = ? AND w.halves_missing = 0)' : ''}
+  ORDER BY m.id`).all(...(hasRuns ? [since, winPointsVersion()] : [since])) as { id: number }[])
   .map((r) => r.id)
   .slice(0, limit);
 
@@ -115,20 +117,20 @@ function loadCached(k: RoundKey): RoundReplay | null {
 
 async function main(): Promise<void> {
   const t0 = Date.now();
-  console.log(`${ids.length} matches without points on ${WIN_POINTS_VERSION}${commit ? '' : ' (dry run)'}`);
+  console.log(`${ids.length} matches without full points on ${winPointsVersion()}${commit ? '' : ' (dry run)'}`);
   await fetchAll();
   const tFetch = Date.now();
   console.log(`replays: ${counts.cached} cached, ${counts.fetched} fetched, ${counts.missing} missing (404), ${counts.fetchFailed} failed`);
 
   const model = winModel(db);
-  let withPoints = 0, noLine = 0, noReplay = 0, failed = 0, points = 0;
+  let withPoints = 0, partial = 0, noLine = 0, noReplay = 0, failed = 0, points = 0;
   ids.forEach((id, i) => {
     try {
-      const pts = finishedPoints(db, id, loadCached, { model });
-      if (pts === null) noLine++;
-      else if (pts.length === 0) noReplay++;
-      else { withPoints++; points += pts.length; }
-      if (commit) writeFinishedPoints(db, id, pts ?? []);
+      const res = finishedPoints(db, id, loadCached, { model });
+      if (res === null) noLine++;
+      else if (res.points.length === 0) noReplay++;
+      else { withPoints++; points += res.points.length; if (res.halvesMissing > 0) partial++; }
+      if (commit) writeFinishedPoints(db, id, res?.points ?? [], { halvesMissing: res?.halvesMissing ?? 0 });
     } catch (e) {
       failed++;
       console.error(`match ${id} failed: ${(e as Error).message}`);
@@ -137,7 +139,7 @@ async function main(): Promise<void> {
   });
   const tEnd = Date.now();
   console.log('--- summary ---');
-  console.log(`matches ${ids.length}: with points ${withPoints}, no line (score carries none) ${noLine}, no usable replay ${noReplay}, failed ${failed}`);
+  console.log(`matches ${ids.length}: with points ${withPoints} (partial ${partial}), no line (score carries none) ${noLine}, no usable replay ${noReplay}, failed ${failed}`);
   console.log(`points ${points}${commit ? ' written' : ' (not written, dry run)'}`);
   console.log(`time: fetch ${((tFetch - t0) / 1000).toFixed(1)} s, compute ${((tEnd - tFetch) / 1000).toFixed(1)} s (${ids.length ? ((tEnd - tFetch) / ids.length).toFixed(0) : 0} ms per match)`);
 }
