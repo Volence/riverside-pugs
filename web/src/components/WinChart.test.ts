@@ -133,13 +133,19 @@ describe('winSummary with points during halves', () => {
     expect(winSummary(line)[1]).toBe('Biggest swing so far: Tank on map 3: 68% to 31% for Team B.');
   });
 
-  it('without a moment in the window tells the half as before, and a low during a half says during', () => {
+  it('without a moment in the window says where, when and how fast, and a low during a half says during', () => {
     const plain = points.map((p) => ({ ...p, moment: undefined }));
     const line: WinLine = { points: plain, turning: 7, turningFrom: 5, winnerLow: { index: 5, p: 0.2 }, halves: 10 };
     expect(winSummary(line)).toEqual([
       "Comeback: Team A won from 20%, during Team B's survivor half on map 3 (The Crane).",
-      "Biggest swing: Team B's survivor half on map 3 (The Crane), which took Team A from 32% to 69%.",
+      'Biggest swing: map 3 (The Crane), Team B survivors 1:55 in, Team A 32% to 69% in 25 seconds.',
     ]);
+  });
+
+  it('a swing that ends on the half-end point says it came as the half ended', () => {
+    const plain = points.map((p) => ({ ...p, moment: undefined }));
+    const line: WinLine = { points: plain, turning: 8, turningFrom: 7, winnerLow: null, halves: 10 };
+    expect(winSummary(line)).toEqual(['Biggest swing: map 3 (The Crane), Team B survivors 2:20 in, Team A 69% to 71% as the half ended.']);
   });
 
   it('describes a point during a half by its time and moment', () => {
