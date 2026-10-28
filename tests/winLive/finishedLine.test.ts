@@ -13,7 +13,8 @@ import { decodeRoundReplay } from '../../src/metrics/replayRound.js';
 import type { RoundKey, RoundReplay } from '../../src/metrics/types.js';
 import { buildProgressMap } from '../../src/winLive/progressMap.js';
 import { configureLiveWin, liveSnapshot, MAX_DECODE_BYTES } from '../../src/winLive/liveState.js';
-import { WIN_POINTS_VERSION } from '../../src/winLive/modelVersion.js';
+import { pointsVersion, winPointsVersion } from '../../src/winLive/modelVersion.js';
+import { CALIBRATION } from '../../src/winProb.js';
 import {
   computeFinishedPoints, finishedHalfSnapshots, pendingWinPointMatches, runWinPointsPass, writeFinishedPoints, type FinishedPoint,
 } from '../../src/winLive/finishedLine.js';
@@ -152,13 +153,24 @@ describe('computeFinishedPoints', () => {
     const rows = db.prepare('SELECT ordinal, half, t_ms, moment, model_version FROM match_win_points ORDER BY t_ms').all() as
       { ordinal: number; half: number; t_ms: number; moment: string | null; model_version: string }[];
     expect(rows.map((r) => r.t_ms)).toEqual(Array.from({ length: 13 }, (_, i) => i * 5000));
-    expect(rows.every((r) => r.ordinal === 0 && r.half === 1 && r.model_version === WIN_POINTS_VERSION)).toBe(true);
+    expect(rows.every((r) => r.ordinal === 0 && r.half === 1 && r.model_version === winPointsVersion())).toBe(true);
     expect(rows.filter((r) => r.moment).map((r) => [r.t_ms, r.moment])).toEqual([[30_000, 'tank_spawn'], [60_000, 'saferoom']]);
     expect(db.prepare('SELECT model_version, points FROM match_win_point_runs WHERE match_id = ?').get(id))
-      .toEqual({ model_version: WIN_POINTS_VERSION, points: 13 });
+      .toEqual({ model_version: winPointsVersion(), points: 13 });
     // Run again: replaced, not added to.
     computeFinishedPoints(db, id, load, { model, progressMaps: new Map([['m1', pm]]) });
     expect((db.prepare('SELECT COUNT(*) AS n FROM match_win_points').get() as { n: number }).n).toBe(13);
+  });
+
+  it('marks the last point saferoom when they made it, over the moment it had (as the live side does)', () => {
+    const id = seed(FOUR);
+    // The tank spawns on the last snapshot of a half the survivors made.
+    computeFinishedPoints(db, id, (k) => (k.ordinal === 0 && k.half === 1 ? replayOf(frames(60_000, 60_000)) : null), { model });
+    expect(db.prepare('SELECT t_ms, moment FROM match_win_points WHERE moment IS NOT NULL').all()).toEqual([{ t_ms: 60_000, moment: 'saferoom' }]);
+    // A wiped half keeps it.
+    db.prepare('UPDATE match_rounds SET survivors_alive = 0 WHERE match_id = ? AND ordinal = 0 AND half = 1').run(id);
+    computeFinishedPoints(db, id, (k) => (k.ordinal === 0 && k.half === 1 ? replayOf(frames(60_000, 60_000)) : null), { model });
+    expect(db.prepare('SELECT t_ms, moment FROM match_win_points WHERE moment IS NOT NULL').all()).toEqual([{ t_ms: 60_000, moment: 'tank_spawn' }]);
   });
 
   it('a downed survivor moves the line against the surviving team', () => {
@@ -213,19 +225,42 @@ describe('the reaper pass', () => {
     const done = await runWinPointsPass(db, '', { limit: 5, load: (k) => (k.ordinal === 1 && k.half === 2 ? replayOf(frames(20_000)) : null) });
     expect(done).toBe(1);
     expect((db.prepare('SELECT COUNT(*) AS n FROM match_win_points').get() as { n: number }).n).toBe(5);
+    // Three halves had no replay: a partial line, for the backfill to redo.
+    expect(db.prepare('SELECT points, halves_missing FROM match_win_point_runs').get()).toEqual({ points: 5, halves_missing: 3 });
     expect(pendingWinPointMatches(db, { limit: 5 })).toEqual([]);
     db.prepare("UPDATE match_win_point_runs SET model_version = 'old'").run();
     expect(pendingWinPointMatches(db, { limit: 5 })).toEqual([id]);
   });
 
-  it('picks a match with missing replays once REPLAY_WAIT_MIN has passed, and logs a failure without retrying it', async () => {
+  it('picks a match with missing replays once REPLAY_WAIT_MIN has passed; a load that throws is a missing half', async () => {
     const id = seed(FOUR);
     db.prepare("UPDATE matches SET ended_at = datetime('now', '-40 minutes') WHERE id = ?").run(id);
     expect(pendingWinPointMatches(db, { limit: 5 })).toEqual([id]);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     await runWinPointsPass(db, '', { limit: 5, load: () => { throw new Error('boom'); } });
-    // A load that throws is a half with no replay, not a failed match.
-    expect(db.prepare('SELECT points FROM match_win_point_runs WHERE match_id = ?').get(id)).toEqual({ points: 0 });
+    expect(db.prepare('SELECT points, halves_missing FROM match_win_point_runs WHERE match_id = ?').get(id))
+      .toEqual({ points: 0, halves_missing: 4 });
+    expect(pendingWinPointMatches(db, { limit: 5 })).toEqual([]);
+  });
+
+  it('records no run for a match whose computation threw, skips it for an hour without holding up the next, then tries again', async () => {
+    const bad = seed(FOUR);
+    const good = seed(FOUR);
+    // Both past the replay wait, the broken one newer, so it comes first.
+    db.prepare("UPDATE matches SET ended_at = datetime('now', '-35 minutes') WHERE id = ?").run(bad);
+    db.prepare("UPDATE matches SET ended_at = datetime('now', '-40 minutes') WHERE id = ?").run(good);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // A replay with no frames list makes the snapshots throw.
+    const broken = (k: RoundKey) => (k.matchId === bad ? ({ frames: null } as unknown as RoundReplay) : null);
+    const t0 = Date.now();
+    expect(await runWinPointsPass(db, '', { limit: 1, nowMs: t0, load: broken })).toBe(0);
+    expect(err).toHaveBeenCalledTimes(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_win_point_runs').get()).toEqual({ n: 0 });
+    // The next tick does the match behind it.
+    expect(await runWinPointsPass(db, '', { limit: 1, nowMs: t0 + 60_000, load: broken })).toBe(1);
+    expect(db.prepare('SELECT match_id FROM match_win_point_runs').all()).toEqual([{ match_id: good }]);
+    expect(pendingWinPointMatches(db, { limit: 5 })).toEqual([bad]);
+    // An hour on it is tried again, and stored once it works.
+    expect(await runWinPointsPass(db, '', { limit: 1, nowMs: t0 + 3_600_000, load: () => null })).toBe(1);
     expect(pendingWinPointMatches(db, { limit: 5 })).toEqual([]);
     err.mockRestore();
   });
@@ -234,6 +269,19 @@ describe('the reaper pass', () => {
     const id = seed(FOUR);
     db.prepare("UPDATE matches SET ended_at = datetime('now', '-5 days') WHERE id = ?").run(id);
     expect(pendingWinPointMatches(db, { limit: 5 })).toEqual([]);
+  });
+});
+
+describe('the model version', () => {
+  it('changes with any of its inputs, the form params and the calibration included', () => {
+    const base = { halfModel: '{"a":1}', progressMaps: '[]', form: '{"calibration":1.1}', calibration: CALIBRATION };
+    const v = pointsVersion(base);
+    expect(pointsVersion({ ...base })).toBe(v);
+    expect(pointsVersion({ ...base, form: '{"calibration":1.2}' })).not.toBe(v);
+    expect(pointsVersion({ ...base, calibration: CALIBRATION + 0.01 })).not.toBe(v);
+    expect(pointsVersion({ ...base, halfModel: '{"a":2}' })).not.toBe(v);
+    expect(pointsVersion({ ...base, progressMaps: '[{}]' })).not.toBe(v);
+    expect(winPointsVersion()).toMatch(/^[0-9a-f]{16}$/);
   });
 });
 
