@@ -214,3 +214,20 @@ export function campaignDisplayName(db: DB, slug: string): string {
 export function campaignVoteName(db: DB, slug: string): string {
   return VOTE_NAMES[slug] ?? campaignDisplayName(db, slug);
 }
+
+/** Whether a player has finished a match on a campaign that needs a download
+ *  (a custom VPK or the L4D2 pack). The play page uses it to tell first-timers
+ *  to install the maps before they queue: a player without them fails the
+ *  file check and the match aborts. Completed matches only, since an abort
+ *  is exactly what a missing download looks like. */
+export function hasPlayedDownloadedCampaign(db: DB, steamid: string): boolean {
+  const slugs = [...campaignRegistry(db).values()]
+    .filter((c) => (c.custom || c.requiresDlc4) && !c.practiceOnly)
+    .map((c) => c.slug);
+  if (slugs.length === 0) return true;
+  return db.prepare(`
+    SELECT 1 FROM match_players mp JOIN matches m ON m.id = mp.match_id
+    WHERE mp.player_id = ? AND m.state = 'completed'
+      AND m.campaign IN (${slugs.map(() => '?').join(',')})
+    LIMIT 1`).get(steamid, ...slugs) !== undefined;
+}

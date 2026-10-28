@@ -51,6 +51,11 @@ export const L4D2_CAMPAIGNS: L4D2Piece[] = [
  *  A convenience only: private windows and cleared storage just show nothing. */
 const STORE_KEY = 'l4d2-downloads';
 type Got = Record<string, string>;
+/** Whether this browser has ticked any L4D2 download: the play page's
+ *  install-the-maps notice stays away for someone who already got them. */
+export function gotAnyL4D2(): boolean {
+  return Object.keys(readGot()).length > 0;
+}
 function readGot(): Got {
   try {
     const v = JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}');

@@ -16,6 +16,7 @@ import { MERGED_MESSAGE, inGoodStanding } from '../standing.js';
 import { competitiveAccess, scrimsAccess } from '../teams/access.js';
 import { teamChipsOf } from '../teams/teams.js';
 import { tournamentOpen } from '../events/events.js';
+import { hasPlayedDownloadedCampaign } from '../campaignRegistry.js';
 
 const NEXT_COOKIE = 'pug_next';
 
@@ -161,6 +162,9 @@ export async function authRoutes(app: FastifyInstance, opts: AuthRouteOpts): Pro
       })() : null,
       // null: not linked, or the member list is not loaded yet.
       discordMember: player.discord_id ? opts.membership?.isMember(player.discord_id) ?? null : null,
+      // False until they finish a match on a custom or L4D2 campaign: the
+      // play page asks them to install the maps before queueing.
+      mapsPlayed: hasPlayedDownloadedCampaign(db, player.steamid),
     };
   });
 

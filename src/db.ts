@@ -734,6 +734,9 @@ CREATE TABLE IF NOT EXISTS match_players (
   joined_map INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (match_id, player_id)
 );
+-- A player's matches (the primary key leads with match_id): /api/me asks on
+-- every request whether they have played a downloaded campaign.
+CREATE INDEX IF NOT EXISTS match_players_player ON match_players (player_id);
 -- Post-match endorsements. The primary key is an anti abuse rule expressed
 -- structurally: one endorsement per giver per recipient per match, so nobody
 -- stacks all three kinds on one friend. Everything a CHECK cannot see (both
