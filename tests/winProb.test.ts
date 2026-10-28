@@ -263,6 +263,14 @@ describe('biggestSwing', () => {
     expect(biggestSwing(pts)).toEqual({ from: 13, to: 15 });
   });
 
+  it('on a line with points during halves, leaves out a half that has none', () => {
+    // Map 1 half 2 had no replay: its whole-half 0.4 change is not a 30 s swing.
+    const pts = [open, at(0, 1, 0, 0.5), at(0, 1, 5000, 0.6), end(0, 1, 0.6), end(0, 2, 0.2)];
+    expect(biggestSwing(pts)).toEqual({ from: 1, to: 2 });
+    // Without any points during halves the old rule stands.
+    expect(biggestSwing([open, end(0, 1, 0.6), end(0, 2, 0.2)])).toEqual({ from: 1, to: 2 });
+  });
+
   it('never measures across two halves', () => {
     // 0.8 at the end of half 1 and 0.2 early in half 2 are 0 s apart on the
     // clock of neither half; half 2 starts from its half-end point instead.

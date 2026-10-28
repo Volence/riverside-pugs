@@ -120,15 +120,17 @@ describe('winSummary with points during halves', () => {
     pt(2, 2, 'a', 1900, 1250, 1),
   ];
 
-  it('names the first moment inside the biggest swing, from the survivors\' side', () => {
+  it('names the moment inside the biggest swing by its likeliest cause, from the survivors\' side', () => {
+    // The tank at 2:00 and the wipe 20 s on are both in the window: the wipe
+    // is what moved it.
     const line: WinLine = { points, turning: 7, turningFrom: 5, winnerLow: { index: 4, p: 0.32 }, halves: 10 };
-    expect(winSummary(line)[1]).toBe('Biggest swing: Tank on map 3: 68% to 31% for Team B.');
+    expect(winSummary(line)[1]).toBe('Biggest swing: Wipe on map 3: 68% to 31% for Team B.');
   });
 
   it('counts a moment on the point the swing starts from, and speaks in the present while live', () => {
-    const wipe = points.map((p, i) => (i === 5 ? { ...p, moment: 'wipe' as const } : { ...p, moment: undefined }));
-    const line: WinLine = { points: wipe.slice(0, 8), turning: 7, turningFrom: 5, winnerLow: null, halves: 10, halvesLeft: 3 };
-    expect(winSummary(line)[1]).toBe('Biggest swing so far: Wipe on map 3: 68% to 31% for Team B.');
+    const tank = points.map((p, i) => (i === 5 ? { ...p, moment: 'tank_spawn' as const } : { ...p, moment: undefined }));
+    const line: WinLine = { points: tank.slice(0, 8), turning: 7, turningFrom: 5, winnerLow: null, halves: 10, halvesLeft: 3 };
+    expect(winSummary(line)[1]).toBe('Biggest swing so far: Tank on map 3: 68% to 31% for Team B.');
   });
 
   it('without a moment in the window tells the half as before, and a low during a half says during', () => {
