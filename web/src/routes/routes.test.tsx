@@ -858,6 +858,26 @@ describe('Play', () => {
     await waitFor(() => expect(screen.getByText('Connect Discord')).toBeTruthy());
   });
 
+  it('asks a player new to the downloaded campaigns to get the maps, until dismissed', () => {
+    localStorage.removeItem('maps-notice-dismissed');
+    const me = { steamid: '1', name: 'a', avatar: null, status: 'active', isAdmin: false, mapsPlayed: false };
+    render(<QueuePanel count={1} joined={false} players={[]} refresh={noop} me={me} />);
+    expect(screen.getByText('Download the maps').getAttribute('href')).toBe('/custom-campaigns');
+    fireEvent.click(screen.getByRole('button', { name: 'I have them' }));
+    expect(screen.queryByText('Download the maps')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Join queue' })).toBeTruthy();
+    cleanup();
+    render(<QueuePanel count={1} joined={false} players={[]} refresh={noop} me={me} />);
+    expect(screen.queryByText('Download the maps')).toBeNull();
+    localStorage.removeItem('maps-notice-dismissed');
+  });
+
+  it('shows no maps notice once the player has played a downloaded campaign', () => {
+    render(<QueuePanel count={1} joined={false} players={[]} refresh={noop}
+      me={{ steamid: '1', name: 'a', avatar: null, status: 'active', isAdmin: false, mapsPlayed: true }} />);
+    expect(screen.queryByText('Download the maps')).toBeNull();
+  });
+
   const active = {
     kind: 'active' as const,
     me: { steamid: '1', name: 'alice', avatar: null, status: 'active', isAdmin: false },

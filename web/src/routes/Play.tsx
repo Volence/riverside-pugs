@@ -13,6 +13,7 @@ import { ConnectPanel } from '../components/ConnectPanel';
 import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
 import { SetupChecklist } from '../components/SetupChecklist';
+import { gotAnyL4D2 } from './L4D2Pack';
 import { PracticeCard } from '../components/PracticeCard';
 import type { Session } from '../hooks/useLiveState';
 
@@ -424,6 +425,38 @@ export function AbortNoticePanel({ notice, refresh }: { notice: AbortNotice; ref
   );
 }
 
+/** Remembered per browser: someone who says they have the maps is not asked again. */
+const MAPS_NOTICE_KEY = 'maps-notice-dismissed';
+
+/**
+ * Shown above Join queue until a player finishes a match on a custom or L4D2
+ * campaign. Matches can pick those campaigns, and a player without the files
+ * fails the file check and the match aborts, so a new player hears about the
+ * downloads before they queue rather than after.
+ */
+function MapsNotice() {
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem(MAPS_NOTICE_KEY) === '1' || gotAnyL4D2(); } catch { return false; }
+  });
+  if (hidden) return null;
+  const dismiss = () => {
+    try { localStorage.setItem(MAPS_NOTICE_KEY, '1'); } catch { /* private window */ }
+    setHidden(true);
+  };
+  return (
+    <div class="maps-notice" role="note">
+      <p>
+        <strong>New here? Get the maps first.</strong> Matches can be played on the L4D2 and custom
+        campaigns, and without them you can't join the server and the match is cancelled.
+      </p>
+      <div class="maps-notice__actions">
+        <a class="btn btn--ghost" href="/custom-campaigns">Download the maps</a>
+        <button class="chip" type="button" onClick={dismiss}>I have them</button>
+      </div>
+    </div>
+  );
+}
+
 export function QueuePanel(
   { count, joined, players, refresh, timeout = null, queueBlock = null, me = null, sideGamesEnabled = false, sideOptIn, sideGame = null }:
     {
@@ -480,7 +513,10 @@ export function QueuePanel(
           <TimeoutNotice until={Date.parse(timeout.until)} kind={timeout.kind} onDone={refresh} />
         </>
       ) : (
-        <button class="btn btn--block" onClick={() => act(api.joinQueue)}>Join queue</button>
+        <>
+          {me && me.mapsPlayed === false && <MapsNotice />}
+          <button class="btn btn--block" onClick={() => act(api.joinQueue)}>Join queue</button>
+        </>
       )}
       {sideGamesEnabled && joined && (count >= SIDE_GAME_MIN || sideOptIn) && (
         <label class="side-toggle">

@@ -2682,6 +2682,11 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .checklist__ready { margin-top: var(--sp-4); color: var(--win); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .queue-block { margin-top: var(--sp-3); }
+/* The install-the-maps notice above Join queue, for players new to the
+   downloaded campaigns. */
+.maps-notice { margin: var(--sp-3) 0; padding: var(--sp-3); border: 1px solid var(--rating); }
+.maps-notice p { margin: 0 0 var(--sp-2); }
+.maps-notice__actions { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 
 .side-toggle { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); }
 .side-game { margin-top: var(--sp-3); }

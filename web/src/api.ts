@@ -27,6 +27,8 @@ export interface Me {
   discord?: { id: string; name: string } | null;
   /** In the Discord server; null when not linked or not known right now. */
   discordMember?: boolean | null;
+  /** Has finished a match on a custom or L4D2 campaign, so has the maps. */
+  mapsPlayed?: boolean;
   /** False when the server has no Twitch app configured: hide every Twitch control. */
   twitchEnabled?: boolean;
   twitch?: { id: string; name: string } | null;
