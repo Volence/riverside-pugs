@@ -1,7 +1,7 @@
 import type { DB } from '../db.js';
 import type { Matchmaker } from '../matchmaker.js';
 import { QUEUE_SIZE } from '../queue.js';
-import { campaignVoteName } from '../campaignRegistry.js';
+import { campaignVoteName, hasPlayedDownloadedCampaign } from '../campaignRegistry.js';
 import { createLinkCode, playerByDiscordId, type PlayerRow } from '../players.js';
 import { spectateFor, type SpectateInfo } from '../spectate.js';
 import type { BotInteraction, InteractionReply, MessagePayload, RoleOps } from './transport.js';
@@ -107,8 +107,16 @@ export async function handleButton(
     if (!r.ok) return say(`Could not join: ${r.error}.`);
     const st = mm.stateFor(steamid);
     // Joining can be the eighth player, which pops the queue straight into a lobby.
-    if (st.lobby) return say('You are in! The queue just popped, ready up on the match card.');
-    return say(`You are in the queue (${st.queue.count}/${QUEUE_SIZE}).`);
+    const joined = st.lobby
+      ? 'You are in! The queue just popped, ready up on the match card.'
+      : `You are in the queue (${st.queue.count}/${QUEUE_SIZE}).`;
+    // The play page's get-the-maps notice, for Discord joiners. The reply is
+    // ephemeral, so Discord's own Dismiss link clears it.
+    if (hasPlayedDownloadedCampaign(deps.db, steamid)) return say(joined);
+    return say(
+      `${joined}\n\n**New here? Get the maps first.** Matches can be played on the L4D2 and custom campaigns, and without them you can't join the server and the match is cancelled.`,
+      { components: [[{ kind: 'link', url: `${deps.publicUrl}/custom-campaigns`, label: 'Download the maps' }]] },
+    );
   }
 
   if (parts[0] === 'q' && parts[1] === 'leave') {
