@@ -53,6 +53,12 @@ function withHalf(model: WinModel, d: Float64Array): WinModel {
 describe('predictHalf', () => {
   const model = buildWinModel(history());
 
+  it('starts from the per-half base when the model has one', () => {
+    const split = buildWinModel(history().map((r, i) => ({ ...r, half: (i % 4 < 2 ? 1 : 2) as 1 | 2 })), 0, { perHalf: true });
+    expect([...predictHalf(split, PARAMS, 'm1', 0, null, 2)]).toEqual([...split.distHalf!('m1', 2)]);
+    expect(tv(predictHalf(split, PARAMS, 'm1', 0, START, 1), split.distHalf!('m1', 1))).toBeLessThan(1e-12);
+  });
+
   it('is the tilted base distribution exactly with no snapshot', () => {
     expect([...predictHalf(model, PARAMS, 'm1', 0, null, 1)]).toEqual([...model.dist('m1')]);
     expect([...predictHalf(model, PARAMS, 'm1', 0.4, null, 1)]).toEqual([...tilt(model.dist('m1'), 0.4)]);

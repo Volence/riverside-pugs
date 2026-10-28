@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { buildWinModel, winChance, matchWinLine, liveWinLine, winModel, CALIBRATION, type HalfRow } from '../src/winProb.js';
+import {
+  buildWinModel, halfBase, winChance, winChanceDists, matchWinLine, liveWinLine, winModel, CALIBRATION, type HalfRow,
+} from '../src/winProb.js';
 import { FORM_PARAMS, formOption, type FormParams } from '../src/winForm.js';
 import { setSetting } from '../src/settings.js';
 import { insertDraft, publishCampaign } from '../src/customCampaigns.js';
@@ -288,5 +290,78 @@ describe('team form on the line', () => {
       expect(Number.isFinite(FORM_PARAMS[k]), k).toBe(true);
     }
     expect(FORM_PARAMS.shrink).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('per-half base distribution', () => {
+  /** history() with halves: on both maps half 1 makes the saferoom more
+   *  often than half 2, as on the real data (33.7% against 23.5%). Plus a
+   *  thin map m3 with two halves. */
+  function halved(): HalfRow[] {
+    const rows: HalfRow[] = [];
+    for (let i = 0; i < 120; i++) {
+      const half = (i % 2 ? 2 : 1) as 1 | 2;
+      const made = half === 1 ? i % 4 < 2 : i % 8 === 1;
+      rows.push({ map: i % 3 ? 'm1' : 'm2', score: made ? 600 + (i % 7) * 20 : 40 + (i % 5) * 10, made, half });
+    }
+    rows.push({ map: 'm3', score: 700, made: true, half: 1 }, { map: 'm3', score: 50, made: false, half: 2 });
+    return rows;
+  }
+  const mean = (d: Float64Array) => d.reduce((s, p, i) => s + p * i, 0);
+  const sum = (d: Float64Array) => d.reduce((s, p) => s + p, 0);
+
+  it('leaves dist, scale and the line exactly as they are, and only exists when asked for', () => {
+    const plain = buildWinModel(halved(), 0);
+    const split = buildWinModel(halved(), 0, { perHalf: true });
+    expect(plain.distHalf).toBeUndefined();
+    for (const map of ['m1', 'm2', 'm3', 'never_played']) {
+      expect([...split.dist(map)]).toEqual([...plain.dist(map)]);
+      expect(split.scale(map)).toBe(plain.scale(map));
+    }
+    expect(winChance(split, 120, ['m1', 'm2'], ['m2'])).toBe(winChance(plain, 120, ['m1', 'm2'], ['m2']));
+  });
+
+  it('gives each half its own shape: half 1 above half 2 where half 1 makes more saferooms', () => {
+    const model = buildWinModel(halved(), 0, { perHalf: true });
+    for (const map of ['m1', 'm2']) {
+      const h1 = model.distHalf!(map, 1);
+      const h2 = model.distHalf!(map, 2);
+      expect(sum(h1)).toBeCloseTo(1, 9);
+      expect(sum(h2)).toBeCloseTo(1, 9);
+      expect(mean(h1)).toBeGreaterThan(mean(model.dist(map)));
+      expect(mean(h2)).toBeLessThan(mean(model.dist(map)));
+    }
+  });
+
+  it('borrows the pooled per-half shape for a thin map and an unknown one', () => {
+    const model = buildWinModel(halved(), 0, { perHalf: true });
+    for (const map of ['m3', 'never_played']) {
+      const h1 = model.distHalf!(map, 1);
+      const h2 = model.distHalf!(map, 2);
+      expect(sum(h1)).toBeCloseTo(1, 9);
+      expect(mean(h1)).toBeGreaterThan(mean(h2));
+    }
+  });
+
+  it('has no half difference when no row says which half it was', () => {
+    const model = buildWinModel(history(), 0, { perHalf: true });
+    expect([...model.distHalf!('m1', 1)]).toEqual([...model.distHalf!('m1', 2)]);
+    expect(sum(model.distHalf!('m1', 1))).toBeCloseTo(1, 9);
+  });
+
+  it('halfBase is distHalf when the model has it and dist otherwise', () => {
+    const split = buildWinModel(halved(), 0, { perHalf: true });
+    const plain = buildWinModel(halved(), 0);
+    expect(halfBase(split, 'm1', 2)).toBe(split.distHalf!('m1', 2));
+    expect(halfBase(plain, 'm1', 2)).toBe(plain.dist('m1'));
+  });
+
+  it('winChanceDists prices given distributions exactly as winChance prices maps', () => {
+    const model = buildWinModel(history());
+    expect(winChanceDists(150, [model.dist('m2')], [model.dist('m1'), model.dist('m2')]))
+      .toBe(winChance(model, 150, ['m2'], ['m1', 'm2']));
+    expect(winChanceDists(0, [], [])).toBe(0.5);
+    expect(winChanceDists(5, [model.dist('m1')], [model.dist('m1')], 1))
+      .toBe(winChance(model, 5, ['m1'], ['m1'], { calibration: 1 }));
   });
 });
