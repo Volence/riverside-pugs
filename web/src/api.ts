@@ -2856,6 +2856,7 @@ export const adminApi = {
   signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
   clearPenalty: (steamid: string, id: number) => post(`/api/admin/players/${steamid}/penalties/${id}/clear`),
+  liftTimeout: (steamid: string) => post(`/api/admin/players/${steamid}/lift-timeout`),
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
   unaliasPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/unalias`),

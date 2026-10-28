@@ -493,6 +493,7 @@ export class AdminFeedPoster {
       case 'abort_match': return `${who} aborted match ${match}${Array.isArray(d.leftOut) && d.leftOut.length ? `, left out of the queue: ${d.leftOut.map((s) => this.name(String(s))).join(', ')}` : ''}`;
       case 'clear_noshows': return `${who} cleared the ${String(d.cleared)} no-show penalties from match ${match}`;
       case 'clear_penalty': return `${who} cleared one of ${target}'s penalties`;
+      case 'lift_timeout': return `${who} lifted ${target}'s queue timeout`;
       case 'noshow_extend': return `${who} moved match ${match}'s no-show deadline to ${String(d.extraMinutes)} minutes later than usual`;
       case 'cancel_pop': return `${who} cancelled a pop: ${String(d.requeued)} back in the queue${Array.isArray(d.excluded) && d.excluded.length ? `, left out ${d.excluded.map((s) => this.name(String(s))).join(', ')}` : ''}`;
       case 'restore_abandon_rating': return `${who} restored ${target}'s rating loss from abandoning match [#${String(d.matchId)}](${this.deps.publicUrl}/match/${String(d.matchId)}): ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;
