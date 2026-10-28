@@ -57,6 +57,10 @@ export interface WinModel {
   /** How many halves the model was built from, shown on the page. */
   halves: number;
   dist(map: string): Float64Array;
+  /** The map's typical made score (median made half, shrunk toward the
+   *  pool's), the unit the pooled shapes and the live half model use. A map
+   *  with no history gets the pooled value. */
+  scale(map: string): number;
 }
 
 function median(xs: number[]): number {
@@ -135,7 +139,7 @@ export function buildWinModel(rows: HalfRow[], now = Date.now()): WinModel {
     cache.set(map, out);
     return out;
   };
-  return { builtAt: now, halves: rows.length, dist };
+  return { builtAt: now, halves: rows.length, dist, scale: (map) => scale.get(map) ?? poolScale };
 }
 
 function convolve(a: Float64Array, b: Float64Array): Float64Array {
