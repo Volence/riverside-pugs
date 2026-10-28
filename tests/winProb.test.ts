@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
-import { buildWinModel, winChance, matchWinLine, liveWinLine, winModel, type HalfRow } from '../src/winProb.js';
+import {
+  buildWinModel, halfBase, winChance, winChanceDists, matchWinLine, liveWinLine, winModel, CALIBRATION, type HalfRow,
+  biggestSwing, type WinPoint,
+} from '../src/winProb.js';
+import { FORM_PARAMS, formOption, type FormParams } from '../src/winForm.js';
+import { setSetting } from '../src/settings.js';
 import { insertDraft, publishCampaign } from '../src/customCampaigns.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistry.js';
 
@@ -221,10 +226,188 @@ describe('liveWinLine', () => {
     expect(liveWinLine(db, id, 'five', model)).toBeNull();
   });
 
+  it('with live points asked for but no half being read, is the same line', () => {
+    playMap(0, 'm1');
+    half(0, 1, 'a', 640);
+    half(0, 2, 'b', null);
+    expect(liveWinLine(db, id, 'five', model, { live: true })).toEqual(liveWinLine(db, id, 'five', model));
+    const pts = liveWinLine(db, id, 'five', model, { live: true })!.points;
+    expect(pts.every((p) => p.tMs === undefined && p.moment === undefined)).toBe(true);
+  });
+
   it('is null when the maps played do not follow the plan, or the plan is unknown', () => {
     playMap(0, 'somewhere_else');
     half(0, 1, 'a', 100);
     expect(liveWinLine(db, id, 'five', model)).toBeNull();
     expect(liveWinLine(db, id, 'no_such_campaign', model)).toBeNull();
+  });
+});
+
+describe('biggestSwing', () => {
+  const end = (o: number, half: number, pA: number): WinPoint =>
+    ({ ordinal: o, half, survTeam: half === 1 ? 'a' : 'b', map: 'm1', scoreA: 0, scoreB: 0, pA });
+  const at = (o: number, half: number, tMs: number, pA: number): WinPoint => ({ ...end(o, half, pA), tMs });
+  const open: WinPoint = { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: 0.5 };
+
+  it('on half-end points alone is the biggest change from one point to the next, the earliest on a tie', () => {
+    expect(biggestSwing([open, end(0, 1, 0.6), end(0, 2, 0.3), end(1, 1, 0.6)])).toEqual({ from: 1, to: 2 });
+    expect(biggestSwing([open, end(0, 1, 0.505)])).toBeNull();
+  });
+
+  it('during a half is the biggest change across 30 s, not a slow slide over minutes', () => {
+    // A climb of 3 points every 10 s for two minutes (36 in all), then a
+    // 26 point drop inside 30 s: the drop is the swing, though the climb
+    // moved further.
+    const climb = Array.from({ length: 13 }, (_, k) => at(0, 1, k * 10_000, 0.5 + k * 0.03));
+    const pts = [open, ...climb, at(0, 1, 130_000, 0.7), at(0, 1, 150_000, 0.6), end(0, 1, 0.6)];
+    expect(biggestSwing(pts)).toEqual({ from: 13, to: 15 });
+  });
+
+  it('on a line with points during halves, leaves out a half that has none', () => {
+    // Map 1 half 2 had no replay: its whole-half 0.4 change is not a 30 s swing.
+    const pts = [open, at(0, 1, 0, 0.5), at(0, 1, 5000, 0.6), end(0, 1, 0.6), end(0, 2, 0.2)];
+    expect(biggestSwing(pts)).toEqual({ from: 1, to: 2 });
+    // Without any points during halves the old rule stands.
+    expect(biggestSwing([open, end(0, 1, 0.6), end(0, 2, 0.2)])).toEqual({ from: 1, to: 2 });
+  });
+
+  it('never measures across two halves', () => {
+    // 0.8 at the end of half 1 and 0.2 early in half 2 are 0 s apart on the
+    // clock of neither half; half 2 starts from its half-end point instead.
+    const pts = [open, at(0, 1, 0, 0.5), at(0, 1, 5000, 0.8), end(0, 1, 0.8), at(0, 2, 0, 0.78), at(0, 2, 60_000, 0.2), end(0, 2, 0.2)];
+    expect(biggestSwing(pts)).toEqual({ from: 1, to: 2 });
+  });
+});
+
+describe('team form on the line', () => {
+  let db: DB;
+  beforeEach(() => { db = openDb(':memory:'); });
+  const model = buildWinModel(history());
+  const form: FormParams = { survivor: 0.5, infected: 0, siDamage: 0, shrink: 2, calibration: 1.15 };
+
+  /** A finished two-map match where A makes both saferooms big and B
+   *  scrapes, maps m1 then m2. */
+  function seed(): number {
+    const id = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, winner, team_a_score, team_b_score) VALUES (1, 'completed', 'no_mercy', 'a', 1680, 900)",
+    ).run().lastInsertRowid);
+    const ins = db.prepare(
+      "INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, survivors_alive, ended_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+    );
+    db.prepare("INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, 0, 'm1', 720, 300)").run(id);
+    db.prepare("INSERT INTO match_maps (match_id, ordinal, map, team_a_score, team_b_score) VALUES (?, 1, 'm2', 960, 600)").run(id);
+    ins.run(id, 0, 1, 'a', 720, 4); ins.run(id, 0, 2, 'b', 300, 0);
+    ins.run(id, 1, 1, 'b', 600, 0); ins.run(id, 1, 2, 'a', 960, 4);
+    return id;
+  }
+
+  it('leaves the opening point alone and moves the later ones toward the team in form', () => {
+    const id = seed();
+    const plain = matchWinLine(db, id, model)!;
+    const withForm = matchWinLine(db, id, model, { form })!;
+    expect(withForm.points[0].pA).toBeCloseTo(plain.points[0].pA, 9);
+    // After A's top half on m1 and B's poor one, A's halves to come lean up.
+    expect(withForm.points[2].pA).toBeGreaterThan(plain.points[2].pA);
+    expect(withForm.points.at(-1)!.pA).toBe(1);
+  });
+
+  it('opens at 50% even with a form temperature other than CALIBRATION', () => {
+    const cooler: FormParams = { ...form, calibration: 0.938 };
+    expect(cooler.calibration).not.toBe(CALIBRATION);
+    expect(matchWinLine(db, seed(), model, { form: cooler })!.points[0].pA).toBeCloseTo(0.5, 9);
+  });
+
+  it('is the same line as today with every strength at zero and today\'s temperature', () => {
+    const id = seed();
+    const zero: FormParams = { survivor: 0, infected: 0, siDamage: 0, shrink: 2, calibration: CALIBRATION };
+    expect(matchWinLine(db, id, model, { form: zero })!.points.map((p) => p.pA))
+      .toEqual(matchWinLine(db, id, model)!.points.map((p) => p.pA));
+  });
+
+  it('is off until win_chance_form is turned on, except for an admin viewer', () => {
+    expect(formOption(db)).toBeUndefined();
+    expect(formOption(db, true)).toBe(FORM_PARAMS);
+    setSetting(db, 'win_chance_form', '1');
+    expect(formOption(db)).toBe(FORM_PARAMS);
+  });
+
+  it('ships fitted parameters that are numbers', () => {
+    for (const k of ['survivor', 'infected', 'siDamage', 'shrink', 'calibration'] as const) {
+      expect(Number.isFinite(FORM_PARAMS[k]), k).toBe(true);
+    }
+    expect(FORM_PARAMS.shrink).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('per-half base distribution', () => {
+  /** history() with halves: on both maps half 1 makes the saferoom more
+   *  often than half 2, as on the real data (33.7% against 23.5%). Plus a
+   *  thin map m3 with two halves. */
+  function halved(): HalfRow[] {
+    const rows: HalfRow[] = [];
+    for (let i = 0; i < 120; i++) {
+      const half = (i % 2 ? 2 : 1) as 1 | 2;
+      const made = half === 1 ? i % 4 < 2 : i % 8 === 1;
+      rows.push({ map: i % 3 ? 'm1' : 'm2', score: made ? 600 + (i % 7) * 20 : 40 + (i % 5) * 10, made, half });
+    }
+    rows.push({ map: 'm3', score: 700, made: true, half: 1 }, { map: 'm3', score: 50, made: false, half: 2 });
+    return rows;
+  }
+  const mean = (d: Float64Array) => d.reduce((s, p, i) => s + p * i, 0);
+  const sum = (d: Float64Array) => d.reduce((s, p) => s + p, 0);
+
+  it('leaves dist, scale and the line exactly as they are, and only exists when asked for', () => {
+    const plain = buildWinModel(halved(), 0);
+    const split = buildWinModel(halved(), 0, { perHalf: true });
+    expect(plain.distHalf).toBeUndefined();
+    for (const map of ['m1', 'm2', 'm3', 'never_played']) {
+      expect([...split.dist(map)]).toEqual([...plain.dist(map)]);
+      expect(split.scale(map)).toBe(plain.scale(map));
+    }
+    expect(winChance(split, 120, ['m1', 'm2'], ['m2'])).toBe(winChance(plain, 120, ['m1', 'm2'], ['m2']));
+  });
+
+  it('gives each half its own shape: half 1 above half 2 where half 1 makes more saferooms', () => {
+    const model = buildWinModel(halved(), 0, { perHalf: true });
+    for (const map of ['m1', 'm2']) {
+      const h1 = model.distHalf!(map, 1);
+      const h2 = model.distHalf!(map, 2);
+      expect(sum(h1)).toBeCloseTo(1, 9);
+      expect(sum(h2)).toBeCloseTo(1, 9);
+      expect(mean(h1)).toBeGreaterThan(mean(model.dist(map)));
+      expect(mean(h2)).toBeLessThan(mean(model.dist(map)));
+    }
+  });
+
+  it('borrows the pooled per-half shape for a thin map and an unknown one', () => {
+    const model = buildWinModel(halved(), 0, { perHalf: true });
+    for (const map of ['m3', 'never_played']) {
+      const h1 = model.distHalf!(map, 1);
+      const h2 = model.distHalf!(map, 2);
+      expect(sum(h1)).toBeCloseTo(1, 9);
+      expect(mean(h1)).toBeGreaterThan(mean(h2));
+    }
+  });
+
+  it('has no half difference when no row says which half it was', () => {
+    const model = buildWinModel(history(), 0, { perHalf: true });
+    expect([...model.distHalf!('m1', 1)]).toEqual([...model.distHalf!('m1', 2)]);
+    expect(sum(model.distHalf!('m1', 1))).toBeCloseTo(1, 9);
+  });
+
+  it('halfBase is distHalf when the model has it and dist otherwise', () => {
+    const split = buildWinModel(halved(), 0, { perHalf: true });
+    const plain = buildWinModel(halved(), 0);
+    expect(halfBase(split, 'm1', 2)).toBe(split.distHalf!('m1', 2));
+    expect(halfBase(plain, 'm1', 2)).toBe(plain.dist('m1'));
+  });
+
+  it('winChanceDists prices given distributions exactly as winChance prices maps', () => {
+    const model = buildWinModel(history());
+    expect(winChanceDists(150, [model.dist('m2')], [model.dist('m1'), model.dist('m2')]))
+      .toBe(winChance(model, 150, ['m2'], ['m1', 'm2']));
+    expect(winChanceDists(0, [], [])).toBe(0.5);
+    expect(winChanceDists(5, [model.dist('m1')], [model.dist('m1')], 1))
+      .toBe(winChance(model, 5, ['m1'], ['m1'], { calibration: 1 }));
   });
 });

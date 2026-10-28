@@ -2326,3 +2326,104 @@ describe('leaderboard stat leaders', () => {
     await waitFor(() => expect(card.getAttribute('aria-pressed')).toBe('true'));
   });
 });
+
+describe('win chance line with points during halves', () => {
+  const end = (o: number, half: number, t: 'a' | 'b', pA: number) =>
+    ({ ordinal: o, half, survTeam: t, map: 'l4d_vs_airport02_offices', scoreA: 0, scoreB: 0, pA });
+  const during = (o: number, half: number, t: 'a' | 'b', tMs: number, pA: number, moment?: 'tank_spawn' | 'tank_death' | 'wipe' | 'saferoom') =>
+    ({ ...end(o, half, t, pA), tMs, ...(moment ? { moment } : {}) });
+  const line = {
+    points: [
+      { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: 0.5 },
+      during(0, 1, 'a', 0, 0.5), during(0, 1, 'a', 60_000, 0.6, 'tank_spawn'), during(0, 1, 'a', 240_000, 0.75, 'saferoom'),
+      end(0, 1, 'a', 0.76),
+      during(0, 2, 'b', 0, 0.76), during(0, 2, 'b', 30_000, 0.5, 'tank_death'), during(0, 2, 'b', 120_000, 0.3, 'wipe'),
+      end(0, 2, 'b', 0.3),
+    ],
+    turning: 6, turningFrom: 5, winnerLow: null, halves: 10, halvesLeft: 4,
+  };
+
+  it('draws the points during a half between its half markers, with a titled icon per moment', async () => {
+    const { WinChart } = await import('../components/WinChart');
+    const { container } = render(<WinChart line={line} />);
+    const d = container.querySelector('.winchart__line')!.getAttribute('d')!;
+    const xs = d.split(/[ML]/).filter(Boolean).map((s) => Number(s.split(',')[0]));
+    expect(xs).toHaveLength(line.points.length);
+    // Half 1's points lie between the opening marker and its half-end marker,
+    // half 2's between the two half-end markers, in time order.
+    expect(xs[1]).toBe(xs[0]);
+    expect(xs[2]).toBeGreaterThan(xs[1]!);
+    expect(xs[3]).toBeLessThanOrEqual(xs[4]!);
+    expect(xs[6]).toBeGreaterThan(xs[4]!);
+    expect(xs[7]).toBeLessThanOrEqual(xs[8]!);
+    // Dots stay on the half markers, plus the swing's end; the points
+    // between are line only.
+    expect(container.querySelectorAll('.winchart__dot')).toHaveLength(4);
+    expect(Number(container.querySelector('.winchart__dot--turn')!.getAttribute('cx'))).toBeCloseTo(xs[6]!, 1);
+    const titles = [...container.querySelectorAll('.winchart__moment title')].map((t) => t.textContent);
+    expect(titles).toEqual([
+      expect.stringContaining('1:00 in: tank spawned'),
+      expect.stringContaining('4:00 in: reached the saferoom'),
+      expect.stringContaining('0:30 in: tank killed'),
+      expect.stringContaining('2:00 in: wiped'),
+    ]);
+    // The table still has one row per half, not one per 5 s.
+    expect(container.querySelectorAll('.winchart__table tbody tr')).toHaveLength(3);
+  });
+
+  it('says what the line comes from, scoped to the half ends once it moves during halves', async () => {
+    const { WinChart } = await import('../components/WinChart');
+    const plain = { ...line, points: line.points.filter((p) => !('tMs' in p)), turning: 1, turningFrom: undefined };
+    const base = 'both teams start at 50%, and every half still to play is priced from the 10 PUG halves played so far, map by map. '
+      + 'Ratings play no part. Checked against past matches: halves it called 80-90% were won 83% of the time.';
+    const { container, unmount } = render(<WinChart line={plain} />);
+    expect(container.querySelector('.winchart__foot')!.textContent).toBe(`From the scoreboard alone: ${base}`);
+    unmount();
+    const live = render(<WinChart line={line} />);
+    expect(live.container.querySelector('.winchart__foot')!.textContent).toBe(`After each half the line comes from the scoreboard alone: ${base}`
+      + ' During each half it also moves every 5 seconds with how far the survivors have got, time into the half, deaths, downs, health lost'
+      + ' and how much of the tank has been beaten; the icons mark tank spawns, tank kills, wipes and saferooms.');
+  });
+
+  it('lets the pointer reach a half-end point over its half\'s last point at the same x', async () => {
+    const { WinChart } = await import('../components/WinChart');
+    const { container } = render(<WinChart line={{ ...line, halvesLeft: 0 }} />);
+    const d = container.querySelector('.winchart__line')!.getAttribute('d')!;
+    const xs = d.split(/[ML]/).filter(Boolean).map((s) => Number(s.split(',')[0]));
+    // jsdom puts the svg at 0,0, so clientX is the x in the chart.
+    const hit = container.querySelector('.winchart__hit')!;
+    fireEvent.mouseMove(hit, { clientX: xs[4] });
+    expect(container.querySelector('.winchart__tiphead')!.textContent).toMatch(/Map 1 .*Team A survivors scored/);
+    fireEvent.mouseMove(hit, { clientX: xs[8] });
+    expect(container.querySelector('.winchart__tip')!.textContent).toContain('Team A 30% · Team B 70%');
+    expect(container.querySelector('.winchart__tiphead')!.textContent).toMatch(/Team B survivors scored/);
+  });
+
+  it('opens a moment icon from a tap or the keyboard, listing every moment a crowded icon stands for', async () => {
+    const { WinChart } = await import('../components/WinChart');
+    // A tank and a wipe 5 s apart share one icon.
+    const crowded = {
+      ...line,
+      points: [...line.points.slice(0, 5), during(0, 2, 'b', 0, 0.76), during(0, 2, 'b', 60_000, 0.6, 'tank_spawn'),
+        during(0, 2, 'b', 65_000, 0.3, 'wipe'), end(0, 2, 'b', 0.3)],
+      turning: 7, turningFrom: 5,
+    };
+    const { container } = render(<WinChart line={crowded} />);
+    const marks = container.querySelectorAll('.winchart__moment');
+    expect(marks).toHaveLength(3);
+    expect(marks[2]!.getAttribute('tabindex')).toBe('0');
+    fireEvent.click(marks[0]!);
+    expect(container.querySelector('.winchart__tiphead')!.textContent).toContain('1:00 in: tank spawned');
+    fireEvent.keyDown(marks[2]!, { key: 'Enter' });
+    const heads = [...container.querySelectorAll('.winchart__tiphead')].map((h) => h.textContent);
+    expect(heads).toEqual([expect.stringContaining('1:00 in: tank spawned'), expect.stringContaining('1:05 in: wiped')]);
+  });
+
+  it('moves the Live page bar with the newest point during the half', async () => {
+    const { LiveOdds } = await import('./Live');
+    const live = { ...line, points: line.points.slice(0, 7) };
+    const { container } = render(<LiveOdds line={live} />);
+    expect(screen.getByText('Team A 50%')).toBeTruthy();
+    expect((container.querySelector('.liveodds__a') as HTMLElement).style.width).toBe('50%');
+  });
+});
