@@ -43,7 +43,10 @@ export interface FormParams {
   calibration: number;
 }
 
-/** The fitted parameters (scripts/win-backtest.ts --part form writes them). */
+/** The fitted parameters (scripts/win-backtest.ts --part form writes them).
+ *  The file also records whether they passed the backtest gate ("gate", the
+ *  Brier numbers, the bins that missed); those fields are a record for
+ *  people and are not read here. The win_chance_form setting is the guard. */
 export const FORM_PARAMS: FormParams = JSON.parse(
   readFileSync(new URL('./winForm.fitted.json', import.meta.url), 'utf8'),
 ) as FormParams;
