@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
   buildWinModel, halfBase, winChance, winChanceDists, matchWinLine, liveWinLine, winModel, CALIBRATION, type HalfRow,
+  biggestSwing, type WinPoint,
 } from '../src/winProb.js';
 import { FORM_PARAMS, formOption, type FormParams } from '../src/winForm.js';
 import { setSetting } from '../src/settings.js';
@@ -239,6 +240,34 @@ describe('liveWinLine', () => {
     half(0, 1, 'a', 100);
     expect(liveWinLine(db, id, 'five', model)).toBeNull();
     expect(liveWinLine(db, id, 'no_such_campaign', model)).toBeNull();
+  });
+});
+
+describe('biggestSwing', () => {
+  const end = (o: number, half: number, pA: number): WinPoint =>
+    ({ ordinal: o, half, survTeam: half === 1 ? 'a' : 'b', map: 'm1', scoreA: 0, scoreB: 0, pA });
+  const at = (o: number, half: number, tMs: number, pA: number): WinPoint => ({ ...end(o, half, pA), tMs });
+  const open: WinPoint = { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: 0.5 };
+
+  it('on half-end points alone is the biggest change from one point to the next, the earliest on a tie', () => {
+    expect(biggestSwing([open, end(0, 1, 0.6), end(0, 2, 0.3), end(1, 1, 0.6)])).toEqual({ from: 1, to: 2 });
+    expect(biggestSwing([open, end(0, 1, 0.505)])).toBeNull();
+  });
+
+  it('during a half is the biggest change across 30 s, not a slow slide over minutes', () => {
+    // A climb of 3 points every 10 s for two minutes (36 in all), then a
+    // 26 point drop inside 30 s: the drop is the swing, though the climb
+    // moved further.
+    const climb = Array.from({ length: 13 }, (_, k) => at(0, 1, k * 10_000, 0.5 + k * 0.03));
+    const pts = [open, ...climb, at(0, 1, 130_000, 0.7), at(0, 1, 150_000, 0.6), end(0, 1, 0.6)];
+    expect(biggestSwing(pts)).toEqual({ from: 13, to: 15 });
+  });
+
+  it('never measures across two halves', () => {
+    // 0.8 at the end of half 1 and 0.2 early in half 2 are 0 s apart on the
+    // clock of neither half; half 2 starts from its half-end point instead.
+    const pts = [open, at(0, 1, 0, 0.5), at(0, 1, 5000, 0.8), end(0, 1, 0.8), at(0, 2, 0, 0.78), at(0, 2, 60_000, 0.2), end(0, 2, 0.2)];
+    expect(biggestSwing(pts)).toEqual({ from: 1, to: 2 });
   });
 });
 

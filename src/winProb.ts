@@ -343,9 +343,12 @@ export interface WinPoint {
 
 export interface WinLine {
   points: WinPoint[];
-  /** Index into points of the half with the biggest swing (from the point
-   *  before it), or null when nothing moved. */
+  /** Index into points of the biggest swing's end, or null when nothing
+   *  moved. On a half-end line the swing runs from the point before it. */
   turning: number | null;
+  /** Where the biggest swing starts, set only on a line with points during
+   *  halves (see biggestSwing): absent means `turning - 1`. */
+  turningFrom?: number;
   /** The winner's lowest chance along the way, and where; null for a draw
    *  and for a match still being played. */
   winnerLow: { index: number; p: number } | null;
@@ -395,13 +398,7 @@ export function winLineFrom(model: WinModel, played: PlayedHalf[], future: Futur
     });
   });
 
-  let turning: number | null = null;
-  let biggest = 0;
-  for (let i = 1; i < points.length; i++) {
-    const swing = Math.abs(points[i].pA - points[i - 1].pA);
-    if (swing > biggest + 1e-9) { biggest = swing; turning = i; }
-  }
-  if (biggest < 0.01) turning = null;
+  const turning = biggestSwing(points)?.to ?? null;
 
   let winnerLow: WinLine['winnerLow'] = null;
   const w = future.length > 0 ? null : a > b ? 'a' : b > a ? 'b' : null;
@@ -412,6 +409,47 @@ export function winLineFrom(model: WinModel, played: PlayedHalf[], future: Futur
     });
   }
   return { points, turning, winnerLow, halves: model.halves, halvesLeft: future.length };
+}
+
+/** How far apart two points of one half may be and still make one swing.
+ *  A single 5 s step rarely moves much: a tank fight or a wipe plays out
+ *  over a few of them, so a swing is a change across a short span. */
+export const SWING_WINDOW_MS = 30_000;
+
+/**
+ * The biggest swing on `points`, from and to (indexes), or null when nothing
+ * moved a point. Each half is taken on its own: the point it starts from (the
+ * half-end point before it, or the opening point), its points during the half
+ * and its half-end point, which counts as at the time of its last point. The
+ * swing is the largest change between two of those at most SWING_WINDOW_MS
+ * apart. A half with no points during it is just its two ends, so on a
+ * half-end line this is the biggest change from one half to the next, the
+ * earliest on a tie.
+ */
+export function biggestSwing(points: WinPoint[]): { from: number; to: number } | null {
+  const halves: { i: number; t: number }[][] = [];
+  let half = [{ i: 0, t: 0 }];
+  for (let i = 1; i < points.length; i++) {
+    const tMs = points[i].tMs;
+    if (tMs !== undefined) { half.push({ i, t: tMs }); continue; }
+    half.push({ i, t: half[half.length - 1].t });
+    halves.push(half);
+    half = [{ i, t: 0 }];
+  }
+  // A half still being played: its points so far.
+  if (half.length > 1) halves.push(half);
+
+  let best: { from: number; to: number } | null = null;
+  let biggest = 0;
+  for (const h of halves) {
+    for (let b = 1; b < h.length; b++) {
+      for (let a = b - 1; a >= 0 && h[b].t - h[a].t <= SWING_WINDOW_MS; a--) {
+        const swing = Math.abs(points[h[b].i].pA - points[h[a].i].pA);
+        if (swing > biggest + 1e-9) { biggest = swing; best = { from: h[a].i, to: h[b].i }; }
+      }
+    }
+  }
+  return biggest < 0.01 ? null : best;
 }
 
 type RoundRow = PlayedHalf & { endedAt: string | null; reliable: number };
@@ -585,23 +623,35 @@ export function liveWinLine(db: DB, matchId: number, campaign: string, model: Wi
 }
 
 /** `line` with each played half's in-half points just before its half-end
- *  point and the half in progress's after the last. The swing and the
- *  winner's low still point at the half-end points they did. */
+ *  point and the half in progress's after the last. The swing (biggestSwing)
+ *  and the winner's low are taken again over every point, so either can land
+ *  during a half. */
 function withInHalf(line: WinLine, finished: Map<string, WinPoint[]>, current: WinPoint[]): WinLine {
   if (finished.size === 0 && current.length === 0) return line;
   const points: WinPoint[] = [line.points[0]];
-  const at: number[] = [0];
   for (let i = 1; i < line.points.length; i++) {
     const p = line.points[i];
     points.push(...(finished.get(`${p.ordinal}:${p.half}`) ?? []));
-    at.push(points.length);
     points.push(p);
   }
   points.push(...current);
+  const swing = biggestSwing(points);
+  // winnerLow is set only on a finished match with a winner, whose last
+  // point's score says who.
+  let winnerLow: WinLine['winnerLow'] = null;
+  if (line.winnerLow) {
+    const end = line.points[line.points.length - 1];
+    const w = end.scoreA > end.scoreB ? 'a' : 'b';
+    points.forEach((pt, index) => {
+      const p = w === 'a' ? pt.pA : 1 - pt.pA;
+      if (!winnerLow || p < winnerLow.p - 1e-9) winnerLow = { index, p };
+    });
+  }
   return {
     ...line,
     points,
-    turning: line.turning === null ? null : at[line.turning],
-    winnerLow: line.winnerLow ? { ...line.winnerLow, index: at[line.winnerLow.index] } : null,
+    turning: swing?.to ?? null,
+    ...(swing ? { turningFrom: swing.from } : {}),
+    winnerLow,
   };
 }
