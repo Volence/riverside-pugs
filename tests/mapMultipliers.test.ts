@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
 import { currentSeasonId } from '../src/players.js';
 import {
-  clampRedistribute, computeMultipliers, foldMirrors, mirrorOriginal, multiplierFor, roundToStep,
+  clampRedistribute, computeMultipliers, ratesByMap, mirrorOriginal, multiplierFor, roundToStep,
   SEASON_RATES_SQL, versusLadder, type LadderMap, type MapRate, type SeasonMultiplierTable,
 } from '../src/mapMultipliers.js';
 
@@ -100,13 +100,32 @@ describe('mirrors', () => {
     expect(mirrorOriginal('l4d_vs_mystery01', known)).toBeNull();
   });
 
-  it('folds a mirror\'s rounds into its original', () => {
-    const folded = foldMirrors([
-      { map: 'l4d_vs_hospital01_apartment', matches: 40, rounds: 80, madeIt: 20 },
-      { map: 'l4d_vs_mhospital01_apartment', matches: 20, rounds: 40, madeIt: 10 },
+  it('keeps a mirror\'s rounds out of its original\'s rate (owner 2026-11-02)', () => {
+    const rates = ratesByMap([
+      { map: 'l4d_vs_hospital01_apartment', matches: 60, rounds: 120, madeIt: 30 },
+      { map: 'l4d_vs_mhospital01_apartment', matches: 60, rounds: 120, madeIt: 90 },
     ], known);
-    expect(folded.get('l4d_vs_hospital01_apartment')).toEqual({ map: 'l4d_vs_hospital01_apartment', matches: 60, rounds: 120, madeIt: 30 });
-    expect(folded.size).toBe(1);
+    expect(rates.get('l4d_vs_hospital01_apartment')).toEqual({ map: 'l4d_vs_hospital01_apartment', matches: 60, rounds: 120, madeIt: 30 });
+    expect(rates.has('l4d_vs_mhospital01_apartment')).toBe(false);
+    expect(rates.size).toBe(1);
+  });
+
+  it('does not recalculate a mirror even when it is on the ladder: it keeps its own number', () => {
+    const ladder = [
+      { map: 'l4d_vs_hospital01_apartment', mission: 'Hospital', chapter: 1, chapters: 2, modifier: 1 },
+      { map: 'l4d_vs_hospital02_subway', mission: 'Hospital', chapter: 2, chapters: 2, modifier: 1 },
+      { map: 'l4d_vs_mhospital01_apartment', mission: 'Hospital Mirror', chapter: 1, chapters: 1, modifier: 1.1 },
+    ];
+    const k = new Set(ladder.map((l) => l.map));
+    const rows = computeMultipliers(ladder, ratesByMap([
+      { map: 'l4d_vs_hospital01_apartment', matches: 60, rounds: 120, madeIt: 30 },
+      { map: 'l4d_vs_hospital02_subway', matches: 60, rounds: 120, madeIt: 60 },
+      { map: 'l4d_vs_mhospital01_apartment', matches: 60, rounds: 120, madeIt: 90 },
+    ], k));
+    const mirror = rows.find((r) => r.map === 'l4d_vs_mhospital01_apartment')!;
+    expect(mirror).toMatchObject({ before: 1.1, after: 1.1, recalculated: false, saferoomRate: null, matches: 0 });
+    // The original's rate is its own rounds only: 30 of 120.
+    expect(rows.find((r) => r.map === 'l4d_vs_hospital01_apartment')!.saferoomRate).toBe(0.25);
   });
 
   it('gives a mirror no line of its original\'s: mirrors keep their own numbers in Season 1', () => {

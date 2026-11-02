@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 import {
-  computeMultipliers, foldMirrors, SEASON_MULTIPLIER_RULES, SEASON_RATES_SQL, versusLadder,
+  computeMultipliers, ratesByMap, SEASON_MULTIPLIER_RULES, SEASON_RATES_SQL, versusLadder,
   type LadderMap, type MapRate, type MultiplierRules, type SeasonMultiplierTable,
 } from '../src/mapMultipliers.js';
 import { openVpk } from '../src/vpk.js';
@@ -75,7 +75,7 @@ function main(): void {
 
   const ladder = readLadder(missions);
   const known = new Set(ladder.map((l) => l.map.toLowerCase()));
-  const rows = computeMultipliers(ladder, foldMirrors(rates, known), rules);
+  const rows = computeMultipliers(ladder, ratesByMap(rates, known), rules);
 
   let mission = '';
   console.log(`map multipliers from ${seasonRow.name} (rules ${JSON.stringify(rules)})`);
