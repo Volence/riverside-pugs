@@ -610,7 +610,9 @@ function Slots({ players, duos = [], me = null, onInvite }: {
   const pairNo = new Map(duos.flatMap((pair, i) => pair.map((id) => [id, i + 1] as const)));
   return (
     <div class="slots">
-      {Array.from({ length: QUEUE_SIZE }, (_, i) => {
+      {/* More than eight only while a duo holds the pop (src/queue.ts); every
+          queued player still gets a slot. */}
+      {Array.from({ length: Math.max(QUEUE_SIZE, players.length) }, (_, i) => {
         const p = players[i];
         const pair = p ? pairNo.get(p.steamid) : undefined;
         return (
