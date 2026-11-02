@@ -109,12 +109,13 @@ describe('mirrors', () => {
     expect(folded.size).toBe(1);
   });
 
-  it('answers a mirror with its original\'s line', () => {
+  it('gives a mirror no line of its original\'s: mirrors keep their own numbers in Season 1', () => {
     const table: SeasonMultiplierTable = {
       season: 'Season 1', basedOn: 'Season 0', computedAt: '', rules: { minMatches: 50, min: 0.75, max: 1.75, step: 0.05 },
       maps: [{ map: 'l4d_vs_hospital01_apartment', mission: 'Hospital', chapter: 1, before: 1, after: 1.15, exact: 1.156, saferoomRate: 0.356, matches: 110, rounds: 216, recalculated: true }],
     };
-    expect(multiplierFor(table, 'l4d_vs_mhospital01_apartment')).toEqual({ after: 1.15, before: 1, saferoomRate: 0.356, matches: 110, recalculated: true });
+    expect(multiplierFor(table, 'l4d_vs_hospital01_apartment')).toEqual({ after: 1.15, before: 1, saferoomRate: 0.356, matches: 110, recalculated: true });
+    expect(multiplierFor(table, 'l4d_vs_mhospital01_apartment')).toBeNull();
     expect(multiplierFor(table, 'c5m1_waterfront')).toBeNull();
   });
 });
@@ -157,7 +158,7 @@ describe('SEASON_RATES_SQL', () => {
 });
 
 describe('/api/maps multipliers', () => {
-  it('shows the committed table only once Season 1 is live, mirrors included', async () => {
+  it('shows the committed table only once Season 1 is live, mirrors left out', async () => {
     const { loadConfig } = await import('../src/config.js');
     const { buildServer } = await import('../src/server.js');
     const { stubOrchestrator } = await import('./helpers.js');
@@ -177,7 +178,7 @@ describe('/api/maps multipliers', () => {
       const m = (await get('/api/maps')).multipliers;
       expect(m).toMatchObject({ season: 'Season 1', basedOn: 'Season 0', min: 0.75, max: 1.75, minMatches: 50 });
       expect(m.maps['l4d_vs_smalltown03_ranchhouse']).toMatchObject({ after: 1.75, before: 1.4, recalculated: true });
-      expect(m.maps['l4d_vs_mhospital01_apartment']).toMatchObject({ after: 1.15, before: 1 });
+      expect(m.maps['l4d_vs_mhospital01_apartment']).toBeUndefined();
       expect(m.maps['c2m1_highway']).toBeUndefined();
       expect((await get('/api/maps/l4d_vs_smalltown03_ranchhouse')).multiplier).toMatchObject({ after: 1.75 });
     } finally {

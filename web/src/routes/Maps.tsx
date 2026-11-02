@@ -257,8 +257,8 @@ function MultiplierNote({ m }: { m: SeasonMultipliers }) {
         multiplier follows how often survivors reached the saferoom on the map in {m.basedOn}: the harder
         the map, the more it is worth, so every map counts about the same in a match. Each campaign keeps
         the same total as before, no map goes below {mult(m.min)} or above {mult(m.max)}, and only maps
-        with at least {m.minMatches} matches in {m.basedOn} changed. A mirrored map uses its original's
-        number. The numbers are worked out again at the start of every season.
+        with at least {m.minMatches} matches in {m.basedOn} changed. Mirrored maps keep their own numbers
+        this season. The numbers are worked out again at the start of every season.
       </p>
     </Panel>
   );
