@@ -19,7 +19,7 @@ import type { Orchestrator } from './orchestrator.js';
 import { inGoodStanding } from './standing.js';
 import { abortNoticeFor, type AbortNotice } from './matchAborts.js';
 import { recordQueueStint } from './queueActivity.js';
-import { requeueOptIns, wantsRequeue, type RequeueResult } from './matchRequeue.js';
+import { DUO_REQUEUE_NOT_BOTH, requeueOptIns, wantsRequeue, type RequeueResult } from './matchRequeue.js';
 import { seasonOneLive } from './seasonThemes.js';
 import {
   duoQueueLive, partnerOf, pairsAmong, createDuoInvite, acceptDuoInvite, declineDuoInvite,
@@ -123,6 +123,9 @@ export interface StateSnapshot {
     cancelled?: true;
     /** Set when the viewer's duo partner did not come back to the queue with them, so neither did they. */
     duoMissed?: NamedPlayer;
+    /** Set when the viewer asked to queue again after a match and their duo
+     *  partner did not, so neither was requeued (requeueOne). */
+    duoNoRequeue?: NamedPlayer;
   } | null;
   /**
    * The match the viewer was on, if it was aborted and they have not
@@ -162,7 +165,7 @@ export class Matchmaker {
   /** Per-player "your ready check failed", keyed by steamid. In memory and
    *  deliberately not persisted: it is about something that happened seconds
    *  ago, and a notice that outlived a restart would be noise. */
-  private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string; cancelled?: true; duoMissed?: string }>();
+  private notices = new Map<string, { notReady: string[]; youWereReady: boolean; removed?: string; cancelled?: true; duoMissed?: string; duoNoRequeue?: string }>();
   /** Queued players who asked for side games (2v2/3v3 while waiting). Kept
    *  through a pop so a failed ready check resumes the game; see sideGames.ts. */
   private sideOptIn = new Set<string>();
@@ -298,10 +301,8 @@ export class Matchmaker {
     // A duo queues together or not at all.
     const partner = this.partner(steamid);
     if (partner) {
-      // The joiner's own standing is the caller's check (requireActive); the
-      // partner's is ours, or a banned or held partner would ride along.
-      const theirs = inGoodStanding(this.db, partner) ? this.joinBlock(partner) : 'not an active player';
-      if (theirs) return { ok: false, error: `your duo partner ${this.named(partner).name} cannot queue: ${theirs}` };
+      const theirs = this.partnerBlock(partner);
+      if (theirs) return { ok: false, error: theirs };
     }
     // Queueing again is moving on: the notice is about the pop they just
     // lost, and holding it over the next one would be wrong.
@@ -450,14 +451,28 @@ export class Matchmaker {
    */
   requeueAfterMatch(matchId: number): Map<string, RequeueResult> {
     const out = new Map<string, RequeueResult>();
-    for (const id of requeueOptIns(this.db, matchId)) out.set(id, this.requeueOne(id));
+    for (const id of requeueOptIns(this.db, matchId)) out.set(id, this.requeueOne(id, matchId));
     return out;
   }
 
   /** One player's requeue, for the match end and for a !rq that arrives
-   *  just after it. Already queued (or in a pop) counts as done. */
-  requeueOne(steamid: string): RequeueResult {
+   *  just after it. Already queued (or in a pop) counts as done.
+   *
+   *  A duo goes back only when both asked on this match (owner 2026-11-02):
+   *  one partner's !rq does not queue the other. A partner who cannot queue
+   *  at all (a timeout) is still the reason given, as for any join; a banned
+   *  partner's duo has already ended, so the one who asked goes back solo. */
+  requeueOne(steamid: string, matchId: number): RequeueResult {
     if (this.queue.has(steamid) || this.playerLobby.has(steamid)) return { ok: true };
+    const partner = this.partner(steamid);
+    if (partner && !wantsRequeue(this.db, matchId, partner)) {
+      const theirs = this.partnerBlock(partner);
+      if (theirs) return { ok: false, error: theirs };
+      const n = this.notices.get(steamid);
+      this.notices.set(steamid, { notReady: n?.notReady ?? [], youWereReady: n?.youWereReady ?? true, ...n, duoNoRequeue: partner });
+      this.changed();
+      return { ok: false, error: DUO_REQUEUE_NOT_BOTH };
+    }
     const r = this.join(steamid);
     return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'could not join the queue' };
   }
@@ -620,6 +635,15 @@ export class Matchmaker {
     const timeout = activeTimeout(this.db, steamid);
     if (timeout) return `timed out for ${timeoutCause(timeout.kind)} until ${timeout.until.toISOString()}`;
     return null;
+  }
+
+  /** Why this player's duo partner may not queue right now, as join() words
+   *  it, or null. The joiner's own standing is the caller's check
+   *  (requireActive); the partner's is ours, or a banned or held partner
+   *  would ride along. */
+  private partnerBlock(partner: string): string | null {
+    const theirs = inGoodStanding(this.db, partner) ? this.joinBlock(partner) : 'not an active player';
+    return theirs ? `your duo partner ${this.named(partner).name} cannot queue: ${theirs}` : null;
   }
 
   /** Drop anyone whose duo partner is neither going back with them nor
@@ -891,6 +915,7 @@ export class Matchmaker {
           ...(n.removed ? { removed: named(n.removed) } : {}),
           ...(n.cancelled ? { cancelled: true as const } : {}),
           ...(n.duoMissed ? { duoMissed: named(n.duoMissed) } : {}),
+          ...(n.duoNoRequeue ? { duoNoRequeue: named(n.duoNoRequeue) } : {}),
         };
       })(),
       abortNotice: abortNoticeFor(this.db, steamid),

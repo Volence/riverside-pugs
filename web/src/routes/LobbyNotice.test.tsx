@@ -76,4 +76,12 @@ describe('LobbyNotice', () => {
     expect(body).toMatch(/duo partner amy/);
     expect(body).not.toMatch(/ready check failed/i);
   });
+
+  it('tells a duo member who asked to queue again that the partner did not', () => {
+    render(<LobbyNotice notice={{ notReady: [], youWereReady: true, duoNoRequeue: p('amy') }} refresh={() => {}} />);
+    const body = document.body.textContent ?? '';
+    expect(body).toMatch(/Not requeued/);
+    expect(body).toMatch(/Your duo partner did not choose to queue again, so neither of you was requeued\./);
+    expect(body).not.toMatch(/ready check failed/i);
+  });
 });
