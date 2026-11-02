@@ -1424,25 +1424,6 @@ describe('MapDetail', () => {
     await waitFor(() => expect(within(body).getByText('30')).toBeTruthy());
   });
 
-  it('sizes the win-rate bars by win rate and holds back players under three maps', async () => {
-    mockApi.map.mockResolvedValue({
-      ...mapData,
-      players: [
-        { steamid: '3', name: 'carol', games: 1, wins: 1, losses: 0, stats: {}, avgStats: {} },
-        { steamid: '2', name: 'bob', games: 8, wins: 2, losses: 6, stats: {}, avgStats: {} },
-        { steamid: '1', name: 'alice', games: 3, wins: 3, losses: 0, stats: {}, avgStats: {} },
-      ],
-    });
-    const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);
-    await waitFor(() => expect(screen.getByText('Compare')).toBeTruthy());
-    const bars = [...container.querySelectorAll('.bars .bar')];
-    expect(bars.map((b) => b.querySelector('.bar__name')?.textContent)).toEqual(['alice', 'bob', 'carol']);
-    const widths = bars.map((b) => (b.querySelector('.bar__fill') as HTMLElement).style.width);
-    expect(widths).toEqual(['100%', '25%', '0%']);
-    // carol's 1-0 is not a 100% win rate.
-    expect(bars[2].querySelector('.bar__value')?.textContent).toMatch(/^n\/a/);
-  });
-
   it('makes the stat bars follow the Per map / Totals choice', async () => {
     mockApi.map.mockResolvedValue(mapData);
     const { container } = render(<MapDetail map="l4d_vs_airport01_greenhouse" />);

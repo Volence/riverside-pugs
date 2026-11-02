@@ -24,8 +24,8 @@ describe('Maps multipliers', () => {
     const { container } = render(<Maps />);
     expect(await screen.findByText('Score multipliers in Season 1')).toBeTruthy();
     expect(screen.getByText(/was 1\.40, 14% made it in Season 0/)).toBeTruthy();
-    const heads = [...container.querySelectorAll('.campaign-table')].map((t) => t.querySelectorAll('th').length);
-    expect(heads).toEqual([8, 7]);
+    const mults = [...container.querySelectorAll('.campaign-table')].map((t) => t.querySelectorAll('.mapch__mult').length);
+    expect(mults).toEqual([1, 0]);
   });
 
   it('shows nothing about multipliers before Season 1', async () => {

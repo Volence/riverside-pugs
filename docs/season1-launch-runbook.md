@@ -51,7 +51,8 @@ Seasons turns all of it on at once.
       copy and diff against the committed json. Blood Harvest 2 sits near a rounding edge (1.177; every
       match kind gave 1.15): if any number moves, ask the owner which table ships, then rebuild the
       json AND the VPK together. Never ship one without the other.
-- [ ] Mirror packs: rebuild the mirrored mission files with the same numbers
+- [ ] DEFERRED (owner 11-02: mirrors keep the old ladder until the next map-pack update, so the
+      downloaded VPKs stay unchanged). Mirror packs: rebuild the mirrored mission files with the same numbers
       (`~/l4d/mirror`: `build.py --missions-only --multipliers <json> <maps...>`, see its README) and
       ship them with the mirror packs, so a mirrored map scores like its original.
 - [ ] Duo queue: run `scripts/duo-calibrate.ts` on a fresh prod copy, send the owner the proposed `duo_bonus_min_sr` / `duo_bonus_max_sr`, set them in Admin > Settings > Queue before the flip. Duos turn on with the flip (seasonOneLive). Trial review: `scripts/duo-review.ts` ~2 weeks after the flip and again at 40 duo matches.
