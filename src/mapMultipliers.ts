@@ -17,8 +17,9 @@ import { parseKeyValues, type KvNode } from './vpk.js';
  * A mirrored map (l4d_vs_mX) keeps its own number in Season 1 (owner,
  * 2026-11-02): the mirror packs players already downloaded carry the old
  * ladder in their mission files and are not repacked, so the site must not
- * show the original's new number for them. Its rounds still fold into the
- * original's rate when the next season's table is computed (foldMirrors).
+ * show the original's new number for them. Its stats are its own (owner,
+ * 2026-11-02): its rounds never count toward the original's rate, and it is
+ * not recalculated this season either (ratesByMap leaves mirrors out).
  *
  * The servers read the multiplier from the mission files (deploy repo,
  * tools/season-multipliers), so the table is computed once per season by
@@ -106,7 +107,7 @@ export function roundToStep(x: number, step: number): number {
 /** The original map a mirrored one copies (l4d_vs_mhospital01_apartment ->
  *  l4d_vs_hospital01_apartment), or null when `map` is not the mirror of a
  *  map in `known`. Checked against the known list so a custom map that just
- *  happens to start with an m is never folded into something else. */
+ *  happens to start with an m is never taken for a mirror. */
 export function mirrorOriginal(map: string, known: ReadonlySet<string>): string | null {
   const m = /^(l4d_vs_|l4d_|)m(.+)$/i.exec(map);
   if (!m) return null;
@@ -114,11 +115,14 @@ export function mirrorOriginal(map: string, known: ReadonlySet<string>): string 
   return known.has(original) ? original : null;
 }
 
-/** Rates per original map, mirrors folded in. */
-export function foldMirrors(rates: MapRate[], known: ReadonlySet<string>): Map<string, MapRate> {
+/** Rates per map, keyed by lower-case name, mirrors left out: a mirror's
+ *  rounds are not its original's, and a mirror with no rate keeps its own
+ *  number. */
+export function ratesByMap(rates: MapRate[], known: ReadonlySet<string>): Map<string, MapRate> {
   const out = new Map<string, MapRate>();
   for (const r of rates) {
-    const key = mirrorOriginal(r.map, known) ?? r.map.toLowerCase();
+    if (mirrorOriginal(r.map, known) !== null) continue;
+    const key = r.map.toLowerCase();
     const acc = out.get(key) ?? { map: key, matches: 0, rounds: 0, madeIt: 0 };
     acc.matches += r.matches;
     acc.rounds += r.rounds;
