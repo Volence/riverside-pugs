@@ -1,5 +1,6 @@
 import type { MatchResult, Winner } from './api';
 import { withNetDamageAsSi } from '../../src/siDamage';
+import { MIRROR_CAMPAIGNS, mirrorMapOriginal } from '../../src/campaigns';
 
 export const CAMPAIGN_NAMES: Record<string, string> = {
   no_mercy: 'No Mercy',
@@ -64,6 +65,9 @@ export function campaignTint(slug: string): string {
   }
   const hue = Math.round(((h % 360) * 137.508) % 360);
   const hashed = `oklch(0.42 0.06 ${hue})`;
+  // A mirrored campaign wears its original's colour.
+  const original = Object.hasOwn(MIRROR_CAMPAIGNS, slug) ? MIRROR_CAMPAIGNS[slug].original : null;
+  if (original) return campaignTint(original);
   if (Object.hasOwn(CAMPAIGN_NAMES, slug)) return `var(--c-${slug.replace(/_/g, '-')}, ${hashed})`;
   return hashed;
 }
@@ -635,6 +639,9 @@ const DLC4_NAMES: Record<string, string> = {
  *  spaces and nothing else removed, which is still better than the raw key. */
 export function mapName(map: string): string {
   if (!map) return '';
+  // A mirrored chapter keeps its original's name: mc1m3_mall is still Mall.
+  const original = mirrorMapOriginal(map);
+  if (original) return mapName(original);
   const lower = map.toLowerCase();
   if (DLC4_NAMES[lower]) return DLC4_NAMES[lower];
 
@@ -673,6 +680,10 @@ const CHAINED_CHAPTER: Record<string, number> = {
  */
 export function chapterOrdinal(map: string): number | null {
   if (!map) return null;
+  // l4d_mgarage01_alleys is chapter 4 of the mirrored Crash Center, as its
+  // original is of Crash Center.
+  const original = mirrorMapOriginal(map);
+  if (original) return chapterOrdinal(original);
   const lower = map.toLowerCase();
   if (CHAINED_CHAPTER[lower] !== undefined) return CHAINED_CHAPTER[lower];
   const dlc4 = /^c\d+m(\d+)/.exec(lower);

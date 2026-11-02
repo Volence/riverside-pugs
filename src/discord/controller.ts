@@ -156,6 +156,13 @@ export async function handleButton(
       if (lobby.phase !== 'map_vote') return say('Voting has not started yet. Ready up first.');
       if (!lobby.options.includes(campaign)) return say('That campaign is not an option in this vote.');
       mm.vote(steamid, campaign);
+      // The site's Download mark, for Discord voters (four-slot ballot only).
+      if (lobby.downloads?.includes(campaign)) {
+        return say(
+          `You voted ${campaignVoteName(deps.db, campaign)}. It needs maps you may not have yet: get them before the match starts or you cannot join the server.`,
+          { components: [[{ kind: 'link', url: `${deps.publicUrl}/custom-campaigns`, label: 'Download the maps' }]] },
+        );
+      }
       return say(`You voted ${campaignVoteName(deps.db, campaign)}.`);
     }
     return say('That button no longer does anything.');

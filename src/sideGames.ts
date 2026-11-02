@@ -621,7 +621,7 @@ export class SideGames {
   /** The base game's campaigns, which every box carries; custom and dlc4 are skipped. */
   private randomFirstMap(notSlug: string | null): string {
     const stock = [...campaignRegistry(this.deps.db).values()]
-      .filter((c) => !c.custom && !c.requiresDlc4 && !c.practiceOnly);
+      .filter((c) => !c.custom && !c.requiresDlc4 && !c.practiceOnly && !c.mirrorOf);
     // Prefer the ones whose chapter list is known, so the finale is caught.
     const known = stock.filter((c) => c.maps.length > 0);
     let pool = known.length ? known : stock;

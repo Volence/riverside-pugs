@@ -546,7 +546,8 @@ describe('GET /api/admin/campaigns', () => {
     // The stock four are always in the registry, so they always appear here
     // too: an admin wants to drop a stock finale for the same reason as a
     // custom one, and this list is the only place that control lives.
-    expect(body.campaigns).toHaveLength(14);
+    // 1 custom + 13 stock + 12 mirrors.
+    expect(body.campaigns).toHaveLength(26);
     const dbd = body.campaigns.find((c: { slug: string }) => c.slug === 'dbd');
     expect(dbd.chapters.map((c: { map: string }) => c.map)).toEqual(['dbd1_alley']);
     expect(dbd.installs).toEqual([

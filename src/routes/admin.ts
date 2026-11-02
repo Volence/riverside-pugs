@@ -13,7 +13,8 @@ import { abortMatch, adminOverview, clearNoShowsOf, restoreAbandonRating, voidMa
 import { holdFor } from '../serverHolds.js';
 import { extendNoShow } from '../noShow.js';
 import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.js';
-import { getCampaignPool, getSetting, setSetting } from '../settings.js';
+import { getCampaignPool, getSetting, getStickyCampaigns, setSetting } from '../settings.js';
+import { recentBallots } from '../ballot.js';
 import { logAdmin, recentActions } from '../admin/audit.js';
 import {
   activeBan, addNote, banPlayer, playerDetail, searchPlayers, unbanPlayer,
@@ -811,13 +812,22 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
       // alsoAllow keeps an already-pooled campaign in the list even after it
       // stops qualifying on its own (disabled, or a server lost its VPK), so
       // the panel does not make its own already-saved setting look invalid.
-      campaigns: poolableCampaigns(db, { alsoAllow: getCampaignPool(db) })
+      campaigns: poolableCampaigns(db, { alsoAllow: [...getCampaignPool(db), ...getStickyCampaigns(db)] })
         .map((c) => ({ slug: c.slug, name: c.name, custom: c.custom })),
       // Named servers, not just a boolean, so the panel can say which box is
       // holding the dlc4 campaigns out of the pool instead of leaving an
       // admin to guess.
       serversMissingDlc4: serversMissingDlc4(db),
     };
+  });
+
+  // The four-slot ballots (src/ballot.ts) with their weights and votes, for
+  // the owner to review. Data only; no panel yet.
+  app.get('/api/admin/ballots', async (req, reply) => {
+    if (!requireAdmin(req, reply)) return reply;
+    const raw = Number((req.query as { limit?: string }).limit ?? 50);
+    const limit = Number.isInteger(raw) && raw > 0 ? Math.min(raw, 500) : 50;
+    return { ballots: recentBallots(db, limit) };
   });
 
   app.put('/api/admin/settings/:key', async (req, reply) => {
@@ -831,7 +841,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     // setting unrelated to this exact key could reject on a slug the panel
     // itself still shows as checked.
     const v = validateSetting(key, (req.body as { value?: unknown } | undefined)?.value, {
-      campaignSlugs: new Set(poolableCampaigns(db, { alsoAllow: getCampaignPool(db) }).map((c) => c.slug)),
+      campaignSlugs: new Set(poolableCampaigns(db, { alsoAllow: [...getCampaignPool(db), ...getStickyCampaigns(db)] }).map((c) => c.slug)),
     });
     if (!v.ok) return reply.code(400).send({ error: `${def.label} ${v.error}` });
     const from = getSetting(db, key) ?? '';

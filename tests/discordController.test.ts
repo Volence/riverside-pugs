@@ -136,6 +136,20 @@ describe('discord buttons', () => {
     expect(body(await press(0, `l:${lobbyId}:vote:not_a_campaign`))).toMatch(/not an option/i);
   });
 
+  it('a slot-ballot vote for a campaign needing a download adds the get-the-maps link', async () => {
+    setSetting(db, 'ballot_mode', 'slots');
+    setSetting(db, 'map_pool', JSON.stringify(['dead_air', 'dead_air_mirror']));
+    for (let i = 0; i < 8; i++) await press(i, 'q:join');
+    const lobbyId = mm.lobbies()[0].id;
+    for (let i = 0; i < 8; i++) await press(i, `l:${lobbyId}:ready`);
+    const plain = await press(0, `l:${lobbyId}:vote:dead_air`);
+    expect(plain.payload.components).toEqual([]);
+    const r = await press(1, `l:${lobbyId}:vote:dead_air_mirror`);
+    expect(body(r)).toMatch(/needs maps you may not have/);
+    const btn = r.payload.components.flat().find((b) => b.kind === 'link');
+    expect(btn && btn.kind === 'link' && btn.url).toBe(`${URL_}/custom-campaigns`);
+  });
+
   it('ready is refused with the reason when the ready gate blocks, and nothing is marked', async () => {
     const { VoicePresence } = await import('../src/discord/voicePresence.js');
     const { makeReadyGate } = await import('../src/readyGate.js');
