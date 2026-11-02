@@ -128,7 +128,18 @@ function load(db: DB, seasonId: number): DuoMatchRow[] {
 
 /** Duos passed over at a pop (did not fit, not swapped in) since `sinceMs`. */
 export function duoPopSkipsSince(db: DB, sinceMs: number): number {
-  return (db.prepare('SELECT COUNT(*) AS n FROM duo_pop_skips WHERE at >= ?').get(new Date(sinceMs).toISOString()) as { n: number }).n;
+  return (db.prepare("SELECT COUNT(*) AS n FROM duo_pop_skips WHERE kind = 'skipped' AND at >= ?").get(new Date(sinceMs).toISOString()) as { n: number }).n;
+}
+
+/** Held pops forced through after duo_hold_max_minutes since `sinceMs`: how
+ *  many, how many solos they bumped to the front, and the mean hold. */
+export function duoHoldBumpsSince(db: DB, sinceMs: number): { pops: number; bumpedSolos: number; avgHeldMinutes: number | null } {
+  const rows = db.prepare("SELECT bumped, held_ms FROM duo_pop_skips WHERE kind = 'forced' AND at >= ?")
+    .all(new Date(sinceMs).toISOString()) as { bumped: string | null; held_ms: number | null }[];
+  const bumpedSolos = rows.reduce((n, r) => n + (r.bumped ? r.bumped.split(',').length : 0), 0);
+  const held = rows.filter((r) => r.held_ms !== null);
+  const avgHeldMinutes = held.length === 0 ? null : held.reduce((n, r) => n + r.held_ms!, 0) / held.length / 60000;
+  return { pops: rows.length, bumpedSolos, avgHeldMinutes };
 }
 
 function queueHealth(db: DB, sinceMs: number) {
@@ -150,6 +161,7 @@ function queueHealth(db: DB, sinceMs: number) {
     duosOpen, formed, acceptedBySource: bySource, avgDuoLifeDays: lengths,
     stints: summarizeStints(stints, duos, readyFails),
     skippedAtPop: duoPopSkipsSince(db, sinceMs),
+    forcedHeldPops: duoHoldBumpsSince(db, sinceMs),
   };
 }
 

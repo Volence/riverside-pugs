@@ -129,6 +129,59 @@ export class Queue {
     return taken;
   }
 
+  /** A held pop forced through after duo_hold_max_minutes (src/matchmaker.ts):
+   *  the same walk in queue order as takeBatch, but the first duo that does
+   *  not fit takes the place of the latest queued solo(s) already taken.
+   *  Those solos stay queued, move to the FRONT so they are first in the next
+   *  pop, and keep their wait. Takes nothing (taken []) when even that cannot
+   *  make `n`. */
+  takeBatchBumping(n: number, partnerOf: (id: string) => string | null): { taken: string[]; bumped: string[] } {
+    const units: string[][] = [];
+    let size = 0;
+    let bumped: string[] = [];
+    let skipped = 0;
+    const done = new Set<string>();
+    for (const id of this.order) {
+      if (size >= n) break;
+      if (done.has(id)) continue;
+      done.add(id);
+      const p = partnerOf(id);
+      if (!p || p === id || !this.order.includes(p)) {
+        units.push([id]);
+        size += 1;
+        continue;
+      }
+      done.add(p);
+      if (size + 2 <= n) {
+        units.push([id, p]);
+        size += 2;
+        continue;
+      }
+      // Bump only once: the first duo that does not fit is the one held.
+      const need = size + 2 - n;
+      const solos = units.filter((u) => u.length === 1);
+      if (bumped.length > 0 || solos.length < need) {
+        skipped++;
+        continue;
+      }
+      const out = new Set(solos.slice(-need).map((u) => u[0]));
+      bumped = this.order.filter((x) => out.has(x));
+      for (let i = units.length - 1; i >= 0; i--) if (units[i].length === 1 && out.has(units[i][0])) units.splice(i, 1);
+      units.push([id, p]);
+      size = size - need + 2;
+    }
+    const taken = units.flat();
+    if (taken.length < n) {
+      this.lastSkippedDuos = 0;
+      return { taken: [], bumped: [] };
+    }
+    this.lastSkippedDuos = skipped;
+    const gone = new Set([...taken, ...bumped]);
+    this.order = [...bumped, ...this.order.filter((id) => !gone.has(id))];
+    for (const id of taken) this.end(id, 'popped');
+    return { taken, bumped };
+  }
+
   requeueFront(steamids: string[]): void {
     const back = steamids.filter((id) => !this.order.includes(id));
     this.order = [...back, ...this.order];
