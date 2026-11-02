@@ -9,7 +9,8 @@ import { duoBonusMu } from './duoBonus.js';
 import { getRatings, getPlayer, currentSeasonId } from './players.js';
 import { getSetting, getJsonSetting } from './settings.js';
 import { getServer } from './serverPool.js';
-import { campaignRegistry } from './campaignRegistry.js';
+import { campaignRegistry, downloadMarks } from './campaignRegistry.js';
+import { ballotMode, createBallot, finishBallot, hasBallot } from './ballot.js';
 import { spectateFor, type SpectateInfo } from './spectate.js';
 import { activeTimeout, recordPenalty, timeoutCause, type PenaltyKind } from './penalties.js';
 import { QUEUE_BLOCK_MESSAGE, type QueueBlock } from './queueGate.js';
@@ -72,6 +73,10 @@ export interface StateSnapshot {
        *  still missing from voice. Null once they may press Ready. */
       players: (NamedPlayer & { readyBlock: ReadyBlock | null })[];
       myVote: string | null;
+      /** Slot ballots only: options needing a download this viewer has
+       *  probably not got (never finished a match that used it). A mark,
+       *  never a restriction. */
+      downloads?: string[];
     })
     | null;
   match: {
@@ -636,7 +641,18 @@ export class Matchmaker {
         console.error('[matchmaker] could not record duo pop skips:', err);
       }
       const id = `${this.idPrefix}${++this.lobbySeq}`;
-      const lobby = new Lobby(id, players, this.lobbyOpts(), this.lobbyEvents(id), this.deps.scheduler ?? realScheduler);
+      const opts = this.lobbyOpts();
+      // The four-slot ballot (src/ballot.ts) narrows the options for this
+      // lobby; persist() keeps them across a restart. A failed draw falls
+      // back to the whole pool rather than stop a pop.
+      if (ballotMode(this.db) === 'slots') {
+        try {
+          opts.mapPool = createBallot(this.db, id, opts.mapPool, this.deps.rng ?? Math.random);
+        } catch (err) {
+          console.error(`[matchmaker] could not draw a ballot for ${id}, offering the whole pool:`, err);
+        }
+      }
+      const lobby = new Lobby(id, players, opts, this.lobbyEvents(id), this.deps.scheduler ?? realScheduler);
       this.lobbyMap.set(id, lobby);
       this.deps.notify?.('🔔 Queue popped, ready check started!');
       for (const p of players) this.playerLobby.set(p, id);
@@ -678,6 +694,8 @@ export class Matchmaker {
 
   private onLobbyComplete(id: string, result: { players: string[]; campaign: string }): void {
     try {
+      // Read before dissolving: the tally the ballot record keeps.
+      const votes = this.lobbyMap.get(id)?.snapshot().votes ?? {};
       this.dissolveLobby(id);
       for (const p of result.players) this.sideOptIn.delete(p);
       const ratings = getRatings(this.db, result.players);
@@ -739,6 +757,13 @@ export class Matchmaker {
         return id;
       })();
       const statLog = statIn && decision ? { ...statIn, decision: decision as StatBalanceDecision } : null;
+
+      // Review data and the next ballot's bumps; never blocks the match.
+      try {
+        finishBallot(this.db, id, votes, result.campaign, matchId);
+      } catch (err) {
+        console.error(`[matchmaker] could not record the ballot for match ${matchId}:`, err);
+      }
 
       if (statLog) {
         // Every queue match is logged, on or off; a failed write never
@@ -838,6 +863,8 @@ export class Matchmaker {
           ...snap,
           players: snap.players.map((p) => ({ ...named(p), readyBlock: this.readyBlock(p) })),
           myVote: lobby.myVote(steamid),
+          // Only on a slot ballot, so the 'all' vote's snapshot is unchanged.
+          ...(hasBallot(this.db, lobby.id) ? { downloads: downloadMarks(this.db, steamid, snap.options) } : {}),
         }
         : null,
       match,

@@ -1551,6 +1551,28 @@ CREATE TABLE IF NOT EXISTS skeet_streak_scans (
   match_id   INTEGER PRIMARY KEY REFERENCES matches(id),
   scanned_at TEXT NOT NULL
 );
+
+-- Four-slot campaign ballots (src/ballot.ts), one row per lobby that drew
+-- one, for the owner to review. options_json: [{slug, slot, weight, base,
+-- since, bump}] in ballot order; votes_json: {slug: votes} at the tally.
+-- winner and match_id stay null for a pop that never finished its vote.
+CREATE TABLE IF NOT EXISTS ballots (
+  id           INTEGER PRIMARY KEY,
+  lobby_id     TEXT NOT NULL UNIQUE,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  options_json TEXT NOT NULL,
+  votes_json   TEXT,
+  winner       TEXT,
+  match_id     INTEGER REFERENCES matches(id)
+);
+
+-- The lost-vote bump: extra ballot weight for a campaign that drew two or
+-- more votes and lost, halved at every later tally it does not win, gone
+-- once it wins.
+CREATE TABLE IF NOT EXISTS ballot_bumps (
+  slug TEXT PRIMARY KEY,
+  bump REAL NOT NULL
+);
 `;
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
@@ -1558,6 +1580,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   ready_seconds: '120',
   vote_seconds: '30',
   map_pool: JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest']),
+  // The campaign vote (src/ballot.ts): 'all' offers the whole pool as it
+  // always has; 'slots' draws one L4D1, L4D2, custom and mirror campaign.
+  ballot_mode: 'all',
+  // Campaigns on every slot ballot on top of the four slots, at most 3.
+  ballot_sticky: '[]',
   discord_webhook_url: '',
   discord_queue_thresholds: JSON.stringify([4, 6]),
   discord_pug_role_id: '',

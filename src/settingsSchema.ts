@@ -11,7 +11,9 @@ import { CAMPAIGNS, DLC4_CAMPAIGNS } from './campaigns.js';
 export type SettingType =
   | { kind: 'int'; min: number; max: number }
   | { kind: 'string'; maxLength: number; allowEmpty: boolean }
-  | { kind: 'campaigns' }
+  /** A list of campaign slugs, shown as checkboxes. At least one unless
+   *  `allowEmpty`; at most `maxItems` when set. */
+  | { kind: 'campaigns'; allowEmpty?: boolean; maxItems?: number }
   | { kind: 'bool' }
   | { kind: 'intList'; min: number; max: number; maxItems: number }
   /** One of a fixed list, shown as a select. */
@@ -49,6 +51,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'server_pick_ping_margin_ms', group: 'Queue', label: 'Ping pick margin (ms)', help: 'How much lower the worst player\'s ping must be on another server before a match leaves the first server in the pick order.', type: { kind: 'int', min: 0, max: 200 } },
   { key: 'server_pick_ping_min_players', group: 'Queue', label: 'Ping pick minimum players', help: 'Players whose ping to every free server is known before ping is used at all. Fewer and the pick order decides.', type: { kind: 'int', min: 1, max: 8 } },
   { key: 'map_pool', group: 'Queue', label: 'Campaign pool', help: 'Campaigns offered in the vote.', type: { kind: 'campaigns' } },
+  { key: 'ballot_mode', group: 'Queue', label: 'Campaign ballot', help: 'Every campaign: the vote offers every campaign in the pool, as it always has. Four slots: the vote offers one L4D1, one L4D2, one custom and one mirrored campaign, each drawn from the pool and weighted toward campaigns that have not been played for a while (and a little toward ones that lost a close vote). The campaign the last queue match played is left out of its slot, and a slot with nothing left in the pool is skipped. The sticky campaigns below are added either way in slot mode. Every slot ballot is recorded with its weights and votes.', type: { kind: 'choice', options: [{ value: 'all', label: 'Every campaign in the pool' }, { value: 'slots', label: 'Four slots (L4D1, L4D2, custom, mirror)' }] } },
+  { key: 'ballot_sticky', group: 'Queue', label: 'Sticky campaigns', help: 'Only with the four-slot ballot: campaigns offered on every ballot after the four slots, for trying out a new one. They do not have to be in the pool, but must be installed on every server. Up to 3.', type: { kind: 'campaigns', allowEmpty: true, maxItems: 3 } },
   { key: 'invite_code', group: 'Queue', label: 'Invite code', help: 'Fallback way in for someone not in the Discord server.', type: { kind: 'string', maxLength: 64, allowEmpty: false }, secret: true },
   { key: 'noshow_minutes', group: 'Match', label: 'No-show minutes', help: 'A live match with too few players connected after this long is aborted.', type: { kind: 'int', min: 3, max: 60 } },
   { key: 'noshow_min_connected', group: 'Match', label: 'No-show minimum connected', help: 'Players that must have connected by the no-show deadline.', type: { kind: 'int', min: 1, max: 8 } },
@@ -230,7 +234,8 @@ export function validateSetting(
       if (raw === false || raw === '0' || raw === 0) return { ok: true, value: '0' };
       return { ok: false, error: 'must be on or off' };
     case 'campaigns': {
-      if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: 'pick at least one campaign' };
+      if (!Array.isArray(raw) || (raw.length === 0 && !t.allowEmpty)) return { ok: false, error: 'pick at least one campaign' };
+      if (t.maxItems !== undefined && new Set(raw).size > t.maxItems) return { ok: false, error: `pick at most ${t.maxItems}` };
       const known = opts.campaignSlugs
         ?? new Set(Object.keys(CAMPAIGNS).filter((slug) => !DLC4_CAMPAIGNS.has(slug)));
       const unknown = raw.filter((c) => typeof c !== 'string' || !known.has(c));
