@@ -23,7 +23,7 @@ import { DUO_REQUEUE_NOT_BOTH, requeueOptIns, wantsRequeue, type RequeueResult }
 import { seasonOneLive } from './seasonThemes.js';
 import {
   duoQueueLive, partnerOf, pairsAmong, createDuoInvite, acceptDuoInvite, declineDuoInvite,
-  cancelDuoInvite, endDuo as endDuoRow, getDuoInvite, openDuoInvites, recordDuoPopSkips, type DuoResult,
+  cancelDuoInvite, endDuo as endDuoRow, getDuoInvite, openDuoInvites, recordDuoPopSkips, recordDuoHoldBump, type DuoResult,
 } from './duos.js';
 
 export interface MatchmakerDeps {
@@ -37,7 +37,13 @@ export interface MatchmakerDeps {
   queueGate?: (steamid: string) => QueueBlock | null;
   /** The voice requirement for pressing Ready. See readyGate.ts. */
   readyGate?: (steamid: string) => ReadyBlock | null;
+  /** The clock for the held-pop limit (duo_hold_max_minutes). Epoch ms. */
+  now?: () => number;
 }
+
+/** How often a held pop is looked at again while it waits, so a change to
+ *  duo_hold_max_minutes applies within this long even if nobody joins. */
+export const HOLD_RECHECK_MS = 60 * 1000;
 
 /** Parse discord_queue_thresholds defensively. A malformed or non-array
  *  setting (admin typo, hand-edited sqlite row) must never break join(). */
@@ -169,6 +175,11 @@ export class Matchmaker {
   /** Queued players who asked for side games (2v2/3v3 while waiting). Kept
    *  through a pop so a failed ready check resumes the game; see sideGames.ts. */
   private sideOptIn = new Set<string>();
+  /** When the queue became held (a duo that does not fit behind 7 solos, so
+   *  9+ queued and nothing popping), epoch ms; null while it is not held.
+   *  Saved with the queue, so a restart keeps the clock running. */
+  private holdSince: number | null = null;
+  private holdTimer: number | null = null;
 
   constructor(private db: DB, private deps: MatchmakerDeps) {
     // Built here rather than as a field initializer so `db` is certainly
@@ -193,6 +204,7 @@ export class Matchmaker {
           .map((l) => l.persist())
           .filter((l) => l.phase === 'ready_check' || l.phase === 'map_vote'),
         sideOptIn: [...this.sideOptIn],
+        holdSince: this.holdSince,
       };
       this.db.prepare(
         `INSERT INTO matchmaker_state (id, json, updated_at) VALUES (1, ?, datetime('now'))
@@ -210,7 +222,7 @@ export class Matchmaker {
   restore(): void {
     const row = this.db.prepare('SELECT json FROM matchmaker_state WHERE id = 1').get() as { json: string } | undefined;
     if (!row) return;
-    let state: { queue: string[]; queueJoinedAt?: Record<string, number>; queueRequeued?: string[]; lobbies: PersistedLobby[]; sideOptIn?: string[] };
+    let state: { queue: string[]; queueJoinedAt?: Record<string, number>; queueRequeued?: string[]; lobbies: PersistedLobby[]; sideOptIn?: string[]; holdSince?: number | null };
     try {
       state = JSON.parse(row.json);
     } catch {
@@ -227,6 +239,10 @@ export class Matchmaker {
     for (const id of state.sideOptIn ?? []) {
       if (this.queue.has(id) || this.playerLobby.has(id)) this.sideOptIn.add(id);
     }
+    // A held queue restores held, its clock where it was (downtime counts),
+    // and the re-check timer picks it up from here.
+    this.holdSince = typeof state.holdSince === 'number' ? state.holdSince : null;
+    this.trackHold();
     if (state.queue?.length || state.lobbies?.length) {
       console.log(`[matchmaker] restored ${state.queue?.length ?? 0} queued and ${state.lobbies?.length ?? 0} lobbies`);
     }
@@ -661,12 +677,70 @@ export class Matchmaker {
     });
   }
 
+  private now(): number {
+    return this.deps.now ? this.deps.now() : Date.now();
+  }
+
+  /** duo_hold_max_minutes, 0 (never force a held pop) when unset or bad. */
+  private holdMaxMs(): number {
+    const m = Number(getSetting(this.db, 'duo_hold_max_minutes') ?? 0);
+    return Number.isFinite(m) && m > 0 ? m * 60 * 1000 : 0;
+  }
+
+  /** Whether a held pop has waited past duo_hold_max_minutes and may be
+   *  forced through. Off (0) by default: never bump a solo. */
+  private holdExpired(): boolean {
+    const max = this.holdMaxMs();
+    return max > 0 && this.holdSince !== null && this.queue.count() > QUEUE_SIZE
+      && this.now() - this.holdSince >= max;
+  }
+
+  /** Start or stop the hold clock to match the queue, and keep one re-check
+   *  timer armed while it is held, since nothing else may happen to re-run
+   *  the pop check. */
+  private trackHold(): void {
+    // maybeStartLobby only stops with 8+ queued when nothing could pop.
+    const held = this.queue.count() >= QUEUE_SIZE;
+    const sched = this.deps.scheduler ?? realScheduler;
+    if (this.holdTimer !== null) {
+      sched.clear(this.holdTimer);
+      this.holdTimer = null;
+    }
+    if (!held) {
+      this.holdSince = null;
+      return;
+    }
+    this.holdSince ??= this.now();
+    const max = this.holdMaxMs();
+    const due = max > 0 ? Math.max(0, this.holdSince + max - this.now()) : HOLD_RECHECK_MS;
+    this.holdTimer = sched.set(() => {
+      this.holdTimer = null;
+      const before = this.lobbyMap.size;
+      this.maybeStartLobby();
+      if (this.lobbyMap.size !== before) this.changed();
+    }, Math.min(due, HOLD_RECHECK_MS));
+  }
+
   private maybeStartLobby(): void {
     while (this.queue.count() >= QUEUE_SIZE) {
-      const players = this.queue.takeBatch(QUEUE_SIZE, (id) => this.partner(id));
+      const partnerOf = (id: string) => this.partner(id);
+      let players = this.queue.takeBatch(QUEUE_SIZE, partnerOf);
       // Enough people, but only a duo is left for the last slot: wait for
-      // one more player rather than bump someone who queued first.
-      if (players.length === 0) break;
+      // one more player rather than bump someone who queued first, unless
+      // staff set a limit on that wait (duo_hold_max_minutes) and it is up.
+      if (players.length === 0) {
+        if (!this.holdExpired()) break;
+        const heldMs = this.now() - this.holdSince!;
+        const forced = this.queue.takeBatchBumping(QUEUE_SIZE, partnerOf);
+        if (forced.taken.length === 0) break;
+        players = forced.taken;
+        this.holdSince = null;
+        try {
+          recordDuoHoldBump(this.db, forced.bumped, heldMs);
+        } catch (err) {
+          console.error('[matchmaker] could not record a forced duo pop:', err);
+        }
+      }
       // Review data only: never let it stop a pop.
       try {
         recordDuoPopSkips(this.db, this.queue.lastSkippedDuos);
@@ -691,6 +765,7 @@ export class Matchmaker {
       for (const p of players) this.playerLobby.set(p, id);
       this.emit('lobbyStarted', id, [...players]);
     }
+    this.trackHold();
   }
 
   private dissolveLobby(id: string): string[] {

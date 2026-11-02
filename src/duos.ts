@@ -128,8 +128,15 @@ export function openDuoInvites(db: DB, steamid: string, now = new Date()): { inc
 
 /** Note `n` duos passed over at one pop, for the trial review. */
 export function recordDuoPopSkips(db: DB, n: number, now = new Date()): void {
-  const ins = db.prepare('INSERT INTO duo_pop_skips (at) VALUES (?)');
+  const ins = db.prepare("INSERT INTO duo_pop_skips (at, kind) VALUES (?, 'skipped')");
   for (let i = 0; i < n; i++) ins.run(now.toISOString());
+}
+
+/** Note a held pop forced through after duo_hold_max_minutes: the solos it
+ *  bumped to the front, and how long it had been held. */
+export function recordDuoHoldBump(db: DB, bumped: string[], heldMs: number, now = new Date()): void {
+  db.prepare("INSERT INTO duo_pop_skips (at, kind, bumped, held_ms) VALUES (?, 'forced', ?, ?)")
+    .run(now.toISOString(), bumped.join(','), Math.round(heldMs));
 }
 
 /** The duos present in `ids`, each once, in the order their first member appears. */

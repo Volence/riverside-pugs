@@ -1758,6 +1758,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   duo_queue_enabled: '1',
   duo_bonus_min_sr: '50',
   duo_bonus_max_sr: '200',
+  // Minutes a pop may be held for a duo that does not fit before a solo is
+  // bumped to the front to make room (src/matchmaker.ts). 0: never bump.
+  duo_hold_max_minutes: '0',
   // Pick a match's server by the players' measured ping (src/serverPick.ts).
   // Off by default: with it off, the admin-set pick order alone decides.
   server_pick_by_ping: '0',
@@ -3147,6 +3150,12 @@ export function openDb(path: string): DB {
   // Who a player was duoed with in this match and the bonus (mu) the
   // balancer and the rating used. Stored so a season recompute replays the
   // same number after the settings change.
+  // kind 'skipped' is a duo passed over at a pop; 'forced' is a held pop
+  // forced through after duo_hold_max_minutes, with the solos it bumped to
+  // the front (comma separated) and how long it had been held.
+  ensureColumn(db, 'duo_pop_skips', 'kind', "TEXT NOT NULL DEFAULT 'skipped'");
+  ensureColumn(db, 'duo_pop_skips', 'bumped', 'TEXT');
+  ensureColumn(db, 'duo_pop_skips', 'held_ms', 'INTEGER');
   ensureColumn(db, 'match_players', 'duo_partner', 'TEXT');
   ensureColumn(db, 'match_players', 'duo_bonus', 'REAL');
   db.exec(`
