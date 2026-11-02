@@ -356,11 +356,15 @@ export function LobbyNotice(
         <div>
           {/* A duo partner left out after an aborted match carries no ready
               check at all (notReady empty, not cancelled). */}
-          <h3>{notice.removed || notice.cancelled ? 'Pop cancelled'
+          <h3>{notice.duoNoRequeue ? 'Not requeued'
+            : notice.removed || notice.cancelled ? 'Pop cancelled'
             : notice.duoMissed && notice.notReady.length === 0 ? 'Out of the queue'
             : 'Ready check failed'}</h3>
           <p>
-            {notice.duoMissed && notice.notReady.some((p) => p.steamid === notice.duoMissed!.steamid) ? (
+            {notice.duoNoRequeue ? (
+              <>Your duo partner did not choose to queue again, so neither of you was requeued.
+                Join again when you are both ready.</>
+            ) : notice.duoMissed && notice.notReady.some((p) => p.steamid === notice.duoMissed!.steamid) ? (
               <>Your duo partner {notice.duoMissed.name} did not ready up, so you were taken out of the queue too.
                 Join again when you are both ready.</>
             ) : notice.duoMissed ? (

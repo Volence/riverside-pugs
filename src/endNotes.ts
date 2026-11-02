@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import type { RequeueResult } from './matchRequeue.js';
+import { DUO_REQUEUE_NOT_BOTH, type RequeueResult } from './matchRequeue.js';
 import { playerSeasonState, rankView, seasonRules, type LadderEntry } from './seasonRules.js';
 
 /**
@@ -49,7 +49,9 @@ export function ratingNote(placementGames: number, before: LadderEntry | null, a
 
 function requeueNote(r: RequeueResult | undefined): string | null {
   if (!r) return null;
-  return r.ok ? 'You are back in the queue.' : `Not requeued: ${r.error}.`;
+  if (r.ok) return 'You are back in the queue.';
+  if (r.error === DUO_REQUEUE_NOT_BOTH) return 'Your duo partner did not choose to queue again, so neither of you was requeued.';
+  return `Not requeued: ${r.error}.`;
 }
 
 /** Keep the text safe as one rcon argument and short enough for the kick

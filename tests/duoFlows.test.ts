@@ -6,7 +6,8 @@ import { setSetting } from '../src/settings.js';
 import type { Scheduler } from '../src/lobby.js';
 import { banPlayer } from '../src/admin/players.js';
 import { recordPenalty } from '../src/penalties.js';
-import { setRequeue } from '../src/matchRequeue.js';
+import { DUO_REQUEUE_NOT_BOTH, setRequeue } from '../src/matchRequeue.js';
+import { endNotes } from '../src/endNotes.js';
 import { partnerOf } from '../src/duos.js';
 import { chooseTeams } from '../src/statBalance.js';
 import { validSplits, type RatedPlayer } from '../src/balance.js';
@@ -80,16 +81,60 @@ describe('requeue after a match (!rq) with a duo', () => {
     expect(r.get(B)).toEqual({ ok: true });
     expect(queued()[0]).toBe(IDS[10]);
     expect(queued().slice(1).sort()).toEqual([A, B].sort());
+    expect(mm.stateFor(A).lobbyNotice).toBeNull();
+    expect(mm.stateFor(B).lobbyNotice).toBeNull();
   });
 
-  it('only one opted in: the partner who did not ask is queued too (spec: either member joining adds both)', () => {
+  it('only one opted in: neither is queued, and the one who asked is told why (owner 2026-11-02)', () => {
     duo(A, B);
     const id = completedMatch(IDS.slice(0, 8));
     setRequeue(db, id, A, true);
     complete(id);
     const r = mm.requeueAfterMatch(id);
     expect([...r.keys()]).toEqual([A]);
-    expect(queued()).toEqual([A, B]);
+    expect(r.get(A)).toEqual({ ok: false, error: DUO_REQUEUE_NOT_BOTH });
+    expect(queued()).toEqual([]);
+    expect(mm.stateFor(A).lobbyNotice?.duoNoRequeue?.steamid).toBe(B);
+    expect(mm.stateFor(B).lobbyNotice).toBeNull();
+  });
+
+  it('only one opted in: the end note says why', () => {
+    duo(A, B);
+    const id = completedMatch(IDS.slice(0, 8));
+    setRequeue(db, id, A, true);
+    complete(id);
+    const notes = endNotes(db, id, new Map(), mm.requeueAfterMatch(id));
+    expect(notes.find((n) => n.steamid === A)?.text).toBe('Your duo partner did not choose to queue again, so neither of you was requeued.');
+    expect(notes.find((n) => n.steamid === B)).toBeUndefined();
+  });
+
+  it('neither opted in: nothing happens', () => {
+    duo(A, B);
+    const id = completedMatch(IDS.slice(0, 8));
+    complete(id);
+    expect(mm.requeueAfterMatch(id).size).toBe(0);
+    expect(queued()).toEqual([]);
+    expect(mm.stateFor(A).lobbyNotice).toBeNull();
+  });
+
+  it('a late !rq from the partner who had not asked queues both', () => {
+    duo(A, B);
+    const id = completedMatch(IDS.slice(0, 8));
+    setRequeue(db, id, A, true);
+    complete(id);
+    mm.requeueAfterMatch(id);
+    setRequeue(db, id, B, true);
+    expect(mm.requeueOne(B, id)).toEqual({ ok: true });
+    expect(queued()).toEqual([B, A]);
+    expect(mm.stateFor(A).lobbyNotice).toBeNull();
+  });
+
+  it('solo players are unaffected', () => {
+    const id = completedMatch(IDS.slice(0, 8));
+    setRequeue(db, id, C, true);
+    complete(id);
+    expect(mm.requeueAfterMatch(id).get(C)).toEqual({ ok: true });
+    expect(queued()).toEqual([C]);
   });
 
   it('partner banned since: the duo ended at the ban, the one who asked goes back as a solo', () => {

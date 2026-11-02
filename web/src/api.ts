@@ -149,8 +149,11 @@ export interface StateSnapshot {
    *  a player was taken out of it (banned mid ready check). */
   /** `duoMissed` is the viewer's duo partner who could not go back in the
    *  queue, which took the viewer out too. Optional: an older server sends none. */
+  /** `duoNoRequeue` is the viewer's duo partner when the viewer asked to queue
+   *  again after a match and the partner did not, so neither went back. */
   lobbyNotice?: {
     notReady: NamedPlayer[]; youWereReady: boolean; removed?: NamedPlayer; cancelled?: true; duoMissed?: NamedPlayer;
+    duoNoRequeue?: NamedPlayer;
   } | null;
   /** The viewer's duo and invites; null while the duo queue is off.
    *  Optional: an older server sends none. */

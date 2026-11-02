@@ -65,5 +65,9 @@ export function requeueOptIns(db: DB, matchId: number): string[] {
     .map((r) => r.player_id);
 }
 
+/** Why one member of a duo who asked was not requeued: a duo goes back only
+ *  when both asked (owner 2026-11-02). The end note says it in full. */
+export const DUO_REQUEUE_NOT_BOTH = 'your duo partner did not choose to queue again';
+
 /** What one requeue attempt came to, for the end-of-match note. */
 export type RequeueResult = { ok: true } | { ok: false; error: string };

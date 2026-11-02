@@ -882,7 +882,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (!m) return { ok: false, error: 'not on a live queue match' };
     setRequeue(deps.db, matchId, steamid, on);
     let r: RequeueResult = { ok: true };
-    if (on && m.state === 'completed' && matchmakerRef) r = matchmakerRef.requeueOne(steamid);
+    if (on && m.state === 'completed' && matchmakerRef) r = matchmakerRef.requeueOne(steamid, matchId);
     hub.broadcast('refresh');
     return r;
   };
