@@ -323,6 +323,9 @@ export class Matchmaker {
       this.queue.leave(id);
       this.sideOptIn.delete(id);
     }
+    // A held pop (a duo behind 7 solos) can become poppable when someone
+    // ahead leaves: 6 solos + the duo is a full 8.
+    this.maybeStartLobby();
     this.changed();
   }
 
@@ -367,8 +370,9 @@ export class Matchmaker {
       for (const p of others) this.notices.set(p, { notReady: [], youWereReady: true, removed: steamid });
       this.emit('lobbyFailed', lobbyId, [...others], []);
       this.queue.requeueFront(others);
-      this.maybeStartLobby();
     }
+    // Also for a queued player: their leaving can free a held pop.
+    this.maybeStartLobby();
     this.changed();
   }
 
@@ -509,7 +513,10 @@ export class Matchmaker {
   /** End the viewer's duo. Both stay where they are, as solos. */
   endDuo(steamid: string): DuoResult {
     const r = endDuoRow(this.db, steamid, steamid);
-    if (r.ok) this.changed();
+    if (!r.ok) return r;
+    // A held duo that splits into two solos can fill the pop it was holding.
+    this.maybeStartLobby();
+    this.changed();
     return r;
   }
 
