@@ -251,7 +251,7 @@ function NothingLive() {
           <span class="quiet__bar" aria-hidden="true"><span style={{ width: `${Math.min(100, (count / QUEUE_SIZE) * 100)}%` }} /></span>
           <span class="quiet__line">
             {count === 0 ? 'Empty. Join and it starts filling.'
-              : count >= QUEUE_SIZE - 2 ? `${QUEUE_SIZE - count} more and it pops.`
+              : count >= QUEUE_SIZE - 2 ? `${Math.max(1, QUEUE_SIZE - count)} more and it pops.`
                 : 'Waiting for players.'}
           </span>
           <span class="quiet__cta">{count === 0 ? 'Start the queue' : 'Join the queue'}</span>
