@@ -391,6 +391,14 @@ describe('campaignTint', () => {
 });
 
 describe('mapName', () => {
+  it('names a mirrored chapter after its original', () => {
+    expect(mapName('mc1m3_mall')).toBe('Mall');
+    expect(mapName('l4d_vs_mairport01_greenhouse')).toBe('The Greenhouse');
+    expect(chapterOrdinal('l4d_mgarage01_alleys')).toBe(4);
+    expect(chapterOrdinal('l4d_mriver01_docks')).toBe(3);
+    expect(chapterOrdinal('mc5m4_quarter')).toBe(4);
+  });
+
   it('names the stock L4D1 chapters', () => {
     expect(mapName('l4d_vs_airport01_greenhouse')).toBe('The Greenhouse');
     expect(mapName('l4d_vs_farm04_barn')).toBe('The Train Station');

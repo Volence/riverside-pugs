@@ -9,7 +9,7 @@ import multipart from '@fastify/multipart';
 import type { DB } from '../db.js';
 import { makeRequireAdmin } from './guards.js';
 import { logAdmin } from '../admin/audit.js';
-import { CAMPAIGNS } from '../campaigns.js';
+import { CAMPAIGNS, MIRROR_CAMPAIGNS } from '../campaigns.js';
 import { campaignRegistry, invalidateCampaignCache, stockChaptersOf } from '../campaignRegistry.js';
 import { allMapsToPlay, clearMapsToPlay, setMapsToPlay } from '../campaignRules.js';
 import { transportFor } from '../addonsTransport.js';
@@ -178,7 +178,11 @@ export async function campaignRoutes(
       // panel can reuse the same ChapterList component a custom card uses,
       // rather than a second rendering path for the same "map, display,
       // is this the finale" data.
-      const missionChapters = stockChaptersOf(db, c.slug);
+      // A mirror's list is hardcoded (MIRROR_CAMPAIGNS), not read from a
+      // mission file, so its chapters carry no display names.
+      const missionChapters = c.mirrorOf
+        ? c.maps.map((map) => ({ map, display: null }))
+        : stockChaptersOf(db, c.slug);
       const chapters = missionChapters.map((ch, i) => ({
         slug: c.slug, ordinal: i, map: ch.map, display: ch.display,
         is_finale: i === missionChapters.length - 1 ? 1 : 0,
@@ -277,7 +281,7 @@ export async function campaignRoutes(
 
       const slug = mission.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
       if (!slug) return reply.code(400).send({ error: 'mission has no usable name' });
-      if (CAMPAIGNS[slug] || getCampaign(db, slug)) {
+      if (CAMPAIGNS[slug] || MIRROR_CAMPAIGNS[slug] || getCampaign(db, slug)) {
         return reply.code(409).send({ error: `a campaign named ${slug} already exists` });
       }
 
