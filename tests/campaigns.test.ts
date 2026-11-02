@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CAMPAIGNS, DLC4_CAMPAIGNS, campaignForMap } from '../src/campaigns.js';
+import { CAMPAIGNS, DLC4_CAMPAIGNS, MIRROR_CAMPAIGNS, campaignForMap, mirrorMapOriginal } from '../src/campaigns.js';
 
 describe('campaignForMap', () => {
   // A self-started match reports the map it is standing on, not a campaign
@@ -100,5 +100,44 @@ describe('campaignForMap', () => {
     const got = campaignForMap('l4d_vs_farm01_hilltop');
     expect(got).not.toBeNull();
     expect(Object.keys(CAMPAIGNS)).toContain(got);
+  });
+});
+
+describe('mirrored campaigns', () => {
+  it.each([
+    ['l4d_vs_mhospital01_apartment', 'no_mercy_mirror'],
+    ['l4d_vs_msmalltown04_mainstreet', 'death_toll_mirror'],
+    ['l4d_vs_mairport03_garage', 'dead_air_mirror'],
+    ['l4d_vs_mfarm02_traintunnel', 'blood_harvest_mirror'],
+    ['mc1m1_hotel', 'crash_center_mirror'],
+    ['l4d_mgarage01_alleys', 'crash_center_mirror'],
+    ['MC2M3_COASTER', 'dark_carnival_mirror'],
+    ['mc6m1_riverbank', 'the_passing_mirror'],
+    ['l4d_mriver01_docks', 'the_passing_mirror'],
+    ['mc13m3_memorialbridge', 'cold_stream_mirror'],
+    ['mc14m1_junkyard', 'the_last_stand_mirror'],
+    // Unflipped finales stay with the original.
+    ['l4d_vs_hospital05_rooftop', 'no_mercy'],
+    ['c14m2_lighthouse', 'the_last_stand'],
+    ['l4d_river03_port', 'the_passing'],
+  ])('maps %s to %s', (map, expected) => {
+    expect(campaignForMap(map)).toBe(expected);
+  });
+
+  it('gives a flipped map its original and nothing else', () => {
+    expect(mirrorMapOriginal('mc1m3_mall')).toBe('c1m3_mall');
+    expect(mirrorMapOriginal('l4d_vs_mhospital02_subway')).toBe('l4d_vs_hospital02_subway');
+    expect(mirrorMapOriginal('l4d_mriver02_barge')).toBe('l4d_river02_barge');
+    expect(mirrorMapOriginal('l4d_vs_hospital05_rooftop')).toBeNull();
+    expect(mirrorMapOriginal('l4d_vs_mystery01')).toBeNull();
+  });
+
+  it('mirrors only campaigns that exist, and keeps each mirror as long as its original mission', () => {
+    for (const [slug, m] of Object.entries(MIRROR_CAMPAIGNS)) {
+      expect(CAMPAIGNS[m.original], slug).toBeDefined();
+      expect(CAMPAIGNS[slug], slug).toBeUndefined();
+      // The last chapter is the original's finale, unflipped.
+      expect(mirrorMapOriginal(m.maps[m.maps.length - 1]), slug).toBeNull();
+    }
   });
 });

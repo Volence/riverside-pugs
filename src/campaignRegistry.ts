@@ -1,12 +1,13 @@
 import type { DB } from './db.js';
-import { CAMPAIGNS, campaignForMap, DLC4_CAMPAIGNS, VOTE_NAMES } from './campaigns.js';
+import { CAMPAIGNS, campaignForMap, DLC4_CAMPAIGNS, MIRROR_CAMPAIGNS, VOTE_NAMES } from './campaigns.js';
 import { chaptersOf, listCampaigns } from './customCampaigns.js';
 import { isInstalledEverywhere } from './campaignInstall.js';
 import { enabledServerIds, allServersHaveDlc4 } from './serverPool.js';
 import { readStockMissions, type StockChapter } from './stockMissions.js';
 
 /**
- * Every campaign the site can run: the stock four, plus published custom ones.
+ * Every campaign the site can run: the stock ones, the mirrored ones
+ * (MIRROR_CAMPAIGNS), plus published custom ones.
  *
  * `src/campaigns.ts` stays a pure const with no database dependency, because
  * the Discord command module reads it at import time and a test asserts its
@@ -17,6 +18,12 @@ import { readStockMissions, type StockChapter } from './stockMissions.js';
  * listener and the answer only changes when an admin publishes, edits or
  * deletes a campaign. Every one of those paths calls invalidateCampaignCache.
  */
+
+/** Which ballot slot a campaign is drawn for (src/ballot.ts). On the entry,
+ *  not in the ballot, so a new campaign slots itself: the base four are l4d1,
+ *  everything needing the L4D2 files is l4d2, an uploaded campaign is custom
+ *  and a mirrored one is mirror. */
+export type CampaignCategory = 'l4d1' | 'l4d2' | 'custom' | 'mirror';
 
 export interface CampaignEntry {
   slug: string;
@@ -32,6 +39,9 @@ export interface CampaignEntry {
   /** A practice map (Hunter Training): installed and downloadable, never a
    *  PUG map. Always false for the stock campaigns. */
   practiceOnly: boolean;
+  category: CampaignCategory;
+  /** The campaign a mirrored one flips (MIRROR_CAMPAIGNS), else null. */
+  mirrorOf: string | null;
 }
 
 /** The map a match changelevels into, per campaign.
@@ -93,6 +103,19 @@ function build(db: DB): NonNullable<typeof cache> {
       slug, name: c.name, firstMap: STOCK_FIRST[slug],
       maps: (stockMissions.get(slug) ?? []).map((ch) => ch.map), custom: false,
       requiresDlc4: DLC4_CAMPAIGNS.has(slug), practiceOnly: false,
+      category: DLC4_CAMPAIGNS.has(slug) ? 'l4d2' : 'l4d1', mirrorOf: null,
+    });
+  }
+  // Mirrors are installed with the server builds (deploy repo), not uploaded,
+  // so like the stock campaigns they have no install rows: custom stays
+  // false. One built from an L4D2 campaign still needs the L4D2 pack (its
+  // unflipped finale and its textures live there), so it shares the
+  // original's dlc4 gate.
+  for (const [slug, c] of Object.entries(MIRROR_CAMPAIGNS)) {
+    registry.set(slug, {
+      slug, name: c.name, firstMap: c.maps[0], maps: [...c.maps], custom: false,
+      requiresDlc4: DLC4_CAMPAIGNS.has(c.original), practiceOnly: false,
+      category: 'mirror', mirrorOf: c.original,
     });
   }
 
@@ -111,6 +134,7 @@ function build(db: DB): NonNullable<typeof cache> {
       slug: row.slug, name: row.name, firstMap: played[0].map,
       maps: played.map((c) => c.map), custom: true,
       requiresDlc4: false, practiceOnly: row.practice_only === 1,
+      category: 'custom', mirrorOf: null,
     });
     // Every chapter claims its map, included or not: a match standing on an
     // excluded chapter is still that campaign for attribution purposes.
@@ -225,9 +249,45 @@ export function hasPlayedDownloadedCampaign(db: DB, steamid: string): boolean {
     .filter((c) => (c.custom || c.requiresDlc4) && !c.practiceOnly)
     .map((c) => c.slug);
   if (slugs.length === 0) return true;
-  return db.prepare(`
-    SELECT 1 FROM match_players mp JOIN matches m ON m.id = mp.match_id
+  return completedCampaignsOf(db, steamid, slugs).size > 0;
+}
+
+/** The campaigns among `slugs` a player has finished a match on. */
+function completedCampaignsOf(db: DB, steamid: string, slugs: string[]): Set<string> {
+  if (slugs.length === 0) return new Set();
+  const rows = db.prepare(`
+    SELECT DISTINCT m.campaign AS campaign FROM match_players mp JOIN matches m ON m.id = mp.match_id
     WHERE mp.player_id = ? AND m.state = 'completed'
-      AND m.campaign IN (${slugs.map(() => '?').join(',')})
-    LIMIT 1`).get(steamid, ...slugs) !== undefined;
+      AND m.campaign IN (${slugs.map(() => '?').join(',')})`).all(steamid, ...slugs) as { campaign: string }[];
+  return new Set(rows.map((r) => r.campaign));
+}
+
+/** What a campaign needs downloaded beyond the base game, as download names:
+ *  'l4d2' for the L4D2 pack, 'mirror' for the mirrored maps pack, and
+ *  'custom:<slug>' for an uploaded campaign's own VPK. A mirror of an L4D2
+ *  campaign needs both packs. */
+function downloadsOf(entry: CampaignEntry): string[] {
+  const out: string[] = [];
+  if (entry.custom) out.push(`custom:${entry.slug}`);
+  if (entry.category === 'mirror') out.push('mirror');
+  if (entry.requiresDlc4) out.push('l4d2');
+  return out;
+}
+
+/** The campaigns among `options` that need a download this player has
+ *  probably not got: one whose downloads are not all covered by a campaign
+ *  they finished a match on. Finishing any L4D2 campaign covers the whole
+ *  L4D2 pack, any mirror the mirror pack. For marking ballot options only;
+ *  it never keeps anyone from voting. */
+export function downloadMarks(db: DB, steamid: string, options: string[]): string[] {
+  const registry = campaignRegistry(db);
+  const needing = [...registry.values()].filter((c) => downloadsOf(c).length > 0);
+  const have = new Set<string>();
+  for (const slug of completedCampaignsOf(db, steamid, needing.map((c) => c.slug))) {
+    for (const d of downloadsOf(registry.get(slug)!)) have.add(d);
+  }
+  return options.filter((slug) => {
+    const entry = registry.get(slug);
+    return !!entry && downloadsOf(entry).some((d) => !have.has(d));
+  });
 }

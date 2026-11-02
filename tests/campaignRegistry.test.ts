@@ -8,7 +8,7 @@ import { upsertPlayer } from '../src/players.js';
 import { ME, OTHER, seedMatch } from './playerStats.test.js';
 import {
   campaignRegistry, resolveCampaignForMap, invalidateCampaignCache, firstMapOf, stockChaptersOf,
-  setMissionsDirs, poolableCampaigns, hasPlayedDownloadedCampaign,
+  setMissionsDirs, poolableCampaigns, hasPlayedDownloadedCampaign, downloadMarks,
 } from '../src/campaignRegistry.js';
 import { addServer, setHasDlc4, serversMissingDlc4 } from '../src/serverPool.js';
 
@@ -31,8 +31,57 @@ const publish = (slug = 'dbd') => {
 };
 
 describe('campaignRegistry', () => {
-  it('contains the thirteen stock campaigns with no custom ones present', () => {
-    expect([...campaignRegistry(db).keys()])
+  it('lists every mirrored campaign with its maps, original and category', () => {
+    const mirrors = [...campaignRegistry(db).values()].filter((c) => c.category === 'mirror');
+    expect(mirrors.map((c) => c.slug)).toEqual([
+      'no_mercy_mirror', 'death_toll_mirror', 'dead_air_mirror', 'blood_harvest_mirror',
+      'crash_center_mirror', 'dark_carnival_mirror', 'swamp_fever_mirror', 'hard_rain_mirror',
+      'the_parish_mirror', 'the_passing_mirror', 'cold_stream_mirror', 'the_last_stand_mirror',
+    ]);
+    // 43 flipped maps across the twelve (each keeps its unflipped finale).
+    expect(mirrors.flatMap((c) => c.maps).filter((m) => /^(mc|l4d_(vs_)?m)/.test(m))).toHaveLength(43);
+    const nm = campaignRegistry(db).get('no_mercy_mirror')!;
+    expect(nm).toMatchObject({
+      name: 'Ycrem On', mirrorOf: 'no_mercy', firstMap: 'l4d_vs_mhospital01_apartment',
+      custom: false, requiresDlc4: false, practiceOnly: false,
+    });
+    expect(nm.maps).toHaveLength(5);
+    expect(campaignRegistry(db).get('crash_center_mirror')).toMatchObject({
+      firstMap: 'mc1m1_hotel', requiresDlc4: true, mirrorOf: 'crash_center',
+    });
+    for (const c of mirrors) expect(campaignRegistry(db).has(c.mirrorOf!)).toBe(true);
+  });
+
+  it('puts every campaign in a ballot category', () => {
+    publish();
+    const cat = (slug: string) => campaignRegistry(db).get(slug)!.category;
+    expect(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'].map(cat)).toEqual(['l4d1', 'l4d1', 'l4d1', 'l4d1']);
+    expect(['the_passing', 'the_parish', 'dark_carnival', 'hard_rain', 'dead_center', 'crash_center', 'swamp_fever'].map(cat))
+      .toEqual(Array(7).fill('l4d2'));
+    expect(cat('dbd')).toBe('custom');
+    expect(cat('dead_air_mirror')).toBe('mirror');
+  });
+
+  it('resolves a mirrored map to its mirror, an unflipped finale to the original', () => {
+    expect(resolveCampaignForMap(db, 'l4d_vs_mhospital03_sewers')).toBe('no_mercy_mirror');
+    expect(resolveCampaignForMap(db, 'l4d_vs_hospital05_rooftop')).toBe('no_mercy');
+    expect(resolveCampaignForMap(db, 'mc1m2_streets')).toBe('crash_center_mirror');
+    expect(resolveCampaignForMap(db, 'l4d_mgarage01_alleys')).toBe('crash_center_mirror');
+    expect(resolveCampaignForMap(db, 'l4d_mriver02_barge')).toBe('the_passing_mirror');
+    expect(firstMapOf(db, 'the_last_stand_mirror')).toBe('mc14m1_junkyard');
+  });
+
+  it('lets a mirror into the pool like its original: L4D1 always, L4D2 with the pack everywhere', () => {
+    const id = addServer(db, { name: 's1', host: 'h', port: 1, rconPort: 2, rconPassword: 'p', status: 'idle' });
+    const slugs = () => poolableCampaigns(db).map((c) => c.slug);
+    expect(slugs()).toContain('dead_air_mirror');
+    expect(slugs()).not.toContain('hard_rain_mirror');
+    setHasDlc4(db, id, true);
+    expect(slugs()).toContain('hard_rain_mirror');
+  });
+
+  it('contains the thirteen stock campaigns, then the twelve mirrors, with no custom ones present', () => {
+    expect([...campaignRegistry(db).keys()].filter((k) => !k.endsWith('_mirror')))
       .toEqual([
         'no_mercy',
         'death_toll',
@@ -249,11 +298,11 @@ describe('stock chapter lists', () => {
 });
 
 describe('dlc4 campaigns in the registry', () => {
-  it('lists all thirteen campaigns with no missions directory configured', () => {
+  it('lists all thirteen campaigns (and the twelve mirrors) with no missions directory configured', () => {
     setMissionsDirs([]);
     invalidateCampaignCache();
     const reg = campaignRegistry(db);
-    expect(reg.size).toBe(13);
+    expect(reg.size).toBe(13 + 12);
     // Chapter lists come from mission files, so they are empty here. The
     // campaign still exists, which is what makes the pool gate meaningful
     // even when the paths are unset.
@@ -397,5 +446,37 @@ describe('hasPlayedDownloadedCampaign', () => {
     publish();
     played(1, 'dbd', 'aborted');
     expect(hasPlayedDownloadedCampaign(db, ME)).toBe(false);
+  });
+});
+
+describe('downloadMarks', () => {
+  const played = (campaign: string, state = 'completed') => {
+    upsertPlayer(db, { steamid: ME, name: 'me', avatar: null }, []);
+    const id = Number(db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, ?, ?)").run(state, campaign).lastInsertRowid);
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(id, ME);
+  };
+  const OPTS = ['no_mercy', 'the_parish', 'no_mercy_mirror', 'hard_rain_mirror', 'dbd'];
+
+  it('marks everything that needs a download for a player who has played only stock L4D1', () => {
+    publish();
+    played('dead_air');
+    expect(downloadMarks(db, ME, OPTS)).toEqual(['the_parish', 'no_mercy_mirror', 'hard_rain_mirror', 'dbd']);
+  });
+
+  it('counts any finished L4D2 campaign for the L4D2 pack and any mirror for the mirror pack', () => {
+    publish();
+    played('dark_carnival');
+    expect(downloadMarks(db, ME, OPTS)).toEqual(['no_mercy_mirror', 'hard_rain_mirror', 'dbd']);
+    played('dead_air_mirror');
+    expect(downloadMarks(db, ME, OPTS)).toEqual(['dbd']);
+    played('dbd', 'aborted');
+    expect(downloadMarks(db, ME, OPTS)).toEqual(['dbd']);
+    played('dbd');
+    expect(downloadMarks(db, ME, OPTS)).toEqual([]);
+  });
+
+  it('needs both packs for an L4D2 mirror', () => {
+    played('dead_air_mirror');
+    expect(downloadMarks(db, ME, ['no_mercy_mirror', 'hard_rain_mirror'])).toEqual(['hard_rain_mirror']);
   });
 });

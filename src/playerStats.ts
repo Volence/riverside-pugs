@@ -480,8 +480,11 @@ export function mapIndex(db: DB): MapIndexRow[] {
   // it, with an honest zero, rather than conclude the site does not have it.
   // Only custom campaigns can be enumerated this way, because the registry
   // carries their chapter lists from the uploaded VPK; the stock four have all
-  // been played, so they lose nothing by being absent here.
+  // been played, so they lose nothing by being absent here. The mirrors are
+  // left out too: their chapter lists are hardcoded and end on the original's
+  // unflipped finale, which no PUG plays, so they join the page once played.
   for (const entry of campaignRegistry(db).values()) {
+    if (entry.mirrorOf) continue;
     for (const map of entry.maps) {
       if (!acc.has(map)) acc.set(map, { played: 0, n: 0, sumA: 0, sumB: 0 });
     }
