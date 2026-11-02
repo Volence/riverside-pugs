@@ -16,7 +16,7 @@ describe('openDb', () => {
       'admin_actions', 'aim_match_scans',
       'alt_holds',
       'appeal_message', 'appeal_messages', 'appeals',
-      'balance_ignored_plugins', 'balance_patch_servers', 'balance_patches', 'balance_rollout_servers', 'balance_rollouts', 'balance_server_state',
+      'balance_ignored_plugins', 'balance_patch_servers', 'balance_patches', 'balance_rollout_servers', 'balance_rollouts', 'balance_server_state', 'ballot_bumps', 'ballots',
       'bans', 'booking_casters', 'booking_events', 'booking_people', 'booking_sides', 'booking_voice', 'bookings', 'campaign_play_rules', 'cast_studios',
       'community_entries', 'community_likes',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',

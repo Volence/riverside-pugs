@@ -121,7 +121,7 @@ function SettingRow({ setting: s, campaigns, serversMissingDlc4, onSaved }: {
               </label>
             ))}
           </div>
-          <MissingDlc4Notice servers={serversMissingDlc4} onChecked={onSaved} />
+          {s.key === 'map_pool' && <MissingDlc4Notice servers={serversMissingDlc4} onChecked={onSaved} />}
         </>
       );
       break;

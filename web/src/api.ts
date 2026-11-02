@@ -76,6 +76,9 @@ export interface LobbySnapshot {
   /** Epoch ms. Compared against the client clock, as it always has been. */
   deadline: number;
   myVote: string | null;
+  /** Four-slot ballots only: options needing a download the viewer has
+   *  probably not got. Marked on the tile, never blocked. */
+  downloads?: string[];
 }
 
 /** A queue timeout being served. `offenses` counts the ladder named by
@@ -1385,7 +1388,7 @@ export interface AdminSetting {
   type:
     | { kind: 'int'; min: number; max: number }
     | { kind: 'string'; maxLength: number; allowEmpty: boolean }
-    | { kind: 'campaigns' }
+    | { kind: 'campaigns'; allowEmpty?: boolean; maxItems?: number }
     | { kind: 'bool' }
     | { kind: 'intList'; min: number; max: number; maxItems: number }
     | { kind: 'choice'; options: { value: string; label: string }[] };
