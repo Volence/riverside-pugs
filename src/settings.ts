@@ -62,8 +62,17 @@ export function getJsonSetting<T>(db: DB, key: string): T {
  * out of a route is not, and two callers here sit on paths that must not fail.
  */
 export function getCampaignPool(db: DB): string[] {
+  return getCampaignList(db, 'map_pool');
+}
+
+/** The sticky ballot campaigns (src/ballot.ts), as defensively as the pool. */
+export function getStickyCampaigns(db: DB): string[] {
+  return getCampaignList(db, 'ballot_sticky');
+}
+
+function getCampaignList(db: DB, key: string): string[] {
   try {
-    const parsed = JSON.parse(getSetting(db, 'map_pool') ?? '[]');
+    const parsed = JSON.parse(getSetting(db, key) ?? '[]');
     return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
   } catch {
     return [];

@@ -691,7 +691,7 @@ function ReadyCheck(
   );
 }
 
-function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void }) {
+export function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void }) {
   const left = useSecondsLeft(lobby.deadline);
   const total = Object.values(lobby.votes).reduce((a, b) => a + b, 0);
   const leader = Math.max(0, ...Object.values(lobby.votes));
@@ -710,10 +710,17 @@ function MapVote({ lobby, refresh }: { lobby: LobbySnapshot; refresh: () => void
             name: campaignVoteName(c),
             sub: n === 0 ? 'No votes' : `${n} vote${n === 1 ? '' : 's'}${leading ? ' · leading' : ''}`,
             active: lobby.myVote === c,
+            badge: lobby.downloads?.includes(c) ? 'Download' : undefined,
           };
         })}
       />
       {total === 0 && <Empty>No votes yet. A random campaign is picked if nobody votes.</Empty>}
+      {(lobby.downloads?.length ?? 0) > 0 && (
+        <p class="muted">
+          Download marks a campaign whose maps you may not have yet. You can still vote for it; <a href="/custom-campaigns">get the maps</a> before
+          the match starts or you cannot join the server.
+        </p>
+      )}
     </Panel>
   );
 }

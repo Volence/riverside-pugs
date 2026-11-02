@@ -17,6 +17,110 @@ export const CAMPAIGNS: Record<string, { name: string }> = {
   crash_center: { name: 'Crash Center' },
 };
 
+/**
+ * The mirrored campaigns (Season 1, "Wrong Way"): every chapter but the
+ * finale flipped left to right, built in ~/l4d/mirror and installed on every
+ * server as 00_mirrormaps_*.vpk since 2026-10-25 (deploy 8047c1b).
+ *
+ * `maps` is the mirror mission file's versus list, read out of each pack
+ * (00_mirrormaps_<mission>.vpk, missions/<mission>_mirror.txt). Hardcoded
+ * rather than read off disk like the stock lists: the packs live in the
+ * servers' addons, not in any directory the site reads, and the stop map
+ * depends on this list being whole. The finale was never mirrored, so the
+ * last chapter keeps its original map name (the chapter count has to match
+ * the original or pug-match ends the match a map early).
+ *
+ * `name` is the mission's own DisplayTitle, the campaign spelled backwards
+ * (owner, 2026-10-21). Their stats stay apart from the originals: the map
+ * names differ, so every map page and saferoom rate is the mirror's own. In
+ * Season 1 a mirror also keeps its own multiplier (the ladder in its pack's
+ * mission file; see mapMultipliers.multiplierFor).
+ *
+ * Not in CAMPAIGNS: that table is the stock list a test pins key for key.
+ */
+export const MIRROR_CAMPAIGNS: Record<string, { name: string; original: string; maps: string[] }> = {
+  no_mercy_mirror: {
+    name: 'Ycrem On', original: 'no_mercy',
+    maps: ['l4d_vs_mhospital01_apartment', 'l4d_vs_mhospital02_subway', 'l4d_vs_mhospital03_sewers', 'l4d_vs_mhospital04_interior', 'l4d_vs_hospital05_rooftop'],
+  },
+  death_toll_mirror: {
+    name: 'Llot Htaed', original: 'death_toll',
+    maps: ['l4d_vs_msmalltown01_caves', 'l4d_vs_msmalltown02_drainage', 'l4d_vs_msmalltown03_ranchhouse', 'l4d_vs_msmalltown04_mainstreet', 'l4d_vs_smalltown05_houseboat'],
+  },
+  dead_air_mirror: {
+    name: 'Ria Daed', original: 'dead_air',
+    maps: ['l4d_vs_mairport01_greenhouse', 'l4d_vs_mairport02_offices', 'l4d_vs_mairport03_garage', 'l4d_vs_mairport04_terminal', 'l4d_vs_airport05_runway'],
+  },
+  blood_harvest_mirror: {
+    name: 'Tsevrah Doolb', original: 'blood_harvest',
+    maps: ['l4d_vs_mfarm01_hilltop', 'l4d_vs_mfarm02_traintunnel', 'l4d_vs_mfarm03_bridge', 'l4d_vs_mfarm04_barn', 'l4d_vs_farm05_cornfield'],
+  },
+  // The garage mission: Dead Center's first three chapters and Crash Course's
+  // Alleys, so it mirrors Crash Center. There is no separate Dead Center
+  // mirror (a map can belong to one mission only). The title is the
+  // mission's, which still says Dead Center backwards.
+  crash_center_mirror: {
+    name: 'Retnec Daed', original: 'crash_center',
+    maps: ['mc1m1_hotel', 'mc1m2_streets', 'mc1m3_mall', 'l4d_mgarage01_alleys', 'c1m4_atrium'],
+  },
+  dark_carnival_mirror: {
+    name: 'Lavinrac Krad', original: 'dark_carnival',
+    maps: ['mc2m1_highway', 'mc2m2_fairgrounds', 'mc2m3_coaster', 'mc2m4_barns', 'c2m5_concert'],
+  },
+  swamp_fever_mirror: {
+    name: 'Revef Pmaws', original: 'swamp_fever',
+    maps: ['mc3m1_plankcountry', 'mc3m2_swamp', 'mc3m3_shantytown', 'c3m4_plantation'],
+  },
+  hard_rain_mirror: {
+    name: 'Niar Drah', original: 'hard_rain',
+    maps: ['mc4m1_milltown_a', 'mc4m2_sugarmill_a', 'mc4m3_sugarmill_b', 'mc4m4_milltown_b', 'c4m5_milltown_escape'],
+  },
+  the_parish_mirror: {
+    name: 'Hsirap Eht', original: 'the_parish',
+    maps: ['mc5m1_waterfront', 'mc5m2_park', 'mc5m3_cemetery', 'mc5m4_quarter', 'c5m5_bridge'],
+  },
+  // Passifice's chain, mirrored: both Passing maps and the first two river maps.
+  the_passing_mirror: {
+    name: 'Ecifircas Eht', original: 'the_passing',
+    maps: ['mc6m1_riverbank', 'mc6m2_bedlam', 'l4d_mriver01_docks', 'l4d_mriver02_barge', 'l4d_river03_port'],
+  },
+  cold_stream_mirror: {
+    name: 'Maerts Dloc', original: 'cold_stream',
+    maps: ['mc13m1_alpinecreek', 'mc13m2_southpinestream', 'mc13m3_memorialbridge', 'c13m4_cutthroatcreek'],
+  },
+  the_last_stand_mirror: {
+    name: 'Dnats Tsal Eht', original: 'the_last_stand',
+    maps: ['mc14m1_junkyard', 'c14m2_lighthouse'],
+  },
+};
+
+/** Mirrored map -> its mirror campaign. Only the flipped chapters: an
+ *  unflipped finale (l4d_vs_hospital05_rooftop) is the original's map and
+ *  keeps resolving to the original campaign. */
+const MIRROR_BY_MAP: ReadonlyMap<string, string> = new Map(
+  Object.entries(MIRROR_CAMPAIGNS).flatMap(([slug, c]) =>
+    c.maps.filter((m) => mirroredMapOriginal(m) !== null).map((m) => [m, slug] as [string, string])),
+);
+
+/** The original of a mirrored map name, by the build's naming rule
+ *  (l4d_vs_X -> l4d_vs_mX, l4d_X -> l4d_mX, cNmM -> mcNmM), or null for any
+ *  name that is not shaped like one. Shape only: callers that must not fold
+ *  a custom map starting with an m check membership as well. */
+function mirroredMapOriginal(map: string): string | null {
+  const lower = map.toLowerCase();
+  const dlc4 = /^m(c\d+m\d+.*)$/.exec(lower);
+  if (dlc4) return dlc4[1];
+  const l4d1 = /^(l4d_(?:vs_)?)m([a-z]+\d.*)$/.exec(lower);
+  return l4d1 ? `${l4d1[1]}${l4d1[2]}` : null;
+}
+
+/** The original map of a mirrored one in MIRROR_CAMPAIGNS
+ *  (mc1m3_mall -> c1m3_mall), or null for every other map. For chapter
+ *  names and numbers, which the mirror shares with its original. */
+export function mirrorMapOriginal(map: string): string | null {
+  return MIRROR_BY_MAP.has(map.toLowerCase()) ? mirroredMapOriginal(map) : null;
+}
+
 /** Where Crash Center starts. Shared with Dead Center: the two differ only in
  *  where the site stops them (Dead Center after Mall, Crash Center after
  *  Alleys), because the game itself can give each map only one mission. */
@@ -124,6 +228,11 @@ const CAMPAIGN_BY_DLC4_NUMBER: Record<string, string> = {
 
 export function campaignForMap(map: string): string | null {
   const lower = map.toLowerCase();
+
+  // Before both patterns: mc1m1_hotel would otherwise fall through to null
+  // and l4d_vs_mhospital01 read its campaign word as "mhospital".
+  const mirror = MIRROR_BY_MAP.get(lower);
+  if (mirror) return mirror;
 
   const dlc4 = /^c(\d+)m\d+/.exec(lower);
   if (dlc4) return CAMPAIGN_BY_DLC4_NUMBER[dlc4[1]] ?? null;

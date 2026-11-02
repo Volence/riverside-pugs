@@ -14,8 +14,11 @@ import { parseKeyValues, type KvNode } from './vpk.js';
  * maps in proportion), and rounded to 0.05. A harder map is worth more, so
  * every map carries about the same weight in a match. Only maps with at
  * least 50 completed PUGs are recalculated; the rest keep their numbers.
- * A mirrored map (l4d_vs_mX) plays and scores as its original l4d_vs_X: its
- * rounds count towards the original's rate and it takes the same number.
+ * A mirrored map (l4d_vs_mX) keeps its own number in Season 1 (owner,
+ * 2026-11-02): the mirror packs players already downloaded carry the old
+ * ladder in their mission files and are not repacked, so the site must not
+ * show the original's new number for them. Its rounds still fold into the
+ * original's rate when the next season's table is computed (foldMirrors).
  *
  * The servers read the multiplier from the mission files (deploy repo,
  * tools/season-multipliers), so the table is computed once per season by
@@ -226,12 +229,12 @@ export function loadMultiplierTable(path = MULTIPLIER_TABLE_PATH): SeasonMultipl
 }
 
 /** One map's public line: its multiplier, the old one, and the saferoom rate
- *  that set it. Mirrors answer with their original's line. */
+ *  that set it. A mirror answers only with a row of its own, which this
+ *  season's table does not have: it kept its number. */
 export interface MapMultiplier { after: number; before: number; saferoomRate: number | null; matches: number; recalculated: boolean }
 
 export function multiplierFor(table: SeasonMultiplierTable, map: string): MapMultiplier | null {
-  const known = new Set(table.maps.map((m) => m.map.toLowerCase()));
-  const key = mirrorOriginal(map, known) ?? map.toLowerCase();
+  const key = map.toLowerCase();
   const row = table.maps.find((m) => m.map.toLowerCase() === key);
   if (!row) return null;
   return { after: row.after, before: row.before, saferoomRate: row.saferoomRate, matches: row.matches, recalculated: row.recalculated };
