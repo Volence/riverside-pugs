@@ -96,6 +96,7 @@ const SECTION_INTROS: Record<string, string> = {
   'setup/fleet': 'What each game server is running right now.',
   'setup/deploy': 'Review and send server config commits to the fleet.',
   'setup/seasons': 'The current season and starting a new one.',
+  'setup/news': 'Staff announcements and patch notes, posted to the site and Discord.',
   'setup/rulesets': 'Match rules for bookings and events.',
   'setup/configs': 'The server configs bookings and events can run.',
   'setup/settings': 'Site-wide switches: queue, Discord, competitive and more.',
@@ -105,6 +106,7 @@ const SECTION_INTROS: Record<string, string> = {
   'balance/knobs': 'The live balance values and what the next match would run.',
   'balance/values': 'Every game value, as the public Game values page shows it.',
   'balance/looks': 'How each night mode look plays, per campaign.',
+  'balance/teams': 'How queue teams were picked: the stat-aware tie-break, its holdout and results.',
 };
 
 /**
