@@ -626,6 +626,8 @@ export class Matchmaker {
       if (!p || coming.has(p) || this.queue.has(p)) return true;
       const n = this.notices.get(id);
       this.notices.set(id, { notReady: n?.notReady ?? [], youWereReady: n?.youWereReady ?? true, ...n, duoMissed: p });
+      // Out of the queue, so out of side games, as for anyone who leaves.
+      this.sideOptIn.delete(id);
       return false;
     });
   }
