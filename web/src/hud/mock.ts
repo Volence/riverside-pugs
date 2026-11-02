@@ -876,13 +876,13 @@ function paintAbilityRing(ctx: CanvasRenderingContext2D, r: Rect, design: HudDes
  * progress (so a standing Hunter, with none, draws nothing: probe Q16a,
  * /home/volence/l4d/hud/probe-phase2-infected/b9/shots-v2/crops/centre-af.png b),
  * else the ready colour, or the attack colour with a survivor in reach.
- * The preview's Recharging draws the ring's sample share. Never drawn with
- * the game's crosshair hidden: never_draw takes the whole HudCrosshair
- * (probe Q16b, b10/shots/crops/centre-bcef.png).
+ * The preview's Recharging draws the ring's sample share. Hiding the game's
+ * crosshair keeps it (build.ts gameCrosshairPass blanks only the icon; probe
+ * XR, /home/volence/l4d/hud/probe-xhair-ring/ab-alpha.jpg).
  */
 function paintAbilityMarker(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesign, _k: number, onAsset?: () => void, view: HudView = {}) {
   const state = previewOf(view.state);
-  if (design.hideGameCrosshair || state.infected !== 'alive' || state.ability === 'notReady') return;
+  if (state.infected !== 'alive' || state.ability === 'notReady') return;
   const c = kvFind(buildTrees(design)('scripts/hudlayout.res'), ['HudCrosshair']);
   const key = state.ability === 'ready' ? 'ability_ready_color' : 'ability_charging_color';
   const rgba = rgbaOf(design, (c && pcGet(c, key)) ?? '255 255 255 255');
@@ -1071,9 +1071,17 @@ function paintTankPanel(ctx: CanvasRenderingContext2D, r: Rect, design: HudDesig
       ctx.fillRect(b.x, b.y, 1, b.h);
       ctx.fillRect(b.x + b.w - 1, b.y, 1, b.h);
       const inner = b.w - 2 * FRUST_FILL_INSET;
-      const w = inner * FRUST_SAMPLE;
-      const x = pcGet(bar, 'east_aligned') === '0' ? b.x + FRUST_FILL_INSET : b.x + b.w - FRUST_FILL_INSET - w;
-      ctx.fillRect(x, b.y + FRUST_FILL_INSET, w, b.h - 2 * FRUST_FILL_INSET);
+      const west = pcGet(bar, 'east_aligned') === '0';
+      // DrawBar (client.dylib 0x3a5d90) fills across while the bar is wider than tall, else up from the
+      // bottom; east_aligned 1 slides a full bar across instead, so only a west-aligned tall bar fills upward.
+      if (west && b.h >= b.w) {
+        const tall = (b.h - 2 * FRUST_FILL_INSET) * FRUST_SAMPLE;
+        ctx.fillRect(b.x + FRUST_FILL_INSET, b.y + b.h - FRUST_FILL_INSET - tall, inner, tall);
+      } else {
+        const w = inner * FRUST_SAMPLE;
+        const x = west ? b.x + FRUST_FILL_INSET : b.x + b.w - FRUST_FILL_INSET - w;
+        ctx.fillRect(x, b.y + FRUST_FILL_INSET, w, b.h - 2 * FRUST_FILL_INSET);
+      }
     }
     for (const [name, s] of FRUST_LINES) {
       const n = shown(name);

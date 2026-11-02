@@ -126,6 +126,17 @@ describe('the frustration meter drawn from its file (plan task Z3)', () => {
     expect(all.filter((x) => x.m === 'fillRect').map((x) => x.a)).toContainEqual([r.x * K + 2, (r.y + 53) * K + 2, (150 * K - 4) / 2, 8 * K - 4]);
   });
 
+  it('fills a west bar at least as tall as wide from the bottom, and slides an east one across (DrawBar 0x3a5d90)', () => {
+    _setProbe('T1', true);
+    const tall = (east: boolean) => validateDesign({ v: 1, children: { tankPanel: { FrustrationBar: { w: 10, h: 40, keys: { east_aligned: east } } } } });
+    const fills = (d: ReturnType<typeof validateDesign>) => calls(d, TANK).filter((x) => x.m === 'fillRect' && x.fill === 'rgba(255,255,255,1)').map((x) => x.a);
+    const west = tall(false);
+    const r = elementRect(west, 'tankPanel', west.aspect);
+    const x = r.x * K, y = (r.y + 53) * K, w = 10 * K, h = 40 * K;
+    expect(fills(west)).toContainEqual([x + 2, y + h - 2 - (h - 4) / 2, w - 4, (h - 4) / 2]);
+    expect(fills(tall(true))).toContainEqual([x + w - 2 - (w - 4) / 2, y + 2, (w - 4) / 2, h - 4]);
+  });
+
   it('shows only for a spawned Tank, and is picked only then', () => {
     const d = validateDesign({ v: 1 });
     expect(text(calls(d, DEFAULT_PREVIEW), 'ATTACK THE SURVIVORS')).toBeUndefined();

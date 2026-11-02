@@ -260,7 +260,7 @@ describe('the panels under the live board', () => {
     mockAdmin.overview.mockResolvedValue(o);
     renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
-    expect(screen.getByText('Aborted')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: /Aborted/ }));
     expect(screen.getByText(/181 - 105/)).toBeTruthy();
     expect(screen.getByText(/left: mayhem/)).toBeTruthy();
     expect(screen.getByText('#80').closest('a')?.getAttribute('href')).toBe('/match/80');
@@ -294,8 +294,9 @@ describe('the panels under the live board', () => {
     mockAdmin.overview.mockResolvedValue(o);
     renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
-    expect(screen.getByText('Team B 1:30 on map 2')).toBeTruthy();
-    expect(screen.getByText('Reconnect 0:20 on map 3')).toBeTruthy();
+    // Short chips, with the full sentence on hover.
+    expect(screen.getByText('B 1:30 · M2').getAttribute('title')).toBe('Team B 1:30 on map 2');
+    expect(screen.getByText('Reconnect 0:20 · M3').getAttribute('title')).toBe('Reconnect 0:20 on map 3');
   });
 
   it('lists each recent match\'s ready-ups with how long and who readied last', async () => {
@@ -314,8 +315,29 @@ describe('the panels under the live board', () => {
     mockAdmin.overview.mockResolvedValue(o);
     renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
+    // One chip per map, the slow one (over two minutes) marked; the "last to
+    // ready" detail opens on click.
+    const slow = screen.getByText('M1 2:10');
+    expect(slow.className).toContain('rres__rchip--bad');
+    expect(screen.getByText('M2 0:25').className).toContain('rres__rchip--ok');
+    expect(screen.queryByText('2:10 on map 1, last killshot')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /who was last/i }));
     expect(screen.getByText('2:10 on map 1, last killshot')).toBeTruthy();
     expect(screen.getByText('0:25 on map 2')).toBeTruthy();
+  });
+
+  it('marks a tournament game and names its teams in the recent results', async () => {
+    const o = overview();
+    o.recent = [{
+      id: 798, campaign: 'blood_harvest', endedAt: '2026-10-23T08:44:15Z', teamAScore: 1107, teamBScore: 925, winner: 'a', forecast: null,
+      pauses: [], readyups: [],
+      booked: { kind: 'tournament', a: { name: 'Bone Breakage', tag: 'BB' }, b: { name: 'Poop Packers', tag: 'PP' }, event: { slug: 'staff-test-ignore', name: 'Staff Test - ignore', matchId: 1 } },
+    }];
+    mockAdmin.overview.mockResolvedValue(o);
+    renderAdmin('/admin/live');
+    await waitFor(() => expect(screen.getByText('Tournament')).toBeTruthy());
+    expect(screen.getByText('BB').closest('.rres__side')!.className).toContain('rres__side--won');
+    expect(screen.getByText('PP').closest('.rres__side')!.className).not.toContain('rres__side--won');
   });
 
   it('shows the slow-to-ready table so a repeat offender stands out', async () => {
@@ -327,7 +349,8 @@ describe('the panels under the live board', () => {
     mockAdmin.overview.mockResolvedValue(o);
     renderAdmin('/admin/live');
     await waitFor(() => expect(screen.getByText('Dallas')).toBeTruthy());
-    expect(screen.getByText('Slow to ready')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Slow to ready' }));
+    expect(screen.getByRole('tab', { name: 'Slow to ready' }).getAttribute('aria-selected')).toBe('true');
     const row = screen.getByText('killshot').closest('tr')!;
     expect(row.textContent).toContain('5 of 6');
     expect(row.textContent).toContain('1:40');
@@ -374,7 +397,8 @@ describe('AdminCampaigns', () => {
   it('shows free disk space so an admin sees headroom before uploading', async () => {
     mockAdmin.campaigns.mockResolvedValue({ free: 11 * 1024 ** 3, campaigns: [] });
     renderAdmin('/admin/setup/campaigns');
-    expect(await waitFor(() => screen.getByText(/11(\.0)? GB free/i))).toBeTruthy();
+    expect(await waitFor(() => screen.getByText(/^11(\.0)? GB$/))).toBeTruthy();
+    expect(screen.getByText('free for uploads')).toBeTruthy();
   });
 
   // Every chapter of a campaign shares its slug, so a list keyed on ch.slug
@@ -698,6 +722,15 @@ describe('the panel shell', () => {
     fireEvent.click(setup);
     await waitFor(() => expect(location.pathname).toBe('/admin/setup'));
     expect(screen.getByRole('tab', { name: 'Settings' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  // The header is the screen's name and what it is for, not just "Admin".
+  it('heads each screen with its section name and an intro line', async () => {
+    mockAdmin.audit.mockResolvedValue({ actions: [] });
+    renderAdmin('/admin/setup/audit');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Audit');
+    expect(screen.getByText('Every staff action, newest first.')).toBeTruthy();
+    expect(screen.getByText('Admin · Setup')).toBeTruthy();
   });
 
   // The bug this pins: with only <Route path="/admin">, every deep link in

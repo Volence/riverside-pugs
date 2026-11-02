@@ -18,12 +18,13 @@ export function StandinsPanel({ eventId, canEdit, gen = 0 }: { eventId: number; 
   const [team, setTeam] = useState('');
   const [out, setOut] = useState('');
   const [scope, setScope] = useState<StandinScope>('match');
-  if (loadError) return <Panel><h3>Stand-ins</h3><p class="error">Could not load the stand-ins.</p></Panel>;
-  if (!data) return <Panel><h3>Stand-ins</h3></Panel>;
+  if (loadError) return <Panel class="evdesk__panel" id="evdesk-standins"><h3>Stand-ins</h3><p class="error">Could not load the stand-ins.</p></Panel>;
+  if (!data) return <Panel class="evdesk__panel" id="evdesk-standins"><h3>Stand-ins</h3></Panel>;
   const starters = data.teams.find((t) => String(t.entryId) === team)?.starters ?? [];
   return (
-    <Panel>
+    <Panel class="evdesk__panel" id="evdesk-standins">
       <h3>Stand-ins</h3>
+      <p class="evdesk__help">Bench players who can cover a missing player for a match.</p>
       {error && <p class="error" role="alert">{error}</p>}
       {canEdit ? (
         <div class="inlinerow">

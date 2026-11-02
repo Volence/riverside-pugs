@@ -474,6 +474,11 @@ export class AdminFeedPoster {
       case 'set_mod': return `${who} ${d.isMod ? 'made' : 'removed'} ${target} ${d.isMod ? 'a moderator' : 'as moderator'}`;
       case 'set_caster': return `${who} ${d.isCaster ? 'made' : 'removed'} ${target} ${d.isCaster ? 'a caster' : 'as caster'}`;
       case 'unlink_discord': return `${who} unlinked ${target}'s Discord`;
+      // Named by the Steam name: by now `target` already reads as the new name.
+      case 'set_display_name':
+        return `${who} set the display name of **${escapeName(String(d.steamName ?? ''))}** (${e.target}) to **${escapeName(String(d.to ?? ''))}** (was ${escapeName(String(d.from ?? ''))})`;
+      case 'clear_display_name':
+        return `${who} cleared the display name **${escapeName(String(d.from ?? ''))}** from ${target}, back to their Steam name`;
       case 'note': {
         // The note's own words, quoted, so the channel shows what was written
         // rather than that something was. Not for a note about a member of
@@ -488,6 +493,7 @@ export class AdminFeedPoster {
       case 'abort_match': return `${who} aborted match ${match}${Array.isArray(d.leftOut) && d.leftOut.length ? `, left out of the queue: ${d.leftOut.map((s) => this.name(String(s))).join(', ')}` : ''}`;
       case 'clear_noshows': return `${who} cleared the ${String(d.cleared)} no-show penalties from match ${match}`;
       case 'clear_penalty': return `${who} cleared one of ${target}'s penalties`;
+      case 'lift_timeout': return `${who} lifted ${target}'s queue timeout`;
       case 'noshow_extend': return `${who} moved match ${match}'s no-show deadline to ${String(d.extraMinutes)} minutes later than usual`;
       case 'cancel_pop': return `${who} cancelled a pop: ${String(d.requeued)} back in the queue${Array.isArray(d.excluded) && d.excluded.length ? `, left out ${d.excluded.map((s) => this.name(String(s))).join(', ')}` : ''}`;
       case 'restore_abandon_rating': return `${who} restored ${target}'s rating loss from abandoning match [#${String(d.matchId)}](${this.deps.publicUrl}/match/${String(d.matchId)}): ${escapeName(String(d.reason ?? ''))}. Season ratings were recomputed.`;

@@ -633,7 +633,7 @@ export async function adminEventRoutes(
   });
 
   /** Owner 2026-10-23: staff swap two starters between draft teams after the
-   *  teams are published and before the event goes live (entries.ts
+   *  teams are published, until the event ends (entries.ts
    *  swapDraftPlayers). After the commit: the admin audit and the DMs. */
   app.post('/api/admin/events/:id/draft/swap-players', async (req, reply) => {
     const me = requireAdmin(req, reply);
@@ -652,6 +652,8 @@ export async function adminEventRoutes(
     if (!r.ok) return refuseWith(reply, r);
     logAdmin(db, me, 'event_draft_swap_players', ev.id, { a, b });
     tellPlayersSwapped(opts, ev.id, a, b);
+    // Open rooms of either team (a live event) refresh to the new rosters.
+    for (const m of roomMatches(ev.id)) if ([a.entryId, b.entryId].some((id) => m.entry_a === id || m.entry_b === id)) opts.rooms?.pushChange(m.id);
     return r.value;
   });
 
@@ -779,6 +781,59 @@ export async function adminEventRoutes(
   roomAction('open-room', 'event_room_open');
   roomAction('reset-room', 'event_room_reset');
   roomAction('hold', 'event_hold');
+
+  /** Owner 2026-10-24: pause the whole event at once. Holds every match of a
+   *  live stage that has both teams and is not on a server yet (waiting,
+   *  veto, lineup, booking): their clocks stop and no room opens. Games
+   *  already on a box play on; hold one of those by itself if needed. */
+  const HOLD_ALL: ReadonlySet<string> = new Set(['waiting', 'veto', 'lineup', 'booking']);
+  app.post('/api/admin/events/:id/hold-all', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    if (ev.status !== 'live') return refuse(reply, 'not_live');
+    const nr = V.normalizeReason(((req.body ?? {}) as { reason?: unknown }).reason);
+    const reason = nr.ok ? nr.value ?? '' : '';
+    if (reason.length < 3) return refuse(reply, 'bad_reason');
+    const held: number[] = [];
+    for (const st of E.stagesOf(db, ev.id).filter((x) => x.status === 'live')) {
+      for (const m of P.matchesOf(db, st.id)) {
+        if (!HOLD_ALL.has(m.status) || m.entry_a === null || m.entry_b === null) continue;
+        if (R.holdMatch(db, { matchId: m.id, by: me, reason }).ok) held.push(m.id);
+      }
+    }
+    for (const id of held) opts.rooms?.pushChange(id);
+    logAdmin(db, me, 'event_hold_all', ev.id, { reason, matches: held });
+    return { held: held.length };
+  });
+
+  /** The other half: release every hold staff put on (the latest
+   *  match_held row of the match has an actor). Holds the clock or the
+   *  engine put on (a game lost, no result) stay for staff to read one by one. */
+  app.post('/api/admin/events/:id/release-all', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    if (!opts.series) return reply.code(404).send({ error: 'not found' });
+    const lastHeldBy = db.prepare(
+      `SELECT actor FROM event_log WHERE event_id = ? AND action = 'match_held' AND json_extract(detail, '$.matchId') = ? ORDER BY id DESC LIMIT 1`,
+    );
+    const released: number[] = [];
+    const failed: number[] = [];
+    for (const st of E.stagesOf(db, ev.id).filter((x) => x.status === 'live')) {
+      for (const m of P.matchesOf(db, st.id)) {
+        if (m.status !== 'admin_hold') continue;
+        const by = (lastHeldBy.get(ev.id, m.id) as { actor: string | null } | undefined)?.actor ?? null;
+        if (by === null) continue;
+        if (opts.series.releaseHold(m.id, me).ok) released.push(m.id); else failed.push(m.id);
+      }
+    }
+    for (const id of released) opts.rooms?.pushChange(id);
+    logAdmin(db, me, 'event_release_all', ev.id, { matches: released, failed });
+    return { released: released.length, failed: failed.length };
+  });
 
   /** Plan T4 Ruling 10: the stage's round schedule, applied at once on a
    *  started stage. One outer transaction (the inner ones become

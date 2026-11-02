@@ -523,11 +523,42 @@ describe('queue-filling alert', () => {
     // Only the role. A queue alert must never mass-ping people by name.
     expect(a.mentionRoleIds).toEqual([ROLE]);
     expect(a.mentionUserIds).toEqual([]);
-    const buttons = a.components.flat();
-    expect(buttons.some((b) => b.kind === 'button' && b.customId === 'q:join')).toBe(true);
-    expect(buttons.some((b) => b.kind === 'link' && b.url === 'https://pug.test/')).toBe(true);
+    // In the queue channel the panel right below has Join: no buttons of its own.
+    expect(a.components).toEqual([]);
+    expect(a.content).toContain('queue panel below');
     expect(pings[0].channelId).toBe(CH);
     expect(alertRows().map((r) => r.state)).toEqual(['open']);
+  });
+
+  it('keeps Join and the website link on an alert posted in a channel of its own', async () => {
+    setRole();
+    setSetting(db, 'discord_queue_alert_channel_id', ALERT_CH);
+    await build().start();
+    await queueTo(6);
+    expect(pings[0].channelId).toBe(ALERT_CH);
+    const buttons = pings[0].payload.components.flat();
+    expect(buttons.some((b) => b.kind === 'button' && b.customId === 'q:join')).toBe(true);
+    expect(buttons.some((b) => b.kind === 'link' && b.url === 'https://pug.test/')).toBe(true);
+  });
+
+  it('deletes a closed alert once it has been up ten minutes, and only then', async () => {
+    setRole();
+    await build().start();
+    await queueTo(6);
+    const id = pings[0].id;
+    await queueTo(0);
+    expect(alertRows().map((r) => r.state)).toEqual(['emptied']);
+    await sync.pass();
+    expect(t.byId(id)!.deleted).toBeFalsy();
+    // updated_at is SQLite's own clock; the sweep reads the sync's.
+    const sql = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+    db.prepare("UPDATE discord_messages SET updated_at = ? WHERE kind = 'alert'").run(sql(clock - 9 * MIN));
+    await sync.pass();
+    expect(t.byId(id)!.deleted).toBeFalsy();
+    db.prepare("UPDATE discord_messages SET updated_at = ? WHERE kind = 'alert'").run(sql(clock - 11 * MIN));
+    await sync.pass();
+    expect(t.byId(id)!.deleted).toBe(true);
+    expect(alertRows().map((r) => r.state)).toEqual(['removed']);
   });
 
   it('follows the threshold setting', async () => {

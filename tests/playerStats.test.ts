@@ -206,6 +206,19 @@ describe('mapDetail', () => {
     expect(mine.stats.ck).toBe(16);
   });
 
+  // The chapter list comes from the campaign registry, which reads the mission
+  // files (MISSIONS_DIR, set on the box, unset here), so it is empty in tests.
+  it('carries each player face and a chapter list', () => {
+    seedMatch(db, 1, [{ map: 'l4d_vs_airport02_offices', a: 300, b: 100 }], {});
+    db.prepare("UPDATE players SET avatar = 'https://img/me.jpg' WHERE steamid = ?").run(ME);
+    const d = mapDetail(db, 'l4d_vs_airport02_offices')!;
+    expect(d.players.find((p) => p.steamid === ME)!.avatar).toBe('https://img/me.jpg');
+    expect(d.players.find((p) => p.steamid === OTHER)!.avatar).toBeNull();
+    expect(d.campaign).toBe('dead_air');
+    expect(d.display).toBeNull();
+    expect(Array.isArray(d.chapters)).toBe(true);
+  });
+
   it('includes both teams, scored from each side own perspective', () => {
     seedMatch(db, 1, [{ map: 'airport01', a: 400, b: 50 }], {});
     const d = mapDetail(db, 'airport01')!;

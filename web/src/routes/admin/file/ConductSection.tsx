@@ -6,13 +6,15 @@ import { fmtTime } from '../useAction';
 const where = (mapOrdinal: number, half: number | null) =>
   `map ${mapOrdinal + 1}${half ? `, round ${half}` : ''}`;
 
-/** A number beside the league's, with the unit once. */
-function versus(mine: string, league: string | null) {
+/** One figure beside the league's, as a stat: the label above, the number
+ *  large, the league's below it in muted. */
+function Stat({ label, mine, league }: { label: string; mine: string; league: string | null }) {
   return (
-    <>
-      <strong>{mine}</strong>
-      {league !== null && <span class="muted"> (league {league})</span>}
-    </>
+    <div class="file-stat">
+      <span class="file-stat__label">{label}</span>
+      <span class="file-stat__n">{mine}</span>
+      {league !== null && <span class="file-stat__vs">league {league}</span>}
+    </div>
   );
 }
 
@@ -22,20 +24,25 @@ function Readyups({ r }: { r: Conduct['readyups'] }) {
     : `about 1 in ${Math.max(1, Math.round(1 / Math.max(r.leagueLastShare, 0.01)))}`;
   return (
     <>
-      <p>
-        Average time not ready:{' '}
-        {versus(fmtClock(r.avgSeconds ?? 0), r.leagueAvgSeconds === null ? null : fmtClock(r.leagueAvgSeconds))}
-        {' · '}Last to ready in {versus(`${r.timesLast} of ${r.count}`, leagueLast)}
-      </p>
+      <div class="file-stats">
+        <Stat label="Average time not ready" mine={fmtClock(r.avgSeconds ?? 0)}
+          league={r.leagueAvgSeconds === null ? null : fmtClock(r.leagueAvgSeconds)} />
+        <Stat label="Last to ready" mine={`${r.timesLast} of ${r.count}`} league={leagueLast} />
+      </div>
       {r.slowest.length > 0 && (
-        <ul class="admin-list">
-          {r.slowest.map((s) => (
-            <li key={`${s.matchId}-${s.mapOrdinal}-${s.half}`}>
-              <a href={`/match/${s.matchId}`}>#{s.matchId}</a> {where(s.mapOrdinal, s.half)}
-              {' · '}{fmtClock(s.seconds)} not ready{s.wasLast && <span class="admin-warn"> · last</span>}
-            </li>
-          ))}
-        </ul>
+        <>
+          <p class="file-help">Slowest ready-ups</p>
+          <ul class="file-rows">
+            {r.slowest.map((s) => (
+              <li key={`${s.matchId}-${s.mapOrdinal}-${s.half}`} class="file-row file-row--line">
+                <a href={`/match/${s.matchId}`}>#{s.matchId}</a>
+                <span class="muted">{where(s.mapOrdinal, s.half)}</span>
+                <span class="file-row__fig">{fmtClock(s.seconds)} not ready</span>
+                {s.wasLast && <span class="file-pill file-pill--warn">last</span>}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </>
   );
@@ -52,18 +59,22 @@ function Pauses({ p }: { p: Conduct['pauses'] }) {
   }
   return (
     <>
-      <p>
-        <strong>{p.called}</strong> pause{p.called === 1 ? '' : 's'} called in {p.matchesSince} match
-        {p.matchesSince === 1 ? '' : 'es'}, {fmtClock(p.totalSeconds)} paused in all
-        <span class="muted"> · tracked since {fmtTime(p.trackedSince)}</span>
+      <div class="file-stats">
+        <Stat label="Pauses called" mine={String(p.called)} league={null} />
+        <Stat label="Time paused in all" mine={fmtClock(p.totalSeconds)} league={null} />
+      </div>
+      <p class="file-help">
+        {p.called} pause{p.called === 1 ? '' : 's'} called in {p.matchesSince} match{p.matchesSince === 1 ? '' : 'es'}
+        {' · '}tracked since {fmtTime(p.trackedSince)}
       </p>
       {p.recent.length > 0 && (
-        <ul class="admin-list">
+        <ul class="file-rows">
           {p.recent.map((x) => (
-            <li key={`${x.matchId}-${x.startedAt}`}>
-              <a href={`/match/${x.matchId}`}>#{x.matchId}</a> {where(x.mapOrdinal, x.half)}
-              {' · '}{x.seconds === null ? 'no end recorded' : fmtClock(x.seconds)}
-              <span class="muted"> · {fmtTime(x.startedAt)}</span>
+            <li key={`${x.matchId}-${x.startedAt}`} class="file-row file-row--line">
+              <a href={`/match/${x.matchId}`}>#{x.matchId}</a>
+              <span class="muted">{where(x.mapOrdinal, x.half)}</span>
+              <span class="file-row__fig">{x.seconds === null ? 'no end recorded' : fmtClock(x.seconds)}</span>
+              <span class="muted file-row__when">{fmtTime(x.startedAt)}</span>
             </li>
           ))}
         </ul>
@@ -79,12 +90,18 @@ export function ConductSection({ d }: { d: PlayerFileData }) {
   const c = d.sections.conduct;
   if (!c) return null;
   return (
-    <Panel class="file-section">
+    <Panel class="file-section" id="conduct">
       <h3>Conduct</h3>
-      <h4>Ready-ups</h4>
-      <Readyups r={c.readyups} />
-      <h4>Pauses</h4>
-      <Pauses p={c.pauses} />
+      <div class="file-split">
+        <div>
+          <h4>Ready-ups</h4>
+          <Readyups r={c.readyups} />
+        </div>
+        <div>
+          <h4>Pauses</h4>
+          <Pauses p={c.pauses} />
+        </div>
+      </div>
     </Panel>
   );
 }

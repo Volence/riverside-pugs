@@ -90,6 +90,26 @@ describe('admin room tools', () => {
     const log = f.db.prepare("SELECT action FROM admin_actions WHERE action LIKE 'event_room%' OR action = 'event_hold' ORDER BY id").all();
     expect(log).toEqual([{ action: 'event_room_open' }, { action: 'event_hold' }, { action: 'event_room_reset' }]);
   });
+
+  it('holds every match not on a server at once, and releases only the holds staff put on (owner 2026-10-24)', async () => {
+    const ev = `/api/admin/events/${f.eventId}`;
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS });
+    expect((await post(`${ev}/hold-all`, A[0], { reason: 'Break' })).statusCode).toBe(403);
+    expect((await post(`${ev}/hold-all`, ADMIN, { reason: ' x ' })).statusCode).toBe(400);
+    expect((await post(`${ev}/hold-all`, ADMIN, { reason: 'Ten minute break' })).json()).toEqual({ held: 1 });
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'admin_hold', hold_reason: 'Ten minute break', hold_from: 'veto' });
+    // Nothing left to hold: a second press holds nothing.
+    expect((await post(`${ev}/hold-all`, ADMIN, { reason: 'Ten minute break' })).json()).toEqual({ held: 0 });
+    expect((await post(`${ev}/release-all`, A[0])).statusCode).toBe(403);
+    expect((await post(`${ev}/release-all`, ADMIN)).json()).toEqual({ released: 1, failed: 0 });
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('veto');
+    // A hold the clock put on stays for staff to read.
+    must(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'nobody_ready' }));
+    expect((await post(`${ev}/release-all`, ADMIN)).json()).toEqual({ released: 0, failed: 0 });
+    expect(P.getMatch(f.db, f.matchId)!.status).toBe('admin_hold');
+    const log = f.db.prepare("SELECT action FROM admin_actions WHERE action IN ('event_hold_all', 'event_release_all') ORDER BY id").all();
+    expect(log).toEqual([{ action: 'event_hold_all' }, { action: 'event_hold_all' }, { action: 'event_release_all' }, { action: 'event_release_all' }]);
+  });
 });
 
 describe('final review: rooms follow results, disqualifications and cancels', () => {

@@ -27,6 +27,8 @@ export interface Me {
   discord?: { id: string; name: string } | null;
   /** In the Discord server; null when not linked or not known right now. */
   discordMember?: boolean | null;
+  /** Has finished a match on a custom or L4D2 campaign, so has the maps. */
+  mapsPlayed?: boolean;
   /** False when the server has no Twitch app configured: hide every Twitch control. */
   twitchEnabled?: boolean;
   twitch?: { id: string; name: string } | null;
@@ -384,7 +386,7 @@ export interface Leaderboard {
 /** Which panel of the weekly board an award sits in. */
 export type AwardGroup = 'survivor' | 'infected' | 'overall' | 'endorsed' | 'shame';
 
-export interface WeeklyWinner { steamid: string; name: string; value: number; games: number; detail: string | null }
+export interface WeeklyWinner { steamid: string; name: string; value: number; games: number; detail: string | null; avatar?: string | null }
 
 /** One line of an award: `avg` and `total` can both exist for the same
  *  `key` (two rows in the same card), `single` never shares its key. */
@@ -404,6 +406,17 @@ export interface WeeklyRecap {
 }
 
 export interface WeeklyData { week: string; live: boolean; minGames: number; awards: WeeklyAward[]; recap: WeeklyRecap }
+
+/** A player's place on one stat board for a week (src/weeklyPlayer.ts). Rank is
+ *  1 + how many have more, so ties share it; an average under the weekly
+ *  minimum carries a null rank. */
+export interface WeeklyStanding { value: number; rank: number | null; of: number; leader: number; gap: number }
+export interface WeeklyPlayerStat { key: string; label: string; group: AwardGroup; avg: WeeklyStanding | null; total: WeeklyStanding | null }
+export interface WeeklyPlayerWeek { week: string; games: number; minGames: number; qualifies: boolean; players: number; stats: WeeklyPlayerStat[] }
+export interface WeeklyHistoryRow {
+  week: string; live: boolean; games: number; skeets: number; commonKills: number; damageAsSi: number;
+  awards: { key: string; label: string; kind: 'avg' | 'total' | 'single' }[];
+}
 
 /** A player's history of weekly awards, shown on their profile. */
 export interface PlayerAward { award: string; label: string; count: number; weeks: string[] }
@@ -595,12 +608,20 @@ export interface WinPoint {
   scoreA: number; scoreB: number;
   /** Team A's chance of winning after this half. */
   pA: number;
+  /** Set on a point during a half (win_chance_live): ms into the half. The
+   *  score is then the one the half started from. Unset on half-end points. */
+  tMs?: number;
+  /** What just happened, on a point during a half. */
+  moment?: 'tank_spawn' | 'tank_death' | 'wipe' | 'saferoom';
 }
 
 export interface WinLine {
   points: WinPoint[];
-  /** Index into points of the biggest swing, null when nothing moved. */
+  /** Index into points of the biggest swing's end, null when nothing moved. */
   turning: number | null;
+  /** Where that swing starts, sent only on a line with points during halves;
+   *  absent means the point before `turning`. */
+  turningFrom?: number;
   /** The winner's lowest chance and where; null for a draw. */
   winnerLow: { index: number; p: number } | null;
   /** How many halves of history the odds come from. */
@@ -719,6 +740,8 @@ export interface MapIndexRow {
 export interface MapLeaderRow {
   steamid: string;
   name: string;
+  /** Optional: an older server sends none. */
+  avatar?: string | null;
   games: number;
   wins: number;
   losses: number;
@@ -757,6 +780,10 @@ export interface MapDetail {
   /** This season's score multiplier for the map and why; null before Season 1
    *  or for a map that kept its number. */
   multiplier?: MapMultiplier | null;
+  /** The chapter's own name, where the mission file gives one. */
+  display?: string | null;
+  /** The campaign's chapters in play order (optional: older servers). */
+  chapters?: { map: string; display: string | null }[];
 }
 
 export interface MapBreakdownRow {
@@ -870,6 +897,7 @@ export interface PendingEndorsement { matchId: number; remaining: number }
 export interface EndorseBoardRow {
   steamid: string; name: string; games: number;
   caller: number; clutch: number; vibes: number; total: number; givers: number;
+  avatar?: string | null;
 }
 export interface EndorseBoard { season: { id: number; name: string }; rows: EndorseBoardRow[] }
 
@@ -1097,6 +1125,9 @@ export interface AdminPlayerRow {
   isAdmin: boolean;
   isMod: boolean;
   discordName: string | null;
+  /** The Steam persona, only when an admin's display name is covering it.
+   *  Optional for a browser holding new JS against an older server. */
+  steamName?: string | null;
   sr: number | null;
   games: number;
   createdAt: string;
@@ -1263,7 +1294,7 @@ export interface AdminOverview {
      *  Optional only for a browser holding new JS against an older server. */
     practice?: { leaseId: number; kind: PracticeKind; ownerName: string; ending: boolean } | null;
   }[];
-  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[]; abandons?: AbandonRecord[] }[];
+  recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[]; abandons?: AbandonRecord[]; booked?: BookedSides | null }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
    *  path ended it, and is null for an admin abort or a reaped match. */
   aborted: {
@@ -1863,7 +1894,7 @@ export interface TimelineItem {
  *  too: it gates the Steam account panel's "Check now". */
 export type FileAction =
   | 'note' | 'looked_at' | 'open_ticket'
-  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
+  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh' | 'rename';
 
 export type InfectedClass = 'smoker' | 'boomer' | 'hunter';
 export interface ClassScores { hiddenShare: number | null; hiddenOccZ: number | null; revealShare: number | null }
@@ -1910,6 +1941,9 @@ export interface PlayerFileData {
     steamid: string; name: string; avatar: string | null; status: string;
     isAdmin: boolean; isMod: boolean; isCaster: boolean; discordName: string | null;
     sr: number | null; games: number; createdAt: string;
+    /** The Steam persona, and whether `name` is a display name an admin set.
+     *  Optional for a browser holding new JS against an older server. */
+    steamName?: string; nameOverridden?: boolean;
   };
   glance: FileSummaryData;
   timeline: TimelineItem[];
@@ -2014,6 +2048,9 @@ export const peopleApi = {
     get<{ bans: PeopleBan[] }>(`/api/admin/people/bans?filter=${filter}&q=${encodeURIComponent(q)}`, signal),
   note: (steamid: string, text: string) =>
     post<{ ok: true }>(`/api/admin/people/${encodeURIComponent(steamid)}/notes`, { text }),
+  /** Admin only (the file's `rename` action). Null puts the Steam name back. */
+  setDisplayName: (steamid: string, name: string | null) =>
+    post<{ ok: true; name: string }>(`/api/admin/people/${encodeURIComponent(steamid)}/display-name`, { name }),
   lookedAt: (steamid: string, note: string) =>
     post<{ ok: true; review: FileReview }>(`/api/admin/people/${encodeURIComponent(steamid)}/looked-at`, { note }),
   chat: (matchId: number, signal?: AbortSignal) =>
@@ -2469,6 +2506,8 @@ export interface StagePlayView {
   groups: { number: number; label: string }[]; rounds: PlayRound[]; standings: PlayStanding[]; advanceCount: number | null;
   /** Swiss, or a league paired Swiss (mirrors src/events/playViews.ts). */
   pairsAsItGoes: boolean;
+  /** Games won for Bo1/Bo3/Bo5, total score for a Bo2 (mirrors src/events/playViews.ts). */
+  series: { bestOf: number; totalScore: boolean };
 }
 /** The Play section of the desk (plan T2 Ruling 17). Mirrors
  *  src/routes/adminEvents.ts AdminEventPlay. */
@@ -3111,6 +3150,7 @@ export const adminApi = {
   signOutPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/sign-out`),
   clearPenalties: (steamid: string) => post(`/api/admin/players/${steamid}/clear-penalties`),
   clearPenalty: (steamid: string, id: number) => post(`/api/admin/players/${steamid}/penalties/${id}/clear`),
+  liftTimeout: (steamid: string) => post(`/api/admin/players/${steamid}/lift-timeout`),
   mergePlayer: (steamid: string, into: string, dryRun = false) =>
     post<{ plan: MergePlan; ok?: true }>(`/api/admin/players/${steamid}/merge`, { into, dryRun }),
   unaliasPlayer: (steamid: string) => post(`/api/admin/players/${steamid}/unalias`),
@@ -3255,6 +3295,8 @@ export const adminApi = {
   moveEventServer: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/move-server`),
   extendEventGrace: (id: number, matchId: number, minutes: number) => post(`/api/admin/events/${id}/matches/${matchId}/extend-grace`, { minutes }),
   releaseEventHold: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/release-hold`),
+  holdAllEventMatches: (id: number, reason: string) => post<{ held: number }>(`/api/admin/events/${id}/hold-all`, { reason }),
+  releaseAllEventHolds: (id: number) => post<{ released: number; failed: number }>(`/api/admin/events/${id}/release-all`),
   freezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/freeze`),
   unfreezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/unfreeze`),
   techPenaltyEventMatch: (id: number, matchId: number, pauseId: number, penalty: 'warning' | 'forfeit') =>
@@ -3561,6 +3603,10 @@ export const api = {
   endorseBoard: (signal?: AbortSignal, season?: number) =>
     get<EndorseBoard>(season === undefined ? '/api/leaderboard/endorsements' : `/api/leaderboard/endorsements?season=${season}`, signal),
   weekly: (signal?: AbortSignal, week?: string) => get<WeeklyData>(week ? `/api/weekly?week=${week}` : '/api/weekly', signal),
+  weeklyPlayer: (steamid: string, signal?: AbortSignal, week?: string) =>
+    get<WeeklyPlayerWeek>(`/api/weekly/player/${steamid}${week ? `?week=${week}` : ''}`, signal),
+  weeklyPlayerHistory: (steamid: string, signal?: AbortSignal) =>
+    get<{ weeks: WeeklyHistoryRow[] }>(`/api/weekly/player/${steamid}/history`, signal),
   weeklyWeeks: (signal?: AbortSignal) => get<{ current: string; weeks: string[] }>('/api/weekly/weeks', signal),
   matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),

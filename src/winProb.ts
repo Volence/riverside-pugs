@@ -21,16 +21,24 @@
  * (Brier 0.163). Treating halves as independent leaves it a little
  * underconfident, because a team that has outscored the other so far tends to
  * keep doing so; CALIBRATION is the one temperature that corrects for that.
+ *
+ * Team form (src/winForm.ts, the win_chance_form setting) is an option on
+ * top: it tilts each team's remaining halves by how it has played so far in
+ * the match and brings its own temperature. Without it every line is the
+ * plain one described here.
  */
 import type { DB } from './db.js';
 import { completedPug } from './matchKinds.js';
 import { unrecordedOrdinals } from './roundStats.js';
 import { campaignRegistry } from './campaignRegistry.js';
 import { stopAfterMap } from './stopPoint.js';
+import { teamForm, tilt, type FormParams } from './winForm.js';
+import { DEFAULT_DELAY_MS } from './replayTail.js';
+import { winPointsVersion } from './winLive/modelVersion.js';
 
 /** Score bucket width. Half scores run 0 to about 1,800; 20 keeps every
  *  convolution small without blurring a lead that decides a match. */
-const BIN = 20;
+export const BIN = 20;
 /** Highest half score kept apart; anything above lands in the last bucket. */
 const MAX_HALF = 2000;
 const NB = MAX_HALF / BIN + 1;
@@ -44,13 +52,34 @@ export const CALIBRATION = 1.15;
 /** A model older than this is rebuilt on the next request. */
 const MAX_AGE_MS = 30 * 60_000;
 
-export interface HalfRow { map: string; score: number; made: boolean | null }
+/** One half of history. `half` (1 or 2, which survivor turn on the map it
+ *  was) is only read by the per-half base (BuildOpts.perHalf). */
+export interface HalfRow { map: string; score: number; made: boolean | null; half?: 1 | 2 }
 
 export interface WinModel {
   builtAt: number;
   /** How many halves the model was built from, shown on the page. */
   halves: number;
   dist(map: string): Float64Array;
+  /** The map's typical made score (median made half, shrunk toward the
+   *  pool's), the unit the pooled shapes and the live half model use. A map
+   *  with no history gets the pooled value. */
+  scale(map: string): number;
+  /** The map's distribution for one survivor turn (1: the team surviving
+   *  first on the map), only on a model built with BuildOpts.perHalf. The
+   *  live line uses it (src/winLive); the public line never does. */
+  distHalf?(map: string, half: 1 | 2): Float64Array;
+}
+
+export interface BuildOpts {
+  /** Also build distHalf. dist and scale come out the same either way. */
+  perHalf?: boolean;
+}
+
+/** The base distribution of a half: the per-half one when the model has
+ *  it, else the map's. */
+export function halfBase(model: WinModel, map: string, half: 1 | 2): Float64Array {
+  return model.distHalf ? model.distHalf(map, half) : model.dist(map);
 }
 
 function median(xs: number[]): number {
@@ -71,7 +100,7 @@ function histogram(scores: Iterable<number>): Float64Array {
 }
 
 /** Build the model from raw halves. Pure, so tests can feed it directly. */
-export function buildWinModel(rows: HalfRow[], now = Date.now()): WinModel {
+export function buildWinModel(rows: HalfRow[], now = Date.now(), opts: BuildOpts = {}): WinModel {
   const byMap = new Map<string, HalfRow[]>();
   for (const r of rows) {
     const list = byMap.get(r.map);
@@ -129,7 +158,79 @@ export function buildWinModel(rows: HalfRow[], now = Date.now()): WinModel {
     cache.set(map, out);
     return out;
   };
-  return { builtAt: now, halves: rows.length, dist };
+  const model: WinModel = { builtAt: now, halves: rows.length, dist, scale: (map) => scale.get(map) ?? poolScale };
+  if (opts.perHalf) model.distHalf = perHalfDist(rows, byMap, scale, poolScale);
+  return model;
+}
+
+/**
+ * The per-half distributions (BuildOpts.perHalf). On the 2026-10-28 data the
+ * team surviving first on a map made the saferoom 34% of the time and the
+ * one surviving second 24%, which one distribution per map cannot show.
+ *
+ * Built in the same spirit as dist: a map's own half-h histogram, shrunk by
+ * SHRINK_ROUNDS toward a prior that is itself the map's both-halves
+ * histogram shrunk toward a pooled per-half shape. The pooled shape is
+ * dist's pooled shape made from half-h rows only, with a half-h make rate
+ * shrunk toward the pool's half-h rate. So a busy map is mostly its own
+ * half-h history, a thin map borrows the half difference from the pool, and
+ * a map never played is the pooled per-half shape outright. Rows without a
+ * half count for the map's both-halves histogram only.
+ *
+ * It lost the 2026-10-28 backtest (scripts/win-backtest.ts --part live):
+ * pooled half-end Brier 0.1761 against 0.1720 for dist, and it opened team A
+ * at 63% on the matches A won 49% of. From map 2 on the leader survives
+ * first, so most of the half 1 advantage is the better team going first,
+ * which the line already prices through the score. Kept for that record;
+ * nothing builds it outside the backtest.
+ */
+function perHalfDist(
+  rows: HalfRow[], byMap: Map<string, HalfRow[]>, scale: Map<string, number>, poolScale: number,
+): (map: string, half: 1 | 2) => Float64Array {
+  const known = rows.filter((r) => r.made !== null);
+  const allMade = known.filter((r) => r.made).length;
+  const pooled = ([1, 2] as const).map((h) => {
+    // With no row for this half, the half falls back to every known row, so
+    // both halves come out the same: no information, no difference.
+    const own = known.filter((r) => r.half === h);
+    const k = own.length ? own : known;
+    const made = k.filter((r) => r.made).length;
+    const rate = k.length ? made / k.length : known.length ? allMade / known.length : 0.4;
+    const normMade: number[] = [];
+    const normWiped: number[] = [];
+    for (const r of k) (r.made ? normMade : normWiped).push(r.score / (scale.get(r.map) ?? poolScale));
+    return { rows: own.length ? h : null, rate, normMade, normWiped };
+  });
+  const cache = new Map<string, Float64Array>();
+  return (map, half) => {
+    const key = `${half}\u0000${map}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const pool = pooled[half - 1];
+    const s = scale.get(map) ?? poolScale;
+    const all = byMap.get(map) ?? [];
+    const own = pool.rows === null ? all : all.filter((r) => r.half === half);
+    const ownKnown = own.filter((r) => r.made !== null);
+    const p = (ownKnown.filter((r) => r.made).length + pool.rate * RATE_PRIOR) / (ownKnown.length + RATE_PRIOR);
+    const made = histogram(pool.normMade.map((x) => x * s));
+    const wiped = histogram(pool.normWiped.map((x) => x * s));
+    const allHist = histogram(all.map((r) => r.score));
+    const ownHist = histogram(own.map((r) => r.score));
+    const w = all.length / (all.length + SHRINK_ROUNDS);
+    const wh = own.length / (own.length + SHRINK_ROUNDS);
+    const out = new Float64Array(NB);
+    if (pool.normMade.length + pool.normWiped.length + all.length === 0) out[0] = 1;
+    else {
+      for (let i = 0; i < NB; i++) {
+        const shape = pool.normMade.length && pool.normWiped.length
+          ? p * made[i] + (1 - p) * wiped[i]
+          : pool.normMade.length ? made[i] : wiped[i];
+        out[i] = wh * ownHist[i] + (1 - wh) * (w * allHist[i] + (1 - w) * shape);
+      }
+    }
+    cache.set(key, out);
+    return out;
+  };
 }
 
 function convolve(a: Float64Array, b: Float64Array): Float64Array {
@@ -142,11 +243,17 @@ function convolve(a: Float64Array, b: Float64Array): Float64Array {
   return out;
 }
 
-function remaining(model: WinModel, maps: string[]): Float64Array {
+/** The distribution of the sum of these halves. */
+export function sumDists(dists: Float64Array[]): Float64Array {
   let d: Float64Array = new Float64Array([1]);
-  for (const m of maps) d = convolve(d, model.dist(m));
+  for (const x of dists) d = convolve(d, x);
   return d;
 }
+
+/** Team form for winChance (src/winForm.ts): each team's remaining survivor
+ *  halves tilted by that much, and the temperature fitted with form in place
+ *  of CALIBRATION. All optional; none given is today's line. */
+export interface WinChanceOpts { tiltA?: number; tiltB?: number; calibration?: number }
 
 /**
  * Chance team A wins from here: `gap` is A's score minus B's so far, and each
@@ -154,10 +261,24 @@ function remaining(model: WinModel, maps: string[]): Float64Array {
  * counts as half a win either way. Calibrated; returns exactly 1, 0 or 0.5
  * once nothing is left to play.
  */
-export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: string[]): number {
-  if (mapsA.length === 0 && mapsB.length === 0) return gap > 0 ? 1 : gap < 0 ? 0 : 0.5;
-  const ra = remaining(model, mapsA);
-  const rb = remaining(model, mapsB);
+export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: string[], opts: WinChanceOpts = {}): number {
+  return winChanceDists(
+    gap,
+    mapsA.map((m) => tilt(model.dist(m), opts.tiltA ?? 0)),
+    mapsB.map((m) => tilt(model.dist(m), opts.tiltB ?? 0)),
+    opts.calibration,
+  );
+}
+
+/**
+ * winChance from the score distributions of each team's halves still to
+ * play, for callers that price a half by something other than its map's
+ * history (the per-half base, a half in progress). Same arithmetic.
+ */
+export function winChanceDists(gap: number, distsA: Float64Array[], distsB: Float64Array[], calibration = CALIBRATION): number {
+  if (distsA.length === 0 && distsB.length === 0) return gap > 0 ? 1 : gap < 0 ? 0 : 0.5;
+  const ra = sumDists(distsA);
+  const rb = sumDists(distsB);
   // P(gap + RA*BIN - RB*BIN > 0), summed without building the difference
   // distribution. Each bucket stands for scores spread evenly across its
   // width, so for each RA bucket the RB buckets wholly below team A's total
@@ -177,7 +298,7 @@ export function winChance(model: WinModel, gap: number, mapsA: string[], mapsB: 
     win += ra[i] * (cumB[j0] + rb[j0] * (limit - j0 + 0.5));
   }
   const raw = Math.min(1 - 1e-9, Math.max(1e-9, win));
-  const z = CALIBRATION * Math.log(raw / (1 - raw));
+  const z = calibration * Math.log(raw / (1 - raw));
   return 1 / (1 + Math.exp(-z));
 }
 
@@ -213,13 +334,21 @@ export interface WinPoint {
   scoreB: number;
   /** Team A's chance of winning after this half. */
   pA: number;
+  /** A point during a half (src/winLive/liveState.ts): ms into the half,
+   *  RoundMs. Unset on half-end points. */
+  tMs?: number;
+  /** What just happened, on a point during a half. */
+  moment?: 'tank_spawn' | 'tank_death' | 'wipe' | 'saferoom';
 }
 
 export interface WinLine {
   points: WinPoint[];
-  /** Index into points of the half with the biggest swing (from the point
-   *  before it), or null when nothing moved. */
+  /** Index into points of the biggest swing's end, or null when nothing
+   *  moved. On a half-end line the swing runs from the point before it. */
   turning: number | null;
+  /** Where the biggest swing starts, set only on a line with points during
+   *  halves (see biggestSwing): absent means `turning - 1`. */
+  turningFrom?: number;
   /** The winner's lowest chance along the way, and where; null for a draw
    *  and for a match still being played. */
   winnerLow: { index: number; p: number } | null;
@@ -234,15 +363,30 @@ export interface PlayedHalf { ordinal: number; half: number; survTeam: 'a' | 'b'
 /** One survivor half still to come: whose, and on which map. */
 export interface FutureHalf { team: 'a' | 'b'; map: string }
 
+/** Options for a line: `form` turns team form on (src/winForm.ts formOption
+ *  says when), with `siDmg` the per-half SI damage terms where feeds exist.
+ *  No caller passes siDmg today: SI damage did not improve the 2026-10-28
+ *  backtest, so the fitted siDamage strength is 0 and the term is unused. */
+export interface WinLineOpts { form?: FormParams; siDmg?: Map<string, number> }
+
 /**
  * The line through `played`, pricing each point against every later played
  * half plus `future`. Shared by finished matches (no future) and live ones.
+ * With form, each point tilts the halves after it by the form of the halves
+ * up to it, never later ones.
  */
-export function winLineFrom(model: WinModel, played: PlayedHalf[], future: FutureHalf[]): WinLine {
+export function winLineFrom(model: WinModel, played: PlayedHalf[], future: FutureHalf[], opts: WinLineOpts = {}): WinLine {
   const slots: FutureHalf[] = [...played.map((r) => ({ team: r.survTeam, map: r.map })), ...future];
   const rest = (from: number, team: 'a' | 'b') => slots.slice(from).filter((x) => x.team === team).map((x) => x.map);
+  const { form } = opts;
+  /** Chance after the first `n` played halves, with gap `gap`. */
+  const chance = (n: number, gap: number): number => {
+    if (!form) return winChance(model, gap, rest(n, 'a'), rest(n, 'b'));
+    const t = teamForm(model, played.slice(0, n), opts.siDmg, form);
+    return winChance(model, gap, rest(n, 'a'), rest(n, 'b'), { tiltA: t.a, tiltB: t.b, calibration: form.calibration });
+  };
   const points: WinPoint[] = [
-    { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: winChance(model, 0, rest(0, 'a'), rest(0, 'b')) },
+    { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: chance(0, 0) },
   ];
   let a = 0;
   let b = 0;
@@ -250,17 +394,11 @@ export function winLineFrom(model: WinModel, played: PlayedHalf[], future: Futur
     if (r.survTeam === 'a') a += r.score; else b += r.score;
     points.push({
       ordinal: r.ordinal, half: r.half, survTeam: r.survTeam, map: r.map,
-      scoreA: a, scoreB: b, pA: winChance(model, a - b, rest(i + 1, 'a'), rest(i + 1, 'b')),
+      scoreA: a, scoreB: b, pA: chance(i + 1, a - b),
     });
   });
 
-  let turning: number | null = null;
-  let biggest = 0;
-  for (let i = 1; i < points.length; i++) {
-    const swing = Math.abs(points[i].pA - points[i - 1].pA);
-    if (swing > biggest + 1e-9) { biggest = swing; turning = i; }
-  }
-  if (biggest < 0.01) turning = null;
+  const turning = biggestSwing(points)?.to ?? null;
 
   let winnerLow: WinLine['winnerLow'] = null;
   const w = future.length > 0 ? null : a > b ? 'a' : b > a ? 'b' : null;
@@ -271,6 +409,51 @@ export function winLineFrom(model: WinModel, played: PlayedHalf[], future: Futur
     });
   }
   return { points, turning, winnerLow, halves: model.halves, halvesLeft: future.length };
+}
+
+/** How far apart two points of one half may be and still make one swing.
+ *  A single 5 s step rarely moves much: a tank fight or a wipe plays out
+ *  over a few of them, so a swing is a change across a short span. */
+export const SWING_WINDOW_MS = 30_000;
+
+/**
+ * The biggest swing on `points`, from and to (indexes), or null when nothing
+ * moved a point. Each half is taken on its own: the point it starts from (the
+ * half-end point before it, or the opening point), its points during the half
+ * and its half-end point, which counts as at the time of its last point. The
+ * swing is the largest change between two of those at most SWING_WINDOW_MS
+ * apart, the earliest on a tie. On a line with no points during halves each
+ * half is just its two ends, so this is the biggest change from one half to
+ * the next. On a line with them, a half that has none (its replay was
+ * missing) is left out: its whole-half change would otherwise beat every
+ * 30 s window on the line.
+ */
+export function biggestSwing(points: WinPoint[]): { from: number; to: number } | null {
+  const halves: { i: number; t: number }[][] = [];
+  let half = [{ i: 0, t: 0 }];
+  for (let i = 1; i < points.length; i++) {
+    const tMs = points[i].tMs;
+    if (tMs !== undefined) { half.push({ i, t: tMs }); continue; }
+    half.push({ i, t: half[half.length - 1].t });
+    halves.push(half);
+    half = [{ i, t: 0 }];
+  }
+  // A half still being played: its points so far.
+  if (half.length > 1) halves.push(half);
+
+  const during = points.some((pt) => pt.tMs !== undefined);
+  let best: { from: number; to: number } | null = null;
+  let biggest = 0;
+  for (const h of halves) {
+    if (during && h.length <= 2) continue;
+    for (let b = 1; b < h.length; b++) {
+      for (let a = b - 1; a >= 0 && h[b].t - h[a].t <= SWING_WINDOW_MS; a--) {
+        const swing = Math.abs(points[h[b].i].pA - points[h[a].i].pA);
+        if (swing > biggest + 1e-9) { biggest = swing; best = { from: h[a].i, to: h[b].i }; }
+      }
+    }
+  }
+  return biggest < 0.01 ? null : best;
 }
 
 type RoundRow = PlayedHalf & { endedAt: string | null; reliable: number };
@@ -303,11 +486,11 @@ function wellFormed(rounds: PlayedHalf[], openEnd: boolean): boolean {
 }
 
 /**
- * The line for one finished match, or null when its score cannot carry one:
- * not completed, a map without both halves, or a map whose stored score is
- * not a result (see unrecordedOrdinals).
+ * A finished match's survivor halves in play order, or null when its score
+ * cannot carry a line: not completed, a map without both halves, or a map
+ * whose stored score is not a result (see unrecordedOrdinals).
  */
-export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db)): WinLine | null {
+export function finishedPlayed(db: DB, matchId: number): PlayedHalf[] | null {
   const match = db.prepare(
     'SELECT state, team_a_score AS a, team_b_score AS b FROM matches WHERE id = ?',
   ).get(matchId) as { state: string; a: number; b: number } | undefined;
@@ -323,17 +506,89 @@ export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel
   // The rounds have to add up to the result the page shows, or the line
   // would end somewhere the scoreboard does not.
   if (sumA !== match.a || sumB !== match.b) return null;
-  return winLineFrom(model, rounds, []);
+  return rounds.map(({ ordinal, half, survTeam, score, map }) => ({ ordinal, half, survTeam, score, map }));
 }
+
+/** matchWinLine's options: `live` adds the stored points during halves
+ *  (match_win_points, src/winLive/finishedLine.ts; the win_chance_live
+ *  setting, winLiveOption), the form price when `form` is given. */
+export interface FinishedLineOpts extends WinLineOpts { live?: boolean }
+
+/**
+ * The line for one finished match, or null when its score cannot carry one
+ * (see finishedPlayed). With `live`, each half's stored in-half points (on
+ * the current winPointsVersion(); rows on another are ignored) go just
+ * before its half-end point; with none stored it is the half-end line.
+ */
+export function matchWinLine(db: DB, matchId: number, model: WinModel = winModel(db), opts: FinishedLineOpts = {}): WinLine | null {
+  const played = finishedPlayed(db, matchId);
+  if (!played) return null;
+  const line = winLineFrom(model, played, [], opts);
+  if (!opts.live) return line;
+  return withInHalf(line, storedInHalfPoints(db, matchId, played, opts.form !== undefined), []);
+}
+
+/** The stored in-half points of a finished match by `${ordinal}:${half}`,
+ *  each with the score its half started from. */
+function storedInHalfPoints(db: DB, matchId: number, played: PlayedHalf[], form: boolean): Map<string, WinPoint[]> {
+  const rows = db.prepare(
+    `SELECT ordinal, half, t_ms AS tMs, p_a AS pA, p_a_form AS pAForm, moment FROM match_win_points
+     WHERE match_id = ? AND model_version = ? ORDER BY ordinal, half, t_ms`,
+  ).all(matchId, winPointsVersion()) as { ordinal: number; half: number; tMs: number; pA: number; pAForm: number; moment: WinPoint['moment'] | null }[];
+  const out = new Map<string, WinPoint[]>();
+  if (rows.length === 0) return out;
+  const halves = new Map<string, { r: PlayedHalf; scoreA: number; scoreB: number }>();
+  let a = 0, b = 0;
+  for (const r of played) {
+    halves.set(`${r.ordinal}:${r.half}`, { r, scoreA: a, scoreB: b });
+    if (r.survTeam === 'a') a += r.score; else b += r.score;
+  }
+  for (const row of rows) {
+    const k = `${row.ordinal}:${row.half}`;
+    const h = halves.get(k);
+    if (!h) continue;
+    const list = out.get(k) ?? [];
+    list.push({
+      ordinal: row.ordinal, half: row.half, survTeam: h.r.survTeam, map: h.r.map, scoreA: h.scoreA, scoreB: h.scoreB,
+      pA: form ? row.pAForm : row.pA, tMs: row.tMs, ...(row.moment ? { moment: row.moment } : {}),
+    });
+    out.set(k, list);
+  }
+  return out;
+}
+
+/** liveWinLine's options: `live` adds the points during halves
+ *  (src/winLive/liveState.ts, the win_chance_live setting, winLiveOption),
+ *  from state at least `delayMs` old (DEFAULT_DELAY_MS unless given: 0 is
+ *  the caster overlay's undelayed view and must be asked for). */
+export interface LiveLineOpts extends WinLineOpts { live?: boolean; nowMs?: number; delayMs?: number }
+
+/** What gives liveWinLine its points during halves: the in-half points of
+ *  each played half by `${ordinal}:${half}`, and the visible ones of the
+ *  half in progress. */
+export type InHalfProvider = (
+  db: DB, matchId: number, model: WinModel, played: PlayedHalf[], future: FutureHalf[],
+  opts: { form?: FormParams; nowMs: number; delayMs: number },
+) => { finished: Map<string, WinPoint[]>; current: WinPoint[] };
+
+/** src/winLive/liveState.ts registers itself here when it loads (the server
+ *  and every caller that asks for `live` import it). A hook rather than an
+ *  import because the web project's type check reads this module, and the
+ *  replay reader behind the live points would pull the server's routes in
+ *  with it. With nothing registered, `live` changes nothing. */
+let inHalfProvider: InHalfProvider | null = null;
+export function provideInHalfPoints(fn: InHalfProvider): void { inHalfProvider = fn; }
 
 /**
  * The line so far for a match being played, priced against the maps it still
  * has to play: the campaign's chapters up to its stop map (see stopAfterMap).
  * Null when that plan is unknown (no missions directory, an unregistered
  * campaign), when the maps played do not follow it, or when the rounds so far
- * are not whole halves in order. A half in progress counts as still to play.
+ * are not whole halves in order. A half in progress counts as still to play,
+ * and with `live` its points so far come after the last half-end point
+ * (each played half's own points before its half-end point).
  */
-export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db)): WinLine | null {
+export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db), opts: LiveLineOpts = {}): WinLine | null {
   // Scrims and event games choose their own maps (a stage's chapter count, a
   // tiebreak map), which the campaign's stop map does not know about.
   const kind = (db.prepare('SELECT kind FROM matches WHERE id = ?').get(matchId) as { kind: string } | undefined)?.kind;
@@ -363,5 +618,44 @@ export function liveWinLine(db: DB, matchId: number, campaign: string, model: Wi
   for (let o = nextOrdinal; o < plan.length; o++) {
     future.push({ team: 'a', map: plan[o] }, { team: 'b', map: plan[o] });
   }
-  return winLineFrom(model, played, future);
+  const line = winLineFrom(model, played, future, opts);
+  if (!opts.live || !inHalfProvider) return line;
+  const extra = inHalfProvider(db, matchId, model, played, future, {
+    form: opts.form, nowMs: opts.nowMs ?? Date.now(), delayMs: opts.delayMs ?? DEFAULT_DELAY_MS,
+  });
+  return withInHalf(line, extra.finished, extra.current);
+}
+
+/** `line` with each played half's in-half points just before its half-end
+ *  point and the half in progress's after the last. The swing (biggestSwing)
+ *  and the winner's low are taken again over every point, so either can land
+ *  during a half. */
+function withInHalf(line: WinLine, finished: Map<string, WinPoint[]>, current: WinPoint[]): WinLine {
+  if (finished.size === 0 && current.length === 0) return line;
+  const points: WinPoint[] = [line.points[0]];
+  for (let i = 1; i < line.points.length; i++) {
+    const p = line.points[i];
+    points.push(...(finished.get(`${p.ordinal}:${p.half}`) ?? []));
+    points.push(p);
+  }
+  points.push(...current);
+  const swing = biggestSwing(points);
+  // winnerLow is set only on a finished match with a winner, whose last
+  // point's score says who.
+  let winnerLow: WinLine['winnerLow'] = null;
+  if (line.winnerLow) {
+    const end = line.points[line.points.length - 1];
+    const w = end.scoreA > end.scoreB ? 'a' : 'b';
+    points.forEach((pt, index) => {
+      const p = w === 'a' ? pt.pA : 1 - pt.pA;
+      if (!winnerLow || p < winnerLow.p - 1e-9) winnerLow = { index, p };
+    });
+  }
+  return {
+    ...line,
+    points,
+    turning: swing?.to ?? null,
+    ...(swing ? { turningFrom: swing.from } : {}),
+    winnerLow,
+  };
 }

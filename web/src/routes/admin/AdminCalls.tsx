@@ -5,6 +5,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel, Tabs } from '../../components/bits';
 import { ticketUrl } from './adminRoutes';
 import { fmtTime, useAction } from './useAction';
+import { fmtAgo } from '../../format';
 
 const FILTERS: { key: 'open' | 'all'; label: string }[] = [
   { key: 'open', label: 'Open' }, { key: 'all', label: 'All' },
@@ -26,25 +27,29 @@ function About({ c }: { c: ModCallView }) {
 function CallRow({ c, action }: { c: ModCallView; action?: ComponentChildren }) {
   const where = [c.serverName ?? 'unknown server', c.map].filter(Boolean).join(' · ');
   return (
-    <div class="call-row">
-      <p>
-        <span class="muted">{fmtTime(c.createdAt)}</span>
-        {' '}<strong>{c.reasonLabel}</strong>
-        {' '}from <a href={`/player/${c.caller.steamid}`}>{c.caller.name}</a>
-        {c.via === 'tv' && <span class="admin-tag">SourceTV</span>}
-        {' '}<About c={c} />
-        <span class="muted"> · {where}</span>
-        {c.matchId !== null && <> · <a href={`/match/${c.matchId}`}>#{c.matchId}</a></>}
-        {c.matchId !== null && c.moment && (
-          <> · <a href={`/match/${c.matchId}?ordinal=${c.moment.ordinal}&half=${c.moment.half}&t=${c.moment.tMs}`}>replay moment</a></>
-        )}
-        {c.ticketId !== null && <> · <a href={ticketUrl(c.ticketId)}>ticket #{c.ticketId}</a></>}
-        {c.serverId !== null && <> · <a href={`/admin/live?chat=${c.serverId}`}>server chat</a></>}
-        {action && <> {action}</>}
-      </p>
+    <div class={`call-row${c.handledAt ? ' is-handled' : ''}`}>
+      <div class="call-row__head">
+        <span class="call-row__reason">{c.reasonLabel}</span>
+        <span class="call-row__who">
+          from <a href={`/player/${c.caller.steamid}`}>{c.caller.name}</a>
+          {c.via === 'tv' && <span class="admin-tag">SourceTV</span>}
+          {' '}<About c={c} />
+        </span>
+        <time class="call-row__when" title={fmtTime(c.createdAt)}>{fmtAgo(c.createdAt)}</time>
+        {action && <span class="call-row__act">{action}</span>}
+      </div>
       {c.text && <blockquote>{c.text}</blockquote>}
+      <p class="call-row__meta">
+        <span>{where}</span>
+        {c.matchId !== null && <a href={`/match/${c.matchId}`}>#{c.matchId}</a>}
+        {c.matchId !== null && c.moment && (
+          <a href={`/match/${c.matchId}?ordinal=${c.moment.ordinal}&half=${c.moment.half}&t=${c.moment.tMs}`}>replay moment</a>
+        )}
+        {c.ticketId !== null && <a href={ticketUrl(c.ticketId)}>ticket #{c.ticketId}</a>}
+        {c.serverId !== null && <a href={`/admin/live?chat=${c.serverId}`}>server chat</a>}
+      </p>
       {(c.note || c.handledAt) && (
-        <p class="muted">
+        <p class="call-row__handled">
           {c.note}
           {c.note && c.handledAt && ' · '}
           {c.handledAt && `Handled by ${c.handledBy ?? 'someone'} ${fmtTime(c.handledAt)}`}

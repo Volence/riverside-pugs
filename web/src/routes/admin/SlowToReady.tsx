@@ -6,6 +6,9 @@ import { formatTime } from '../../replay/ReplayControls';
  *  match is about eight ready-ups, so this is two or three matches. */
 export const MIN_READYUPS = 20;
 
+/** Rows shown before "Show all". */
+const TOP = 10;
+
 type SortKey = 'last' | 'avg' | 'total';
 const VALUE: Record<SortKey, (p: SlowToReady) => number> = {
   // The share, not the count: somebody last 20 times in 68 holds the lobby up
@@ -20,6 +23,8 @@ export function SlowToReadyTable({ rows }: { rows: SlowToReady[] }) {
   const [sort, setSort] = useState<SortKey>('last');
   const [desc, setDesc] = useState(true);
   const [all, setAll] = useState(false);
+  const [more, setMore] = useState(false);
+  const [find, setFind] = useState('');
   if (rows.length === 0) return null;
 
   const enough = rows.filter((p) => p.readyups >= MIN_READYUPS);
@@ -32,6 +37,10 @@ export function SlowToReadyTable({ rows }: { rows: SlowToReady[] }) {
     // Ties by sample size, then id, so the order never shuffles between polls.
     return (desc ? d : -d) || b.readyups - a.readyups || a.steamid.localeCompare(b.steamid);
   });
+  const q = find.trim().toLowerCase();
+  const matching = q ? sorted.filter((p) => p.name.toLowerCase().includes(q)) : sorted;
+  // The top of the list is the point; the long tail is one click away.
+  const listed = more || q ? matching : matching.slice(0, TOP);
   const pick = (k: SortKey) => {
     if (k === sort) setDesc(!desc);
     else { setSort(k); setDesc(true); }
@@ -45,35 +54,50 @@ export function SlowToReadyTable({ rows }: { rows: SlowToReady[] }) {
   );
 
   return (
-    <>
-      <h3>Slow to ready</h3>
+    <div class="slowready">
       <p class="muted">
         Across every counted match. "Last" is the share of their ready-ups where they were the one
         everybody was waiting on when the round went live. Click a column to sort by it.
       </p>
-      {canFilter && (
-        <label class="muted">
-          <input type="checkbox" checked={all} onChange={(e) => setAll((e.target as HTMLInputElement).checked)} />
-          {' '}Include players with fewer than {MIN_READYUPS} ready-ups
-        </label>
-      )}
+      <div class="slowready__tools">
+        <input type="search" value={find} placeholder="Find a player" aria-label="Find a player"
+          onInput={(e) => setFind((e.target as HTMLInputElement).value)} />
+        {canFilter && (
+          <label class="muted">
+            <input type="checkbox" checked={all} onChange={(e) => setAll((e.target as HTMLInputElement).checked)} />
+            {' '}Include players with fewer than {MIN_READYUPS} ready-ups
+          </label>
+        )}
+      </div>
       <div class="table-wrap">
-        <table class="admin-table">
+        <table class="admin-table slowready__table">
           <thead><tr><th>Player</th>{head('last')}{head('avg')}{head('total')}</tr></thead>
           <tbody>
-            {sorted.map((p) => (
-              <tr key={p.steamid}>
-                <td><a href={`/player/${p.steamid}`}>{p.name}</a></td>
-                <td class="num">
-                  {Math.round(VALUE.last(p) * 100)}% <span class="muted">{p.timesLast} of {p.readyups}</span>
-                </td>
-                <td class="num">{formatTime(p.avgSeconds * 1000)}</td>
-                <td class="num">{formatTime(p.totalSeconds * 1000)}</td>
-              </tr>
-            ))}
+            {listed.map((p) => {
+              const share = VALUE.last(p);
+              return (
+                <tr key={p.steamid}>
+                  <td><a href={`/player/${p.steamid}`}>{p.name}</a></td>
+                  <td class="num">
+                    <span class="slowready__share">
+                      <span class="slowready__track" aria-hidden="true"><span style={{ width: `${Math.round(share * 100)}%` }} /></span>
+                      <span class="slowready__pct">{Math.round(share * 100)}%</span>
+                      <span class="muted">{p.timesLast} of {p.readyups}</span>
+                    </span>
+                  </td>
+                  <td class="num">{formatTime(p.avgSeconds * 1000)}</td>
+                  <td class="num">{formatTime(p.totalSeconds * 1000)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
-    </>
+      {listed.length < matching.length && (
+        <div class="slowready__more">
+          <button class="chip" type="button" onClick={() => setMore(true)}>Show all {matching.length}</button>
+        </div>
+      )}
+    </div>
   );
 }

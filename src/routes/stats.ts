@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { avatarsOf } from '../avatars.js';
 import { mapLooksFor } from '../mapLooks.js';
 import type { DB } from '../db.js';
 import { createReadStream } from 'node:fs';
@@ -36,6 +37,8 @@ import { sessionsForMatch } from '../sourcetvSessions.js';
 import { abortCauseOf, abortParties } from '../matchAborts.js';
 import { isActiveStaff } from '../serverChat.js';
 import { matchWinLine } from '../winProb.js';
+import { formOption } from '../winForm.js';
+import { winLiveOption } from '../winLive/liveState.js';
 import { bookedSidesFor } from '../matchSides.js';
 
 /** A face on the recent-matches list. */
@@ -115,7 +118,9 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
       ? db.prepare('SELECT id, name FROM seasons WHERE id = ?').get(seasonId) as { id: number; name: string } | undefined
       : undefined;
     if (!season) return reply.code(404).send({ error: 'no such season' });
-    return { season, rows: endorsementBoard(db, season.id) };
+    const rows = endorsementBoard(db, season.id);
+    const faces = avatarsOf(db, rows.map((r) => r.steamid));
+    return { season, rows: rows.map((r) => ({ ...r, avatar: faces.get(r.steamid) ?? null })) };
   });
 
   /** Per-stat ladder. `self`-visibility stats are refused here rather than
@@ -218,7 +223,14 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
    *  standing, never to an anonymous visitor or one who is banned, inactive,
    *  or merged (see standing.ts inGoodStanding, which viewerOf already
    *  applies). discord_id itself is never selected at all. */
-  app.get('/api/live', async (req) => ({ matches: getLiveMatches(db, viewerOf(req) !== null) }));
+  app.get('/api/live', async (req) => {
+    const viewer = viewerOf(req);
+    // Team form on the win chance line is the win_chance_form setting, or an
+    // admin viewer, who sees it before it goes public (src/winForm.ts). The
+    // same for the line moving during a half (win_chance_live).
+    const admin = viewer !== null && isAdminViewer(viewer);
+    return { matches: getLiveMatches(db, viewer !== null, formOption(db, admin), winLiveOption(db, admin)) };
+  });
 
   /** Every map that has been played, so the map pages are discoverable. */
   // `pool` is the current vote rotation, so the page can put what you might
@@ -441,9 +453,12 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     // Win chance after every half, from the scoreboard alone (both teams start
     // at 50%, ratings play no part), so unlike the forecast above it is
     // public. Null when the score cannot carry a line; see matchWinLine.
+    // Team form is in it when win_chance_form is on, or for an admin viewer,
+    // and so are the stored points during halves with win_chance_live.
     let winLine: ReturnType<typeof matchWinLine> = null;
     try {
-      winLine = matchWinLine(db, id);
+      const admin = viewer !== null && isAdminViewer(viewer);
+      winLine = matchWinLine(db, id, undefined, { form: formOption(db, admin), live: winLiveOption(db, admin) });
     } catch (err) {
       req.log.warn({ err, matchId: id }, 'win line failed');
     }

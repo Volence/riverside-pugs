@@ -15,7 +15,7 @@ import {
   renderQueueAlertClosed, renderResult, type MatchCardState, type MatchView, type PlayerView, type ResultPlayer,
 } from './presenter.js';
 import { getSetting } from '../settings.js';
-import { decideAlert, lastAlertAt, openAlerts, queueAlertConfig, queueAlertRoleId, type AlertClose } from './queueAlert.js';
+import { decideAlert, expiredClosedAlerts, lastAlertAt, openAlerts, queueAlertConfig, queueAlertRoleId, type AlertClose } from './queueAlert.js';
 import { sideGamesEnabled, type SidePublicView } from '../sideGames.js';
 import { ABORT_REASON, abortParties, anyRequeued, type AbortCause } from '../matchAborts.js';
 
@@ -28,6 +28,8 @@ const ABORT_LINE_TTL_MIN = 5;
 
 import type { BotTransport, MessagePayload } from './transport.js';
 import { matchWinLine } from '../winProb.js';
+import { formOption } from '../winForm.js';
+import { winLiveOption } from '../winLive/liveState.js';
 
 /** Team voice channels, plugged in by voice.ts. Kept as a narrow hook so this
  *  file does not depend on how channels are made. */
@@ -381,6 +383,7 @@ export class DiscordSync {
     const popped = this.poppedSinceLastPass;
     this.poppedSinceLastPass = false;
     const cfg = queueAlertConfig(db, this.deps.channelId);
+    await this.sweepClosedAlerts();
     const open = openAlerts(db);
     // Older open alerts than the newest should not exist; close any found as
     // the newest would be, so none is left inviting people in.
@@ -407,6 +410,7 @@ export class DiscordSync {
     if (decision.kind === 'update') {
       const result = await this.safeEdit(current!.channel_id, current!.message_id, renderQueueAlert({
         count, size: QUEUE_SIZE, roleId: cfg.roleId, publicUrl: this.deps.publicUrl, ping: false,
+        inQueueChannel: current!.channel_id === this.deps.channelId,
       }));
       if (result === 'ok') this.alertShows.set(current!.message_id, count);
       // Deleted by hand: it is gone, and re-posting it would ping again.
@@ -423,6 +427,7 @@ export class DiscordSync {
     try {
       messageId = await this.deps.transport.send(cfg.channelId, renderQueueAlert({
         count, size: QUEUE_SIZE, roleId: cfg.roleId, publicUrl: this.deps.publicUrl,
+        inQueueChannel: cfg.channelId === this.deps.channelId,
       }));
       saveMessage(db, { kind: 'alert', ref, channelId: cfg.channelId, messageId, state: 'open' });
       this.alertShows.set(messageId, count);
@@ -442,6 +447,19 @@ export class DiscordSync {
         console.error('[discord] recording the queue alert failed:', saveErr);
       }
       return messageId !== null && cfg.channelId === this.deps.channelId;
+    }
+  }
+
+  /** Delete every closed alert whose linger has run out (ALERT_LINGER_MINUTES).
+   *  Marked removed first, so a failed delete (already gone by hand, missing
+   *  permissions) is not retried every pass. Never throws. */
+  private async sweepClosedAlerts(): Promise<void> {
+    const { db } = this.deps;
+    for (const a of expiredClosedAlerts(db, this.deps.now?.() ?? Date.now())) {
+      setMessageState(db, 'alert', a.ref, 'removed');
+      await this.deps.transport.remove(a.channel_id, a.message_id).catch((err: unknown) => {
+        console.error(`[discord] deleting closed queue alert ${a.message_id} failed:`, err);
+      });
     }
   }
 
@@ -638,10 +656,14 @@ export class DiscordSync {
 }
 
 /** The winner's lowest win chance along the way when it was a real comeback
- *  (under 25%), else null. Never lets a fault in the odds stop a result card. */
-function comebackFrom(db: DB, matchId: number): number | null {
+ *  (under 25%), else null. Never lets a fault in the odds stop a result card.
+ *  Exported for its test. */
+export function comebackFrom(db: DB, matchId: number): number | null {
   try {
-    const low = matchWinLine(db, matchId)?.winnerLow;
+    // Team form only once win_chance_form is on, and the low during a half
+    // only once win_chance_live is: the card is public, so neither takes the
+    // admin preview.
+    const low = matchWinLine(db, matchId, undefined, { form: formOption(db), live: winLiveOption(db) })?.winnerLow;
     return low && low.p < 0.25 ? low.p : null;
   } catch {
     return null;

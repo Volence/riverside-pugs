@@ -127,33 +127,41 @@ export function ReplayControls(
             tick {demoTickAt(demo, playback.tMs)}
           </span>
         )}
-        {SPEEDS.map((s) => (
-          <button
-            key={s}
-            class={`chip ${playback.speed === s ? 'is-on' : ''}`}
-            onClick={() => playback.setSpeed(s)}
-          >{s}x</button>
-        ))}
-        {live && (
-          <button
-            class={`chip ${playback.following ? 'is-on' : ''}`}
-            onClick={playback.follow}
-          >Live</button>
-        )}
-        <span class="replay__sep" aria-hidden="true" />
-        {/* Spec 7.1: fit, 2x, 4x, 6x. Wheel zoom lands between chips, and
-            then none is lit, which is honest. */}
-        {ZOOM_LEVELS.map((z) => (
-          <button
-            key={z}
-            class={`chip ${Math.abs(zoom - z) < 0.01 ? 'is-on' : ''}`}
-            onClick={() => setZoom(z)}
-            aria-label={z === 1 ? 'Zoom to fit' : `Zoom ${z}x`}
-          >{z === 1 ? 'Fit' : `${z}x`}</button>
-        ))}
+        {/* Labelled groups: a row of bare "1x 2x 4x Fit 2x 4x" chips read as
+            one list, and two of its labels were the same. */}
+        <div class="replay__group" role="group" aria-label="Speed">
+          <span class="replay__glabel" aria-hidden="true">Speed</span>
+          {SPEEDS.map((s) => (
+            <button
+              key={s}
+              class={`chip ${playback.speed === s ? 'is-on' : ''}`}
+              onClick={() => playback.setSpeed(s)}
+            >{s}x</button>
+          ))}
+          {live && (
+            <button
+              class={`chip ${playback.following ? 'is-on' : ''}`}
+              onClick={playback.follow}
+            >Live</button>
+          )}
+        </div>
+        <div class="replay__group" role="group" aria-label="Zoom">
+          <span class="replay__glabel" aria-hidden="true">Zoom</span>
+          {/* Spec 7.1: fit, 2x, 4x, 6x. Wheel zoom lands between chips, and
+              then none is lit, which is honest. */}
+          {ZOOM_LEVELS.map((z) => (
+            <button
+              key={z}
+              class={`chip ${Math.abs(zoom - z) < 0.01 ? 'is-on' : ''}`}
+              onClick={() => setZoom(z)}
+              aria-label={z === 1 ? 'Zoom to fit' : `Zoom ${z}x`}
+            >{z === 1 ? 'Fit' : `${z}x`}</button>
+          ))}
+        </div>
       </div>
 
-      <div class="replay__toolbar">
+      <div class="replay__toolbar" role="group" aria-label="Camera">
+        <span class="replay__glabel" aria-hidden="true">Camera</span>
         <button
           class={`chip ${follow.kind === 'free' ? 'is-on' : ''}`}
           onClick={() => setFollow(FREE)}

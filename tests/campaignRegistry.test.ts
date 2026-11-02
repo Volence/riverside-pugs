@@ -8,7 +8,7 @@ import { upsertPlayer } from '../src/players.js';
 import { ME, OTHER, seedMatch } from './playerStats.test.js';
 import {
   campaignRegistry, resolveCampaignForMap, invalidateCampaignCache, firstMapOf, stockChaptersOf,
-  setMissionsDirs, poolableCampaigns,
+  setMissionsDirs, poolableCampaigns, hasPlayedDownloadedCampaign,
 } from '../src/campaignRegistry.js';
 import { addServer, setHasDlc4, serversMissingDlc4 } from '../src/serverPool.js';
 
@@ -370,5 +370,32 @@ describe('practice-only campaigns', () => {
     expect(poolableCampaigns(db, { alsoAllow: ['hunter_training'] }).map((c) => c.slug)).not.toContain('hunter_training');
     // Still a known campaign: its maps resolve and it has a name.
     expect(campaignRegistry(db).get('hunter_training')?.practiceOnly).toBe(true);
+  });
+});
+
+describe('hasPlayedDownloadedCampaign', () => {
+  const played = (id: number, campaign: string, state = 'completed') => {
+    db.prepare("INSERT INTO matches (id, season_id, state, campaign) VALUES (?, 1, ?, ?)").run(id, state, campaign);
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(id, ME);
+  };
+  beforeEach(() => { upsertPlayer(db, { steamid: ME, name: 'me', avatar: null }, []); });
+
+  it('is false with only stock base-game matches', () => {
+    played(1, 'no_mercy');
+    expect(hasPlayedDownloadedCampaign(db, ME)).toBe(false);
+  });
+
+  it('is true after a completed L4D2 or custom campaign match', () => {
+    played(1, 'dead_center');
+    expect(hasPlayedDownloadedCampaign(db, ME)).toBe(true);
+    publish();
+    played(2, 'dbd');
+    expect(hasPlayedDownloadedCampaign(db, OTHER)).toBe(false);
+  });
+
+  it('does not count an aborted match, which is what a missing download looks like', () => {
+    publish();
+    played(1, 'dbd', 'aborted');
+    expect(hasPlayedDownloadedCampaign(db, ME)).toBe(false);
   });
 });

@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { MatchRoomView } from '../api';
 
-const { mockEvents } = vi.hoisted(() => ({
+const { mockEvents, mockMatch } = vi.hoisted(() => ({
+  mockMatch: vi.fn((): Promise<unknown> => Promise.reject(new Error('not mocked'))),
   mockEvents: {
     room: vi.fn(), ready: vi.fn(), veto: vi.fn(), lineup: vi.fn(), confirmResult: vi.fn(), dispute: vi.fn(),
     propose: vi.fn(), respond: vi.fn(), counter: vi.fn(), withdrawProposal: vi.fn(),
@@ -10,7 +11,7 @@ const { mockEvents } = vi.hoisted(() => ({
 }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, eventsApi: { ...actual.eventsApi, ...mockEvents } };
+  return { ...actual, api: { ...actual.api, match: mockMatch }, eventsApi: { ...actual.eventsApi, ...mockEvents } };
 });
 vi.mock('../hooks/useHubEvent', () => ({ useHubEvent: () => {} }));
 vi.mock('../components/Confirm', () => ({ confirm: vi.fn(async () => true) }));
@@ -92,6 +93,22 @@ describe('EventMatchPage', () => {
     expect(screen.getByRole('link', { name: 'Bone Breaker' }).getAttribute('href')).toBe('/player/76561197972484944');
     expect(screen.getAllByText('Captain')).toHaveLength(2);
     expect(screen.getByText('Stand-in')).toBeTruthy();
+  });
+
+  it('lists the demos of each finished game with download links (owner 2026-10-25)', async () => {
+    mockMatch.mockResolvedValueOnce({ players: [], demos: [{ ordinal: 1, map: 'l4d_vs_farm01_hilltop', bytes: 32 * 1024 * 1024 }, { ordinal: 2, map: 'l4d_vs_farm02_traintunnel', bytes: 26 * 1024 * 1024 }] });
+    mockEvents.room.mockResolvedValue(view({
+      phase: 'done', deadline: null, finishedAt: '2026-10-23T08:48:00.000Z',
+      result: { winner: 'a', scoreA: 1, scoreB: 0, forfeit: false },
+      series: { bestOf: 1, totalScore: false, winsA: 1, winsB: 0, totalA: 0, totalB: 0, over: true, winner: 'a' },
+      games: [{ id: 1, game: 1, ordinal: 1, tiebreak: false, campaign: 'blood_harvest', campaignName: 'Blood Harvest', map: null, pickedBy: 'a', sideBy: 'b', firstSurvivors: 'a', matchId: 798, state: 'done', scoreA: 1107, scoreB: 925, winner: 'a', forfeit: null, live: null }],
+    }));
+    render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+    await screen.findByRole('heading', { name: 'Demos' });
+    expect(mockMatch).toHaveBeenCalledWith('798', expect.anything());
+    const links = screen.getAllByRole('link', { name: 'Download' });
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/api/matches/798/demos/1', '/api/matches/798/demos/2']);
+    expect(screen.getByText('Demos crash on playback? Read this')).toBeTruthy();
   });
 
   it.each(['waiting', 'server', 'hold'] as const)('refetches every 10 s in the %s phase, since a result can close the room with no push', async (phase) => {

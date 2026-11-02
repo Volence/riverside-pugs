@@ -478,6 +478,19 @@ describe('aborting from the admin panel', () => {
     expect(noShows()).toBe(0);
   });
 
+  it('lifts a queue timeout from the banner, clearing only what runs it', async () => {
+    const pen = db.prepare("INSERT INTO penalties (player_id, kind, match_id, created_at) VALUES (?, ?, NULL, ?)");
+    pen.run(IDS[1], 'ready_fail', new Date(Date.now() - 2 * 3_600_000).toISOString());  // long expired
+    pen.run(IDS[1], 'no_show', new Date().toISOString());
+    const lift = (who: string) =>
+      app.inject({ method: 'POST', url: `/api/admin/players/${who}/lift-timeout`, cookies: cookies[ADMIN] });
+    expect((await lift('76561199000000000')).statusCode).toBe(404);
+    expect((await lift(IDS[1])).json()).toEqual({ ok: true, cleared: 1 });
+    expect(db.prepare('SELECT kind FROM penalties WHERE player_id = ? AND cleared_at IS NULL').all(IDS[1])).toEqual([{ kind: 'ready_fail' }]);
+    expect((await audit())[0]).toMatchObject({ action: 'lift_timeout', target: IDS[1], detail: { cleared: 1, kinds: ['no_show'] } });
+    expect((await lift(IDS[1])).statusCode).toBe(404);
+  });
+
   it('clears one penalty from a player file, and only that one', async () => {
     const pen = db.prepare("INSERT INTO penalties (player_id, kind, match_id, created_at) VALUES (?, ?, NULL, ?)");
     const a = Number(pen.run(IDS[1], 'no_show', new Date().toISOString()).lastInsertRowid);

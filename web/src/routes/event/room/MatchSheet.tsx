@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, entryLogoUrl, type MatchPlayerStats, type MatchRoomView, type PlayEntry, type RoomGame, type RoomPlayer } from '../../../api';
+import { api, entryLogoUrl, type MatchDemo, type MatchPlayerStats, type MatchRoomView, type PlayEntry, type RoomGame, type RoomPlayer } from '../../../api';
 import { campaignTint } from '../../../format';
 import { gameTitle } from './roomText';
 
@@ -129,20 +129,30 @@ function GameCard({ v, g }: { v: MatchRoomView; g: RoomGame }) {
 /** Per-player numbers summed over the finished games, keyed by SteamID. */
 export type GameStats = Map<string, { siDamage: number; commonKills: number; siKills: number; damageAsSi: number; games: number }>;
 
-/** Reads each finished game's own match data once; a game the viewer may
- *  not open (or an error) just contributes nothing. */
-export function useGameStats(v: MatchRoomView | null): GameStats | null {
-  const ids = v ? v.games.filter((g) => g.state === 'done' && g.matchId !== null).map((g) => g.matchId!) : [];
-  const key = ids.join(',');
+/** One finished game's SourceTV demos, keyed to the pug match that holds them. */
+export type GameDemos = { title: string; campaignName: string; matchId: number; demos: MatchDemo[] }[];
+
+/** Reads each finished game's own match data once, for the per-player
+ *  numbers and the demo list; a game the viewer may not open (or an error)
+ *  just contributes nothing. */
+export function useGameStats(v: MatchRoomView | null): { stats: GameStats | null; demos: GameDemos } {
+  const games = v ? v.games.filter((g) => g.state === 'done' && g.matchId !== null) : [];
+  const key = games.map((g) => g.matchId).join(',');
   const [stats, setStats] = useState<GameStats | null>(null);
+  const [demos, setDemos] = useState<GameDemos>([]);
   useEffect(() => {
-    if (ids.length === 0) { setStats(null); return undefined; }
+    if (games.length === 0) { setStats(null); setDemos([]); return undefined; }
     const ctl = new AbortController();
-    void Promise.all(ids.map((id) => api.match(String(id), ctl.signal).then((r) => ('ongoing' in r && r.ongoing ? [] : (r as { players: MatchPlayerStats[] }).players), () => [] as MatchPlayerStats[])))
-      .then((lists) => {
+    const none = { players: [] as MatchPlayerStats[], demos: [] as MatchDemo[] };
+    void Promise.all(games.map((g) => api.match(String(g.matchId), ctl.signal).then((r) => {
+      if ('ongoing' in r && r.ongoing) return none;
+      const d = r as { players: MatchPlayerStats[]; demos?: MatchDemo[] };
+      return { players: d.players, demos: d.demos ?? [] };
+    }, () => none)))
+      .then((results) => {
         if (ctl.signal.aborted) return;
         const out: GameStats = new Map();
-        for (const p of lists.flat()) {
+        for (const p of results.flatMap((r) => r.players)) {
           const cur = out.get(p.steamid) ?? { siDamage: 0, commonKills: 0, siKills: 0, damageAsSi: 0, games: 0 };
           cur.siDamage += p.siDamage;
           cur.commonKills += p.commonKills;
@@ -152,11 +162,12 @@ export function useGameStats(v: MatchRoomView | null): GameStats | null {
           out.set(p.steamid, cur);
         }
         setStats(out.size > 0 ? out : null);
+        setDemos(games.map((g, i) => ({ title: gameTitle(g), campaignName: g.campaignName, matchId: g.matchId!, demos: results[i].demos })).filter((g) => g.demos.length > 0));
       });
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return stats;
+  return { stats, demos };
 }
 
 const ROLE_TEXT: Record<'captain' | 'sub' | 'standin', string> = { captain: 'Captain', sub: 'Sub', standin: 'Stand-in' };

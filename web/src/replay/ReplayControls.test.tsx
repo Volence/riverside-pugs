@@ -156,3 +156,17 @@ describe('ReplayControls tick tooltip', () => {
     expect(container.querySelector('.scrub__tip')!.classList.contains('scrub__tip--end')).toBe(true);
   });
 });
+
+describe('ReplayControls groups', () => {
+  // Speed and zoom both had chips reading "2x" and "4x" in one bare row;
+  // each set now sits in its own labelled group.
+  it('labels the speed, zoom and camera groups', () => {
+    const { container } = mount();
+    const groups = [...container.querySelectorAll('[role="group"]')].map((g) => g.getAttribute('aria-label'));
+    expect(groups).toEqual(['Speed', 'Zoom', 'Camera']);
+    const zoom = container.querySelector('[aria-label="Zoom"]')!;
+    expect(zoom.querySelector('[aria-label="Zoom to fit"]')).toBeTruthy();
+    const speed = container.querySelector('[aria-label="Speed"]')!;
+    expect([...speed.querySelectorAll('button')].map((b) => b.textContent)).toContain('2x');
+  });
+});

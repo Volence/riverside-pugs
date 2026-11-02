@@ -174,7 +174,7 @@ export function foldMatchNames(db: DB, matchId: number, now = new Date()): void 
   const at = sqlTime(now);
   const queue = getSetting(db, 'admin_feed_renames') !== '0';
   const roster = db.prepare(
-    `SELECT mp.player_id AS steamid, p.name, p.avatar FROM match_players mp
+    `SELECT mp.player_id AS steamid, COALESCE(p.steam_name, p.name) AS name, p.avatar FROM match_players mp
        JOIN players p ON p.steamid = mp.player_id
       WHERE mp.match_id = ? AND COALESCE(mp.unrated_reason, '') != 'not_in_dump'`,
   ).all(matchId) as { steamid: string; name: string; avatar: string | null }[];

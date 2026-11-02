@@ -54,7 +54,7 @@ function SignupRow({ s, canAct, busy, others, onCaptain, onSwap, onRemove }: {
         {s.role === 'captain' && s.captainPref !== 'want' && <span class="muted"> (did not volunteer)</span>}
       </td>
       {canAct && (
-        <td>
+        <td class="evdesk__acts">
           <div class="inlinerow">
             {s.role === 'captain'
               ? <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => onCaptain(s, false)}>Remove captain</button>
@@ -88,8 +88,8 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
   const { busy, error, run } = useAction(() => { reload(); onChange?.(); });
   const [teams, setTeams] = useState('');
   const [refused, setRefused] = useState<string[]>([]);
-  if (loadError) return <Panel><h3>Draft</h3><p class="error">Could not load the draft.</p></Panel>;
-  if (!data) return <Panel><h3>Draft</h3></Panel>;
+  if (loadError) return <Panel class="evdesk__panel" id="evdesk-draft"><h3>Draft</h3><p class="error">Could not load the draft.</p></Panel>;
+  if (!data) return <Panel class="evdesk__panel" id="evdesk-draft"><h3>Draft</h3></Panel>;
   const locked = data.lockedAt !== null;
   const published = data.cutAt !== null;
   const n = data.signups.length;
@@ -120,8 +120,9 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
   });
 
   return (
-    <Panel>
+    <Panel class="evdesk__panel" id="evdesk-draft">
       <h3>Draft</h3>
+      <p class="evdesk__help">Close signups, pick the captains and publish the cut. Everyone gets their role by DM when the cut goes out.</p>
       <p>{header}</p>
       {canEdit && !locked && (
         <div class="inlinerow">
@@ -171,7 +172,7 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
       )}
       {n === 0 ? <Empty>Nobody has signed up yet.</Empty> : (
         <div class="table-wrap">
-          <table class="admin-table">
+          <table class="admin-table evdesk__signups">
             <thead>
               <tr>
                 <th>Name</th><th>SR</th><th>Captain</th><th>Note</th><th>Signed up</th><th>Reliability</th><th>Role</th>{canAct && <th>Actions</th>}

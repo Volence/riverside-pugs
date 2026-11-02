@@ -4,6 +4,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel, Tabs } from '../../components/bits';
 import { Figure, Figures } from '../../components/PageHeader';
 import { fmtTime } from './useAction';
+import { fmtAgo } from '../../format';
 import { fileUrl, ticketUrl } from './adminRoutes';
 
 const FILTERS = [
@@ -54,7 +55,7 @@ export function PeopleBans() {
       {data && bans.length === 0 && <Empty>{query ? 'Nobody by that name or ID.' : 'No bans here.'}</Empty>}
       {bans.length > 0 && (
         <div class="table-wrap">
-          <table class="admin-table">
+          <table class="admin-table bans-table">
             <thead>
               <tr><th>Player</th><th>Reason</th><th>Length</th><th>Issued</th><th>Status</th><th>Ticket</th></tr>
             </thead>
@@ -67,17 +68,17 @@ export function PeopleBans() {
                   </td>
                   {/* Staff-written text, rendered as text. */}
                   <td>
-                    {b.hold && <span class="chip">alt hold</span>} {b.reason}
+                    {b.hold && <span class="ban-state ban-state--hold">alt hold</span>} <span class="bans-reason">{b.reason}</span>
                     {b.abandon?.restoredAt && <div class="muted">rating loss restored{b.abandon.restoredByName ? ` by ${b.abandon.restoredByName}` : ''}{b.abandon.restoreReason ? `: ${b.abandon.restoreReason}` : ''}</div>}
                   </td>
                   <td>{b.length}</td>
-                  <td class="muted">
-                    {fmtTime(b.createdAt)}{b.createdByName ? ` by ${b.createdByName}` : ''}
+                  <td class="muted" title={fmtTime(b.createdAt)}>
+                    {fmtAgo(b.createdAt)}{b.createdByName ? ` by ${b.createdByName}` : ''}
                   </td>
                   <td>
                     {b.active ? <span class="admin-status admin-status--banned">in force</span>
-                      : b.liftedAt ? <span class="muted">lifted {fmtTime(b.liftedAt)}{b.liftedByName ? ` by ${b.liftedByName}` : ''}</span>
-                        : <span class="muted">expired</span>}
+                      : b.liftedAt ? <><span class="ban-state">lifted</span><div class="muted bans-sub">{fmtTime(b.liftedAt)}{b.liftedByName ? ` by ${b.liftedByName}` : ''}</div></>
+                        : <span class="ban-state">expired</span>}
                   </td>
                   <td>{b.ticketId === null ? <span class="muted">none</span> : <a href={ticketUrl(b.ticketId)}>#{b.ticketId}</a>}</td>
                 </tr>

@@ -349,9 +349,9 @@ describe('the live board', () => {
     expect(screen.getByRole('heading', { name: 'Queue' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Recent results' })).toBeTruthy();
     expect(screen.getByText('queued')).toBeTruthy();
-    // The Void button lives in the last column, and at phone width the rest
-    // of the table scrolls sideways under it.
-    expect(document.querySelector('.admin-table--recent.admin-table--pin-last')).toBeTruthy();
+    // Recent results are compact rows (they stack into cards on a phone, so
+    // nothing scrolls sideways), each with its Void action.
+    expect(document.querySelector('ul.rres')).toBeTruthy();
   });
 
   it('a moderator sees the servers without their controls', async () => {

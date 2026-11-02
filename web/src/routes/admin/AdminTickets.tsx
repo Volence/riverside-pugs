@@ -4,6 +4,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { useTicketNudge } from '../../hooks/useTicketNudge';
 import { Empty, Panel, Tabs } from '../../components/bits';
 import { fmtTime } from './useAction';
+import { fmtAgo } from '../../format';
 
 const FILTERS: { key: 'open' | 'mine' | 'closed'; label: string }[] = [
   { key: 'open', label: 'Open' }, { key: 'mine', label: 'Mine' }, { key: 'closed', label: 'Closed' },
@@ -29,14 +30,16 @@ export function AdminTickets({ onOpen }: { onOpen: (id: number) => void }) {
       <ul class="tickets">
         {data?.tickets.map((t) => (
           <li key={t.id}>
-            <button type="button" class="ticket-row" onClick={() => onOpen(t.id)}>
+            <button type="button" class={`ticket-row${t.status === 'open' ? '' : ' is-closed'}`} onClick={() => onOpen(t.id)}>
               <span class="ticket-row__id">#{t.id}</span>
-              <strong>{t.targetName ?? t.targetId ?? 'Discord member'}</strong>
-              {t.restricted && <span class="admin-tag">restricted</span>}
-              <span class="muted">{t.categories.join(', ')}</span>
-              <span class="muted">{reportLine(t)}</span>
-              <span class="muted">{t.claimedByName ? `claimed by ${t.claimedByName}` : 'unclaimed'}</span>
-              <span class="muted">{fmtTime(t.lastReportAt ?? t.createdAt)}</span>
+              <span class="ticket-row__who">
+                <strong>{t.targetName ?? t.targetId ?? 'Discord member'}</strong>
+                {t.restricted && <span class="admin-tag">restricted</span>}
+                <span class="ticket-row__cats">{t.categories.join(', ')}</span>
+              </span>
+              <span class="muted ticket-row__reports">{reportLine(t)}</span>
+              <span class={`ticket-row__claim${t.claimedByName ? ' is-claimed' : ''}`}>{t.claimedByName ? `claimed by ${t.claimedByName}` : 'unclaimed'}</span>
+              <time class="muted ticket-row__when" title={fmtTime(t.lastReportAt ?? t.createdAt)}>{fmtAgo(t.lastReportAt ?? t.createdAt)}</time>
             </button>
           </li>
         ))}

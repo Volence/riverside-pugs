@@ -30,6 +30,16 @@ export interface PlayerRow {
    *  the login beside it is the only Twitch identifier the API serves. */
   twitch_id: string | null;
   twitch_name: string | null;
+  /** The Steam persona as last seen. NULL on rows older than the column, where
+   *  `name` is still the persona. Read it through steamNameOf. */
+  steam_name: string | null;
+  /** The name an admin set, which `name` mirrors while it is set. */
+  name_override: string | null;
+}
+
+/** The Steam persona behind a row, whatever `name` is showing. */
+export function steamNameOf(p: Pick<PlayerRow, 'name' | 'steam_name'>): string {
+  return p.steam_name ?? p.name;
 }
 
 export interface RatingRow {
@@ -48,10 +58,11 @@ export function upsertPlayer(
 ): void {
   const isAdmin = adminSteamIds.includes(p.steamid);
   db.prepare(
-    `INSERT INTO players (steamid, name, avatar, status, is_admin)
-     VALUES (@steamid, @name, @avatar, @status, @is_admin)
+    `INSERT INTO players (steamid, name, steam_name, avatar, status, is_admin)
+     VALUES (@steamid, @name, @name, @avatar, @status, @is_admin)
      ON CONFLICT(steamid) DO UPDATE SET
-       name = excluded.name,
+       steam_name = excluded.steam_name,
+       name = COALESCE(players.name_override, excluded.name),
        avatar = excluded.avatar,
        is_admin = MAX(players.is_admin, excluded.is_admin),
        status = CASE WHEN excluded.is_admin = 1 THEN 'active' ELSE players.status END`,

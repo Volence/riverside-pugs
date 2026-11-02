@@ -131,10 +131,10 @@ describe('the rename digest', () => {
   it('queues nothing for a brand-new player, then the first new name after', () => {
     // A persona and an in-game name that differ on the first match are
     // both the new player's first names.
-    db.prepare("UPDATE players SET name = 'amour p' WHERE steamid = ?").run(AMOUR);
+    db.prepare("UPDATE players SET name = 'amour p', steam_name = 'amour p' WHERE steamid = ?").run(AMOUR);
     play(1, AMOUR, 'amour plastique', 19);
     expect(takeRenameDigest(db, new Date('2026-09-20T00:00:00Z'))).toBeNull();
-    db.prepare("UPDATE players SET name = 'v' WHERE steamid = ?").run(AMOUR);
+    db.prepare("UPDATE players SET name = 'v', steam_name = 'v' WHERE steamid = ?").run(AMOUR);
     play(2, AMOUR, 'v', 24);
     play(3, AMOUR, 'v', 24);
     const digest = takeRenameDigest(db, new Date('2026-09-25T00:00:00Z'));

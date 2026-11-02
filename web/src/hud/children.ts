@@ -224,6 +224,17 @@ const HEALTH_NUMBER = block('HealthNumber', [
  */
 const REVIVE_LINK = "The health bar and the item icons move sideways together: the game draws a teammate's bar at the item row's left edge (from the start of the map and again after every revive), so a bar moved alone would not move in game. While a teammate is down the game draws the bar at the Down picture's left edge.";
 
+/**
+ * The survivor health number's colour (build.ts healthNumberPass): left
+ * unset, the game paints it the bar's colour every update, by name
+ * (TeamDisplayPlayer::UpdateDisplay, client.dylib 0x3cd7a0); given a colour,
+ * the download renames the label, which keeps %HealthNumber% and its own
+ * colour (probe R23, /home/volence/l4d/hud/probe-r23/runs/cards.jpg).
+ */
+// The game hides only the child named HealthNumber on a dead card (SetControlVisible, UpdateDisplay 0x3cd7a0), so the
+// renamed one stays up there: probe R23-HN (/home/volence/l4d/hud/probe-r23/runs-hn/bottom.jpg) showed a magenta 1.
+const HEALTH_NUMBER_NOTE = "Unset, the game colours this like the bar (by health, or the bar colour). Pick a colour and it keeps that colour at every health, but then a dead teammate's card shows 1 instead of no number.";
+
 const STATE_NOTE = 'The game decides when this one shows. Pick Down or Dead above the canvas to see it.';
 
 /**
@@ -270,8 +281,8 @@ export const TEAM_PANEL: PanelChildren = {
       keys: healthKeys('Recolours the bar and the number on every card.',
         'client.dll HealthPanel run: m_inset|inset (one HealthPanel class with the own bar, where probe Q3 proved it; B13 shows the same default inset on cards)') },
     { name: 'Name', label: 'Name', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true },
-    { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
-      addable: { template: HEALTH_NUMBER, after: 'Name' }, note: 'The game colours this by health.', hideIn: ['dead'] },
+    { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      addable: { template: HEALTH_NUMBER, after: 'Name' }, note: HEALTH_NUMBER_NOTE, hideIn: ['dead'] },
     // Colour: fgcolor_override colours the icons (probe B1 S-items, card1-a.png, yellow icons).
     { name: 'Items', label: 'Item icons', kind: 'label', role: 'content', box: 'none', move: true, font: true, colour: true,
       note: `The preview draws the game's own item icons, a full loadout; in game the row shows only what that teammate carries. ${REVIVE_LINK}`,
@@ -323,8 +334,8 @@ export const OWN_PANEL: PanelChildren = {
       note: "The game fills the bar by health. While you are down it draws the bar at the Down picture's left edge; the revive puts it back here." },
     { name: 'HealthIcon', label: 'Health cross', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
       note: "The game colours this with the panel's health colour, or the Panel colour when one is set." },
-    { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: false,
-      note: 'The game colours this by health.' },
+    { name: 'HealthNumber', label: 'Health number', kind: 'label', role: 'content', box: 'wh', move: true, font: true, colour: true,
+      note: HEALTH_NUMBER_NOTE },
     { name: 'HealthbarTextureTop', label: 'Scratches, top', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: false,
       art: 'splatter', fitPlace: 'keep', note: SCRATCH_NOTE },
     { name: 'HealthbarTextureBottom', label: 'Scratches, bottom', kind: 'image', role: 'decor', box: 'wh', move: true, font: false, colour: false,
@@ -620,7 +631,8 @@ export const FRUST_PANEL: PanelChildren = {
     FRUST_LINE('Warning2', 'Warning, second line'),
     { name: 'FrustrationBar', label: 'Bar', kind: 'other', role: 'content', box: 'wh', move: true, font: false, colour: false, gate: 'T1',
       keys: [{ key: 'east_aligned', label: 'Fill from the right', type: 'bool', gate: 'T1',
-        evidence: 'client.dll CFrustrationMeterBarPanel run: east_aligned; stock frustrationmeter.res FrustrationBar "east_aligned" "1"' }] },
+        evidence: 'client.dll CFrustrationMeterBarPanel run: east_aligned; stock frustrationmeter.res FrustrationBar "east_aligned" "1"; client.dylib CFrustrationMeterBarPanel::Paint 0x3a68e0 and DrawBar 0x3a5d90 (a bar at least as tall as wide fills from the bottom, west-aligned only)',
+        note: 'For a vertical bar, make it taller than wide and turn this off: it then fills from the bottom. The game always draws the bar white.' }] },
     FRUST_LINE('FrustrationLabel', 'Label'),
   ],
 };
@@ -769,7 +781,7 @@ export const TAB_INFECTED_ROW: PanelChildren = {
   children: [
     { name: 'PlayerBackground', label: 'Other rows', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE,
       keys: [{ key: 'bgcolor_override', label: "Other rows' colour", type: 'colour', unsetLabel: 'File colour', gate: 'TS5b',
-        evidence: `${PANEL_BG}; the other infected rows were never on screen (probe TS5b needs a second infected player)` }] },
+        evidence: `${PANEL_BG}; client.dylib InfectedStatsPanel::SetSelected 0x3f4da0 shows PlayerBackground on every row but yours and sets no colour (TS5b, passed on the code: no second infected player was on screen)` }] },
     { name: 'PlayerBackground_Selected', label: 'Your row', kind: 'other', role: 'decor', colour: false, ...TAB_HIDE, codeShown: true,
       keys: [{ key: 'bgcolor_override', label: 'Your row colour', type: 'colour', unsetLabel: 'File colour', gate: 'TS5',
         evidence: `${PANEL_BG}; probe TS5, probe-tab tab1/runs/tab-infected/tab-c.png (your row yellow)` }],

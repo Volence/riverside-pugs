@@ -217,6 +217,21 @@ export interface VoiceOps {
      *  were made without it (staff cannot see them unless let in one by one). */
     staffDropped?: boolean;
   }>;
+  /** An event's team voice (owner 2026-10-24): a private category with one
+   *  private voice channel per team, in `labels` order, made as soon as the
+   *  teams are known. Nobody is let in here; setMemberAccess lets each team's
+   *  players in afterwards. Takes back what it made on a failure and drops the
+   *  staff role on a refusal, exactly as createMatchChannels does. */
+  createTeamChannels(name: string, labels: string[], staffRoleId: string | null): Promise<{
+    categoryId: string; channelIds: string[]; staffDropped?: boolean;
+  }>;
+  /** A private category (hidden from @everyone, the bot let in), placed
+   *  right below `afterId` when that category exists. For a tournament
+   *  match's own heading over its two team channels. */
+  createPrivateCategory(name: string, afterId: string | null): Promise<string>;
+  /** Move a channel under another category, keeping its own permission
+   *  overwrites (never synced to the new parent). Ignores an unknown channel. */
+  moveChannel(channelId: string, parentId: string): Promise<void>;
   /** The voice channel a guild member is sitting in, or null. */
   memberVoiceChannel(userId: string): Promise<string | null>;
   move(userId: string, channelId: string): Promise<void>;

@@ -835,27 +835,40 @@ function ObsBox(p: {
   return (
     <section class="panel">
       <h3>OBS</h3>
-      {p.status !== 'connected' ? (
-        <>
-          <p class="muted studio__hint">Optional. In OBS: Tools, WebSocket Server Settings, enable it and copy the password.</p>
-          <div class="studio__form">
-            <input value={p.url} onInput={(e) => p.setUrl(e.currentTarget.value)} aria-label="OBS WebSocket address" />
-            <input type="password" value={p.password} placeholder="Password" onInput={(e) => p.setPassword(e.currentTarget.value)} aria-label="OBS WebSocket password" />
-            <button type="button" class="btn btn--sm" disabled={p.status === 'connecting'} onClick={p.connect}>{p.status === 'connecting' ? 'Connecting' : 'Connect'}</button>
-          </div>
-          <label class="studio__toggle studio__toggle--small"><input type="checkbox" checked={p.remember} onChange={(e) => p.setRemember(e.currentTarget.checked)} /><span>Remember the password on this computer</span></label>
-        </>
-      ) : (
-        <>
-          <p class="studio__obs-ok">Connected. Program: <b>{p.program || 'unknown'}</b></p>
-          <label class="studio__toggle studio__toggle--small"><input type="checkbox" checked={p.switchOn} onChange={(e) => p.setSwitch(e.currentTarget.checked)} /><span>Cut the matching OBS scene when I pick a scene here</span></label>
-          {missing.length > 0 && <p class="muted studio__hint">Missing in OBS: {missing.join(', ')}. Import the scene collection below to get them.</p>}
-          <button type="button" class="btn btn--ghost btn--sm" onClick={p.disconnect}>Disconnect</button>
-        </>
-      )}
+      <ol class="studio__steps">
+        <li>
+          <p class="studio__step-title">Get the scenes</p>
+          <p class="muted studio__hint">OBS: Scene Collection, Import, pick the file. Every scene is a browser source on your own links.</p>
+          <p class="studio__dl"><a class="btn btn--ghost btn--sm" href="/api/cast/studio/obs-collection" download>Download OBS scene collection</a></p>
+        </li>
+        <li>
+          <p class="studio__step-title">Connect <span class="muted">(optional)</span></p>
+          {p.status !== 'connected' ? (
+            <>
+              <p class="muted studio__hint">In OBS: Tools, WebSocket Server Settings, enable it and copy the password.</p>
+              <div class="studio__form">
+                <input value={p.url} onInput={(e) => p.setUrl(e.currentTarget.value)} aria-label="OBS WebSocket address" />
+                <input type="password" value={p.password} placeholder="Password" onInput={(e) => p.setPassword(e.currentTarget.value)} aria-label="OBS WebSocket password" />
+                <button type="button" class="btn btn--sm" disabled={p.status === 'connecting'} onClick={p.connect}>{p.status === 'connecting' ? 'Connecting' : 'Connect'}</button>
+              </div>
+              <label class="studio__toggle studio__toggle--small"><input type="checkbox" checked={p.remember} onChange={(e) => p.setRemember(e.currentTarget.checked)} /><span>Remember the password on this computer</span></label>
+            </>
+          ) : (
+            <>
+              <p class="studio__obs-ok">Connected. Program: <b>{p.program || 'unknown'}</b></p>
+              {missing.length > 0 && <p class="muted studio__hint">Missing in OBS: {missing.join(', ')}. Import the scene collection above to get them.</p>}
+              <button type="button" class="btn btn--ghost btn--sm" onClick={p.disconnect}>Disconnect</button>
+            </>
+          )}
+        </li>
+        <li>
+          <p class="studio__step-title">Cut scenes from here</p>
+          {p.status === 'connected'
+            ? <label class="studio__toggle studio__toggle--small"><input type="checkbox" checked={p.switchOn} onChange={(e) => p.setSwitch(e.currentTarget.checked)} /><span>Cut the matching OBS scene when I pick a scene here</span></label>
+            : <p class="muted studio__hint">Once connected, picking a scene on this page can cut the same scene in OBS.</p>}
+        </li>
+      </ol>
       {p.error && <p class="studio__error">{p.error}</p>}
-      <p class="studio__dl"><a class="btn btn--ghost btn--sm" href="/api/cast/studio/obs-collection" download>Download OBS scene collection</a></p>
-      <p class="muted studio__hint">OBS: Scene Collection, Import, pick the file. Every scene is a browser source on your own links.</p>
     </section>
   );
 }
@@ -870,9 +883,9 @@ function LinksBox({ url, onNewKey }: { url: (scene: string) => string; onNewKey:
     <section class="panel">
       <h3>Overlay links</h3>
       <p class="muted studio__hint">1920 x 1080 browser sources. Program follows this page; the others are one scene each. Keep these private: anyone with a link sees your feed.</p>
-      <ul class="studio__links">
+      <ul class="studio__links studio__links--cards">
         {all.map((k) => (
-          <li key={k}>
+          <li key={k} class={k === 'program' ? 'is-program' : undefined}>
             <span>{k === 'program' ? 'Program (follows you)' : SCENE_LABELS[k]}</span>
             <button type="button" class="btn btn--ghost btn--sm" onClick={() => void copy(k)}>{copied === k ? 'Copied' : 'Copy'}</button>
           </li>

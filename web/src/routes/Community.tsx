@@ -52,15 +52,25 @@ export function Community({ session }: { session: Session }) {
         only ever carry HUD files.
       </p>
 
-      <div class="community__bar">
-        <Tabs label="What to show" active={kind} onSelect={(k) => pick(k as CommunityKind)}
-          tabs={[{ key: 'hud', label: 'HUDs' }, { key: 'crosshair', label: 'Crosshairs' }]} />
-        <Tabs label="Order" active={sort} onSelect={(o) => order(o as 'new' | 'top')}
-          tabs={[{ key: 'new', label: 'New' }, { key: 'top', label: 'Top' }]} />
+      <div class="community__bar" role="group" aria-label="Filters">
+        <div class="community__filter">
+          <span class="community__filterlabel">Type</span>
+          <Tabs label="What to show" active={kind} onSelect={(k) => pick(k as CommunityKind)}
+            tabs={[{ key: 'hud', label: 'HUDs' }, { key: 'crosshair', label: 'Crosshairs' }]} />
+        </div>
+        <div class="community__filter">
+          <span class="community__filterlabel">Sort</span>
+          <Tabs label="Order" active={sort} onSelect={(o) => order(o as 'new' | 'top')}
+            tabs={[{ key: 'new', label: 'New' }, { key: 'top', label: 'Top' }]} />
+        </div>
         {viewer && (
-          <Tabs label="Whose" active={scope} onSelect={(f) => filter(f as Show)}
-            tabs={[{ key: 'all', label: 'All' }, { key: 'yours', label: 'Yours' }, { key: 'liked', label: 'Liked' }]} />
+          <div class="community__filter">
+            <span class="community__filterlabel">Whose</span>
+            <Tabs label="Whose" active={scope} onSelect={(f) => filter(f as Show)}
+              tabs={[{ key: 'all', label: 'All' }, { key: 'yours', label: 'Yours' }, { key: 'liked', label: 'Liked' }]} />
+          </div>
         )}
+        {data && <span class="community__count muted">{data.total} {data.total === 1 ? noun.replace(/s$/, '') : noun}</span>}
       </div>
 
       {error && <Panel><p class="error">Could not load the community page. Try again in a moment.</p></Panel>}

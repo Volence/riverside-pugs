@@ -35,6 +35,7 @@ const ALLOWED: Record<string, number> = {
   'src/inputBursts.ts': 1,          // end-of-match input checks, every kind (a scrim cheater is still one)
   'src/aimRules.ts': 1,             // end-of-match aim sweep, every kind (same reason as inputBursts)
   'src/fingerprintReplay.ts': 1,    // replays every match end, every kind, as the end-of-match sweep does
+  'src/campaignRegistry.ts': 1,     // has the player got the maps: a scrim on a custom map counts too
 };
 
 const RAW = /state\s*=\s*'completed'|state\s+IN\s*\([^)]*'completed'/g;

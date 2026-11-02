@@ -24,10 +24,10 @@ export interface AwardResult { key: string; label: string; group: AwardGroup; ki
 export interface AwardDef { key: string; label: string; group: AwardGroup }
 
 type FixedColumn = 'si_damage' | 'si_kills' | 'common_kills' | 'revives' | 'ff_dealt';
-interface StatAward extends AwardDef { fixed?: FixedColumn; stats?: string[] }
+export interface StatAward extends AwardDef { fixed?: FixedColumn; stats?: string[] }
 
 /** Stat awards: an average and a total each. Order is display order. */
-const STAT_AWARDS: StatAward[] = [
+export const STAT_AWARDS: StatAward[] = [
   { key: 'si_damage', label: 'SI damage', group: 'survivor', fixed: 'si_damage' },
   { key: 'si_kills', label: 'SI kills', group: 'survivor', fixed: 'si_kills' },
   { key: 'common_kills', label: 'Common kills', group: 'survivor', fixed: 'common_kills' },
@@ -162,12 +162,13 @@ export function topOf<T extends { value: number }>(rows: T[]): T[] {
  * Weeks before it keep the gross total they were judged on. Closed weeks are
  * frozen anyway (weeklyStore.ts), but a rebuild of an old week, or a live
  * read of one never frozen, must not hand its award to someone else. This is
- * the first week to start after the change was approved, so no week changes
- * its rule halfway through.
+ * the first week not yet frozen when the change went live (the Season 1
+ * deploy missed the 10-26 week's close on 11-02 12:00 UTC), so no frozen
+ * week is judged by a rule the code no longer shows.
  */
-export const NET_SI_DAMAGE_FROM_WEEK = '2026-10-26';
+export const NET_SI_DAMAGE_FROM_WEEK = '2026-11-02';
 
-function statTotals(db: DB, week: string, a: StatAward): Map<string, number> {
+export function statTotals(db: DB, week: string, a: StatAward): Map<string, number> {
   const { from, to } = weekBounds(week);
   if (a.key === 'damage_as_si' && week >= NET_SI_DAMAGE_FROM_WEEK) {
     const parts = db.prepare(

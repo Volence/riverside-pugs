@@ -4,7 +4,7 @@ import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { setSetting } from '../src/settings.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { reapNoShowMatches } from '../src/noShow.js';
-import { recordPenalty, activeTimeout, clearPenalties, penaltyHistory } from '../src/penalties.js';
+import { recordPenalty, activeTimeout, clearPenalties, liftTimeout, penaltyHistory } from '../src/penalties.js';
 import type { Scheduler } from '../src/lobby.js';
 
 const IDS = Array.from({ length: 8 }, (_, i) => `7656119800000000${i + 1}`);
@@ -96,6 +96,29 @@ describe('timeout ladder', () => {
     clearPenalties(db, P, IDS[7], T0);
     expect(activeTimeout(db, P, T0)).toBeNull();
     expect(penaltyHistory(db, P)[0]).toMatchObject({ kind: 'no_show', matchId: 3, clearedBy: IDS[7] });
+  });
+
+  // The banner's Lift timeout: clears what is keeping them out of the queue
+  // and nothing else. Older open rows are already out of the window and stay
+  // on the record; the other ladder is touched only when it is running too.
+  it('lifting a timeout clears the running ladder in the window and leaves the rest', () => {
+    recordPenalty(db, P, 'no_show', 1, plus(-10 * 24 * 60));   // outside the window
+    recordPenalty(db, P, 'ready_fail', null, plus(-120));      // its 5 minutes long gone
+    recordPenalty(db, P, 'no_show', 2, plus(-30));
+    recordPenalty(db, P, 'no_show', 3, T0);
+    expect(activeTimeout(db, P, T0)).toMatchObject({ kind: 'no_show', offenses: 2 });
+    expect(liftTimeout(db, P, IDS[7], T0)).toEqual({ cleared: 2, kinds: ['no_show'] });
+    expect(activeTimeout(db, P, T0)).toBeNull();
+    const open = penaltyHistory(db, P).filter((x) => !x.clearedAt).map((x) => [x.kind, x.matchId]);
+    expect(open).toEqual([['ready_fail', null], ['no_show', 1]]);
+    expect(liftTimeout(db, P, IDS[7], T0)).toEqual({ cleared: 0, kinds: [] });
+  });
+
+  it('lifting a timeout clears both ladders when both are running', () => {
+    recordPenalty(db, P, 'no_show', 4, T0);
+    recordPenalty(db, P, 'ready_fail', null, plus(1));
+    expect(liftTimeout(db, P, IDS[7], plus(2))).toEqual({ cleared: 2, kinds: ['ready_fail', 'no_show'] });
+    expect(activeTimeout(db, P, plus(2))).toBeNull();
   });
 
   it('disabled means no timeout and nothing recorded', () => {

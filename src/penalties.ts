@@ -106,6 +106,31 @@ export function clearPenalty(db: DB, steamid: string, id: number, by: string, no
     .run(by, now.toISOString(), id, steamid).changes > 0;
 }
 
+/**
+ * Lift the queue timeout a player is serving: clear the open offenses, in the
+ * window, of every ladder running right now, and nothing else. A ladder that
+ * has already run out, and rows older than the window, do not keep anyone
+ * out of the queue, so they stay on the record. The per-row Clear is for
+ * taking back one offense; this is for "let them queue". Kinds are reported
+ * ready checks first, the order the ladders are checked in.
+ */
+export function liftTimeout(db: DB, steamid: string, by: string, now = new Date()): { cleared: number; kinds: PenaltyKind[] } {
+  if (!enabled(db)) return { cleared: 0, kinds: [] };
+  const since = new Date(now.getTime() - windowDays(db) * 24 * 60 * 60 * 1000).toISOString();
+  const clear = db.prepare(
+    `UPDATE penalties SET cleared_by = ?, cleared_at = ?
+     WHERE player_id = ? AND kind = ? AND cleared_at IS NULL AND created_at >= ? AND created_at <= ?`,
+  );
+  let cleared = 0;
+  const kinds: PenaltyKind[] = [];
+  for (const kind of ['ready_fail', 'no_show'] as const) {
+    if (!ladderTimeout(db, steamid, kind, now)) continue;
+    cleared += clear.run(by, now.toISOString(), steamid, kind, since, now.toISOString()).changes;
+    kinds.push(kind);
+  }
+  return { cleared, kinds };
+}
+
 /** Clear the no-shows one match handed out, for an abort whose no-shows were
  *  not the players' doing. Returns who had one cleared. */
 export function clearMatchNoShows(db: DB, matchId: number, by: string, now = new Date()): string[] {

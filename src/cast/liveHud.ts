@@ -7,8 +7,13 @@ import type { CastLiveRound, LiveHud } from './types.js';
  *
  * Undelayed game state, so it is kept in memory only, keyed by match token,
  * and read only by the caster studio feed (behind the overlay key and the
- * caster gate). It never reaches the database or the public live page. A web
- * restart loses it for 2 s, which is all it is worth.
+ * caster gate). A web restart loses it for 2 s, which is all it is worth.
+ *
+ * Each half also keeps a timestamped history of its progress and tank flow
+ * (history), for the live win chance (src/winLive/liveState.ts). The public
+ * line reads only samples at least the live viewer's delay old, and the
+ * history reaches the database only after the half has ended
+ * (match_progress_samples, written by the round-end handler).
  */
 
 export interface LiveHudPlayer {
@@ -74,9 +79,27 @@ export const TANK_RECAP_MS = 12_000;
 export const LIVE_HUD_FRESH_MS = 6000;
 /** Tokens nobody has updated for this long are dropped. */
 const FORGET_MS = 10 * 60_000;
+/** A half's history is dropped this long after its last sample, and holds at
+ *  most HISTORY_MAX samples (two hours at one every 2 s). */
+const HISTORY_FORGET_MS = 2 * 60 * 60_000;
+const HISTORY_MAX = 3600;
+
+/** One LIVEHUD sample in a half's history: when it arrived (this process's
+ *  clock), the furthest survivor's flow % and the tank flow %, both as sent
+ *  (-1 unknown). */
+export interface LiveHudSample { at: number; prog: number; tank: number }
+
+interface HalfHistory {
+  /** When this process saw the half go live (resetReach at ROUND_START), or
+   *  null when it never did (a web restart mid-half). */
+  startedAt: number | null;
+  samples: LiveHudSample[];
+  lastAt: number;
+}
 
 export class LiveHudStore {
   private byToken = new Map<string, { at: number; line: LiveHudLine; reach: Map<string, number> }>();
+  private halves = new Map<string, HalfHistory>();
   private tanks = new Map<string, { at: number; recap: TankDone }>();
   private witches = new Map<string, { at: number; recap: WitchDone }>();
 
@@ -114,16 +137,41 @@ export class LiveHudStore {
       const k = `${round.ordinal}:${round.half}`;
       reach.set(k, Math.max(reach.get(k) ?? 0, line.prog));
     }
+    if (round) {
+      const hk = historyKey(token, round.ordinal, round.half);
+      let h = this.halves.get(hk);
+      if (!h) { h = { startedAt: null, samples: [], lastAt: nowMs }; this.halves.set(hk, h); }
+      h.samples.push({ at: nowMs, prog: line.prog, tank: line.tank });
+      if (h.samples.length > HISTORY_MAX) h.samples.splice(0, h.samples.length - HISTORY_MAX);
+      h.lastAt = nowMs;
+      if (this.halves.size > 64) {
+        for (const [k, v] of this.halves) if (nowMs - v.lastAt > HISTORY_FORGET_MS) this.halves.delete(k);
+      }
+    }
     this.byToken.set(token, { at: nowMs, line, reach });
     if (this.byToken.size > 64) {
       for (const [k, v] of this.byToken) if (nowMs - v.at > FORGET_MS) this.byToken.delete(k);
     }
   }
 
-  /** A half (re)started: forget its reach, so a replayed half never takes
-   *  its opponent's mark from the abandoned attempt. */
-  resetReach(token: string, ordinal: number, half: number): void {
+  /** A half (re)started: forget its reach and its history, so a replayed
+   *  half never takes its opponent's mark, or a live win chance point, from
+   *  the abandoned attempt. `nowMs` is when it went live, the history's
+   *  clock origin. */
+  resetReach(token: string, ordinal: number, half: number, nowMs = Date.now()): void {
     this.byToken.get(token)?.reach.delete(`${ordinal}:${half}`);
+    this.halves.set(historyKey(token, ordinal, half), { startedAt: nowMs, samples: [], lastAt: nowMs });
+  }
+
+  /** Every sample recorded for one half since it went live, oldest first
+   *  (memory only: a web restart during that half loses the part before it). */
+  history(token: string, ordinal: number, half: number): LiveHudSample[] {
+    return [...(this.halves.get(historyKey(token, ordinal, half))?.samples ?? [])];
+  }
+
+  /** When this process saw the half go live, or null when it did not. */
+  halfStartedAt(token: string, ordinal: number, half: number): number | null {
+    return this.halves.get(historyKey(token, ordinal, half))?.startedAt ?? null;
   }
 
   /** The furthest progress seen in one half, or null if none was recorded
@@ -139,6 +187,8 @@ export class LiveHudStore {
     return hit.line;
   }
 }
+
+const historyKey = (token: string, ordinal: number, half: number) => `${token}:${ordinal}:${half}`;
 
 /** The one store the log listener writes and the caster feed reads. */
 export const liveHudStore = new LiveHudStore();

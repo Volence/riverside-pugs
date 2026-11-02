@@ -56,7 +56,7 @@ export function roomTimers(db: DB): RoomTimers {
     readyMinutes: settingNumber(db, 'event_ready_minutes', 10, { min: 2, max: 30, integer: true }),
     stepSeconds: settingNumber(db, 'event_veto_step_seconds', 60, { min: 20, max: 300, integer: true }),
     lineupMinutes: settingNumber(db, 'event_lineup_minutes', 5, { min: 1, max: 15, integer: true }),
-    confirmMinutes: settingNumber(db, 'event_confirm_minutes', 15, { min: 5, max: 60, integer: true }),
+    confirmMinutes: settingNumber(db, 'event_confirm_minutes', 0, { min: 0, max: 60, integer: true }),
   };
 }
 
@@ -450,7 +450,10 @@ export function openPick(db: DB, o: { matchId: number; timers: RoomTimers; now?:
   })();
 }
 
-/** The series is over: the confirm window opens (Ruling 9). Refused as
+/** The series is over: the confirm window opens (Ruling 9). With
+ *  event_confirm_minutes at 0 (owner 2026-10-24: the scores come from our
+ *  plugins, so a problem goes to a mod instead) the deadline is now and the
+ *  room clock records the result on its next tick. Refused as
  *  'changed' while the recorded games do not make a finished series. */
 export function startConfirm(db: DB, o: { matchId: number; timers: RoomTimers; now?: Date }): V.Checked<P.MatchRow> {
   const now = o.now ?? new Date();

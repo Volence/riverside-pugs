@@ -132,7 +132,7 @@ describe('T1b columns', () => {
     expect(cols('event_games')).toEqual(expect.arrayContaining(['score_a', 'score_b', 'forfeit_side', 'winner', 'map', 'ended_at']));
     expect(cols('bookings')).toContain('next_map');
     expect(cols('booking_sides')).toContain('present_now');
-    expect((db.prepare("SELECT value FROM settings WHERE key = 'event_confirm_minutes'").get() as { value: string }).value).toBe('15');
+    expect((db.prepare("SELECT value FROM settings WHERE key = 'event_confirm_minutes'").get() as { value: string }).value).toBe('0');
   });
 
   it('has the hold origin and the staff freeze columns (plan T3c)', () => {

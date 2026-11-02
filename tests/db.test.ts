@@ -21,8 +21,11 @@ describe('openDb', () => {
       'community_entries', 'community_likes',
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
-      'draft_captain_offers', 'draft_keep_answers', 'draft_keeps', 'draft_pick_lists', 'draft_picks', 'draft_rooms', 'draft_signups', 'draft_standin_offers', 'draft_standins', 'duo_invites', 'duo_pop_skips', 'duos', 'endorsements', 'evader_flags', 'evader_members', 'evader_people', 'event_campaign_prefs', 'event_entries', 'event_entry_players', 'event_entry_prefs', 'event_games', 'event_lineups',
-      'event_log', 'event_matches', 'event_reschedules', 'event_stages', 'event_vetoes', 'events', 'fingerprint_alerts', 'fingerprint_cache', 'fingerprint_dismissals', 'fleet_files', 'fleet_readings',
+      'draft_captain_offers', 'draft_keep_answers', 'draft_keeps', 'draft_pick_lists', 'draft_picks', 'draft_rooms', 'draft_signups',
+      'draft_standin_offers', 'draft_standins', 'duo_invites', 'duo_pop_skips', 'duos', 'endorsements', 'evader_flags', 'evader_members', 'evader_people',
+      'event_campaign_prefs', 'event_entries', 'event_entry_players', 'event_entry_prefs', 'event_entry_voice', 'event_games', 'event_lineups',
+      'event_log', 'event_match_voice', 'event_matches', 'event_reschedules', 'event_stages', 'event_vetoes', 'events', 'fingerprint_alerts',
+      'fingerprint_cache', 'fingerprint_dismissals', 'fleet_files', 'fleet_readings',
       'game_configs',
       'input_bursts', 'input_caps', 'input_detections', 'input_match_scans', 'input_stalls',
       'integrity_clips', 'integrity_flag_posts', 'integrity_flags', 'integrity_prior', 'integrity_prior_rounds', 'integrity_reviews', 'integrity_rounds',
@@ -30,9 +33,9 @@ describe('openDb', () => {
       'map_looks',
       'match_abandons', 'match_abort_notices', 'match_balance_log', 'match_chat', 'match_connect_funnel', 'match_demos', 'match_gg_votes', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps', 'match_name_sightings',
-      'match_pauses', 'match_player_stats', 'match_players', 'match_presence',
-      'match_readyup_players', 'match_readyups', 'match_replays', 'match_requeue', 'match_round_feeds', 'match_round_marks', 'match_round_stats', 'match_rounds',
-      'match_si_lives', 'match_survivor_downs',
+      'match_pauses', 'match_player_stats', 'match_players', 'match_presence', 'match_progress_samples', 'match_readyup_players', 'match_readyups',
+      'match_replays', 'match_requeue', 'match_round_feeds', 'match_round_marks', 'match_round_stats', 'match_rounds', 'match_si_lives',
+      'match_survivor_downs', 'match_win_point_runs', 'match_win_points',
       'matches', 'matchmaker_state',
       'mod_calls',
       'news_posts',
@@ -226,7 +229,7 @@ describe('practice_leases kinds', () => {
     const db = openDb(':memory:');
     const plan = (sql: string) => (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as { detail: string }[])
       .map((r) => r.detail).join('\n');
-    expect(plan("SELECT match_id FROM match_players WHERE player_id = 'x'")).toMatch(/idx_match_players_player/);
+    expect(plan("SELECT match_id FROM match_players WHERE player_id = 'x'")).toMatch(/match_players_player/);
     expect(plan("SELECT COUNT(*) FROM rating_history WHERE player_id = 'x' AND season_id = 1"))
       .toMatch(/idx_rating_history_player_season/);
     db.close();

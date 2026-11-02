@@ -717,10 +717,10 @@ describe('drawHud delegates panels to the renderer', () => {
       expect(draws(calls(d, { ...DEFAULT_PREVIEW, infected: 'dead' }), CROSSHAIR_OPEN)).toEqual([]);
     });
 
-    it('draws neither with the game\'s crosshair hidden (probe Q16b, b10/shots/crops/centre-bcef.png)', () => {
+    it('keeps the marker and drops the crosshair with the game\'s crosshair hidden (probe XR, ab-alpha.jpg)', () => {
       const d = { ...marker(40), hideGameCrosshair: true };
       const cs = calls(d);
-      expect(draws(cs, 'vgui/hud/pz_charge_crosshair')).toEqual([]);
+      expect(draws(cs, 'vgui/hud/pz_charge_crosshair')).toHaveLength(1);
       expect(draws(cs, CROSSHAIR_OPEN)).toEqual([]);
     });
   });

@@ -682,12 +682,15 @@ export function setDraftCaptain(db: DB, o: { eventId: number; entryId: number; s
 /**
  * Staff swap two starters between two draft teams (owner, 2026-10-23: a
  * balance fix after the teams are published), in one transaction with one
- * 'entry_players_swapped' row. Only from teams made until the event goes
- * live: before that no match, lineup or booking holds either player, so the
- * rosters are the whole change. Captains are refused (move the captaincy
- * with Make captain first). draft_signups.draft_team follows, so the working
- * teams read the same as the entries. Seeds are left as they are; staff can
- * still reorder them before the start.
+ * 'entry_players_swapped' row. From teams made until the event ends (owner
+ * 2026-10-24: swaps between rounds of a live event). While it is live a
+ * player in a locked lineup of an unfinished match is refused (swap_in_lineup:
+ * that room, its booking or a game on a box already rosters them), so the
+ * rosters are always the whole change; a room before its lineups reads the
+ * rosters live. Captains are refused (move the captaincy with Make captain
+ * first). draft_signups.draft_team follows, so the working teams read the
+ * same as the entries. Seeds are left as they are; staff can still reorder
+ * them before the start.
  */
 export function swapDraftPlayers(db: DB, o: {
   eventId: number; a: { entryId: number; steamid: string }; b: { entryId: number; steamid: string }; actor: string; now: Date;
@@ -698,7 +701,7 @@ export function swapDraftPlayers(db: DB, o: {
       const ev = E.getEvent(db, o.eventId);
       if (!ev || ev.status === 'draft') return V.fail('not_found');
       if (ev.entry_kind !== 'draft') return V.fail('replace_not_draft');
-      if (ev.teams_made_at === null || !LEAVE_OPEN.has(ev.status)) return V.fail('swap_closed');
+      if (ev.teams_made_at === null || !ROSTER_OPEN.has(ev.status)) return V.fail('swap_closed');
       if (o.a.entryId === o.b.entryId) return V.fail('swap_same_team');
       const sides = [o.a, o.b].map((x) => {
         const entry = getEntry(db, x.entryId);
@@ -708,6 +711,10 @@ export function swapDraftPlayers(db: DB, o: {
         if (x.steamid === entry.captain_steamid) throw new Refused(V.fail('swap_captain'));
         const place = placesOf(db, entry.id).find((p) => p.steamid === x.steamid && p.role === 'starter');
         if (!place) throw new Refused(V.fail('replace_not_starter'));
+        const busy = lineupMatches(db, ev.id, entry.id, x.steamid);
+        if (busy.length > 0) {
+          throw new Refused(V.fail('swap_in_lineup', [{ steamid: x.steamid, problems: [`In the locked lineup of ${entry.name}'s match ${busy[0]!.matchId}.`] }]));
+        }
         return { entry, place };
       });
       const [sa, sb] = sides as [typeof sides[number], typeof sides[number]];

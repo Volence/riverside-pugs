@@ -82,8 +82,9 @@ function Likes({ entry, session }: { entry: CommunityEntry; session: Session }) 
   return (
     <span class="ccard__likes">
       <button type="button" class={`chip ccard__like${likes.mine ? ' is-on' : ''}`} disabled={!active || busy} title={title}
-        aria-pressed={likes.mine} onClick={toggle}>
-        {likes.mine ? `Liked, ${likes.n}` : `Like, ${likes.n}`}
+        aria-pressed={likes.mine} aria-label={likes.mine ? `Liked, ${likes.n}` : `Like, ${likes.n}`} onClick={toggle}>
+        <span class="ccard__heart" aria-hidden="true">{likes.mine ? '\u2665' : '\u2661'}</span>
+        <span aria-hidden="true">{likes.n}</span>
       </button>
       {err && <span class="error"> {err}</span>}
     </span>
@@ -96,7 +97,7 @@ function RemoveEntry({ entry, onGone }: { entry: CommunityEntry; onGone: () => v
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  if (!open) return <button class="chip" type="button" onClick={() => setOpen(true)}>Remove</button>;
+  if (!open) return <button class="ccard__modlink" type="button" onClick={() => setOpen(true)}>Remove</button>;
   const submit = async (e: Event) => {
     e.preventDefault();
     setBusy(true);
@@ -219,12 +220,16 @@ export function CommunityCard(
         {size === 'large'
           ? <h2 class="ccard__title">{entry.title}</h2>
           : <h3 class="ccard__title"><a href={href}>{entry.title}</a></h3>}
-        {entry.description && <p class="ccard__desc">{entry.description}</p>}
+        {/* In the gallery a missing description still holds its line, so every
+            card in a row puts its author, likes and buttons at the same height. */}
+        {entry.description
+          ? <p class="ccard__desc" title={size === 'card' ? entry.description : undefined}>{entry.description}</p>
+          : size === 'card' && <p class="ccard__desc ccard__desc--none" aria-hidden="true">&nbsp;</p>}
         <div class="ccard__who">
           {entry.author.avatar
             ? <img class="ccard__avatar" src={entry.author.avatar} alt="" loading="lazy" />
             : <span class="ccard__avatar ccard__avatar--blank" />}
-          <PlayerLink steamid={entry.author.steamid} name={entry.author.name} />
+          <span class="ccard__author"><PlayerLink steamid={entry.author.steamid} name={entry.author.name} /></span>
           {removed
             ? <span class="ccard__likes muted">{`${entry.likes} ${entry.likes === 1 ? 'like' : 'likes'}`}</span>
             : <Likes entry={entry} session={session} />}
@@ -250,7 +255,7 @@ export function CommunityCard(
               <ReportPlayer target={{ steamid: entry.author.steamid, name: entry.author.name }}
                 entry={{ id: entry.id, kind: entry.kind, title: entry.title }} />
             )}
-            {own && <button class="chip" type="button" onClick={del}>Delete</button>}
+            {own && <button class="ccard__modlink" type="button" onClick={del}>Delete</button>}
             {staff && !own && <RemoveEntry entry={entry} onGone={() => setGone('Removed.')} />}
           </div>
         ) : null}

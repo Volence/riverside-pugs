@@ -26,6 +26,7 @@ import { RankBadge as SeasonRankBadge, RankCard, Top10Tag, Trophy } from '../com
 import type { PastSeason, ProfileScopeInfo, ProfileScopeRequest, WrappedSeason } from '../api';
 import { loadWrappedSeasons } from '../wrapped';
 import { withNetDamageAsSi } from '../../../src/siDamage';
+import { ProfileWeekly } from '../components/ProfileWeekly';
 
 /** Maps with fewer games than this fold away on the by-map bars: a 0W 2L map says little. */
 const MAP_MIN_SAMPLE = 5;
@@ -278,6 +279,7 @@ export function Profile(
         <div class="prof__cols">
           <div class="prof__main">
             <ProfileEvents events={data.events} />
+            <ProfileWeekly steamid={steamid} />
 
             <Panel class="panel--table prof__matches">
               <h3>Recent matches</h3>

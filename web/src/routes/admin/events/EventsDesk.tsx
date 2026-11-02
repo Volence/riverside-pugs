@@ -43,8 +43,23 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div class="stack">
+      <Panel class="evdesk__panel">
+        <h3>All events</h3>
+        <p class="evdesk__help">Open an event to run it. Drafts are only visible to staff.</p>
+        {loadError ? <p class="error" role="alert">Could not load the events.</p> : !data ? <p class="muted">Loading...</p> : data.events.length === 0 ? <Empty>No events yet.</Empty> : (
+          <ul class="admin-list evdesk__list">
+            {data.events.map((ev) => (
+              <li key={ev.id} class="evdesk__item">
+                <a href={eventAdminUrl(ev.id)}><strong>{ev.name}</strong></a>{' '}
+                <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span>{' '}
+                <span class="muted">· {whenText(ev.startsAt)} · {ev.stages} stage{ev.stages === 1 ? '' : 's'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
       {canEdit && (
-      <Panel>
+      <Panel class="evdesk__panel">
         <h3>New event</h3>
         <p class="muted">It starts as a draft only staff can see. Add its stages, then publish it.</p>
         {(problem ?? error) && <p class="error" role="alert">{problem ?? error}</p>}
@@ -77,20 +92,6 @@ export function EventsDesk({ canEdit }: { canEdit: boolean }) {
         </form>
       </Panel>
       )}
-      <Panel>
-        <h3>All events</h3>
-        {loadError ? <p class="error" role="alert">Could not load the events.</p> : !data ? <p class="muted">Loading...</p> : data.events.length === 0 ? <Empty>No events yet.</Empty> : (
-          <ul class="admin-list">
-            {data.events.map((ev) => (
-              <li key={ev.id}>
-                <a href={eventAdminUrl(ev.id)}><strong>{ev.name}</strong></a>{' '}
-                <span class={`teamchip eventstatus eventstatus--${ev.status}`}>{ev.statusLabel ?? STATUS_LABEL[ev.status]}</span>{' '}
-                <span class="muted">· {whenText(ev.startsAt)} · {ev.stages} stage{ev.stages === 1 ? '' : 's'}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
     </div>
   );
 }
