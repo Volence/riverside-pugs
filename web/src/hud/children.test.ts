@@ -73,11 +73,11 @@ describe('the teammate card registry', () => {
     expect(TEAM_PANEL.children.filter((c) => c.box === 'square').map((c) => c.name)).toEqual(['Head', 'Incapacitated', 'Dead', 'Voice']);
   });
 
-  it('offers colour only on labels, the splatter and the portrait, and never on the health number or the state art', () => {
+  it('offers colour only on labels, the splatter and the portrait (the health number among them, probe R23), and never on the state art', () => {
     for (const def of TEAM_PANEL.children) {
       if (def.colour) expect(def.kind === 'label' || def.name === 'BackgroundImage' || def.name === 'Head', def.name).toBe(true);
     }
-    expect(TEAM_PANEL.children.find((c) => c.name === 'HealthNumber')!.colour).toBe(false);
+    expect(TEAM_PANEL.children.find((c) => c.name === 'HealthNumber')!.colour).toBe(true);
     for (const n of ['Incapacitated', 'Dead', 'Voice']) expect(TEAM_PANEL.children.find((c) => c.name === n)!.colour, n).toBe(false);
   });
 
@@ -200,8 +200,9 @@ describe('the own health registry', () => {
       ...(c.colourGate ? [`${c.name}.colour:${c.colourGate}`] : []),
     ]);
     expect(gated).toEqual(['Health.monochrome_color:Q1', 'Health.inset:Q3', 'DuckingIcon.colour:Q8']);
-    // Every other own piece offers no colour at all: code colours them by health.
-    for (const def of OWN_PANEL.children) if (!def.colourGate) expect(def.colour, def.name).toBe(false);
+    // Every other own piece offers no colour at all: code colours them by health. The health number takes one
+    // because the download renames it out of code's reach (build.ts healthNumberPass, probe R23).
+    for (const def of OWN_PANEL.children) if (!def.colourGate) expect(def.colour, def.name).toBe(def.name === 'HealthNumber');
   });
 
   it('calls the monochrome key a panel colour, because it tints the whole panel (probe B1 Q1)', () => {

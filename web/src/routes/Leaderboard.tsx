@@ -200,7 +200,7 @@ export function Leaderboard({ me }: { me: string | null }) {
       )}
 
       {weekly ? (
-        <WeeklyBoard week={week} onWeek={setWeek} />
+        <WeeklyBoard week={week} onWeek={setWeek} me={me} />
       ) : endorse ? (
         <EndorseBoard season={season} me={me} />
       ) : (

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { adminApi, type PlayMatch, type RoomPhase, type StagePlayView } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
@@ -40,14 +40,33 @@ const validScore = (s: string): boolean => {
  *  `onSaved` fires only once the server actually took the result (it runs
  *  after `recordEventResult` resolves, inside the function `run` awaits, so
  *  a refused or failed save leaves the form open with what was typed). */
-function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: number; m: PlayMatch; run: Run; busy: boolean; correcting: boolean; onSaved?: () => void }) {
+function ResultForm({ eventId, s, m, run, busy, correcting, onSaved }: { eventId: number; s: StagePlayView; m: PlayMatch; run: Run; busy: boolean; correcting: boolean; onSaved?: () => void }) {
   const [winner, setWinner] = useState<'' | 'a' | 'b'>('');
   const [scoreA, setScoreA] = useState('');
   const [scoreB, setScoreB] = useState('');
   const [forfeit, setForfeit] = useState(false);
   const a = m.a!.name;
   const b = m.b!.name;
-  const canSave = winner !== '' && (forfeit || (validScore(scoreA) && validScore(scoreB)));
+  // A games-won series takes games, not campaign points (Draft Tourney #1
+  // match 7 was typed as 654 : 1490): the winner has the games that win it,
+  // the loser fewer. A Bo2 is total score, so any scores with the winner ahead.
+  const { bestOf, totalScore } = s.series;
+  const needed = Math.floor(bestOf / 2) + 1;
+  const unit = totalScore ? 'total score' : 'games won';
+  const scoresFit = () => {
+    if (!validScore(scoreA) || !validScore(scoreB) || winner === '') return false;
+    const [w, l] = winner === 'a' ? [Number(scoreA), Number(scoreB)] : [Number(scoreB), Number(scoreA)];
+    return totalScore ? w > l : w === needed && l < needed;
+  };
+  const pickWinner = (v: '' | 'a' | 'b') => {
+    setWinner(v);
+    // A Bo1 has one possible score: fill it in.
+    if (!totalScore && bestOf === 1 && v !== '') {
+      setScoreA(v === 'a' ? '1' : '0');
+      setScoreB(v === 'b' ? '1' : '0');
+    }
+  };
+  const canSave = winner !== '' && (forfeit || scoresFit());
   const save = () => {
     if (!canSave) return;
     const body = forfeit ? { winner, forfeit: true } : { winner, scoreA: Number(scoreA), scoreB: Number(scoreB), forfeit: false };
@@ -64,7 +83,7 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
   return (
     <div class="inlinerow resultform">
       <label>Winner
-        <select aria-label="Winner" value={winner} onChange={(e) => setWinner((e.target as HTMLSelectElement).value as '' | 'a' | 'b')}>
+        <select aria-label="Winner" value={winner} onChange={(e) => pickWinner((e.target as HTMLSelectElement).value as '' | 'a' | 'b')}>
           <option value="">Pick</option>
           <option value="a">{a}</option>
           <option value="b">{b}</option>
@@ -73,12 +92,15 @@ function ResultForm({ eventId, m, run, busy, correcting, onSaved }: { eventId: n
       {!forfeit && (
         <>
           <label class="resultform__score">{a}
-            <input type="number" min={0} aria-label={`${a} score`} placeholder="score" value={scoreA} onInput={(e) => setScoreA((e.target as HTMLInputElement).value)} />
+            <input type="number" min={0} max={totalScore ? undefined : needed} aria-label={`${a} ${unit}`} placeholder={unit} value={scoreA} onInput={(e) => setScoreA((e.target as HTMLInputElement).value)} />
           </label>
           <label class="resultform__score">{b}
-            <input type="number" min={0} aria-label={`${b} score`} placeholder="score" value={scoreB} onInput={(e) => setScoreB((e.target as HTMLInputElement).value)} />
+            <input type="number" min={0} max={totalScore ? undefined : needed} aria-label={`${b} ${unit}`} placeholder={unit} value={scoreB} onInput={(e) => setScoreB((e.target as HTMLInputElement).value)} />
           </label>
         </>
+      )}
+      {!forfeit && (
+        <span class="muted resultform__hint">{totalScore ? `Bo2: each team's total score over both games.` : `Bo${bestOf}: games won, the winner ${needed}.`}</span>
       )}
       <label><input type="checkbox" aria-label="Forfeit" checked={forfeit} onChange={(e) => setForfeit((e.target as HTMLInputElement).checked)} /> Forfeit</label>
       <button class="btn btn--ghost btn--sm" disabled={busy || !canSave} onClick={save}>Save result</button>
@@ -345,6 +367,9 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
             // Opens the room ahead of its time (the clock opens it otherwise).
             <button class="btn btn--ghost btn--sm" aria-label={`Open room: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.openEventRoom(eventId, m.id))}>Open room now</button>
           )}
+          {editable && m.phase === 'waiting' && !holding && (
+            <button class="btn btn--ghost btn--sm" aria-label={`Hold: ${names}`} disabled={busy} onClick={() => setHolding(true)}>Hold</button>
+          )}
           {editable && ROOM_LIVE.has(m.phase) && (
             <>
               <button class="btn btn--ghost btn--sm" aria-label={`Reset room: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.resetEventRoom(eventId, m.id), BOOKED.has(m.phase)
@@ -357,13 +382,13 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
           )}
         </div>
       )}
-      {editable && ROOM_LIVE.has(m.phase) && m.phase !== 'hold' && holding && (
+      {editable && (ROOM_LIVE.has(m.phase) || m.phase === 'waiting') && m.phase !== 'hold' && holding && (
         <HoldForm eventId={eventId} m={m} run={run} busy={busy} onDone={() => setHolding(false)} />
       )}
       {editable && OPEN.has(m.status) && (
         <div class="deskmatch__result">
           <span class="deskmatch__label">Enter a result by hand</span>
-          <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting={false} />
+          <ResultForm eventId={eventId} s={s} m={m} run={run} busy={busy} correcting={false} />
         </div>
       )}
       {correctable && !correcting && (
@@ -374,11 +399,73 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
       {correctable && correcting && (
         <div class="deskmatch__result">
           <span class="deskmatch__label">Correct the result</span>
-          <ResultForm eventId={eventId} m={m} run={run} busy={busy} correcting onSaved={() => setCorrecting(false)} />
+          <ResultForm eventId={eventId} s={s} m={m} run={run} busy={busy} correcting onSaved={() => setCorrecting(false)} />
         </div>
       )}
       {editable && m.desk && (ROOM_LIVE.has(m.phase) || m.phase === 'waiting' || (finished(m) && m.desk.pauses.length > 0)) && <DeskTools eventId={eventId} m={m} run={run} busy={busy} />}
     </li>
+  );
+}
+
+/** Phases a match is counted under on the night bar, in the order a match moves through them. */
+const NIGHT: { key: string; label: string; phases: RoomPhase[] }[] = [
+  { key: 'waiting', label: 'To play', phases: ['waiting'] },
+  { key: 'room', label: 'Ready and veto', phases: ['ready', 'veto', 'lineup'] },
+  { key: 'server', label: 'Getting a server', phases: ['server', 'connect'] },
+  { key: 'live', label: 'Playing', phases: ['live', 'confirming'] },
+  { key: 'hold', label: 'On hold', phases: ['hold'] },
+];
+
+/** Owner 2026-10-24: the night at a glance on top of Play, where every
+ *  match of the live stages stands, with one button to hold every match not
+ *  on a server yet (a break, a server problem, a roster fix) and one to
+ *  release every hold staff put on. */
+function NightBar({ eventId, matches, canEdit, run, busy }: { eventId: number; matches: PlayMatch[]; canEdit: boolean; run: Run; busy: boolean }) {
+  const [holding, setHolding] = useState(false);
+  const [reason, setReason] = useState('');
+  const [said, setSaid] = useState('');
+  const open = matches.filter((m) => m.a !== null && m.b !== null && !finished(m));
+  const count = (phases: RoomPhase[]) => open.filter((m) => phases.includes(m.phase)).length;
+  const holdable = open.filter((m) => m.phase === 'waiting' || m.phase === 'ready' || m.phase === 'veto' || m.phase === 'lineup' || m.phase === 'server').length;
+  const held = count(['hold']);
+  return (
+    <div class="nightbar" aria-label="Matches tonight">
+      <ul class="nightbar__counts">
+        {NIGHT.map((x) => {
+          const n = count(x.phases);
+          return <li key={x.key} class={`nightbar__count nightbar__count--${x.key}${n === 0 ? ' is-zero' : ''}`}><strong>{n}</strong> <span>{x.label}</span></li>;
+        })}
+      </ul>
+      {canEdit && (
+        <div class="inlinerow nightbar__acts">
+          {!holding && (
+            <button class="btn btn--ghost btn--sm" disabled={busy || holdable === 0} onClick={() => setHolding(true)}>Hold all rooms</button>
+          )}
+          {holding && (
+            <form class="inlinerow" onSubmit={(e) => {
+              e.preventDefault();
+              void run(async () => {
+                const r = await adminApi.holdAllEventMatches(eventId, reason.trim());
+                setSaid(`${r.held} ${r.held === 1 ? 'match' : 'matches'} put on hold.`);
+                setHolding(false);
+                setReason('');
+              }, { title: `Hold ${holdable} ${holdable === 1 ? 'match' : 'matches'}?`, body: 'Every match not on a server yet stops: ready, veto and lineup clocks pause and no room opens on its own. Games already on a server play on. The reason shows on each room page.', confirmLabel: 'Hold all' });
+            }}>
+              <input type="text" aria-label="Hold all reason" placeholder="Reason, shown in each room" maxLength={300} value={reason} onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+              <button class="btn btn--sm" type="submit" disabled={busy || reason.trim().length < 3}>Hold all</button>
+              <button class="btn btn--ghost btn--sm" type="button" onClick={() => setHolding(false)}>Cancel</button>
+            </form>
+          )}
+          {held > 0 && (
+            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(async () => {
+              const r = await adminApi.releaseAllEventHolds(eventId);
+              setSaid(`${r.released} released${r.failed > 0 ? `, ${r.failed} could not be (see the match below)` : ''}.`);
+            }, { title: 'Release every staff hold?', body: 'Each match goes back to where it was with a fresh clock. Holds the site put on by itself (a game lost, no result) stay, since each needs a look.', confirmLabel: 'Release' })}>Release staff holds</button>
+          )}
+          {said && <span class="muted" role="status">{said}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -389,12 +476,21 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
 export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { eventId: number; canEdit: boolean; gen?: number; onChange?: () => void; slug?: string }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventPlay(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
-  if (loadError) return <Panel><h3>Play</h3><p class="error">Could not load the matches.</p></Panel>;
-  if (!data) return <Panel><h3>Play</h3></Panel>;
+  // Owner 2026-10-24: while the event is live the desk follows the rooms by
+  // itself (every 15 s), so staff never act on a phase that moved on.
+  const live = data?.status === 'live';
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(reload, 15_000);
+    return () => clearInterval(timer);
+  }, [live]);
+  if (loadError) return <Panel class="evdesk__panel" id="evdesk-play"><h3>Play</h3><p class="error">Could not load the matches.</p></Panel>;
+  if (!data) return <Panel class="evdesk__panel" id="evdesk-play"><h3>Play</h3></Panel>;
   const before = data.status === 'registration' || data.status === 'checkin';
   return (
-    <Panel class="playpanel">
+    <Panel class="playpanel evdesk__panel" id="evdesk-play">
       <h3>Play</h3>
+      <p class="evdesk__help">Every match of the event: open rooms, hold, reset, enter results and the staff tools.</p>
       {before && data.lockedAt === null && <p class="muted">The event can start once the entry list is final. It starts by itself at the start time.</p>}
       {before && data.lockedAt !== null && (
         <>
@@ -406,10 +502,14 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
           )}
         </>
       )}
+      {!before && data.stages.some((st) => st.status === 'live') && (
+        <NightBar eventId={eventId} canEdit={canEdit} run={run} busy={busy}
+          matches={data.stages.filter((st) => st.status === 'live').flatMap((st) => st.rounds.flatMap((r) => r.matches))} />
+      )}
       {error && <p class="error" role="alert">{error}</p>}
       {!before && data.stages.length === 0 && <Empty>No stage has started.</Empty>}
       {data.stages.map((s) => (
-        <section key={s.ordinal}>
+        <section key={s.ordinal} class="evdesk__stage">
           <h4>Stage {s.ordinal}{s.status === 'finished' ? ' (finished)' : ''}</h4>
           {s.rounds.map((r) => (
             <div key={`${r.group}-${r.round}`}>

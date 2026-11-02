@@ -52,14 +52,14 @@ export function canOpenFile(db: DB, viewer: FileViewer, targetSteamid: string): 
  *  may re-query Steam for an account. */
 export type FileAction =
   | 'note' | 'looked_at' | 'open_ticket'
-  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh';
+  | 'ban' | 'timeout' | 'merge' | 'sign_out' | 'waive' | 'staff_flags' | 'review_round' | 'steam_refresh' | 'rename';
 
 /** A moderator writes a note, marks a file looked at, and opens a ticket. A
  *  moderator bans only from a ticket and only up to the configured cap,
  *  which is the tickets route and is not reachable from here. */
 const MOD_ACTIONS: FileAction[] = ['note', 'looked_at', 'open_ticket'];
 const ADMIN_ACTIONS: FileAction[] = [
-  ...MOD_ACTIONS, 'ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags', 'review_round', 'steam_refresh',
+  ...MOD_ACTIONS, 'ban', 'timeout', 'merge', 'sign_out', 'waive', 'staff_flags', 'review_round', 'steam_refresh', 'rename',
 ];
 
 export function fileActions(db: DB, viewer: FileViewer, target: string): FileAction[] {

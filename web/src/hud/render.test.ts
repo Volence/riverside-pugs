@@ -286,6 +286,14 @@ describe('drawPanel', () => {
     }
   });
 
+  it('draws a health number the player coloured in that colour, the + still by health (probe R23)', () => {
+    const { ctx, calls } = recCtx();
+    drawPanel(ctx, design({ children: { ownHealth: { HealthNumber: { color: '255 0 255 255' } } } }), 'ownHealth', { x: 0, y: 0 }, 1);
+    const texts = calls.filter((c) => c.m === 'fillText');
+    expect(texts.find((c) => c.a[0] === '100')!.fill).toBe('rgba(255,0,255,1)');
+    expect(texts.find((c) => c.a[0] !== '100')!.fill).toBe('rgba(10,177,50,1)');
+  });
+
   it('writes the own health icon as the file does, a "," in the ToolBox icon face, which is the game\'s "+"', () => {
     // localplayerpanel.res: HealthIcon, labelText ",", font L4D_Icons (ToolBox, 16 tall, additive).
     const { ctx, calls } = recCtx();

@@ -25,6 +25,7 @@ export function IdentitySection(
   const [planError, setPlanError] = useState('');
   const [personChoice, setPersonChoice] = useState('');
   const [newLabel, setNewLabel] = useState('');
+  const [displayName, setDisplayName] = useState(d.header.nameOverridden ? d.header.name : '');
   const countries = [...new Set(id.networks.map((n) => n.country).filter(Boolean))].map(countryName);
 
   const preview = async () => {
@@ -42,6 +43,111 @@ export function IdentitySection(
     <Panel class="file-section">
       <h3 id="identity">Identity</h3>
 
+      {can('rename') && (
+        <>
+          <h4>Display name</h4>
+          <p class="file-help">
+            The name shown on the website and in Discord, for a Steam name that is blank, unreadable or not
+            what anyone calls them. In game they keep their Steam name
+            ({d.header.steamName ?? d.header.name}).
+          </p>
+          <form class="admin-merge" onSubmit={(e) => {
+            e.preventDefault();
+            const next = displayName.trim();
+            void run(() => peopleApi.setDisplayName(d.steamid, next), `Show ${d.header.name} as ${next} on the website and in Discord?`);
+          }}>
+            <input value={displayName} placeholder="Display name" aria-label="Display name" maxLength={32}
+              onInput={(e) => setDisplayName((e.target as HTMLInputElement).value)} />
+            <button class="btn" type="submit"
+              disabled={busy || !displayName.trim() || displayName.trim() === d.header.name}>Save</button>
+            {d.header.nameOverridden && (
+              <button class="chip" type="button" disabled={busy}
+                onClick={() => run(
+                  () => peopleApi.setDisplayName(d.steamid, null),
+                  `Clear ${d.header.name}'s display name and go back to their Steam name?`,
+                ).then(() => setDisplayName(''))}>Use Steam name</button>
+            )}
+          </form>
+        </>
+      )}
+
+      {(id.names?.length ?? 0) > 0 && (
+        <>
+          <h4>Names played under</h4>
+          <ul class="file-rows">
+            {id.names!.map((n) => (
+              <li key={n.key} class="file-row file-row--name">
+                <span class="file-row__name">{n.name}</span>
+                <span class="file-row__fig">{n.matches} {n.matches === 1 ? 'match' : 'matches'} · {n.sources.map((src) => (src === 'steam' ? 'Steam' : 'in game')).join(' and ')}</span>
+                <span class="muted file-row__when">first {fmtTime(n.firstSeen)}, last {fmtTime(n.lastSeen)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {id.discordHistory.length > 0 && (
+        <>
+          <h4>Discord accounts</h4>
+          <ul class="file-rows">
+            {id.discordHistory.map((h) => (
+              <li key={`${h.discordId}-${h.linkedAt}`} class="file-row">
+                <div class="file-row__main">
+                  <span>{h.discordName || 'unknown'} <code>{h.discordId}</code></span>
+                  <span class={`file-pill${h.unlinkedAt ? ' file-pill--lifted' : ' file-pill--ok'}`}>{h.unlinkedAt ? 'unlinked' : 'current'}</span>
+                </div>
+                <div class="file-row__meta">
+                  {h.linkedBy === 'backfill' ? 'linked before history was kept' : `linked ${fmtTime(h.linkedAt)}`}
+                  {h.unlinkedAt ? `, unlinked ${fmtTime(h.unlinkedAt)}${h.unlinkedBy === 'merge' ? ' by a merge' : ''}` : ''}
+                </div>
+                {h.others.map((o) => (
+                  <div key={`${o.steamid}-${o.linkedAt}`} class="file-row__meta">
+                    This Discord was {o.unlinkedAt ? 'previously' : 'also'} linked to{' '}
+                    <a href={fileUrl(o.steamid)}>{o.name ?? o.steamid}</a>
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {(countries.length > 0 || id.sharesAddressWith.length > 0) && <h4>Connections</h4>}
+      {countries.length > 0 && (
+        <p class="file-help">Connects from {countries.join(', ')} · {id.networks.length} connection{id.networks.length === 1 ? '' : 's'} seen</p>
+      )}
+      {id.sharesAddressWith.length > 0 && (
+        <>
+          <p><strong>Seen on the same connection as:</strong></p>
+          <ul class="file-rows">
+            {id.sharesAddressWith.map((o) => (
+              <li key={o.steamid} class="file-row file-row--line">
+                <a href={fileUrl(o.steamid)}>{o.name}</a> <code>{o.steamid}</code>{' '}
+                <span class="muted">
+                  {o.seenCount} {o.seenCount === 1 ? 'connect' : 'connects'}
+                  {o.country ? `, ${countryName(o.country)}` : ''}, last {fmtTime(o.lastSeen)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p class="file-help">
+            A shared connection is not proof. A VPN, a household, a LAN cafe and two siblings all
+            look like this. Check it against how they play before merging.
+          </p>
+        </>
+      )}
+
+      <div class="file-sub">
+        <SteamAccountPanel
+          d={{ steamid: d.steamid, steamAccount: id.steamAccount }}
+          busy={busy}
+          run={run}
+          canRefresh={can('steam_refresh')}
+          onSelect={(steamid) => { location.href = fileUrl(steamid); }}
+        />
+      </div>
+
+      {(id.evaderPerson || can('looked_at')) && <h4>Known evader</h4>}
       {id.evaderPerson ? (
         <p>
           <span class="admin-status admin-status--banned">known evader</span>{' '}
@@ -77,10 +183,11 @@ export function IdentitySection(
 
       {(id.altHolds?.length ?? 0) > 0 && (
         <>
-          <p><strong>Alt holds:</strong> <a href="/admin/people/alts">review on Alts</a></p>
-          <ul class="admin-list">
+          <h4>Alt holds</h4>
+          <p class="file-help"><a href="/admin/people/alts">Review on Alts</a></p>
+          <ul class="file-rows">
             {id.altHolds!.map((h) => (
-              <li key={h.id}>
+              <li key={h.id} class="file-row">
                 {h.source === 'fingerprint'
                   ? (h.steamid === d.steamid
                     ? <>Held on a press fingerprint match with <strong>{h.personLabel ?? 'a known evader'}</strong> (nearest account <a href={fileUrl(h.otherSteamid)}>{h.otherName}</a>)</>
@@ -99,80 +206,11 @@ export function IdentitySection(
         </>
       )}
 
-      {(id.names?.length ?? 0) > 0 && (
-        <>
-          <p><strong>Names played under:</strong></p>
-          <ul class="admin-list">
-            {id.names!.map((n) => (
-              <li key={n.key}>
-                {n.name}{' '}
-                <span class="muted">
-                  {n.matches} {n.matches === 1 ? 'match' : 'matches'}
-                  {' · '}{n.sources.map((src) => (src === 'steam' ? 'Steam' : 'in game')).join(' and ')}
-                  {' · '}first {fmtTime(n.firstSeen)}, last {fmtTime(n.lastSeen)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {id.discordHistory.length > 0 && (
-        <ul class="admin-list">
-          {id.discordHistory.map((h) => (
-            <li key={`${h.discordId}-${h.linkedAt}`}>
-              {h.discordName || 'unknown'} <code>{h.discordId}</code>{' '}
-              <span class="muted">
-                {h.linkedBy === 'backfill' ? 'linked before history was kept' : `linked ${fmtTime(h.linkedAt)}`}
-                {h.unlinkedAt ? `, unlinked ${fmtTime(h.unlinkedAt)}${h.unlinkedBy === 'merge' ? ' by a merge' : ''}` : ', current'}
-              </span>
-              {h.others.map((o) => (
-                <div key={`${o.steamid}-${o.linkedAt}`} class="muted">
-                  This Discord was {o.unlinkedAt ? 'previously' : 'also'} linked to{' '}
-                  <a href={fileUrl(o.steamid)}>{o.name ?? o.steamid}</a>
-                </div>
-              ))}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {countries.length > 0 && (
-        <p class="muted">Connects from {countries.join(', ')} · {id.networks.length} connection{id.networks.length === 1 ? '' : 's'} seen</p>
-      )}
-      {id.sharesAddressWith.length > 0 && (
-        <>
-          <p><strong>Seen on the same connection as:</strong></p>
-          <ul class="admin-list">
-            {id.sharesAddressWith.map((o) => (
-              <li key={o.steamid}>
-                <a href={fileUrl(o.steamid)}>{o.name}</a> <code>{o.steamid}</code>{' '}
-                <span class="muted">
-                  {o.seenCount} {o.seenCount === 1 ? 'connect' : 'connects'}
-                  {o.country ? `, ${countryName(o.country)}` : ''}, last {fmtTime(o.lastSeen)}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p class="muted">
-            A shared connection is not proof. A VPN, a household, a LAN cafe and two siblings all
-            look like this. Check it against how they play before merging.
-          </p>
-        </>
-      )}
-
-      <SteamAccountPanel
-        d={{ steamid: d.steamid, steamAccount: id.steamAccount }}
-        busy={busy}
-        run={run}
-        canRefresh={can('steam_refresh')}
-        onSelect={(steamid) => { location.href = fileUrl(steamid); }}
-      />
-
+      {id.aliases.length > 0 && <h4>Merged accounts</h4>}
       {id.aliases.length > 0 && (
-        <ul class="admin-list">
+        <ul class="file-rows">
           {id.aliases.map((a) => (
-            <li key={a.steamid}>
+            <li key={a.steamid} class="file-row file-row--line">
               Merged in: <code>{a.steamid}</code> <span class="muted">since {fmtTime(a.created_at)}</span>{' '}
               {can('merge') && (
                 <button class="chip" type="button" disabled={busy}
@@ -187,8 +225,9 @@ export function IdentitySection(
       )}
 
       {can('merge') && (
-        <>
-          <p class="muted">
+        <div class="file-danger" id="merge">
+          <h4>Merge into another account</h4>
+          <p class="file-help">
             Merge this account into another, for one person playing on two Steam accounts.
             <strong> {d.header.name} disappears</strong> and everything they did moves to the account you name.
           </p>
@@ -215,7 +254,7 @@ export function IdentitySection(
                 )}>Merge and recompute</button>
             </div>
           )}
-        </>
+        </div>
       )}
     </Panel>
   );

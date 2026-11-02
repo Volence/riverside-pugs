@@ -597,7 +597,10 @@ export class SeriesEngine {
         const graceMs = seriesTimings(this.db).closeGraceMs;
         const closing = B.setCloseAt(this.db, b.id, gamesPlayed(this.db, b.id), new Date(now.getTime() + graceMs).toISOString(), now);
         const mins = Math.round(graceMs / 60_000);
-        this.deps.runner.announce(b.id, `Series over: ${this.scoreline(m, v)}. Captains confirm or dispute on the site within ${timers.confirmMinutes} minutes.${closing ? ` The server closes in ${mins} minute${mins === 1 ? '' : 's'}.` : ''}`);
+        const after = timers.confirmMinutes > 0
+          ? `Captains confirm or dispute on the site within ${timers.confirmMinutes} minutes.`
+          : 'A problem with the result? Tell a mod.';
+        this.deps.runner.announce(b.id, `Series over: ${this.scoreline(m, v)}. ${after}${closing ? ` The server closes in ${mins} minute${mins === 1 ? '' : 's'}.` : ''}`);
       }
       tellSeriesResult(this.deps, m.event_id, m.id);
       console.log(`[series] match ${m.id}: series over, confirm window open`);

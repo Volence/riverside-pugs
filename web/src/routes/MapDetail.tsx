@@ -1,9 +1,13 @@
 import { api, type MapLeaderRow } from '../api';
 import { useFetch } from '../hooks/useFetch';
-import { campaignName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, statHelp, survivalLabel } from '../format';
+import { campaignName, campaignTint, chapterName, deriveLiveStats, fmtClock, labelFor, mapName, orderLiveStatKeys, statHelp, survivalLabel } from '../format';
 import { useState } from 'preact/hooks';
 import { Bars, BarRow, Empty, PageSkeleton, Panel, PlayerLink, Tabs } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { MAP_THUMBS, mapThumb } from '../../../src/mapThumbs';
+
+/** Games on a map before a win rate is worth drawing as a bar. */
+const MIN_GAMES = 5;
 
 /** Maps played here before a player's win rate is shown. Same floor as
  *  RANKED_MIN_GAMES in src/standings.ts: one or two maps make a 0% or 100%
@@ -24,6 +28,7 @@ export function MapDetail({ map }: { map: string }) {
   // Averages first: a total mostly reports who has played the most, while
   // what someone usually gets on a map is the number that compares.
   const [mode, setMode] = useState<'avg' | 'total'>('avg');
+  const [showAll, setShowAll] = useState(false);
 
   if (error) {
     return (
@@ -47,9 +52,22 @@ export function MapDetail({ map }: { map: string }) {
     Array.from(new Set(players.flatMap((p) => Object.keys(p.stats)))),
   );
 
+  // Where this chapter sits in its campaign: "Death Toll · Chapter 2 of 5".
+  const chapters = data.chapters ?? [];
+  const at = chapters.findIndex((c) => c.map.toLowerCase() === data.map.toLowerCase());
+  const eyebrow = data.campaign
+    ? `${campaignName(data.campaign)}${at >= 0 ? ` · Chapter ${at + 1} of ${chapters.length}` : ''}`
+    : 'Map';
+  const face = (p: MapLeaderRow, cls: string) => (p.avatar
+    ? <img class={cls} src={p.avatar} alt="" width={20} height={20} loading="lazy" />
+    : <span class={`${cls} ${cls}--none`} aria-hidden="true" data-initial={p.name.slice(0, 1).toUpperCase()} />);
+  // The bars list everyone with enough games to read a rate from, the most
+  // played first; the rest fold away, as on the profile's by-map bars.
+  const LIST = 15;
+
   return (
-    <div class="page page--list">
-      <PageHeader eyebrow={data.campaign ? campaignName(data.campaign) : 'Map'} title={mapName(data.map)}>
+    <div class="page page--list mapdetail" style={data.campaign ? { '--campaign': campaignTint(data.campaign) } as Record<string, string> : undefined}>
+      <PageHeader eyebrow={eyebrow} title={chapterName(data.display ?? null, mapName(data.map))}>
         <Figures>
           <Figure label="Played" value={data.played} />
           {/* Null when no playing of this map has a real score: say so
@@ -90,6 +108,37 @@ export function MapDetail({ map }: { map: string }) {
         </Figures>
       </PageHeader>
 
+      {/* The map from above, cut down from the replay viewer's overview so
+          the header shows the ground the numbers below were played on. */}
+      {MAP_THUMBS[data.map] !== undefined && (
+        <figure class="mapbanner" style={{ '--map-aspect': String(MAP_THUMBS[data.map]) } as Record<string, string>}>
+          <img
+            src={mapThumb(data.map, 1280)!}
+            srcset={`${mapThumb(data.map, 640)} 640w, ${mapThumb(data.map, 1280)} 1280w`}
+            sizes="(max-width: 700px) 100vw, 1240px"
+            alt={`Overview of ${chapterName(data.display ?? null, mapName(data.map))} from above`}
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+      )}
+
+      {chapters.length > 1 && (
+        <nav class="mapchips" aria-label="Chapters in this campaign">
+          {chapters.map((c, i) => (
+            <a
+              key={c.map}
+              class={`mapchip${i === at ? ' is-current' : ''}`}
+              href={`/map/${encodeURIComponent(c.map)}`}
+              aria-current={i === at ? 'page' : undefined}
+            >
+              <span class="mapchip__n">{i + 1}</span>
+              {chapterName(c.display, mapName(c.map))}
+            </a>
+          ))}
+        </nav>
+      )}
+
       <Panel>
         <h3>Compare</h3>
         <Tabs
@@ -99,27 +148,37 @@ export function MapDetail({ map }: { map: string }) {
         />
         {(() => {
           if (tab === 'winrate') {
-            // Bar length is the win rate itself. Players under the floor
-            // follow, best rate first, like provisional rows on the
-            // leaderboard.
-            const rated = players
-              .map((p) => ({ p, wr: mapWinRate(p) }))
-              .sort((a, b) => (b.wr ?? -1) - (a.wr ?? -1) || b.p.games - a.p.games);
+            // Bar length is the win rate with a line at 50%, so length and
+            // colour say the same thing. Players with only a few games here
+            // would put 0% and 100% rows everywhere, so they fold away.
+            const rated = players.filter((p) => p.wins + p.losses >= MIN_GAMES)
+              .sort((a, b) => b.games - a.games || b.wins - a.wins);
+            const few = players.length - rated.length;
+            const list = showAll ? rated : rated.slice(0, LIST);
             return (
-              <Bars>
-                {rated.map(({ p, wr }) => (
-                  <BarRow
-                    key={p.steamid}
-                    name={p.name}
-                    href={`/player/${encodeURIComponent(p.steamid)}`}
-                    value={wr === null ? 'n/a' : `${wr}%`}
-                    detail={p.games < MAP_WINRATE_MIN_GAMES
-                      ? `(${p.wins}W ${p.losses}L, under ${MAP_WINRATE_MIN_GAMES} played)`
-                      : `(${p.wins}W ${p.losses}L)`}
-                    fraction={wr === null ? 0 : wr / 100}
-                    tone={wr === null ? 'neutral' : wr >= 50 ? 'good' : 'bad'}
-                  />
-                ))}
+              <Bars label={`Win rate here, most played first${few > 0 ? ` (${few} with fewer than ${MIN_GAMES} games not shown)` : ''}`}>
+                {list.map((p) => {
+                  const wr = Math.round((p.wins / (p.wins + p.losses)) * 100);
+                  return (
+                    <BarRow
+                      key={p.steamid}
+                      icon={face(p, 'mapface')}
+                      name={p.name}
+                      href={`/player/${encodeURIComponent(p.steamid)}`}
+                      value={`${wr}%`}
+                      detail={`(${p.wins}W ${p.losses}L)`}
+                      fraction={wr / 100}
+                      mark={0.5}
+                      tone={wr >= 50 ? 'good' : 'bad'}
+                    />
+                  );
+                })}
+                {rated.length === 0 && <p class="muted">Nobody has {MIN_GAMES} games here yet.</p>}
+                {rated.length > LIST && (
+                  <button class="chip mapmore" type="button" onClick={() => setShowAll(!showAll)}>
+                    {showAll ? 'Show fewer' : `Show all ${rated.length}`}
+                  </button>
+                )}
               </Bars>
             );
           }
@@ -129,11 +188,13 @@ export function MapDetail({ map }: { map: string }) {
           const vals = players.map((p) => cellsOf(p)[tab] ?? 0);
           const max = Math.max(...vals, 1);
           const ranked = [...players].sort((a, b) => (cellsOf(b)[tab] ?? 0) - (cellsOf(a)[tab] ?? 0));
+          const shownRanked = showAll ? ranked : ranked.slice(0, LIST);
           return (
-            <Bars label={mode === 'avg' ? 'Per map' : 'Totals'}>
-              {ranked.map((p) => (
+            <Bars label={`${labelFor(tab)} here, ${mode === 'avg' ? 'per map' : 'total'}`}>
+              {shownRanked.map((p) => (
                 <BarRow
                   key={p.steamid}
+                  icon={face(p, 'mapface')}
                   name={p.name}
                   href={`/player/${encodeURIComponent(p.steamid)}`}
                   value={cellsOf(p)[tab] === undefined ? 'n/a' : String(cellsOf(p)[tab])}
@@ -141,6 +202,11 @@ export function MapDetail({ map }: { map: string }) {
                   tone="neutral"
                 />
               ))}
+              {ranked.length > LIST && (
+                <button class="chip mapmore" type="button" onClick={() => setShowAll(!showAll)}>
+                  {showAll ? 'Show fewer' : `Show all ${ranked.length}`}
+                </button>
+              )}
             </Bars>
           );
         })()}
@@ -174,7 +240,9 @@ export function MapDetail({ map }: { map: string }) {
                 const wr = mapWinRate(p);
                 return (
                   <tr key={p.steamid}>
-                    <td class="lb__pcol pname"><PlayerLink steamid={p.steamid} name={p.name} /></td>
+                    <td class="lb__pcol">
+                      <span class="lbname">{face(p, 'lbname__face')}<PlayerLink steamid={p.steamid} name={p.name} /></span>
+                    </td>
                     <td class="num">{p.games}</td>
                     <td class="num">{p.wins}</td>
                     <td class="num">{p.losses}</td>

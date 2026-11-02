@@ -142,6 +142,35 @@ const asDraft = (f: RoomFixture) => {
   f.db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE entry_id = ? AND steamid = ?').run(NOW.toISOString(), f.entryA, A[4]);
 };
 
+describe('swapDraftPlayers while the event is live (owner 2026-10-24)', () => {
+  it('swaps two starters between teams between rounds, with no lineup holding them', () => {
+    const f = published();
+    f.db.prepare("UPDATE events SET status = 'live' WHERE id = ?").run(f.eventId);
+    const [e1, e2] = [f.entries[0]!, f.entries[1]!];
+    const a = starters(f, e1)[1]!;
+    const b = starters(f, e2)[2]!;
+    must(N.swapDraftPlayers(f.db, { eventId: f.eventId, a: { entryId: e1, steamid: a }, b: { entryId: e2, steamid: b }, actor: ADMIN, now: LATER }));
+    expect(starters(f, e1)).toContain(b);
+    expect(starters(f, e2)).toContain(a);
+    f.db.prepare("UPDATE events SET status = 'finished' WHERE id = ?").run(f.eventId);
+    const r = N.swapDraftPlayers(f.db, { eventId: f.eventId, a: { entryId: e1, steamid: b }, b: { entryId: e2, steamid: a }, actor: ADMIN, now: LATER });
+    expect(!r.ok && r.error).toBe('swap_closed');
+  });
+
+  it('refuses a player in the locked lineup of a match still being played, naming them, and writes nothing', async () => {
+    const s = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: (f) => { asDraft(f); driveLoserPicks(f); } });
+    try {
+      const before = snapshot(s);
+      const r = N.swapDraftPlayers(s.db, { eventId: s.eventId, a: { entryId: s.entryA, steamid: A[3]! }, b: { entryId: s.entryB, steamid: BATS[2]! }, actor: ADMIN, now: new Date(s.t.t) });
+      expect(!r.ok && r.error).toBe('swap_in_lineup');
+      expect(!r.ok && r.detail?.[0]?.steamid).toBe(A[3]);
+      expect(snapshot(s)).toBe(before);
+    } finally {
+      s.close();
+    }
+  });
+});
+
 describe('a staff replace during a booked series (Ruling 5, Review Focus 2)', () => {
   let s: SeriesFixture;
   afterEach(() => { vi.restoreAllMocks(); s?.close(); });

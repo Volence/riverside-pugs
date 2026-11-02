@@ -603,6 +603,19 @@ describe('who may be on the box (plan 4b2)', () => {
     expect(list).not.toContain(P[11]);
   });
 
+  it('allowList carries casters: every good-standing caster on a tournament, only fully invited ones on a scrim', () => {
+    const id = running();
+    db.prepare('UPDATE players SET is_caster = 1 WHERE steamid IN (?, ?, ?)').run(P[5], P[6], P[11]);
+    ban(P[11]);
+    db.prepare('INSERT INTO booking_casters (booking_id, caster_steamid, invited_by_a, invited_by_b, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, P[5], P[0], P[1], NOW.toISOString());
+    db.prepare('INSERT INTO booking_casters (booking_id, caster_steamid, invited_by_a, invited_by_b, created_at) VALUES (?, ?, ?, NULL, ?)')
+      .run(id, P[6], P[0], NOW.toISOString());
+    expect(allowList(db, id)).toEqual([P[0], P[1], P[5]].sort());
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(id);
+    expect(allowList(db, id)).toEqual([P[0], P[1], P[5], P[6]].sort());
+  });
+
   it('a captain adds a ringer to their side, creating a players row for an unknown id', () => {
     const id = running();
     const unknown = '76561199123456789';

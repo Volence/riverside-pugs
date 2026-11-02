@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { adminApi, type AdminOverview, type CaptureHealth, type Forecast, type LogAuthMode, type ServerLogAuth } from '../../api';
-import { campaignName } from '../../format';
+import { campaignName, campaignTint, fmtAgo } from '../../format';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction, type Run } from './useAction';
 import { formatTime } from '../../replay/ReplayControls';
@@ -8,7 +8,6 @@ import { SlowToReadyTable } from './SlowToReady';
 import type { ConfirmChoice } from '../../components/Confirm';
 import type { AbandonRecord, MatchPause, MatchReadyup } from '../../api';
 import { RestoreRating, abandonOutcome, restoredText } from './RestoreRating';
-import { AbortPartyList } from '../../components/AbortPartyList';
 
 /**
  * The panels of the Live desk: open matches, the servers, the queue and the
@@ -304,108 +303,239 @@ export function AdminQueuePanel({ queue, lobbies = [], busy, run }: {
   );
 }
 
+type ResultsTab = 'results' | 'aborted' | 'voided' | 'slow';
+
 export function RecentResultsPanel({ data, busy, run, isAdmin = false }: { data: AdminOverview; busy: boolean; run: Run; isAdmin?: boolean }) {
   const [voiding, setVoiding] = useState<number | null>(null);
   const [reason, setReason] = useState('');
+  const [tab, setTab] = useState<ResultsTab>('results');
+  const aborted = data.aborted ?? [];
+  const slow = data.slowToReady ?? [];
+  // One panel, four views. Stacked, the aborted list and the slow-to-ready
+  // table pushed each other and the results a long scroll apart.
+  const tabs: [ResultsTab, string, number | null][] = [
+    ['results', 'Results', data.recent.length],
+    ['aborted', 'Aborted', aborted.length],
+    ['voided', 'Voided', data.voided.length],
+    ['slow', 'Slow to ready', null],
+  ];
   return (
     <Panel class="panel--table">
       <h3>Recent results</h3>
-      <p class="muted">Voiding removes a match from every stat and rebuilds the season's ratings without it. It cannot be undone from here.</p>
-      {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
-        <div class="table-wrap">
-          <table class="admin-table admin-table--recent admin-table--pin-last">
-            <thead><tr><th>Match</th><th class="num">Score</th><th>Odds</th><th>Pauses</th><th>Ready-ups</th><th>Ended</th><th /></tr></thead>
-            <tbody>
-              {data.recent.map((m) => (
-                <tr key={m.id}>
-                  <td>
-                    <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)}
-                    {(m.abandons ?? []).map((a) => <AbandonLine key={a.steamid} a={a} busy={busy} run={run} isAdmin={isAdmin} />)}
-                  </td>
-                  <td class="num">{m.teamAScore} - {m.teamBScore}</td>
-                  {/* Was the result the odds expected? The upset marker is
-                      the point of the column: a run of them is what tells
-                      you the balancer needs looking at. */}
-                  <td><Odds f={m.forecast} winner={m.winner} /></td>
-                  <td>
-                    {(m.pauses ?? []).length === 0 ? <span class="muted">none</span> : (
-                      <ul class="admin-pauses">
-                        {m.pauses.map((p, i) => <li key={i}>{pauseText(p)}</li>)}
-                      </ul>
-                    )}
-                  </td>
-                  <td>
-                    {(m.readyups ?? []).length === 0 ? <span class="muted">none</span> : (
-                      <ul class="admin-pauses">
-                        {m.readyups.map((r, i) => <li key={i}>{readyupText(r)}</li>)}
-                      </ul>
-                    )}
-                  </td>
-                  <td>{fmtTime(m.endedAt)}</td>
-                  <td>
-                    {voiding === m.id ? (
-                      <form class="admin-form" onSubmit={(e) => {
-                        e.preventDefault();
-                        void run(() => adminApi.voidMatch(m.id, reason), {
-                          title: `Void match #${m.id}?`,
-                          body: 'It stops counting anywhere and every rating for the season is recomputed without it.',
-                          confirmLabel: 'Void match',
-                          danger: true,
-                        })
-                          .then(() => { setVoiding(null); setReason(''); });
-                      }}>
-                        <input value={reason} placeholder="Why" aria-label="Void reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-                        <button class="btn" type="submit" disabled={busy || !reason.trim()}>Void</button>
-                        <button class="chip" type="button" onClick={() => setVoiding(null)}>Cancel</button>
-                      </form>
-                    ) : <button class="chip" onClick={() => { setVoiding(m.id); setReason(''); }}>Void</button>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <SlowToReadyTable rows={data.slowToReady ?? []} />
-      {(data.aborted ?? []).length > 0 && (
+      <div class="tabs subtabs" role="tablist" aria-label="Recent results">
+        {tabs.filter(([k, , n]) => k === 'results' || k === 'slow' ? (k !== 'slow' || slow.length > 0) : (n ?? 0) > 0).map(([k, label, n]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k}
+            class={`tabs__tab${tab === k ? ' is-active' : ''}`} onClick={() => setTab(k)}>
+            {label}{n !== null && <span class="tabs__count">{n}</span>}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'results' && (
         <>
-          <h4>Aborted</h4>
+          <p class="muted">Voiding removes a match from every stat and rebuilds the season's ratings without it. It cannot be undone from here.</p>
+          {data.recent.length === 0 ? <Empty>No completed matches.</Empty> : (
+            <ul class="rres">
+              {data.recent.map((m) => (
+                <RecentRow key={m.id} m={m} busy={busy} run={run} isAdmin={isAdmin}
+                  voiding={voiding === m.id} reason={reason} setReason={setReason}
+                  onVoid={() => { setVoiding(m.id); setReason(''); }} onCancel={() => setVoiding(null)}
+                  onVoided={() => { setVoiding(null); setReason(''); }} />
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {tab === 'aborted' && (
+        <>
           <p class="muted">
             Ended with no result, so nothing counted. The scoreline is how far they got; the
             roster, stats and replays are on the match page.
           </p>
-          <ul class="admin-list">
-            {data.aborted.map((m) => (
-              <li key={m.id}>
-                <a href={`/match/${m.id}`}>#{m.id}</a> {campaignName(m.campaign)} {m.teamAScore} - {m.teamBScore}
-                {m.abandonedBy && !(m.parties ?? []).length ? <> · left: {m.abandonedBy}</> : null}
-                {' '}<span class="muted">({fmtTime(m.endedAt)})</span>
-                {(m.noShows ?? 0) > 0 && (
-                  <>
-                    {' '}<button class="chip" type="button" disabled={busy}
-                      onClick={() => run(() => adminApi.clearMatchNoShows(m.id), {
-                        title: `Clear the ${m.noShows} no-show penalties from match #${m.id}?`,
-                        body: 'For no-shows that were not the players\' doing, such as our server or a Steam outage. Their queue timeouts are recomputed without them.',
-                        confirmLabel: 'Clear no-shows',
-                      })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
-                  </>
-                )}
-                {(m.abandons ?? []).map((a) => <AbandonLine key={a.steamid} a={a} busy={busy} run={run} isAdmin={isAdmin} />)}
-                <AbortPartyList parties={m.parties ?? []} />
-              </li>
-            ))}
+          <ul class="rres">
+            {aborted.map((m) => <AbortedRow key={m.id} m={m} busy={busy} run={run} isAdmin={isAdmin} />)}
           </ul>
         </>
       )}
-      {data.voided.length > 0 && (
-        <>
-          <h4>Voided</h4>
-          <ul class="admin-list">
-            {data.voided.map((v) => <li key={v.id}><a href={`/match/${v.id}`}>#{v.id}</a> {campaignName(v.campaign)}: {v.voidReason} <span class="muted">({fmtTime(v.voidedAt)})</span></li>)}
-          </ul>
-        </>
+
+      {tab === 'voided' && (
+        <ul class="rres">
+          {data.voided.map((v) => (
+            <li key={v.id} class="rres__row abrow" style={{ '--campaign': campaignTint(v.campaign) } as Record<string, string>}>
+              <div class="abrow__head">
+                <span class="rres__match">
+                  <a class="rres__id" href={`/match/${v.id}`}>#{v.id}</a>
+                  <span class="rres__camp">{campaignName(v.campaign)}</span>
+                </span>
+                <span class="abrow__why">{v.voidReason}</span>
+                <time class="rres__ended" title={fmtTime(v.voidedAt)}>{fmtAgo(v.voidedAt)}</time>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {tab === 'slow' && <SlowToReadyTable rows={slow} />}
     </Panel>
+  );
+}
+
+type AbortedMatch = AdminOverview['aborted'][number];
+
+/**
+ * One aborted match as a compact row: match, campaign tint, how far it got
+ * and when, then who it was about. A quitter's line carries Restore rating.
+ * Everyone who got the same thing for the same reason (eight "never
+ * connected" no-shows) shares one line of names instead of a line each.
+ */
+function AbortedRow({ m, busy, run, isAdmin }: { m: AbortedMatch; busy: boolean; run: Run; isAdmin: boolean }) {
+  const parties = m.parties ?? [];
+  const abandons = m.abandons ?? [];
+  const abandonOf = new Map(abandons.map((a) => [a.steamid, a]));
+  const groups: { key: string; what: string; outcome: string; people: typeof parties }[] = [];
+  for (const p of parties) {
+    if (abandonOf.has(p.steamid)) continue;
+    const key = `${p.what}|${p.outcome}`;
+    const g = groups.find((x) => x.key === key);
+    if (g) g.people.push(p); else groups.push({ key, what: p.what, outcome: p.outcome, people: [p] });
+  }
+  const quitters = parties.filter((p) => abandonOf.has(p.steamid));
+  const loose = abandons.filter((a) => !parties.some((p) => p.steamid === a.steamid));
+  const who = (p: (typeof parties)[number]) => (
+    <a href={`/player/${p.steamid}`}>{p.name}</a>
+  );
+  return (
+    <li class="rres__row abrow" style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
+      <div class="abrow__head">
+        <span class="rres__match">
+          <a class="rres__id" href={`/match/${m.id}`}>#{m.id}</a>
+          <span class="rres__camp">{campaignName(m.campaign)}</span>
+        </span>
+        <span class="rres__score">{m.teamAScore} - {m.teamBScore}</span>
+        {m.abandonedBy && parties.length === 0 && <span class="abrow__why">left: {m.abandonedBy}</span>}
+        <time class="rres__ended" title={m.endedAt ? fmtTime(m.endedAt) : undefined}>{m.endedAt ? fmtAgo(m.endedAt) : ''}</time>
+        {(m.noShows ?? 0) > 0 && (
+          <button class="chip abrow__act" type="button" disabled={busy}
+            onClick={() => run(() => adminApi.clearMatchNoShows(m.id), {
+              title: `Clear the ${m.noShows} no-show penalties from match #${m.id}?`,
+              body: 'For no-shows that were not the players\' doing, such as our server or a Steam outage. Their queue timeouts are recomputed without them.',
+              confirmLabel: 'Clear no-shows',
+            })}>Clear {m.noShows} no-show{m.noShows === 1 ? '' : 's'}</button>
+        )}
+      </div>
+      {(quitters.length > 0 || loose.length > 0 || groups.length > 0) && (
+        <ul class="abrow__people">
+          {quitters.map((p) => {
+            const a = abandonOf.get(p.steamid)!;
+            return (
+              <li key={p.steamid}>
+                <span class="abrow__tag abrow__tag--quit">abandoned</span>
+                <span>{who(p)}{p.team ? <span class="muted"> (Team {p.team.toUpperCase()})</span> : null}</span>
+                <span class="muted">{p.what}: {p.outcome}; {abandonOutcome(a)}, rated a loss{restoredText(a)}</span>
+                {!a.restoredAt && isAdmin && <RestoreRating matchId={a.matchId} steamid={a.steamid} who={a.name} busy={busy} run={run} />}
+              </li>
+            );
+          })}
+          {loose.map((a) => <li key={a.steamid}><AbandonLine a={a} busy={busy} run={run} isAdmin={isAdmin} /></li>)}
+          {groups.map((g) => (
+            <li key={g.key}>
+              <span class="abrow__tag">{g.what}</span>
+              <span>
+                {g.people.map((p, i) => (
+                  <span key={p.steamid}>{i > 0 ? ', ' : ''}{who(p)}{p.team ? <span class="muted"> ({p.team.toUpperCase()})</span> : null}</span>
+                ))}
+              </span>
+              <span class="muted">· {g.outcome}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+type RecentMatch = AdminOverview['recent'][number];
+
+/** How long a ready-up took, as a tone: a minute is slow, two is a problem. */
+export function readyupTone(seconds: number | null): 'ok' | 'slow' | 'bad' {
+  if (seconds === null) return 'slow';
+  return seconds > 120 ? 'bad' : seconds > 60 ? 'slow' : 'ok';
+}
+
+/**
+ * One finished match on the Live board, as a compact row: the match and its
+ * campaign tint, the score with the winner bright, the odds, pauses as chips,
+ * every ready-up as one chip per map (the slow ones coloured) with the "last
+ * to ready" names one click away, when it ended, and Void.
+ */
+function RecentRow({ m, busy, run, isAdmin, voiding, reason, setReason, onVoid, onCancel, onVoided }: {
+  m: RecentMatch; busy: boolean; run: Run; isAdmin: boolean; voiding: boolean; reason: string;
+  setReason: (v: string) => void; onVoid: () => void; onCancel: () => void; onVoided: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const readyups = m.readyups ?? [];
+  const pauses = m.pauses ?? [];
+  const worst = readyups.reduce((w, r) => Math.max(w, r.seconds ?? 0), 0);
+  const nameA = m.booked?.a.tag || m.booked?.a.name || 'A';
+  const nameB = m.booked?.b.tag || m.booked?.b.name || 'B';
+  const won = (side: 'a' | 'b') => m.winner === side ? ' rres__side--won' : '';
+  return (
+    <li class="rres__row" style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
+      <div class="rres__match">
+        <a href={`/match/${m.id}`} class="rres__id">#{m.id}</a>
+        <span class="rres__camp">{campaignName(m.campaign)}</span>
+        {m.booked && <span class={`rres__kind rres__kind--${m.booked.kind}`}>{m.booked.kind === 'tournament' ? 'Tournament' : 'Scrim'}</span>}
+        {(m.abandons ?? []).map((a) => <AbandonLine key={a.steamid} a={a} busy={busy} run={run} isAdmin={isAdmin} />)}
+      </div>
+      <div class="rres__score" aria-label="Score">
+        <span class={`rres__side${won('a')}`}><span class="rres__team">{nameA}</span> {m.teamAScore}</span>
+        <span class="rres__dash">-</span>
+        <span class={`rres__side${won('b')}`}>{m.teamBScore} <span class="rres__team">{nameB}</span></span>
+      </div>
+      <div class="rres__odds"><Odds f={m.forecast} winner={m.winner} /></div>
+      <div class="rres__pauses">
+        {pauses.length === 0 ? <span class="muted">no pauses</span>
+          : pauses.map((p, i) => <span key={i} class="rres__chip" title={pauseText(p)}>{pauseChip(p)}</span>)}
+      </div>
+      <div class="rres__ready">
+        {readyups.length === 0 ? <span class="muted">no ready-ups</span> : (
+          <button type="button" class="rres__readybtn" aria-expanded={open} onClick={() => setOpen(!open)}
+            title={readyups.map(readyupText).join('\n')}>
+            {readyups.map((r, i) => (
+              <span key={i} class={`rres__rchip rres__rchip--${readyupTone(r.seconds)}`}>
+                M{r.mapOrdinal + 1} {r.seconds === null ? 'open' : formatTime(r.seconds * 1000)}
+              </span>
+            ))}
+            <span class="rres__more">{open ? 'Hide' : worst > 60 ? 'Who was last' : 'Details'}</span>
+          </button>
+        )}
+      </div>
+      <time class="rres__ended" title={m.endedAt ? fmtTime(m.endedAt) : undefined}>{m.endedAt ? fmtAgo(m.endedAt) : ''}</time>
+      <div class="rres__act">
+        {voiding ? (
+          <form class="admin-form" onSubmit={(e) => {
+            e.preventDefault();
+            void run(() => adminApi.voidMatch(m.id, reason), {
+              title: `Void match #${m.id}?`,
+              body: 'It stops counting anywhere and every rating for the season is recomputed without it.',
+              confirmLabel: 'Void match',
+              danger: true,
+            })
+              .then(onVoided);
+          }}>
+            <input value={reason} placeholder="Why" aria-label="Void reason" onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
+            <button class="btn" type="submit" disabled={busy || !reason.trim()}>Void</button>
+            <button class="chip" type="button" onClick={onCancel}>Cancel</button>
+          </form>
+        ) : <button class="chip rres__void" onClick={onVoid}>Void</button>}
+      </div>
+      {open && readyups.length > 0 && (
+        <ul class="rres__detail">
+          {readyups.map((r, i) => <li key={i} class={`rres__dline rres__dline--${readyupTone(r.seconds)}`}>{readyupText(r)}</li>)}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -580,6 +710,13 @@ export function pauseText(p: MatchPause): string {
   const who = p.team ? `Team ${p.team.toUpperCase()}` : p.leave ? 'Reconnect' : 'Admin';
   const length = p.seconds === null ? 'still open' : formatTime(p.seconds * 1000);
   return `${who} ${length} on map ${p.mapOrdinal + 1}`;
+}
+
+/** A pause as a short chip ("B 0:50 · M3"); the full sentence is its title. */
+export function pauseChip(p: MatchPause): string {
+  const who = p.team ? p.team.toUpperCase() : p.leave ? 'Reconnect' : 'Admin';
+  const length = p.seconds === null ? 'open' : formatTime(p.seconds * 1000);
+  return `${who} ${length} · M${p.mapOrdinal + 1}`;
 }
 
 /** One ready-up: how long it took, which map, and who readied last. */

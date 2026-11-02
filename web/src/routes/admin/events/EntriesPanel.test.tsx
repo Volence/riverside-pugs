@@ -67,9 +67,13 @@ describe('EntriesPanel', () => {
     expect(confirm).toHaveBeenCalled();
   });
 
-  it('offers no swap once the event is live', async () => {
+  it('offers the swap while the event is live (owner 2026-10-24), and none once it is finished', async () => {
     mockAdmin.eventEntries.mockResolvedValue({ lockedAt: 'x', entries: [draftEntry(), draftEntry({ id: 2, name: 'Team d0', captainSteamid: 'd0' })] });
-    render(<EntriesPanel eventId={9} status="live" checkin={false} draft canEdit />);
+    const { unmount } = render(<EntriesPanel eventId={9} status="live" checkin={false} draft canEdit />);
+    await screen.findByText('Team d0');
+    expect(screen.getAllByRole('button', { name: /to another team/ }).length).toBeGreaterThan(0);
+    unmount();
+    render(<EntriesPanel eventId={9} status="finished" checkin={false} draft canEdit />);
     await screen.findByText('Team d0');
     expect(screen.queryByRole('button', { name: /to another team/ })).toBeNull();
   });

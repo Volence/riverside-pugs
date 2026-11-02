@@ -1408,12 +1408,12 @@
       "note": "Cooldown when a tank punch or rock breaks the pull almost at once."
     },
     {
-      "id": "l4d2_tankrage_flowpercent",
+      "id": "l4d2_tankrage_distance",
       "group": "tank",
-      "label": "Rage freeze: every % of the map survivors run back",
+      "label": "Rage freeze: distance survivors run back",
       "source": "cvar",
-      "unit": "%",
-      "note": "Every time survivors run back this share of the map, the tank's frustration meter freezes."
+      "unit": "units",
+      "note": "Every time survivors run back this far, the tank's frustration meter freezes. The same on every map: the ground the tank covers in one freeze."
     },
     {
       "id": "l4d2_tankrage_freezetime",
@@ -1755,7 +1755,7 @@
     {
       "id": "tankrage",
       "group": "tank",
-      "text": "Tank rage freeze: when survivors run back, the tank's rage meter freezes for {l4d2_tankrage_freezetime} s for every {l4d2_tankrage_flowpercent}% of the map they retreat, so running back does not cost the tank control.",
+      "text": "Tank rage freeze: when survivors run back, the tank's rage meter freezes for {l4d2_tankrage_freezetime} s for every {l4d2_tankrage_distance} units they retreat, so running back does not cost the tank control.",
       "when": {
         "plugin": "l4d2_tankrage.smx"
       },

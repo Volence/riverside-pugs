@@ -164,6 +164,23 @@ describe('the community page', () => {
     await waitFor(() => expect(mockCommunity.list).toHaveBeenLastCalledWith({ kind: 'hud', sort: 'new', page: 1 }, expect.anything()));
   });
 
+  // Every gallery card has the same structure, so a row lines up: a missing
+  // description still holds its line and the moderation links sit at the foot.
+  it('labels the filters and keeps each card in one fixed structure', async () => {
+    mockCommunity.list.mockResolvedValue(page([hud(), hud({ id: 12, title: 'Bare', description: '' })]));
+    const { container } = show(ACTIVE);
+    await screen.findByText('Bare');
+    expect([...container.querySelectorAll('.community__filterlabel')].map((e) => e.textContent)).toEqual(['Type', 'Sort', 'Whose']);
+    expect(screen.getByText('2 HUDs')).toBeTruthy();
+    const cards = [...container.querySelectorAll('article.ccard--card')];
+    expect(cards).toHaveLength(2);
+    expect(cards[1]!.querySelector('.ccard__desc--none')).toBeTruthy();
+    for (const card of cards) {
+      expect(card.querySelector('.ccard__mod button.report')).toBeTruthy();
+      expect(within(card as HTMLElement).getByRole('button', { name: 'Like, 2' }).textContent).toContain('2');
+    }
+  });
+
   describe('likes', () => {
     it('are disabled for a visitor who is not signed in', async () => {
       show(ANON);

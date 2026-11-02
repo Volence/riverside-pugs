@@ -1287,7 +1287,9 @@ function drawLabel(ctx: CanvasRenderingContext2D, design: HudDesign, panelId: st
   // Scheme tall is already scaled by scalePass when the parent was.
   const cell = setFont(ctx, design, kvGet(n, 'font') ?? '', k, opts.onAsset);
   // The health number and its + are coloured by game code (healthRgb), not the file: red when down (probe T7).
-  const byHealth = HEALTH_PANELS.has(panelId) && HEALTH_LABELS.has(n.key.toLowerCase());
+  // A health number the player coloured is renamed in the download (build.ts healthNumberPass) and keeps that colour.
+  const coloured = n.key.toLowerCase() === 'healthnumber' && design.children[panelId]?.HealthNumber?.color !== undefined;
+  const byHealth = HEALTH_PANELS.has(panelId) && HEALTH_LABELS.has(n.key.toLowerCase()) && !coloured;
   const own = kvGet(n, 'fgcolor_override');
   ctx.fillStyle = byHealth ? `rgba(${sampleHealthRgb(opts).join(',')},1)` : own !== undefined ? colourOf(design, own) : labelTextColour(design);
   const align = (kvGet(n, 'textAlignment') ?? 'west').toLowerCase();

@@ -258,6 +258,27 @@ CREATE TABLE IF NOT EXISTS booking_voice (
   created_at  TEXT NOT NULL,
   deleted_at  TEXT
 );
+-- An event's team voice (owner 2026-10-24): one private category per event
+-- and a private voice channel per entry, made once the teams are known and
+-- removed when the event is over or the entry is out. deleted_at when gone.
+CREATE TABLE IF NOT EXISTS event_entry_voice (
+  entry_id    INTEGER PRIMARY KEY REFERENCES event_entries(id),
+  event_id    INTEGER NOT NULL REFERENCES events(id),
+  category_id TEXT NOT NULL,
+  channel_id  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  deleted_at  TEXT
+);
+-- A tournament match's own voice heading (owner 2026-10-24): while the match
+-- is being played, a private category named after it holds its two teams'
+-- event_entry_voice channels; they go back under the event's category after.
+CREATE TABLE IF NOT EXISTS event_match_voice (
+  match_id    INTEGER PRIMARY KEY REFERENCES event_matches(id),
+  event_id    INTEGER NOT NULL REFERENCES events(id),
+  category_id TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  deleted_at  TEXT
+);
 -- Casters both captains invited to a booked scrim (plan 4c). Each side's
 -- manager sets their half; the caster sees the booking's games, live feed and
 -- relay only while both halves are set and they still hold is_caster in good
@@ -714,8 +735,9 @@ CREATE TABLE IF NOT EXISTS match_players (
   PRIMARY KEY (match_id, player_id)
 );
 -- The primary key leads with match_id, so "every match this player was in"
--- (profiles, the map breakdown, chemistry, weekly awards) scanned the table.
-CREATE INDEX IF NOT EXISTS idx_match_players_player ON match_players (player_id);
+-- (profiles, the map breakdown, chemistry, weekly awards, /api/me's
+-- downloaded-campaign check) scanned the table.
+CREATE INDEX IF NOT EXISTS match_players_player ON match_players (player_id);
 -- Post-match endorsements. The primary key is an anti abuse rule expressed
 -- structurally: one endorsement per giver per recipient per match, so nobody
 -- stacks all three kinds on one friend. Everything a CHECK cannot see (both
@@ -968,6 +990,49 @@ CREATE TABLE IF NOT EXISTS match_demos (
 -- as discoverMatchDemos works, because the filename already carries the
 -- match link by construction and a lost datagram would otherwise leave a
 -- real file permanently unindexed.
+-- LIVEHUD progress through a half, one sample per 10 s of half time (t_ms
+-- on the plugin's RoundMs clock: game time since the half went live, which
+-- stops during a pause, the clock of replay frames and the data feeds),
+-- written once the half has ended (src/winLive/liveState.ts
+-- writeProgressSamples) so later retraining of the live win chance has true
+-- progress. Never written while a half is live: the samples are undelayed.
+-- tank is the tank flow %, NULL when the plugin did not know it.
+CREATE TABLE IF NOT EXISTS match_progress_samples (
+  match_id INTEGER NOT NULL REFERENCES matches(id),
+  ordinal  INTEGER NOT NULL,
+  half     INTEGER NOT NULL,
+  t_ms     INTEGER NOT NULL,
+  prog     INTEGER NOT NULL,
+  tank     INTEGER,
+  PRIMARY KEY (match_id, ordinal, half, t_ms)
+);
+-- A finished match's win line during its halves (src/winLive/finishedLine.ts):
+-- one row per 5 s of each half with a replay, plus the moments, computed once
+-- after the match ends (never on a page view). p_a is team A's chance on the
+-- plain line, p_a_form with team form (win_chance_form). model_version is
+-- winPointsVersion(); a row with another one is ignored by matchWinLine.
+CREATE TABLE IF NOT EXISTS match_win_points (
+  match_id      INTEGER NOT NULL REFERENCES matches(id),
+  ordinal       INTEGER NOT NULL,
+  half          INTEGER NOT NULL,
+  t_ms          INTEGER NOT NULL,
+  p_a           REAL NOT NULL,
+  p_a_form      REAL NOT NULL,
+  moment        TEXT,
+  model_version TEXT NOT NULL,
+  PRIMARY KEY (match_id, ordinal, half, t_ms)
+);
+-- That a match's win points were computed on a version, even when it got none
+-- (no replays, or a score that carries no line), so the reaper does not pick
+-- it again until the version changes. halves_missing counts the halves whose
+-- replay was not there (a partial line, which scripts/win-backfill.ts redoes).
+CREATE TABLE IF NOT EXISTS match_win_point_runs (
+  match_id       INTEGER PRIMARY KEY REFERENCES matches(id),
+  model_version  TEXT NOT NULL,
+  points         INTEGER NOT NULL,
+  halves_missing INTEGER NOT NULL DEFAULT 0,
+  computed_at    TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS match_replays (
   match_id  INTEGER NOT NULL REFERENCES matches(id),
   ordinal   INTEGER NOT NULL,
@@ -1656,6 +1721,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   practice_leasing: 'admins',
   practice_max_leases: '2',
   sidegames_enabled: '0',
+  // Team form on the win chance line (src/winForm.ts). Off: the line is the
+  // map-history-only one; admins see form on the match and Live pages anyway.
+  win_chance_form: '0',
+  // The win chance moving during a half (src/winLive/liveState.ts). Off: it
+  // moves only at half ends; admins see it on the Live page anyway.
+  win_chance_live: '0',
   sidegames_min_players: '4',
   duo_queue_enabled: '1',
   duo_bonus_min_sr: '50',
@@ -1695,8 +1766,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   event_ready_minutes: '10',
   event_veto_step_seconds: '60',
   event_lineup_minutes: '5',
-  // Tournaments plan T3b: the confirm window after a series' last game.
-  event_confirm_minutes: '15',
+  // Tournaments plan T3b: the confirm window after a series' last game; 0
+  // (owner 2026-10-24) records the result at once.
+  event_confirm_minutes: '0',
   // Tournaments plan T4: how long an unanswered reschedule proposal waits
   // before it locks (spec section 5), and how early a scheduled match's room opens.
   reschedule_autoaccept_hours: '24',
@@ -1986,6 +2058,13 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'players', 'twitch_id', 'TEXT');
   ensureColumn(db, 'players', 'twitch_name', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS players_twitch_id ON players(twitch_id) WHERE twitch_id IS NOT NULL');
+  // Display name an admin set (src/displayName.ts). `name` stays the column
+  // every page reads and always holds what to show: the override when there
+  // is one, otherwise the Steam persona, which is kept in `steam_name` so a
+  // sign-in can refresh it without undoing the rename. A NULL steam_name on
+  // an old row means `name` is still the persona.
+  ensureColumn(db, 'players', 'steam_name', 'TEXT');
+  ensureColumn(db, 'players', 'name_override', 'TEXT');
   // Second Steam accounts, pointed at the one account their owner really is.
   // Written by a merge and read on every line the game server sends, so a
   // reconnect on the alt is rostered as the person rather than as a new
