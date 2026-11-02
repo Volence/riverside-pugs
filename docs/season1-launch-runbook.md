@@ -43,7 +43,9 @@ Seasons turns all of it on at once.
       `src/mapMultipliers.ts`). The VPK is built by the deploy repo's
       `tools/season-multipliers/build_mission_vpk.py` (branch `season1-multipliers` there) from the
       SAME json. Counts completed, unvoided PUGs only (owner 10-23).
-      Approved Season 1 numbers (taken from prod 10-23): Dead Air 0.75/1.60/1.75/1.00,
+      Shipping numbers (owner OK 11-02, recomputed from prod 11-02; 7 maps moved 0.05 to 0.10 from the 10-23 table):
+      Dead Air 0.80/1.50/1.75/1.05, Death Toll 0.90/1.10/1.75/1.35, No Mercy 1.15/1.35/1.35/1.20,
+      Blood Harvest 1.30/1.25/1.30/1.30. The 10-23 table was: Dead Air 0.75/1.60/1.75/1.00,
       Death Toll 0.90/1.10/1.75/1.35, No Mercy 1.15/1.40/1.35/1.15, Blood Harvest 1.30/1.20/1.35/1.30.
       Season 0 keeps playing until the flip, so the night before, rerun the script on a fresh prod
       copy and diff against the committed json. Blood Harvest 2 sits near a rounding edge (1.177; every
@@ -88,7 +90,7 @@ Seasons turns all of it on at once.
    ```
    cd ~/l4d/deploy-season1-mult/tools/season-multipliers
    python3 build_mission_vpk.py build  ~/l4d/deploy/overrides/left4dead/addons/l4d1_mission_nav.vpk season1.json /tmp/s1.vpk
-   python3 build_mission_vpk.py verify ~/l4d/deploy/overrides/left4dead/addons/l4d1_mission_nav.vpk season1.json /tmp/s1.vpk   # PASS, md5 97a90786 (10-23 PUG-only table)
+   python3 build_mission_vpk.py verify ~/l4d/deploy/overrides/left4dead/addons/l4d1_mission_nav.vpk season1.json /tmp/s1.vpk   # PASS, md5 045889e7 (11-02 table)
    T=$(mktemp -d); mkdir -p $T/overrides/left4dead/addons $T/riverside1 $T/riverside2
    cp ~/l4d/deploy/server.env $T/; cp ~/l4d/deploy/riverside1/riverside1.env $T/riverside1/; cp ~/l4d/deploy/riverside2/riverside2.env $T/riverside2/
    cp /tmp/s1.vpk $T/overrides/left4dead/addons/l4d1_mission_nav.vpk
@@ -126,7 +128,7 @@ Seasons turns all of it on at once.
 
 > **Map score multipliers.** A map's score multiplier now follows how often survivors reached the
 > saferoom there in Season 0, instead of going up map by map. Harder maps are worth more (Ranch
-> House and Dead Air's Garage are now 1.75), easier ones less (Greenhouse is 0.75), so every map
+> House and Dead Air's Garage are now 1.75), easier ones less (Greenhouse is 0.80), so every map
 > counts about the same in a match. Each campaign adds up to the same total as before. The numbers,
 > and the saferoom rate behind each one, are on the Campaigns page, and they are worked out again
 > at the start of every season.
