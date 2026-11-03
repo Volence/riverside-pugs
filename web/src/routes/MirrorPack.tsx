@@ -36,7 +36,7 @@ export function MirrorPack() {
       <p>
         Season 1's Wrong Way maps: every chapter flipped left to right, so the route you know turns
         the other way. Finales are the original maps. Signs and text read backwards on purpose.
-        Every match vote has one mirrored campaign on it, so install these before you queue. One
+        From Season 1 (November 3) every match vote has one on it, so install these before then. One
         download has all twelve: the stock four, and the eight L4D2 campaigns, which also need
         the <a href="#l4d2-pack">L4D2 campaigns</a> above.
       </p>
