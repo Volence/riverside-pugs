@@ -57,10 +57,11 @@ export const MIRROR_CAMPAIGNS: Record<string, { name: string; original: string; 
   },
   // The garage mission: Dead Center's first three chapters and Crash Course's
   // Alleys, so it mirrors Crash Center. There is no separate Dead Center
-  // mirror (a map can belong to one mission only). The title is the
-  // mission's, which still says Dead Center backwards.
+  // mirror (a map can belong to one mission only). The site title is Crash
+  // Center backwards (owner 11-03); the mission file inside the pack still
+  // says Retnec Daed until the next map-pack update.
   crash_center_mirror: {
-    name: 'Retnec Daed', original: 'crash_center',
+    name: 'Retnec Hsarc', original: 'crash_center',
     maps: ['mc1m1_hotel', 'mc1m2_streets', 'mc1m3_mall', 'l4d_mgarage01_alleys', 'c1m4_atrium'],
   },
   dark_carnival_mirror: {

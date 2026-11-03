@@ -11,7 +11,7 @@ Season 1, **Wrong Way**, starts **Tuesday, November 3** and runs through Monday,
 
 ## What changes
 
-- **Soft reset.** Everyone's rating is pulled toward the middle. Season 0's leaderboard, matches and stats stay on the site.
+- **Soft reset.** Everyone's rating is pulled toward the middle, the top a bit harder than the rest, so nobody starts in Master. Season 0's leaderboard, matches and stats stay on the site.
 - **Placements.** Your SR and rank stay hidden for your first 5 matches of the season.
 - **SR** is your rating minus one uncertainty, so it climbs as the system gets surer about you.
 - **Ranks:** Bronze, Silver (1100), Gold (1600), Platinum (2100), Diamond (2700) and Master (3300), each with divisions III, II and I.
@@ -25,7 +25,9 @@ Season 1, **Wrong Way**, starts **Tuesday, November 3** and runs through Monday,
 - The site has a new Wrong Way look for the season.
 - After every match you get your own SR change in chat and in the disconnect box.
 - Type **!rq** in game, tick the box on the site, or press the button in Discord, and you go straight back in the queue when your match ends.
-- **Mirrored maps.** The flipped world from the trailer is real: mirrored versions of the maps are in the rotation.
+- **Mirrored maps.** The flipped world from the trailer is real: every L4D1 and L4D2 campaign has a mirrored version, every chapter flipped left to right. Download them once (one 870 MB zip) from https://riversidepug.com/custom-campaigns#mirror-pack. The mirrored L4D2 campaigns also need the L4D2 pack on the same page.
+- **New map vote.** Every vote shows 4 campaigns: one L4D1, one L4D2, one custom and one mirrored. Campaigns that have not been played in a while come up more often, one that got votes but lost gets a little boost next time, and the last campaign played is never on the next vote. A vote option marked Download is one you may not have yet: you can still vote for it, but get the maps before the match starts.
+- **Duo queue.** Queue with a friend from the Play page and you land on the same team. Since friends play better together, a high-rated duo counts as a little stronger than its two ratings: for team balance, and for rating, so it gains a bit less for a win and loses a bit more for a loss. If you type !rq as a duo, both of you have to opt in.
 - **Season 0 Wrapped**, a recap of the first season, is out on launch day.
 
 See you in the queue on the 3rd.
