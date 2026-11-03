@@ -104,6 +104,10 @@ async function main(): Promise<void> {
   // Owner, before the test DM: it must never reach everyone. Without --only,
   // sending needs --everyone as well; with --only, exactly one person or none.
   if (send && !only && !flag('everyone')) throw new Error('refusing: --send without --only needs --everyone');
+  // Links only open once the season's decks are frozen (at the flip); before
+  // that only a single test DM may go out, or everyone would get a dead link.
+  const frozen = (db.prepare('SELECT COUNT(*) c FROM season_wrapped WHERE season_id = ?').get(seasonId) as { c: number }).c > 0;
+  if (send && !only && !frozen) throw new Error(`refusing: ${season.name} Wrapped is not frozen yet, so the links would not open`);
   if (only && list.length > 1) throw new Error(`refusing: --only matched ${list.length} people`);
   const log: Record<string, string> = existsSync(logPath) ? JSON.parse(readFileSync(logPath, 'utf8')) : {};
   const todo = list.filter((t) => !log[t.steamid]);
