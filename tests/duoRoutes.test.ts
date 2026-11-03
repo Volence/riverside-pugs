@@ -51,6 +51,69 @@ describe('duo routes', () => {
   });
 });
 
+describe('staff duo blocks (owner 2026-11-03)', () => {
+  const STAFF = '76561198000000209';
+  const audit = () => db.prepare('SELECT admin_id, action, target, detail FROM admin_actions ORDER BY id').all();
+
+  it('blocks a player in a duo: the duo ends, accepting is refused, and both are audited', async () => {
+    db.prepare('UPDATE seasons SET ranks = 1').run();
+    const ca = authedCookie(app, db, A);
+    const cb = authedCookie(app, db, B);
+    const staff = authedCookie(app, db, STAFF);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(STAFF);
+    const id = (await post('/api/duo/invite', ca, { steamid: B })).json().inviteId;
+    expect((await post(`/api/duo/invites/${id}/accept`, cb)).statusCode).toBe(200);
+
+    const blocked = await post(`/api/admin/players/${A}/duo-block`, staff, { reason: 'duo griefing', minutes: 1440 });
+    expect(blocked.statusCode).toBe(200);
+    expect(db.prepare('SELECT ended_by FROM duos').get()).toEqual({ ended_by: STAFF });
+    expect((await app.inject({ method: 'GET', url: '/api/state', cookies: cb })).json().duo.partner).toBeNull();
+
+    // B asks A again: neutral to B. A asks B: told about their own block.
+    const toA = await post('/api/duo/invite', cb, { steamid: A });
+    expect(toA.json()).toEqual({ error: 'that player cannot duo right now' });
+    const fromA = await post('/api/duo/invite', ca, { steamid: B });
+    expect(fromA.json().error).toMatch(/^you are blocked from duo queue until \d{4}-\d\d-\d\d \d\d:\d\d UTC$/);
+
+    // An invite left over from before the block cannot be accepted by A.
+    const old = Number(db.prepare("INSERT INTO duo_invites (from_id, to_id, source, created_at) VALUES (?, ?, 'site', ?)")
+      .run(B, A, new Date().toISOString()).lastInsertRowid);
+    expect((await post(`/api/duo/invites/${old}/accept`, ca)).json().error).toMatch(/^you are blocked from duo queue/);
+
+    expect((await post(`/api/admin/players/${A}/duo-unblock`, staff)).statusCode).toBe(200);
+    // Lifted: the same invite goes through.
+    expect((await post(`/api/duo/invites/${old}/accept`, ca)).statusCode).toBe(200);
+    expect((await post(`/api/admin/players/${A}/duo-unblock`, staff)).statusCode).toBe(409);
+
+    expect(audit()).toEqual([
+      { admin_id: STAFF, action: 'duo_block', target: A, detail: JSON.stringify({ reason: 'duo griefing', minutes: 1440 }) },
+      { admin_id: STAFF, action: 'duo_unblock', target: A, detail: '{}' },
+    ]);
+  });
+
+  it('shows the active block on the player file', async () => {
+    authedCookie(app, db, A);
+    const staff = authedCookie(app, db, STAFF);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(STAFF);
+    await post(`/api/admin/players/${A}/duo-block`, staff, { reason: 'duo griefing' });
+    const f = (await app.inject({ method: 'GET', url: `/api/admin/people/${A}`, cookies: staff })).json();
+    expect(f.sections.standing.duoBlock).toMatchObject({ reason: 'duo griefing', expiresAt: null, createdBy: STAFF });
+  });
+
+  it('refuses anyone but an admin, and a block with no reason', async () => {
+    authedCookie(app, db, A);
+    const cb = authedCookie(app, db, B);
+    const staff = authedCookie(app, db, STAFF);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(STAFF);
+    expect((await post(`/api/admin/players/${A}/duo-block`, cb, { reason: 'x' })).statusCode).toBe(403);
+    expect((await post(`/api/admin/players/${A}/duo-unblock`, cb)).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `/api/admin/players/${A}/duo-block`, payload: { reason: 'x' } })).statusCode).toBe(401);
+    expect((await post(`/api/admin/players/${A}/duo-block`, staff, { reason: ' ' })).statusCode).toBe(400);
+    expect((await post(`/api/admin/players/${A}/duo-block`, staff, { reason: 'x', minutes: 0 })).statusCode).toBe(400);
+    expect(audit()).toEqual([]);
+  });
+});
+
 describe('match page roster', () => {
   it('names each duo member partner and null for everyone else', async () => {
     const C = '76561198000000203';

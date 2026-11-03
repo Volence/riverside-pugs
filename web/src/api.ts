@@ -1979,6 +1979,8 @@ export interface PlayerFileData {
       discordSanctions?: DiscordSanction[];
       /** Every abandon and whether its rating loss was restored. Optional for an older server. */
       abandons?: AbandonRecord[];
+      /** A staff block from the duo queue in force now. Optional for an older server. */
+      duoBlock?: DuoBlock | null;
     };
     matches: AdminPlayerDetail['matches'];
     /** Optional only for a browser holding new JS against an older server. */
@@ -2019,6 +2021,13 @@ export interface NeedsALookRow {
 /** One row of "everyone the analyzer has measured": the board's own columns
  *  plus the name to print. Mirrors MeasuredRow in src/admin/needsALook.ts. */
 export type MeasuredRow = AnalyzerRank & { name: string };
+
+/** A staff block from the duo queue. Mirrors DuoBlock in src/duos.ts;
+ *  expiresAt null is permanent. */
+export interface DuoBlock {
+  id: number; playerId: string; reason: string; createdBy: string; createdByName: string | null;
+  createdAt: string; expiresAt: string | null;
+}
 
 /** One abandon as staff see it (owner rulings 2026-10-10): `decided` is the
  *  team that won a match left already decided, null when it aborted. A
@@ -3146,6 +3155,9 @@ export const adminApi = {
   ban: (steamid: string, reason: string, minutes: number | null) =>
     post(`/api/admin/players/${steamid}/ban`, { reason, minutes }),
   unban: (steamid: string) => post(`/api/admin/players/${steamid}/unban`),
+  duoBlock: (steamid: string, reason: string, minutes: number | null) =>
+    post(`/api/admin/players/${steamid}/duo-block`, { reason, minutes }),
+  duoUnblock: (steamid: string) => post(`/api/admin/players/${steamid}/duo-unblock`),
   activate: (steamid: string) => post(`/api/admin/players/${steamid}/activate`),
   setAdmin: (steamid: string, isAdmin: boolean) => post(`/api/admin/players/${steamid}/admin`, { isAdmin }),
   setMod: (steamid: string, isMod: boolean) => post(`/api/admin/players/${steamid}/mod`, { isMod }),

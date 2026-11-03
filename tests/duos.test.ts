@@ -5,9 +5,11 @@ import { setSetting } from '../src/settings.js';
 import {
   duoQueueLive, partnerOf, createDuoInvite, acceptDuoInvite, declineDuoInvite, cancelDuoInvite,
   endDuo, openDuoInvites, getDuoInvite, pairsAmong, DUO_INVITE_MS,
+  blockFromDuo, liftDuoBlock, activeDuoBlock,
 } from '../src/duos.js';
 
 const [A, B, C] = ['76561198000000001', '76561198000000002', '76561198000000003'];
+const STAFF = '76561198000000009';
 let db: DB;
 const T0 = new Date('2026-11-03T20:00:00Z');
 
@@ -81,6 +83,93 @@ describe('invites and duos', () => {
     expect(endDuo(db, B, B, T0)).toEqual({ ok: true });
     expect(partnerOf(db, A)).toBeNull();
     expect(endDuo(db, B, B, T0)).toEqual({ ok: false, error: 'you are not in a duo' });
+  });
+});
+
+const at = (ms: number) => new Date(T0.getTime() + ms);
+const MIN = 60_000;
+
+describe('decline cooldown (owner 2026-11-03)', () => {
+  it('stops the inviter asking again for an hour, one way only', () => {
+    declineDuoInvite(db, invite(A, B), B, T0);
+    expect(createDuoInvite(db, A, B, 'site', at(1))).toEqual({
+      ok: false, error: 'that player declined your last invite; try again in 60 minutes',
+    });
+    expect(createDuoInvite(db, A, B, 'site', at(59 * MIN + 30_000))).toEqual({
+      ok: false, error: 'that player declined your last invite; try again in 1 minute',
+    });
+    // The one who declined may ask back at once, in case it was a slip.
+    expect(createDuoInvite(db, B, A, 'site', at(1)).ok).toBe(true);
+  });
+
+  it('lifts after the hour', () => {
+    declineDuoInvite(db, invite(A, B), B, T0);
+    expect(createDuoInvite(db, A, B, 'site', at(60 * MIN)).ok).toBe(true);
+  });
+
+  it('does not stop the inviter asking someone else', () => {
+    declineDuoInvite(db, invite(A, B), B, T0);
+    expect(createDuoInvite(db, A, C, 'site', at(1)).ok).toBe(true);
+  });
+
+  it('is over once the decliner has asked back', () => {
+    declineDuoInvite(db, invite(A, B), B, T0);
+    cancelDuoInvite(db, invite(B, A, at(MIN)), B, at(MIN));
+    expect(createDuoInvite(db, A, B, 'site', at(2 * MIN)).ok).toBe(true);
+  });
+});
+
+describe('invite cap (owner 2026-11-03)', () => {
+  it('refuses a sixth invite in a rolling hour, whatever became of the five', () => {
+    for (let i = 0; i < 5; i++) invite(A, i % 2 ? B : C, at(i * MIN));
+    expect(createDuoInvite(db, A, B, 'site', at(10 * MIN))).toEqual({
+      ok: false, error: 'you have sent 5 duo invites in the last hour; try again in 50 minutes',
+    });
+    // The first ages out at T0 + 60 min, making room for one more.
+    expect(createDuoInvite(db, A, B, 'site', at(60 * MIN - 1)).ok).toBe(false);
+    expect(createDuoInvite(db, A, B, 'site', at(60 * MIN)).ok).toBe(true);
+    expect(createDuoInvite(db, A, B, 'site', at(60 * MIN + 1)).ok).toBe(false);
+  });
+
+  it('counts only the sender', () => {
+    for (let i = 0; i < 5; i++) invite(A, B, at(i));
+    expect(createDuoInvite(db, B, A, 'site', at(10)).ok).toBe(true);
+  });
+});
+
+describe('duo blocks (owner 2026-11-03)', () => {
+  it('refuses the blocked player sending, being invited and accepting, naming the block only to them', () => {
+    const open = invite(B, A);
+    blockFromDuo(db, A, STAFF, 'griefing duos', 60, T0);
+    expect(getDuoInvite(db, open)!.outcome).toBe('void');
+    expect(createDuoInvite(db, A, B, 'site', at(1))).toEqual({ ok: false, error: 'you are blocked from duo queue until 2026-11-03 21:00 UTC' });
+    expect(createDuoInvite(db, B, A, 'site', at(1))).toEqual({ ok: false, error: 'that player cannot duo right now' });
+    // An invite sent before the block, made after it by the database alone.
+    const id = Number(db.prepare("INSERT INTO duo_invites (from_id, to_id, source, created_at) VALUES (?, ?, 'site', ?)")
+      .run(C, A, at(1).toISOString()).lastInsertRowid);
+    expect(acceptDuoInvite(db, id, A, at(2))).toEqual({ ok: false, error: 'you are blocked from duo queue until 2026-11-03 21:00 UTC' });
+    const fromA = Number(db.prepare("INSERT INTO duo_invites (from_id, to_id, source, created_at) VALUES (?, ?, 'site', ?)")
+      .run(A, C, at(1).toISOString()).lastInsertRowid);
+    expect(acceptDuoInvite(db, fromA, C, at(2))).toEqual({ ok: false, error: 'that player cannot duo right now' });
+  });
+
+  it('a permanent block says so', () => {
+    blockFromDuo(db, A, STAFF, 'x', null, T0);
+    expect(createDuoInvite(db, A, B, 'site', at(1))).toEqual({ ok: false, error: 'you are blocked from duo queue permanently' });
+    expect(activeDuoBlock(db, A, at(365 * 24 * 60 * MIN))?.expiresAt).toBeNull();
+  });
+
+  it('ends when lifted or when it runs out', () => {
+    blockFromDuo(db, A, STAFF, 'x', 60, T0);
+    expect(activeDuoBlock(db, A, at(1))).toMatchObject({ reason: 'x', createdBy: STAFF });
+    expect(activeDuoBlock(db, A, at(60 * MIN))).toBeNull();
+    expect(createDuoInvite(db, A, B, 'site', at(60 * MIN)).ok).toBe(true);
+
+    blockFromDuo(db, C, STAFF, 'y', null, T0);
+    expect(liftDuoBlock(db, C, STAFF, at(1))).toBe(true);
+    expect(liftDuoBlock(db, C, STAFF, at(2))).toBe(false);
+    expect(activeDuoBlock(db, C, at(2))).toBeNull();
+    expect(createDuoInvite(db, C, B, 'site', at(2)).ok).toBe(true);
   });
 });
 

@@ -279,6 +279,23 @@ describe('/duo and /unduo', () => {
     expect(text(r)).toMatch(/not in a duo/);
   });
 
+  // Owner 2026-11-03: each invite DMs, so a decline holds the inviter off
+  // that player for an hour, and nobody sends more than five an hour.
+  it('/duo after a decline, and past the hourly cap, refuses privately and DMs nobody', async () => {
+    await runDm();
+    const id = (db.prepare('SELECT id FROM duo_invites').get() as { id: number }).id;
+    expect(mm.declineDuo(id, IDS[5]).ok).toBe(true);
+    sent.length = 0;
+    const r = await runDm();
+    expect(r.ephemeral).toBe(true);
+    expect(text(r)).toMatch(/that player declined your last invite; try again in 60 minutes/);
+    for (const other of [IDS[1], IDS[2], IDS[3], IDS[4]]) expect(mm.inviteDuo(IDS[0], other, 'site').ok).toBe(true);
+    // Take the decline out of the way: the cap is what is left.
+    db.prepare("UPDATE duo_invites SET outcome = 'cancelled' WHERE outcome = 'declined'").run();
+    expect(text(await runDm())).toMatch(/you have sent 5 duo invites in the last hour; try again in \d+ minutes/);
+    expect(sent).toEqual([]);
+  });
+
   it('/duo before Season 1 refuses', async () => {
     db.prepare('UPDATE seasons SET ranks = 0').run();
     expect(text(await run('duo', { user: '905' }))).toMatch(/not on right now/);

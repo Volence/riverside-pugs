@@ -3146,6 +3146,19 @@ export function openDb(path: string): DB {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       at TEXT NOT NULL
     );
+    -- Staff blocks from the duo queue (src/duos.ts activeDuoBlock). Active
+    -- while lifted_at IS NULL and expires_at is NULL (permanent) or later.
+    CREATE TABLE IF NOT EXISTS duo_blocks (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_id  TEXT NOT NULL,
+      reason     TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT,
+      lifted_at  TEXT,
+      lifted_by  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS duo_blocks_player ON duo_blocks (player_id);
   `);
   // Who a player was duoed with in this match and the bonus (mu) the
   // balancer and the rating used. Stored so a season recompute replays the
