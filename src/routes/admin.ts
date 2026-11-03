@@ -16,6 +16,7 @@ import { SETTINGS_SCHEMA, settingDef, validateSetting } from '../settingsSchema.
 import { getCampaignPool, getSetting, getStickyCampaigns, setSetting } from '../settings.js';
 import { recentBallots } from '../ballot.js';
 import { logAdmin, recentActions } from '../admin/audit.js';
+import { blockFromDuo, liftDuoBlock } from '../duos.js';
 import {
   activeBan, addNote, banPlayer, playerDetail, searchPlayers, unbanPlayer,
 } from '../admin/players.js';
@@ -159,6 +160,36 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
     if (!t) return reply;
     unbanPlayer(db, t.steamid, t.adminId);
     logAdmin(db, t.adminId, 'unban', t.steamid);
+    return { ok: true };
+  });
+
+  // A block from the duo queue (owner 2026-11-03): ban's permission and
+  // ban's lengths, but they can still queue solo.
+  app.post('/api/admin/players/:steamid/duo-block', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    const { reason, minutes } = (req.body ?? {}) as { reason?: unknown; minutes?: unknown };
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) {
+      return reply.code(400).send({ error: 'a reason is required (up to 500 characters)' });
+    }
+    let mins: number | null = null;
+    if (minutes !== undefined && minutes !== null && minutes !== '') {
+      mins = Number(minutes);
+      if (!Number.isInteger(mins) || mins <= 0 || mins > 60 * 24 * 365) {
+        return reply.code(400).send({ error: 'minutes must be a whole number between 1 and 525600' });
+      }
+    }
+    blockFromDuo(db, t.steamid, t.adminId, reason.trim(), mins);
+    matchmaker.duoBlocked(t.steamid, t.adminId);
+    logAdmin(db, t.adminId, 'duo_block', t.steamid, { reason: reason.trim(), minutes: mins });
+    return { ok: true };
+  });
+
+  app.post('/api/admin/players/:steamid/duo-unblock', async (req, reply) => {
+    const t = target(req, reply);
+    if (!t) return reply;
+    if (!liftDuoBlock(db, t.steamid, t.adminId)) return reply.code(409).send({ error: 'player is not blocked from duo' });
+    logAdmin(db, t.adminId, 'duo_unblock', t.steamid);
     return { ok: true };
   });
 

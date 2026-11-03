@@ -6,7 +6,7 @@ import { ConfirmHost } from '../components/Confirm';
 const { mockPeople, mockAdmin, mockMod } = vi.hoisted(() => ({
   mockPeople: { people: vi.fn(), file: vi.fn(), review: vi.fn(), bans: vi.fn(), note: vi.fn(), lookedAt: vi.fn() },
   mockAdmin: {
-    ban: vi.fn(), unban: vi.fn(), activate: vi.fn(), setAdmin: vi.fn(), setMod: vi.fn(),
+    ban: vi.fn(), unban: vi.fn(), duoBlock: vi.fn(), duoUnblock: vi.fn(), activate: vi.fn(), setAdmin: vi.fn(), setMod: vi.fn(),
     signOutPlayer: vi.fn(), clearPenalties: vi.fn(), clearPenalty: vi.fn(), liftTimeout: vi.fn(), unlinkDiscord: vi.fn(),
     mergePlayer: vi.fn(), unaliasPlayer: vi.fn(), steamRefresh: vi.fn(), integrityReview: vi.fn(),
   },
@@ -263,6 +263,38 @@ describe('the Player File', () => {
     expect(dialog.textContent).toContain('no-show');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Lift timeout' }));
     await waitFor(() => expect(mockAdmin.liftTimeout).toHaveBeenCalledWith(P));
+  });
+
+  // Owner 2026-11-03: a duo queue block folds beside the ban, same lengths.
+  it('blocks from duo from the standing banner, after unfolding its form', async () => {
+    render(<><PlayerFile steamid={P} me="76561199000000009" /><ConfirmHost /></>);
+    await screen.findByRole('heading', { name: /griefer/ });
+    expect(screen.queryByLabelText('Duo block reason')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Block from duo' }));
+    expect(screen.queryByRole('button', { name: 'Ban this player' })).toBeNull();
+    fireEvent.input(screen.getByLabelText('Duo block reason'), { target: { value: 'duo griefing' } });
+    fireEvent.change(screen.getByLabelText('Duo block length'), { target: { value: '10080' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Block from duo' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    expect(dialog.textContent).toContain('queue solo');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Block from duo' }));
+    await waitFor(() => expect(mockAdmin.duoBlock).toHaveBeenCalledWith(P, 'duo griefing', 10080));
+    expect(mockAdmin.ban).not.toHaveBeenCalled();
+  });
+
+  it('shows an active duo block on the banner, with Lift duo block in place of Block from duo', async () => {
+    const base = file();
+    mockPeople.file.mockResolvedValue(file({ sections: { ...base.sections, standing: { ...base.sections.standing,
+      duoBlock: { id: 3, playerId: P, reason: 'duo griefing', createdBy: '9', createdByName: 'boss', createdAt: '2026-11-03T00:00:00.000Z', expiresAt: null } } } }));
+    render(<><PlayerFile steamid={P} me="76561199000000009" /><ConfirmHost /></>);
+    await screen.findByRole('heading', { name: /griefer/ });
+    const banner = document.querySelector('.file-standing') as HTMLElement;
+    expect(banner.textContent).toContain('Blocked from duo permanently: duo griefing · by boss');
+    expect(within(banner).queryByRole('button', { name: 'Block from duo' })).toBeNull();
+    fireEvent.click(within(banner).getByRole('button', { name: 'Lift duo block' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Lift duo block' }));
+    await waitFor(() => expect(mockAdmin.duoUnblock).toHaveBeenCalledWith(P));
   });
 
   it('shows no Lift timeout when there is no timeout', async () => {

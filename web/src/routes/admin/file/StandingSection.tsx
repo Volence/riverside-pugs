@@ -16,6 +16,30 @@ function abandonOf(d: PlayerFileData, reason: string) {
   return m ? (d.sections.standing.abandons ?? []).find((a) => a.matchId === Number(m[1])) ?? null : null;
 }
 
+/** The duo queue block in force, one muted line under the standing. */
+function DuoBlockLine({ d }: { d: PlayerFileData }) {
+  const b = d.sections.standing.duoBlock;
+  if (!b) return null;
+  return (
+    <p class="muted">
+      Blocked from duo {b.expiresAt ? `until ${fmtTime(b.expiresAt)}` : 'permanently'}: <strong>{b.reason}</strong>
+      {b.createdByName ? ` · by ${b.createdByName}` : ''}
+    </p>
+  );
+}
+
+/** Lift the duo block, beside Unban or Ban this player. */
+function LiftDuoBlock({ d, busy, run }: Pick<Props, 'd' | 'busy' | 'run'>) {
+  return (
+    <button class="btn" type="button" disabled={busy}
+      onClick={() => run(() => adminApi.duoUnblock(d.steamid), {
+        title: `Lift ${d.header.name}'s duo block?`,
+        body: 'They can send and accept duo invites again at once.',
+        confirmLabel: 'Lift duo block',
+      })}>Lift duo block</button>
+  );
+}
+
 /**
  * Where this player stands, and the one control that changes it, at the top
  * of the file. Ban and Unban used to sit halfway down the page behind a
@@ -25,10 +49,14 @@ function abandonOf(d: PlayerFileData, reason: string) {
  *
  * A ban whose reason reads "Withheld" came from a restricted ticket the
  * viewer is not on: the server decides that, not this page.
+ *
+ * A block from the duo queue (owner 2026-11-03) folds the same way beside
+ * the ban; they can still queue solo while it lasts.
  */
 export function StandingBanner({ d, busy, run, can }: Props) {
   const s = d.sections.standing;
-  const [open, setOpen] = useState(false);
+  // Which form is unfolded: the ban's or the duo block's.
+  const [open, setOpen] = useState<'ban' | 'duo' | null>(null);
   const [reason, setReason] = useState('');
   const [minutes, setMinutes] = useState('');
   const live = s.penalties.filter((p) => !p.clearedAt).length;
@@ -48,6 +76,7 @@ export function StandingBanner({ d, busy, run, can }: Props) {
             Since {fmtTime(b.createdAt)}{b.createdByName ? ` by ${b.createdByName}` : ''}
             {s.timeout && ` · also on queue timeout until ${fmtTime(s.timeout.until)}`}
           </p>
+          <DuoBlockLine d={d} />
         </div>
         {can('ban') && (
           <div class="file-standing__acts">
@@ -57,6 +86,7 @@ export function StandingBanner({ d, busy, run, can }: Props) {
                 body: 'The ban is lifted here and on every game server.',
                 confirmLabel: 'Unban',
               })}>Unban</button>
+            {s.duoBlock && <LiftDuoBlock d={d} busy={busy} run={run} />}
             {/* Lifting an abandon ban does not give the rating back; staff
                 who decide it was not the player's fault do that here too. */}
             {abandon && !abandon.restoredAt && (
@@ -77,26 +107,38 @@ export function StandingBanner({ d, busy, run, can }: Props) {
           {s.bans.length === 0 ? 'No bans before' : `${s.bans.length} past ban${s.bans.length === 1 ? '' : 's'}`}
           {' · '}{live === 0 ? 'no open penalties' : `${live} open penalt${live === 1 ? 'y' : 'ies'}`}
         </p>
+        <DuoBlockLine d={d} />
       </div>
       {can('ban') && (open ? (
         <form class="file-standing__ban" onSubmit={(e) => {
           e.preventDefault();
-          void run(() => adminApi.ban(d.steamid, reason.trim(), minutes ? Number(minutes) : null), {
-            title: `Ban ${d.header.name}?`,
-            body: reason.trim()
-              ? `They are banned here and kicked from every game server. They will be shown: "${reason.trim()}"`
-              : 'They are banned here and kicked from every game server.',
-            confirmLabel: 'Ban',
-            danger: true,
-          }).then(() => { setReason(''); setMinutes(''); setOpen(false); });
+          const why = reason.trim();
+          const mins = minutes ? Number(minutes) : null;
+          void (open === 'ban'
+            ? run(() => adminApi.ban(d.steamid, why, mins), {
+              title: `Ban ${d.header.name}?`,
+              body: why
+                ? `They are banned here and kicked from every game server. They will be shown: "${why}"`
+                : 'They are banned here and kicked from every game server.',
+              confirmLabel: 'Ban',
+              danger: true,
+            })
+            : run(() => adminApi.duoBlock(d.steamid, why, mins), {
+              title: `Block ${d.header.name} from duo queue?`,
+              body: 'They cannot send or accept duo invites, and a duo they are in ends now. They can still queue solo.',
+              confirmLabel: 'Block from duo',
+              danger: true,
+            })).then(() => { setReason(''); setMinutes(''); setOpen(null); });
         }}>
-          <input value={reason} placeholder="Reason (shown to them)" aria-label="Ban reason" autoFocus
+          <input value={reason} placeholder={open === 'ban' ? 'Reason (shown to them)' : 'Reason (staff only)'}
+            aria-label={open === 'ban' ? 'Ban reason' : 'Duo block reason'} autoFocus
             onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
-          <select value={minutes} aria-label="Ban length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
+          <select value={minutes} aria-label={open === 'ban' ? 'Ban length' : 'Duo block length'}
+            onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
             {BAN_LENGTHS.map(([m, label]) => <option key={label} value={m === null ? '' : String(m)}>{label}</option>)}
           </select>
-          <button class="btn" type="submit" disabled={busy || !reason.trim()}>Ban</button>
-          <button class="chip" type="button" onClick={() => setOpen(false)}>Cancel</button>
+          <button class="btn" type="submit" disabled={busy || !reason.trim()}>{open === 'ban' ? 'Ban' : 'Block from duo'}</button>
+          <button class="chip" type="button" onClick={() => setOpen(null)}>Cancel</button>
         </form>
       ) : (
         <div class="file-standing__acts">
@@ -112,7 +154,10 @@ export function StandingBanner({ d, busy, run, can }: Props) {
                 confirmLabel: 'Lift timeout',
               })}>Lift timeout</button>
           )}
-          <button class="btn btn--ghost file-standing__open" type="button" onClick={() => setOpen(true)}>Ban this player</button>
+          <button class="btn btn--ghost file-standing__open" type="button" onClick={() => setOpen('ban')}>Ban this player</button>
+          {s.duoBlock
+            ? <LiftDuoBlock d={d} busy={busy} run={run} />
+            : <button class="btn btn--ghost" type="button" onClick={() => setOpen('duo')}>Block from duo</button>}
         </div>
       ))}
     </div>

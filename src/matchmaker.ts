@@ -23,7 +23,7 @@ import { DUO_REQUEUE_NOT_BOTH, requeueOptIns, wantsRequeue, type RequeueResult }
 import { seasonOneLive } from './seasonThemes.js';
 import {
   duoQueueLive, partnerOf, pairsAmong, createDuoInvite, acceptDuoInvite, declineDuoInvite,
-  cancelDuoInvite, endDuo as endDuoRow, getDuoInvite, openDuoInvites, recordDuoPopSkips, recordDuoHoldBump, type DuoResult,
+  cancelDuoInvite, duoBlockError, endDuo as endDuoRow, getDuoInvite, openDuoInvites, recordDuoPopSkips, recordDuoHoldBump, type DuoResult,
 } from './duos.js';
 
 export interface MatchmakerDeps {
@@ -511,6 +511,9 @@ export class Matchmaker {
     for (const id of pair) {
       if (!inGoodStanding(this.db, id)) return { ok: false, error: `${this.named(id).name} cannot duo right now` };
     }
+    // Before the ready check and queue reasons, so a blocked player is told that.
+    const blocked = duoBlockError(this.db, steamid, inv.fromId);
+    if (blocked) return { ok: false, error: blocked };
     for (const id of pair) {
       if (this.playerLobby.has(id) || this.hasOpenMatch(id)) {
         return { ok: false, error: `${this.named(id).name} is in a ready check or a match; try again after it` };
@@ -546,14 +549,21 @@ export class Matchmaker {
     return r;
   }
 
-  /** End the viewer's duo. Both stay where they are, as solos. */
-  endDuo(steamid: string): DuoResult {
-    const r = endDuoRow(this.db, steamid, steamid);
+  /** End the viewer's duo. Both stay where they are, as solos. `by` is
+   *  whoever ended it: the viewer, or staff blocking them from duo. */
+  endDuo(steamid: string, by = steamid): DuoResult {
+    const r = endDuoRow(this.db, steamid, by);
     if (!r.ok) return r;
     // A held duo that splits into two solos can fill the pop it was holding.
     this.maybeStartLobby();
     this.changed();
     return r;
+  }
+
+  /** Staff just blocked this player from duo (blockFromDuo, which voided
+   *  their invites): end any duo they are in and let the pages know. */
+  duoBlocked(steamid: string, by: string): void {
+    if (!this.endDuo(steamid, by).ok) this.changed();
   }
 
   ready(steamid: string): { ok: boolean; error?: string } {

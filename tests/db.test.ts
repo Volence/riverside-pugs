@@ -22,7 +22,7 @@ describe('openDb', () => {
       'custom_campaign_chapters', 'custom_campaign_installs', 'custom_campaigns',
       'discord_link_codes', 'discord_link_history', 'discord_messages', 'discord_sanctions', 'discord_voice', 'discord_voice_origin',
       'draft_captain_offers', 'draft_keep_answers', 'draft_keeps', 'draft_pick_lists', 'draft_picks', 'draft_rooms', 'draft_signups',
-      'draft_standin_offers', 'draft_standins', 'duo_invites', 'duo_pop_skips', 'duos', 'endorsements', 'evader_flags', 'evader_members', 'evader_people',
+      'draft_standin_offers', 'draft_standins', 'duo_blocks', 'duo_invites', 'duo_pop_skips', 'duos', 'endorsements', 'evader_flags', 'evader_members', 'evader_people',
       'event_campaign_prefs', 'event_entries', 'event_entry_players', 'event_entry_prefs', 'event_entry_voice', 'event_games', 'event_lineups',
       'event_log', 'event_match_voice', 'event_matches', 'event_reschedules', 'event_stages', 'event_vetoes', 'events', 'fingerprint_alerts',
       'fingerprint_cache', 'fingerprint_dismissals', 'fleet_files', 'fleet_readings',

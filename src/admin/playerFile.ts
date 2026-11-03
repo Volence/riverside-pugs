@@ -28,6 +28,7 @@ import { conductOf, type ConductSection } from './conduct.js';
 import { scrimRecordOf, type ScrimRecord } from '../scrims/reliability.js';
 import { scrimReviewsOf, type ScrimReviews } from '../scrims/reviews.js';
 import { scrimBlocksOf, type ScrimBlocks } from '../scrims/blocks.js';
+import { activeDuoBlock, type DuoBlock } from '../duos.js';
 
 export interface PlayerFile {
   steamid: string;
@@ -60,6 +61,8 @@ export interface PlayerFile {
       discordSanctions: SanctionRow[];
       /** Every abandon, with whether its rating loss was restored. */
       abandons: AbandonRecord[];
+      /** A staff block from the duo queue in force now, else null. */
+      duoBlock: DuoBlock | null;
     };
     matches: RecentMatchRow[];
     conduct: ConductSection;
@@ -180,6 +183,7 @@ export function playerFile(
         timeout: timeout ? { until: timeout.until.toISOString(), offenses: timeout.offenses, kind: timeout.kind } : null,
         discordSanctions: sanctionsForPlayer(db, canonical).map((s) => redactDiscordSanction(db, s, viewer.steamid)),
         abandons: abandonsOfPlayer(db, canonical),
+        duoBlock: activeDuoBlock(db, canonical, now),
       },
       matches,
       conduct: conductOf(db, canonical),
