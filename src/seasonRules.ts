@@ -29,16 +29,20 @@ export const NEW_SEASON_RULES: SeasonRules = { srSigmaK: 1, placementGames: 5, r
 
 /**
  * The soft reset a new season starts from: mu pulled 30% of the way back to
- * the default, sigma raised to at least 6. Backtested 2026-10-19 by starting a
- * pretend season on 09-28 and on 10-05 and replaying every later match: log
- * loss 0.693 / 0.680, against 0.725 / 0.729 for a hard reset and 0.704 /
- * 0.693 for carrying ratings over unchanged.
+ * the default (50% from above it), sigma raised to at least 6. Backtested
+ * 2026-10-19 by starting a pretend season on 09-28 and on 10-05 and replaying
+ * every later match: log loss 0.693 / 0.680, against 0.725 / 0.729 for a hard
+ * reset and 0.704 / 0.693 for carrying ratings over unchanged. The owner
+ * asked for the harder pull above the default on 11-02: with keep 0.7 there
+ * too, the top Season 0 player started Season 1 in Master, above anyone's
+ * Season 0 SR, because Season 1 SR subtracts one sigma instead of two.
  */
-export const SOFT_RESET = { keep: 0.7, sigmaFloor: 6, mu: 25 } as const;
+export const SOFT_RESET = { keep: 0.7, keepAbove: 0.5, sigmaFloor: 6, mu: 25 } as const;
 
 export function softResetRating(r: { mu: number; sigma: number }): { mu: number; sigma: number } {
+  const keep = r.mu > SOFT_RESET.mu ? SOFT_RESET.keepAbove : SOFT_RESET.keep;
   return {
-    mu: SOFT_RESET.mu + SOFT_RESET.keep * (r.mu - SOFT_RESET.mu),
+    mu: SOFT_RESET.mu + keep * (r.mu - SOFT_RESET.mu),
     sigma: Math.max(r.sigma, SOFT_RESET.sigmaFloor),
   };
 }

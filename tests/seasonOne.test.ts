@@ -69,8 +69,8 @@ describe('ranks', () => {
     expect(rankAfter(gold3, 1600 - DEMOTION_BUFFER - 1)).toBe(gold3 - 1);
   });
 
-  it('soft reset pulls mu 30% toward 25 and floors sigma at 6', () => {
-    expect(softResetRating({ mu: 45, sigma: 4 })).toEqual({ mu: 39, sigma: 6 });
+  it('soft reset pulls mu 30% toward 25 from below, 50% from above, and floors sigma at 6', () => {
+    expect(softResetRating({ mu: 45, sigma: 4 })).toEqual({ mu: 35, sigma: 6 });
     expect(softResetRating({ mu: 15, sigma: 7.5 })).toEqual({ mu: 18, sigma: 7.5 });
   });
 });
@@ -240,7 +240,7 @@ describe('season 1 review fixes', () => {
     const seed1 = db.prepare('SELECT mu FROM season_seeds WHERE season_id = ? AND player_id = ?').get(s1, IDS[0]) as { mu: number };
     startNewSeason(db, 'Season 2');
     const seed2 = db.prepare('SELECT mu FROM season_seeds WHERE season_id = ? AND player_id = ?').get(currentSeasonId(db), IDS[0]) as { mu: number };
-    expect(seed2.mu).toBeCloseTo(25 + 0.7 * (seed1.mu - 25), 9);
+    expect(seed2.mu).toBeCloseTo(softResetRating({ mu: seed1.mu, sigma: 6 }).mu, 9);
   });
 
   it('Season 0 hands out no Top 10 badge', async () => {
