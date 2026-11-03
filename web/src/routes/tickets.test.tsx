@@ -154,7 +154,7 @@ describe('the Tickets section', () => {
     renderAdmin('/admin/people/tickets/12', mod);
     await screen.findByText('saw me through a wall');
     const length = screen.getByLabelText('Ban length') as HTMLSelectElement;
-    expect([...length.options].map((o) => o.value)).toEqual(['60', '1440', '4320', '10080']);
+    expect([...length.options].map((o) => o.value)).toEqual(['60', '360', '720', '1440', '2880', '4320', '5760', '7200', '10080']);
     fireEvent.input(screen.getByLabelText('Ban reason'), { target: { value: 'walls' } });
     fireEvent.change(length, { target: { value: '1440' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ban' }));
@@ -168,7 +168,7 @@ describe('the Tickets section', () => {
     renderAdmin('/admin/people/tickets/12', { ...mod, isAdmin: true });
     await screen.findByText('saw me through a wall');
     const values = [...(screen.getByLabelText('Ban length') as HTMLSelectElement).options].map((o) => o.value);
-    expect(values).toEqual(['60', '1440', '4320', '10080', '43200', '']);
+    expect(values).toEqual(['60', '360', '720', '1440', '2880', '4320', '5760', '7200', '10080', '20160', '43200', '']);
   });
 
   it('a restricted ticket says so, and lists who can see it', async () => {

@@ -4,15 +4,28 @@ import { useFetch } from '../../hooks/useFetch';
 import { Empty, Panel } from '../../components/bits';
 import { fmtTime, useAction } from './useAction';
 import { fileUrl, ticketUrl } from './adminRoutes';
+import { BAN_LENGTHS } from './banLengths';
 
 export function AdminAppeal({ id }: { id: number }) {
   const { data: a, error: loadError, reload } = useFetch((s) => appealStaffApi.get(id, s), [id]);
   const { busy, error, run } = useAction(reload);
   const [message, setMessage] = useState('');
+  // Minutes from BAN_LENGTHS, or 'date' for the hand-picked end below it.
+  const [shortenTo, setShortenTo] = useState('');
   const [endsAt, setEndsAt] = useState('');
   if (loadError) return <Empty>No such appeal.</Empty>;
   if (!a) return null;
   const open = a.state === 'open' || a.state === 'asked' || a.state === 'answered';
+  // Staff lower a ban to a new total length, counted from when it was issued,
+  // the same lengths the ban forms offer. Only the ones that still end in the
+  // future and before the ban ends now are offered (the server refuses the rest).
+  const issued = Date.parse(a.target.createdAt);
+  const endsNow = a.target.endsAt ? Date.parse(a.target.endsAt) : Infinity;
+  const shorter = BAN_LENGTHS.flatMap(([m, label]) => {
+    const end = m === null ? NaN : issued + m * 60_000;
+    return end > Date.now() + 60_000 && end < endsNow ? [{ m: String(m), label, end: new Date(end).toISOString() }] : [];
+  });
+  const newEnd = shortenTo === 'date' ? (endsAt ? new Date(endsAt).toISOString() : '') : shorter.find((o) => o.m === shortenTo)?.end ?? '';
 
   return (
     <div class="stack">
@@ -63,9 +76,16 @@ export function AdminAppeal({ id }: { id: number }) {
             })}>Accept</button>
             {a.canShorten && (
               <>
-                <input type="datetime-local" value={endsAt} onInput={(e) => setEndsAt((e.target as HTMLInputElement).value)} />
-                <button class="btn" disabled={busy || !endsAt} onClick={() => run(() => appealStaffApi.decide(a.id, 'shorten', new Date(endsAt).toISOString()), {
-                  title: 'Shorten this ban?', body: `It will end ${new Date(endsAt).toLocaleString()}. The player is told the new end.`, confirmLabel: 'Shorten',
+                <select value={shortenTo} aria-label="Shorten the ban to" onChange={(e) => setShortenTo((e.target as HTMLSelectElement).value)}>
+                  <option value="">Shorten to...</option>
+                  {shorter.map((o) => <option key={o.m} value={o.m}>{o.label} in total (ends {fmtTime(o.end)})</option>)}
+                  <option value="date">Pick an end date</option>
+                </select>
+                {shortenTo === 'date' && (
+                  <input type="datetime-local" aria-label="New end" value={endsAt} onInput={(e) => setEndsAt((e.target as HTMLInputElement).value)} />
+                )}
+                <button class="btn" disabled={busy || !newEnd} onClick={() => run(() => appealStaffApi.decide(a.id, 'shorten', newEnd), {
+                  title: 'Shorten this ban?', body: `It will end ${new Date(newEnd).toLocaleString()}. The player is told the new end.`, confirmLabel: 'Shorten',
                 })}>Shorten</button>
               </>
             )}
