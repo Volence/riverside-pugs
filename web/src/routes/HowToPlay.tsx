@@ -1,8 +1,15 @@
+import { useEffect, useState } from 'preact/hooks';
+import { api } from '../api';
 import { Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { DocLayout } from '../components/DocLayout';
 import { SetupChecklist } from '../components/SetupChecklist';
 import type { Session } from '../hooks/useLiveState';
+
+/** The SR answer follows the current season's rules, so the site can ship
+ *  ahead of Season 1 and still describe Season 0 correctly until the flip. */
+const SR_RANKED = <>SR comes from an OpenSkill rating, updated after every match from whether your team won, lost or drew. Only winning moves it: your own stats never do. Each season you play <strong>5 placement matches</strong> first; your SR and rank show after the fifth. Ranks go Bronze, Silver, Gold, Platinum, Diamond and Master, each with three divisions (III, II, I). Silver starts at 1100 SR, Gold at 1600, Platinum at 2100, Diamond at 2700 and Master at 3300. You rank up the moment you cross a line, and only drop once you are 50 SR below it. The <strong>Top 10</strong> badge and a place in the final standings need 20 matches in the season. A new season starts everyone from a soft reset of their old rating, so you keep most of what you earned. If you join a match as a sub and play under half of it, your stats count but your rating does not change.</>;
+const SR_LEGACY = <>SR comes from an OpenSkill rating, updated after every match from whether your team won, lost or drew. It is shown cautiously: a new player's rating is uncertain, so it starts lower and settles as you play. You are <strong>provisional</strong> for your first 3 matches and are listed below the ranked part of the leaderboard until then. If you join a match as a sub and play under half of it, your stats count but your rating does not change.</>;
 
 const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   {
@@ -24,10 +31,6 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
   {
     q: 'How do I connect to the server?',
     a: <>Press <strong>Copy</strong> on Play, or <strong>Connect</strong> on the Discord match card, and paste the line into the L4D console (enable the console in Options, open it with <code>~</code>). The password goes first, then the connect: <code>password pug_xxxx; connect ip:port</code>. The other way round fails with "Bad password". Play also has a <strong>join through Steam</strong> link; it fills the password in for you, but you still have to press Enter on it.</>,
-  },
-  {
-    q: 'How does SR work?',
-    a: <>SR comes from an OpenSkill rating, updated after every match from whether your team won, lost or drew. It is shown cautiously: a new player's rating is uncertain, so it starts lower and settles as you play. You are <strong>provisional</strong> for your first 3 matches and are listed below the ranked part of the leaderboard until then. If you join a match as a sub and play under half of it, your stats count but your rating does not change.</>,
   },
   {
     q: 'What happens if I miss a ready check or do not show up?',
@@ -91,6 +94,14 @@ const SECTIONS: { id: string; label: string }[] = [
 
 export function HowToPlay({ session }: { session: Session }) {
   const me = session.kind === 'active' || session.kind === 'pending' ? session.me : null;
+  const [ranked, setRanked] = useState(false);
+  useEffect(() => {
+    const ctl = new AbortController();
+    api.seasons(ctl.signal).then((r) => setRanked(!!r.seasons.find((x) => x.current)?.ranks)).catch(() => {});
+    return () => ctl.abort();
+  }, []);
+  // Where it always sat, right after connecting.
+  const faq = [...FAQ.slice(0, 5), { q: 'How does SR work?', a: ranked ? SR_RANKED : SR_LEGACY }, ...FAQ.slice(5)];
   return (
     <div class="page page--list">
       <PageHeader eyebrow="Riverside" title="How to play" />
@@ -421,7 +432,7 @@ viewmodel_fov_override 70`}</code></pre>
         <Panel id="faq">
           <h3>FAQ</h3>
           <div class="faq">
-            {FAQ.map((f) => (
+            {faq.map((f) => (
               <details key={f.q}>
                 <summary>{f.q}</summary>
                 <p>{f.a}</p>
