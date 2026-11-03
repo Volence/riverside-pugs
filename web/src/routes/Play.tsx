@@ -14,8 +14,6 @@ import { SpectatePanel } from '../components/SpectatePanel';
 import { PageHeader } from '../components/PageHeader';
 import { SetupChecklist } from '../components/SetupChecklist';
 import { gotAnyL4D2 } from './L4D2Pack';
-import { gotAnyMirror } from './MirrorPack';
-import { useSeasonLook } from '../seasonTheme';
 import { PracticeCard } from '../components/PracticeCard';
 import type { Session } from '../hooks/useLiveState';
 
@@ -430,38 +428,6 @@ export function AbortNoticePanel({ notice, refresh }: { notice: AbortNotice; ref
 /** Remembered per browser: someone who says they have the maps is not asked again. */
 const MAPS_NOTICE_KEY = 'maps-notice-dismissed';
 
-const MIRROR_NOTICE_KEY = 'mirror-notice-dismissed';
-
-/**
- * The Wrong Way season puts a mirrored campaign on every match vote, and the
- * players who already have the other maps dismissed MapsNotice long ago. Shown
- * once the Wrong Way season is live, until they download a mirror piece here or
- * say they have them. New players get MapsNotice instead, which covers both.
- */
-function MirrorNotice() {
-  const season = useSeasonLook();
-  const [hidden, setHidden] = useState(() => {
-    try { return localStorage.getItem(MIRROR_NOTICE_KEY) === '1' || gotAnyMirror(); } catch { return false; }
-  });
-  if (hidden || season?.theme !== 'wrong-way') return null;
-  const dismiss = () => {
-    try { localStorage.setItem(MIRROR_NOTICE_KEY, '1'); } catch { /* private window */ }
-    setHidden(true);
-  };
-  return (
-    <div class="maps-notice" role="note">
-      <p>
-        <strong>Get the mirrored maps.</strong> Every match vote now has a mirrored campaign on it,
-        and without its files you can't join the server and the match is cancelled.
-      </p>
-      <div class="maps-notice__actions">
-        <a class="btn btn--ghost" href="/custom-campaigns#mirror-pack">Download the mirrored maps</a>
-        <button class="chip" type="button" onClick={dismiss}>I have them</button>
-      </div>
-    </div>
-  );
-}
-
 /**
  * Shown above Join queue until a player finishes a match on a custom or L4D2
  * campaign. Matches can pick those campaigns, and a player without the files
@@ -480,8 +446,8 @@ function MapsNotice() {
   return (
     <div class="maps-notice" role="note">
       <p>
-        <strong>New here? Get the maps first.</strong> Matches can be played on the L4D2, mirrored and
-        custom campaigns, and without them you can't join the server and the match is cancelled.
+        <strong>New here? Get the maps first.</strong> Matches can be played on the L4D2 and custom
+        campaigns, and without them you can't join the server and the match is cancelled.
       </p>
       <div class="maps-notice__actions">
         <a class="btn btn--ghost" href="/custom-campaigns">Download the maps</a>
@@ -549,7 +515,6 @@ export function QueuePanel(
       ) : (
         <>
           {me && me.mapsPlayed === false && <MapsNotice />}
-          {me && me.mapsPlayed !== false && <MirrorNotice />}
           <button class="btn btn--block" onClick={() => act(api.joinQueue)}>Join queue</button>
         </>
       )}

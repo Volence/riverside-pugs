@@ -412,8 +412,8 @@ viewmodel_fov_override 70`}</code></pre>
             vote.
           </p>
           <p>
-            Season 1 adds mirrored campaigns, every chapter flipped left to right, and every match
-            vote has one. Install them once from the{' '}
+            Season 1 (November 3) adds mirrored campaigns, every chapter flipped left to right, and
+            every match vote has one. Install them once from the{' '}
             <a href="/custom-campaigns#mirror-pack">same page</a>: thirteen more add-on files for
             the same folder.
           </p>

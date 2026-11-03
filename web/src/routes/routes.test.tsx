@@ -71,8 +71,6 @@ beforeEach(() => {
   // mock existed; tests that care about the queue panel override it.
   mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
   mockApi.seasons.mockResolvedValue({ seasons: [] });
-  // Play's mirror notice asks for the season look on mount.
-  mockApi.site.mockResolvedValue({ discordEnabled: false, discordInviteUrl: null, requireDiscord: false, season: null });
   // Every MatchDetail fixture rendered with a signed-in viewer reaches
   // EndorsePanel, which polls this on mount. Without a default it rejects and
   // exercises only the panel's failure path, whichever test happens to render it.
