@@ -723,7 +723,9 @@ export function frozenCommunity(db: DB, seasonId: number): WrappedCommunity | nu
 export function frozenPlayer(db: DB, seasonId: number, steamid: string, now = new Date()): WrappedPlayer | null {
   if (!steamid) return null;
   const row = db.prepare(
-    `SELECT data FROM season_wrapped WHERE season_id = ? AND player_id = ? AND ${notBannedSql('player_id')}`,
+    // Qualified: bare player_id inside notBannedSql's subquery is the bans
+    // row's own column, so any active ban anywhere hid every deck (11-03 flip).
+    `SELECT w.data FROM season_wrapped w WHERE w.season_id = ? AND w.player_id = ? AND ${notBannedSql('w.player_id')}`,
   ).get(seasonId, steamid, now.toISOString()) as { data: string } | undefined;
   return row ? JSON.parse(row.data) as WrappedPlayer : null;
 }
