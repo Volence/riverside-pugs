@@ -50,15 +50,15 @@ export const L4D2_CAMPAIGNS: L4D2Piece[] = [
 /** What this browser has downloaded, as piece id (or 'all') to the URL it got.
  *  A convenience only: private windows and cleared storage just show nothing. */
 const STORE_KEY = 'l4d2-downloads';
-type Got = Record<string, string>;
+export type Got = Record<string, string>;
 /** Whether this browser has ticked any L4D2 download: the play page's
  *  install-the-maps notice stays away for someone who already got them. */
 export function gotAnyL4D2(): boolean {
   return Object.keys(readGot()).length > 0;
 }
-function readGot(): Got {
+export function readGot(key = STORE_KEY): Got {
   try {
-    const v = JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}');
+    const v = JSON.parse(localStorage.getItem(key) ?? '{}');
     return v && typeof v === 'object' ? v as Got : {};
   } catch { return {}; }
 }
@@ -81,7 +81,7 @@ export function pieceStatus(p: L4D2Piece, got: Got, allUrl = L4D2_PACK_URL): 'ha
   return null;
 }
 
-function mb(bytes: number): string {
+export function mb(bytes: number): string {
   const m = bytes / 1024 / 1024;
   return m >= 1024 ? `${(m / 1024).toFixed(1)} GB` : `${Math.round(m)} MB`;
 }
@@ -134,7 +134,7 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
 ];
 
-function PieceRow({ piece, status, note, onGet }: {
+export function PieceRow({ piece, status, note, onGet }: {
   piece: L4D2Piece; status: 'have' | 'updated' | null; note?: string; onGet: () => void;
 }) {
   return (
@@ -152,7 +152,7 @@ function PieceRow({ piece, status, note, onGet }: {
 }
 
 export function L4D2Pack() {
-  const [got, setGot] = useState<Got>(readGot);
+  const [got, setGot] = useState<Got>(() => readGot());
   const mark = (id: string, url: string) => {
     const next = { ...got, [id]: url };
     setGot(next);
