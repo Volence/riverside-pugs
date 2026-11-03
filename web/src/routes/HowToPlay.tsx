@@ -53,8 +53,12 @@ const FAQ: { q: string; a: preact.ComponentChildren }[] = [
     a: <>Yes. Press <strong>Queue alerts (on/off)</strong> on the Discord queue panel, or type <code>/alerts on</code>. You get the Queue Alerts role, which stays on until you turn it off, and the bot pings it when the queue is a couple of players short of popping, at most once every 45 minutes. Old pings are edited once the queue pops or empties. <code>/alerts off</code> stops them.</>,
   },
   {
+    q: 'How do I duo queue?',
+    a: <>Type <code>/duo</code> in Discord and pick your friend; they get an <strong>Accept</strong> button. On the site, when you are both in the queue, click <strong>Duo</strong> on their slot on the Play page and they accept there. Once you are a duo, either of you joining the queue brings the other, and you always play on the same team. <code>/unduo</code> or <strong>End duo</strong> on the Play page splits you up. A high-rated duo counts as a little stronger than its two ratings, for team balance and for rating.</>,
+  },
+  {
     q: 'What bot commands are there?',
-    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code>, <code>/alerts</code> and <code>/report</code>. The queue itself is the panel in Discord. When a match ends its result card has an <strong>Endorse</strong> button: you can endorse up to 2 players from it within 24 hours.</>,
+    a: <><code>/profile</code>, <code>/leaderboard</code>, <code>/matches</code>, <code>/queue</code>, <code>/link</code>, <code>/alerts</code>, <code>/duo</code>, <code>/unduo</code> and <code>/report</code>. The queue itself is the panel in Discord. When a match ends its result card has an <strong>Endorse</strong> button: you can endorse up to 2 players from it within 24 hours.</>,
   },
   {
     q: 'A match is stuck, or the server never came up.',

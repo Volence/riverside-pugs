@@ -14,7 +14,15 @@ export function DuoPanel({ duo, refresh }: { duo: DuoView; refresh: () => void }
     }
     refresh();
   };
-  if (!duo.partner && duo.incoming.length === 0 && !duo.outgoing) return null;
+  // No duo yet: say how to get one (players kept asking at the Season 1 launch).
+  if (!duo.partner && duo.incoming.length === 0 && !duo.outgoing) {
+    return (
+      <p class="duopanel__hint">
+        Duo queue: type <strong>/duo</strong> in Discord and pick your friend, or click <strong>Duo</strong> on
+        their slot when they are in the queue. Once they accept, you always play on the same team.
+      </p>
+    );
+  }
   const out = duo.outgoing;
   return (
     <Panel class="duopanel">

@@ -10,9 +10,10 @@ const P = (name: string) => ({ steamid: `id-${name}`, name, avatar: null });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('DuoPanel', () => {
-  it('renders nothing with no duo and no invites', () => {
+  it('with no duo and no invites, says how to start one', () => {
     const { container } = render(<DuoPanel duo={{ partner: null, incoming: [], outgoing: null }} refresh={() => {}} />);
-    expect(container.textContent).toBe('');
+    expect(container.textContent).toContain('/duo');
+    expect(container.querySelector('button')).toBeNull();
   });
 
   it('shows an incoming invite and accepts it', async () => {

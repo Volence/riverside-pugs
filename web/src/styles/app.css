@@ -2679,6 +2679,7 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .report__form textarea { min-height: 6rem; resize: vertical; }
 
 .queue-timeout { margin-top: var(--sp-3); color: var(--loss); }
+.duopanel__hint { margin: 0 0 var(--sp-3); font-size: var(--fs-dense); color: var(--text-muted); }
 
 /* The failed-ready-check notice. Text and its Dismiss button on one row, and
    the button drops under the text rather than squeezing it on a phone. */
