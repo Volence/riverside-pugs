@@ -10,7 +10,11 @@ export function DuoPanel({ duo, refresh }: { duo: DuoView; refresh: () => void }
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong.');
+      // A request that never reached the site (stew, Season 1 launch: End duo
+      // did nothing until he turned his ad blocker off) says so, with the
+      // Discord way round it.
+      setError(err instanceof ApiError ? err.message
+        : 'Could not reach the site. A browser extension such as an ad blocker may be blocking it; /duo and /unduo in Discord work too.');
     }
     refresh();
   };
@@ -30,7 +34,7 @@ export function DuoPanel({ duo, refresh }: { duo: DuoView; refresh: () => void }
       {duo.partner && (
         <p>
           You are a duo with <strong>{duo.partner.name}</strong>. Either of you joining the queue brings the other,
-          and you always play on the same team.{' '}
+          and you always play on the same team. End it here or with <strong>/unduo</strong> in Discord.{' '}
           <button type="button" class="btn btn--ghost btn--sm" onClick={() => act(api.duoEnd)}>End duo</button>
         </p>
       )}
