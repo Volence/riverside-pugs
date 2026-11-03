@@ -20,6 +20,9 @@ export interface CommandDeps {
   /** The ban explanation (reason, expiry), as the button controller has it. */
   banMessage?: (steamid: string) => string;
   adminSteamIds?: string[];
+  /** Send a Discord DM: /duo invites go to the invitee privately (owner,
+   *  Season 1 launch: a duo invite is nobody else's business). */
+  dm?: (userId: string, payload: MessagePayload) => Promise<void>;
 }
 
 /** Labels for the report categories, in the order they should list. */
@@ -114,7 +117,7 @@ export async function handleCommand(deps: CommandDeps, i: Cmd): Promise<Interact
     case 'queue': return queue(deps);
     case 'link': return link(deps, i);
     case 'report': return report(deps, i);
-    case 'duo': return duo(deps, i);
+    case 'duo': return await duo(deps, i);
     case 'unduo': return unduo(deps, i);
     default: return priv({ content: 'Unknown command.' });
   }
@@ -252,7 +255,7 @@ function link(deps: CommandDeps, i: Cmd): InteractionReply {
   return linkPrompt({ ...deps }, i.userId, i.userName);
 }
 
-function duo(deps: CommandDeps, i: Cmd): InteractionReply {
+async function duo(deps: CommandDeps, i: Cmd): Promise<InteractionReply> {
   const who = resolve(deps, i);
   if ('reply' in who) return who.reply;
   const targetDiscord = i.options.user;
@@ -260,13 +263,26 @@ function duo(deps: CommandDeps, i: Cmd): InteractionReply {
   if (!target) return priv({ content: 'That user has not linked a Steam account, so they cannot duo yet.' });
   const r = deps.matchmaker.inviteDuo(who.player.steamid, target.steamid, 'discord');
   if (!r.ok) return priv({ content: `Could not: ${r.error}.` });
-  return pub({
-    content: `<@${targetDiscord}> ${escapeName(who.player.name)} wants to duo queue with you. You would always play on the same team. The invite lasts 10 minutes.`,
-    mentionUserIds: [targetDiscord!],
-    components: [[
-      { kind: 'button', customId: `${DUO_BUTTON_PREFIX}${r.inviteId}:a`, label: 'Accept', style: 'success' },
-      { kind: 'button', customId: `${DUO_BUTTON_PREFIX}${r.inviteId}:d`, label: 'Decline', style: 'secondary' },
-    ]],
+  // The invite goes to the invitee by DM, never into the channel; the Play
+  // page shows it to them too, which is the way in when their DMs are closed.
+  const site = `${deps.publicUrl}/`;
+  let sent = false;
+  try {
+    await deps.dm?.(targetDiscord!, {
+      content: `${escapeName(who.player.name)} wants to duo queue with you. You would always play on the same team. The invite lasts 10 minutes. You can also answer it on the Play page: ${site}`,
+      embeds: [], mentionUserIds: [],
+      components: [[
+        { kind: 'button', customId: `${DUO_BUTTON_PREFIX}${r.inviteId}:a`, label: 'Accept', style: 'success' },
+        { kind: 'button', customId: `${DUO_BUTTON_PREFIX}${r.inviteId}:d`, label: 'Decline', style: 'secondary' },
+      ]],
+    });
+    sent = !!deps.dm;
+  } catch { /* DMs closed: the Play page still has it */ }
+  const name = escapeName(target.name);
+  return priv({
+    content: sent
+      ? `Invite sent to **${name}** by DM. It lasts 10 minutes, and they can also accept it on the Play page.`
+      : `Invite sent to **${name}**, but their DMs are closed. They can accept it on the Play page (${site}) within 10 minutes.`,
   });
 }
 

@@ -2154,6 +2154,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           db: deps.db, matchmaker, publicUrl: deps.config.publicUrl,
           banMessage: (steamid) => banMessage(deps.db, steamid, deps.config.publicUrl),
           adminSteamIds: deps.config.adminSteamIds,
+          dm: (userId, payload) => (bot ? bot.transport.dm(userId, payload) : Promise.reject(new Error('bot not started'))),
         }, i),
       },
     })
