@@ -453,6 +453,25 @@ export interface MatchSummary {
 
 export interface MatchListPlayer { steamid: string; name: string; avatar: string | null }
 
+/** One end of the recent matches header's margin figures. */
+export interface MatchListPick { id: number; campaign: string; teamAScore: number; teamBScore: number }
+
+/** GET /api/matches: one page of the list (50, newest first), whether more
+ *  are left, and the header's figures over the whole scope. `season` is the
+ *  season shown, null for all seasons; `summary` is null with no matches. */
+export interface MatchList {
+  matches: (MatchSummary & { seasonId?: number })[];
+  more?: boolean;
+  summary?: {
+    matches: number;
+    campaigns: number;
+    avgMargin: number;
+    closest: MatchListPick;
+    widest: MatchListPick;
+  } | null;
+  season?: { id: number; name: string; current: boolean } | null;
+}
+
 /** Who a booked game was between, by match team (src/matchSides.ts). */
 export interface BookedSides {
   kind: 'scrim' | 'tournament';
@@ -3626,7 +3645,15 @@ export const api = {
   weeklyPlayerHistory: (steamid: string, signal?: AbortSignal) =>
     get<{ weeks: WeeklyHistoryRow[] }>(`/api/weekly/player/${steamid}/history`, signal),
   weeklyWeeks: (signal?: AbortSignal) => get<{ current: string; weeks: string[] }>('/api/weekly/weeks', signal),
-  matches: (signal?: AbortSignal) => get<{ matches: MatchSummary[] }>('/api/matches', signal),
+  /** The recent matches list: `season` is a season id or 'all', absent for
+   *  the current season; `before` pages back from the lowest id shown. */
+  matches: (signal?: AbortSignal, opts: { season?: number | 'all'; before?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.season !== undefined) q.set('season', String(opts.season));
+    if (opts.before !== undefined) q.set('before', String(opts.before));
+    const qs = q.toString();
+    return get<MatchList>(qs ? `/api/matches?${qs}` : '/api/matches', signal);
+  },
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
   streams: (all = false, signal?: AbortSignal) =>
     get<StreamsView>(`/api/streams${all ? '?all=1' : ''}`, signal),
