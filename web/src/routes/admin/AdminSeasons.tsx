@@ -35,7 +35,7 @@ export function AdminSeasons() {
         <h3>Start a new season</h3>
         <p class="muted">
           Ends {current ? current.name : 'the current season'} now and freezes its final standings. Everyone who
-          played starts the new season from a soft reset (skill pulled 30% toward the middle, uncertainty at least 6)
+          played starts the new season from a soft reset (skill pulled 30% toward the middle, 50% from above it, uncertainty at least 6)
           with a 0-0 record, and places again: SR and rank show after 5 games. SR becomes skill minus one uncertainty,
           with ranks from Bronze to Master. The old season's leaderboard, matches and stats stay viewable. Not
           possible while a match is being set up or played.
