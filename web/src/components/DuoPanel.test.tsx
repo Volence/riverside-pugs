@@ -30,3 +30,12 @@ describe('DuoPanel', () => {
     expect(mockApi.duoEnd).toHaveBeenCalled();
   });
 });
+
+describe('DuoPanel when the request never reaches the site', () => {
+  it('says an extension may be blocking it and points at /unduo', async () => {
+    mockApi.duoEnd.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    render(<DuoPanel duo={{ partner: P('adam'), incoming: [], outgoing: null }} refresh={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'End duo' }));
+    expect(await screen.findByText(/ad blocker may be blocking it/)).toBeTruthy();
+  });
+});
