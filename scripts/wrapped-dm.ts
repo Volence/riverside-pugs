@@ -4,7 +4,7 @@
  *
  *   npx tsx scripts/wrapped-dm.ts --season 1                      # dry run: who, and each message
  *   npx tsx scripts/wrapped-dm.ts --season 1 --only <steamid> --send   # one test DM
- *   npx tsx scripts/wrapped-dm.ts --season 1 --send               # everyone, paced
+ *   npx tsx scripts/wrapped-dm.ts --season 1 --send --everyone    # everyone, paced
  *
  * Who: matches >= --min (10) in that season, Discord linked, not banned
  * (status or an active ban). Each person's numbers come from their frozen
@@ -101,6 +101,10 @@ async function main(): Promise<void> {
   if (!season) throw new Error(`no season ${seasonId}`);
   let list = targets(db, seasonId, min);
   if (only) list = list.filter((t) => t.steamid === only);
+  // Owner, before the test DM: it must never reach everyone. Without --only,
+  // sending needs --everyone as well; with --only, exactly one person or none.
+  if (send && !only && !flag('everyone')) throw new Error('refusing: --send without --only needs --everyone');
+  if (only && list.length > 1) throw new Error(`refusing: --only matched ${list.length} people`);
   const log: Record<string, string> = existsSync(logPath) ? JSON.parse(readFileSync(logPath, 'utf8')) : {};
   const todo = list.filter((t) => !log[t.steamid]);
   console.log(`${list.length} eligible, ${list.length - todo.length} already done, ${todo.length} to send${send ? '' : ' (dry run)'}`);
