@@ -228,7 +228,8 @@ export function LiveOdds({ line }: { line: WinLine }) {
  */
 function NothingLive() {
   const { data: queue } = useFetch((s) => api.queue(s), []);
-  const { data: recent } = useFetch((s) => api.matches(s), []);
+  // Every season: the last game played, even on a new season's first day.
+  const { data: recent } = useFetch((s) => api.matches(s, { season: 'all' }), []);
   // The events list 404s while the competitive switch keeps events to staff;
   // the card is simply left out then.
   const { data: events } = useFetch((s) => eventsApi.list(s), []);

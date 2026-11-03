@@ -136,7 +136,8 @@ function SignIn() {
  */
 function Landing() {
   const { data: live } = useFetch((s) => api.live(s), []);
-  const { data: recent } = useFetch((s) => api.matches(s), []);
+  // Every season, so the landing is not bare on a new season's first day.
+  const { data: recent } = useFetch((s) => api.matches(s, { season: 'all' }), []);
   const { data: board } = useFetch((s) => api.leaderboard(s), []);
 
   const liveMatch = live?.matches?.[0] ?? null;

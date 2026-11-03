@@ -5251,6 +5251,9 @@ tr.is-selected td { background: color-mix(in srgb, var(--accent) 8%, transparent
 .mlist__score .is-won { color: var(--text-bright); }
 .mlist__dash { margin: 0 var(--sp-2); color: var(--border-strong); }
 .mlist__when { justify-self: end; font-size: var(--fs-dense); color: var(--text-muted); white-space: nowrap; }
+/* All seasons: where one season gives way to the next, and the next page. */
+.mlist__season { padding: var(--sp-3) var(--sp-1) var(--sp-1); }
+.mlist__more { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); margin-top: var(--sp-4); }
 @media (max-width: 760px) {
   .mlist__link { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4); }
   .mlist__result { grid-column: 1 / -1; grid-row: 2; }

@@ -199,6 +199,11 @@ describe('Matches', () => {
       matches: [
         { id: 7, campaign: 'blood_harvest', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
       ],
+      summary: {
+        matches: 1, campaigns: 1, avgMargin: 100,
+        closest: { id: 7, campaign: 'blood_harvest', teamAScore: 900, teamBScore: 800 },
+        widest: { id: 7, campaign: 'blood_harvest', teamAScore: 900, teamBScore: 800 },
+      },
     });
     render(<Matches />);
     // Appears twice now: in the summary tiles and in the row.
@@ -206,7 +211,7 @@ describe('Matches', () => {
     // The winning side is marked on the row; a PUG's sides are its players, not "Team A".
     expect(screen.getByText('Won')).toBeTruthy();
     expect(screen.queryByText('Team A')).toBeNull();
-    // The tile row is derived from the same fetch, so it must render too.
+    // The tile row comes with the same fetch, so it must render too.
     expect(screen.getByText('Matches')).toBeTruthy();
   });
 
@@ -245,6 +250,12 @@ describe('Matches', () => {
         { id: 7, campaign: 'blood_harvest', endedAt: '2026-09-06T04:00:00', teamAScore: 900, teamBScore: 800, winner: 'a' },
         { id: 8, campaign: 'dead_air', endedAt: '2026-09-07T04:00:00', teamAScore: 400, teamBScore: 100, winner: 'a' },
       ],
+      // The server's figures over the whole season (tests/matchListSeasons.test.ts).
+      summary: {
+        matches: 2, campaigns: 2, avgMargin: 200,
+        closest: { id: 7, campaign: 'blood_harvest', teamAScore: 900, teamBScore: 800 },
+        widest: { id: 8, campaign: 'dead_air', teamAScore: 400, teamBScore: 100 },
+      },
     });
     render(<Matches />);
     await waitFor(() => expect(screen.getByText('Matches')).toBeTruthy());

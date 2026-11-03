@@ -1,4 +1,7 @@
-import { api, type MatchListPlayer, type MatchSummary } from '../api';
+import { Fragment } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
+import { api, ApiError, type MatchList, type MatchListPlayer, type MatchSummary } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, campaignTint, fmtAgo, fmtDate } from '../format';
 import { Empty, Panel } from '../components/bits';
@@ -78,46 +81,161 @@ function Row({ m, now }: { m: MatchSummary; now: number }) {
   );
 }
 
+/** Which matches the page lists: a season id, every season, or (undefined)
+ *  the current season. */
+type MatchScope = number | 'all' | undefined;
+
+/** The scope from the URL: `?season=all`, `?season=N`, or the current season. */
+function parseScope(raw: string | null | undefined): MatchScope {
+  if (raw === 'all') return 'all';
+  const id = Number(raw);
+  return raw && Number.isInteger(id) && id > 0 ? id : undefined;
+}
+
+/** ?season= straight off the address bar, for a render outside a router. */
+function readSearchSeason(): string | null {
+  return typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('season');
+}
+
+/** This page's URL showing `scope`; the current season is the bare URL. */
+function scopedUrl(scope: MatchScope): string | null {
+  if (typeof location === 'undefined') return null;
+  const url = new URL(location.href);
+  if (scope === undefined) url.searchParams.delete('season');
+  else url.searchParams.set('season', String(scope));
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+/** The pages loaded past the first, tied to the first page they continue so
+ *  a change of season drops them without an effect to reset them. */
+interface Older { base: MatchList; rows: MatchList['matches']; more: boolean }
+
 export function Matches() {
-  const { data, error } = useFetch((s) => api.matches(s), []);
+  // Same shape as the profile's season switch: the URL is the only state
+  // (?season=N|all), the current season is the bare URL, and a pick replaces
+  // the entry rather than adding one for Back to walk through.
+  const loc = useLocation();
+  const [, rerender] = useState(0);
+  const scope = parseScope(loc.query ? loc.query.season : readSearchSeason());
+  const setScope = (next: MatchScope) => {
+    const url = scopedUrl(next);
+    if (!url) return;
+    if (loc.route) loc.route(url, true);
+    else { window.history.replaceState(window.history.state, '', url); rerender((n) => n + 1); }
+  };
+  const scopeOpts = scope === undefined ? {} : { season: scope };
+  const { data, error } = useFetch((s) => api.matches(s, scopeOpts), [scope]);
+  const { data: seasonList } = useFetch((s) => api.seasons(s).catch(() => ({ seasons: [] })), []);
+  const seasons = seasonList?.seasons ?? [];
+  const [older, setOlder] = useState<Older | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreFailed, setMoreFailed] = useState(false);
   const now = Date.now();
+
+  // A season id the server does not know: back to the current season, so the
+  // URL says what is shown rather than leaving a dead link on an error.
+  useEffect(() => {
+    if (error instanceof ApiError && error.status === 404 && typeof scope === 'number') setScope(undefined);
+  }, [error]);
+
+  const extra = data && older?.base === data ? older : null;
+  const rows = data ? [...data.matches, ...(extra?.rows ?? [])] : [];
+  const more = extra ? extra.more : !!data?.more;
+
+  const showMore = async () => {
+    if (!data || rows.length === 0) return;
+    const base = data;
+    setLoadingMore(true);
+    setMoreFailed(false);
+    try {
+      const next = await api.matches(undefined, { ...scopeOpts, before: rows[rows.length - 1].id });
+      setOlder((o) => ({ base, rows: [...(o?.base === base ? o.rows : []), ...next.matches], more: !!next.more }));
+    } catch {
+      setMoreFailed(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const seasonName = (id: number) => seasons.find((x) => x.id === id)?.name ?? null;
+  const summary = data?.summary ?? null;
+  const eyebrow = scope === 'all' ? 'All seasons' : data?.season?.name ?? 'The latest results';
 
   return (
     <div class="page page--list">
-      <PageHeader eyebrow="The latest results" title="Recent matches">
-        {data && data.matches.length > 0 && (() => {
-          const n = data.matches.length;
-          const campaigns = new Set(data.matches.map((m) => m.campaign));
-          // Deliberately not "Team A wins". a and b are labels reassigned every
-          // match, so a win rate under them aggregates different people each time
-          // and describes nobody. Margin is a property of the match itself, so it
-          // stays true however the sides were labelled.
-          const margin = (m: typeof data.matches[number]) => Math.abs(m.teamAScore - m.teamBScore);
-          const avgMargin = Math.round(data.matches.reduce((sum, m) => sum + margin(m), 0) / n);
-          const closest = data.matches.reduce((best, m) => (margin(m) < margin(best) ? m : best));
-          const widest = data.matches.reduce((best, m) => (margin(m) > margin(best) ? m : best));
-          return (
-            <Figures>
-              <Figure label="Matches" value={n} />
-              <Figure label="Campaigns" value={campaigns.size} />
-              <Figure label="Avg margin" value={avgMargin} />
-              <Figure label="Closest" value={`${closest.teamAScore} - ${closest.teamBScore}`} sub={campaignName(closest.campaign)} />
-              <Figure label="Widest" value={`${widest.teamAScore} - ${widest.teamBScore}`} sub={campaignName(widest.campaign)} />
-            </Figures>
-          );
-        })()}
+      <PageHeader
+        eyebrow={eyebrow}
+        title="Recent matches"
+        aside={seasons.length > 1 ? (
+          <select
+            class="season-picker" aria-label="Season"
+            value={scope === 'all' ? 'all' : String(scope ?? seasons.find((x) => x.current)?.id ?? '')}
+            onChange={(e) => {
+              const v = (e.target as HTMLSelectElement).value;
+              if (v === 'all') return setScope('all');
+              const picked = seasons.find((x) => String(x.id) === v);
+              setScope(!picked || picked.current ? undefined : picked.id);
+            }}
+          >
+            {seasons.map((x) => <option key={x.id} value={String(x.id)}>{x.current ? `${x.name} (current)` : x.name}</option>)}
+            <option value="all">All seasons</option>
+          </select>
+        ) : undefined}
+      >
+        {/* The server's figures over the whole season (or every season), not
+            the page in hand. Deliberately no "Team A wins": a and b are
+            labels dealt afresh every match, so a margin is what stays true. */}
+        {summary && (
+          <Figures>
+            <Figure label="Matches" value={summary.matches.toLocaleString()} />
+            <Figure label="Campaigns" value={summary.campaigns} />
+            <Figure label="Avg margin" value={summary.avgMargin} />
+            <Figure
+              label="Closest" value={`${summary.closest.teamAScore} - ${summary.closest.teamBScore}`}
+              sub={`${campaignName(summary.closest.campaign)} #${summary.closest.id}`}
+            />
+            <Figure
+              label="Widest" value={`${summary.widest.teamAScore} - ${summary.widest.teamBScore}`}
+              sub={`${campaignName(summary.widest.campaign)} #${summary.widest.id}`}
+            />
+          </Figures>
+        )}
       </PageHeader>
 
       {error ? (
         <Panel><Empty>Couldn't load matches.</Empty></Panel>
       ) : !data ? (
         <Panel><Empty>Loading…</Empty></Panel>
-      ) : data.matches.length === 0 ? (
-        <Panel><Empty>No completed matches yet.</Empty></Panel>
+      ) : rows.length === 0 ? (
+        <Panel><Empty>{scope === 'all' ? 'No completed matches yet.' : 'No completed matches this season yet.'}</Empty></Panel>
       ) : (
-        <ol class="mlist">
-          {data.matches.map((m) => <Row key={m.id} m={m} now={now} />)}
-        </ol>
+        <>
+          <ol class="mlist">
+            {rows.map((m, n) => {
+              // Across every season, a line where one season gives way to the
+              // next (newest first, so it sits under the newer season's first
+              // match), so the two do not read as one run.
+              const prev = n > 0 ? rows[n - 1] : null;
+              const turn = scope === 'all' && prev && prev.seasonId !== undefined && m.seasonId !== undefined && prev.seasonId !== m.seasonId;
+              return (
+                <Fragment key={m.id}>
+                  {turn && (
+                    <li class="mlist__season eyebrow">{seasonName(prev.seasonId!) ?? 'A new season'} starts</li>
+                  )}
+                  <Row m={m} now={now} />
+                </Fragment>
+              );
+            })}
+          </ol>
+          {more && (
+            <div class="mlist__more">
+              <button type="button" class="chip" disabled={loadingMore} onClick={() => void showMore()}>
+                {loadingMore ? 'Loading…' : 'Show more'}
+              </button>
+              {moreFailed && <span class="muted">Couldn't load more.</span>}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

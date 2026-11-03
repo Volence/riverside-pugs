@@ -256,21 +256,46 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     return { ...d, multiplier: multipliers([d.map])?.maps[d.map] ?? null };
   });
 
-  app.get('/api/matches', async (req) => {
+  /** The recent matches list, one season at a time: `?season=N` (a season
+   *  id), `?season=all`, or the current season when absent. An unknown season
+   *  is a 404 like the leaderboard's. `?before=<id>` pages back from the
+   *  lowest id already shown; `more` says whether anything is left past this
+   *  page. `summary` is the header's figures over the WHOLE scope, not just the
+   *  page in hand, so "Matches" is the season's count, not 50. */
+  app.get('/api/matches', async (req, reply) => {
+    const q = req.query as { season?: string; before?: string };
+    let season: { id: number; name: string; current: boolean } | null = null;
+    if (q.season !== 'all') {
+      const id = q.season === undefined ? currentSeasonId(db) : Number(q.season);
+      const row = Number.isInteger(id)
+        ? db.prepare('SELECT id, name, ended_at FROM seasons WHERE id = ?').get(id) as { id: number; name: string; ended_at: string | null } | undefined
+        : undefined;
+      if (!row) return reply.code(404).send({ error: 'no such season' });
+      season = { id: row.id, name: row.name, current: row.ended_at === null };
+    }
+    const before = q.before === undefined ? null : Number(q.before);
+    if (before !== null && !(Number.isInteger(before) && before > 0)) return reply.code(400).send({ error: 'bad before' });
     // A scrim or tournament match with participants-only or staff-only
     // visibility has no business in the public recent-matches list; vis.sql
     // narrows the row set the same way canViewMatch would judge each row.
+    // The summary goes through the same filter, so a hidden match is not
+    // counted (or named the closest) where it cannot be listed.
     const v = viewerFor(db, viewerOf(req));
     const vis = visibleMatchesSql(v, 'm');
-    const matches = db.prepare(
+    const scopeSql = `m.state = 'completed' AND ${vis.sql}${season ? ' AND m.season_id = ?' : ''}`;
+    const scopeParams = season ? [...vis.params, season.id] : [...vis.params];
+    const page = db.prepare(
       `SELECT m.id, m.campaign, m.ended_at AS endedAt, m.team_a_score AS teamAScore, m.team_b_score AS teamBScore, m.winner,
-              m.forfeit_team AS forfeitTeam, m.booking_id AS bookingId,
+              m.forfeit_team AS forfeitTeam, m.booking_id AS bookingId, m.season_id AS seasonId,
               (SELECT GROUP_CONCAT(n, ' and ') FROM (SELECT COALESCE(p.name, a.player_id) AS n FROM match_abandons a
                  LEFT JOIN players p ON p.steamid = a.player_id
                  WHERE a.match_id = m.id AND a.decided IS NOT NULL ORDER BY a.player_id)) AS abandonedBy,
               ${teamLeadSql('a')} AS teamALead, ${teamLeadSql('b')} AS teamBLead
-       FROM matches m WHERE m.state = 'completed' AND ${vis.sql} ORDER BY m.id DESC LIMIT ?`,
-    ).all(...vis.params, RECENT_MATCH_LIMIT) as ({ id: number; bookingId: number | null } & Record<string, unknown>)[];
+       FROM matches m WHERE ${scopeSql}${before !== null ? ' AND m.id < ?' : ''} ORDER BY m.id DESC LIMIT ?`,
+    ).all(...scopeParams, ...(before !== null ? [before] : []), RECENT_MATCH_LIMIT + 1) as ({ id: number; bookingId: number | null } & Record<string, unknown>)[];
+    // One row past the page is how `more` is known without a second count.
+    const more = page.length > RECENT_MATCH_LIMIT;
+    const matches = page.slice(0, RECENT_MATCH_LIMIT);
     // Each row's two rosters, for the faces on the list: one query for the
     // whole page rather than one per match.
     const ids = matches.map((m) => m.id);
@@ -296,6 +321,9 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
         const players = rosters.get(m.id) ?? { a: [], b: [] };
         return booked ? { ...m, players, booked } : { ...m, players };
       }),
+      more,
+      summary: matchListSummary(db, scopeSql, scopeParams),
+      season,
     };
   });
 
@@ -552,4 +580,30 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     reply.header('Content-Disposition', `attachment; filename="${friendly}"`);
     return reply.send(createReadStream(found.path));
   });
+}
+
+/** The recent matches header over a whole scope (`where` on `matches m`):
+ *  how many, how many campaigns, the average margin, and the closest and
+ *  widest games. Deliberately not "Team A wins": a and b are labels dealt
+ *  afresh every match, so a win rate under them describes nobody, while a
+ *  margin is a property of the match itself. A tie goes to the newer match.
+ *  Null when the scope has no matches. */
+function matchListSummary(db: DB, where: string, params: (string | number)[]) {
+  const totals = db.prepare(
+    `SELECT COUNT(*) AS matches, COUNT(DISTINCT m.campaign) AS campaigns,
+            AVG(ABS(m.team_a_score - m.team_b_score)) AS avgMargin
+     FROM matches m WHERE ${where}`,
+  ).get(...params) as { matches: number; campaigns: number; avgMargin: number | null };
+  if (totals.matches === 0) return null;
+  const pick = (dir: 'ASC' | 'DESC') => db.prepare(
+    `SELECT m.id, m.campaign, m.team_a_score AS teamAScore, m.team_b_score AS teamBScore
+     FROM matches m WHERE ${where} ORDER BY ABS(m.team_a_score - m.team_b_score) ${dir}, m.id DESC LIMIT 1`,
+  ).get(...params) as { id: number; campaign: string; teamAScore: number; teamBScore: number };
+  return {
+    matches: totals.matches,
+    campaigns: totals.campaigns,
+    avgMargin: Math.round(totals.avgMargin ?? 0),
+    closest: pick('ASC'),
+    widest: pick('DESC'),
+  };
 }
