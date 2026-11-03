@@ -281,7 +281,7 @@ viewmodel_fov_override 70`}</code></pre>
                 <li>The <a href="/autoexec.cfg" download="autoexec.cfg">autoexec.cfg</a> rates and any settings of your own.</li>
                 <li>The <a href="#fov">FOV plugin</a>, with <code>fov_override</code> between 75 and 120.</li>
                 <li>HUDs and crosshairs, including everything from the <a href="#hud">HUD editor and Community</a>.</li>
-                <li>The <a href="/custom-campaigns#l4d2-pack">L4D2 campaigns</a>.</li>
+                <li>The <a href="/custom-campaigns#l4d2-pack">L4D2 campaigns</a> and the <a href="/custom-campaigns#mirror-pack">mirrored campaigns</a>.</li>
                 <li>Scroll-wheel binds for jump or attack.</li>
               </ul>
             </div>
@@ -421,6 +421,12 @@ viewmodel_fov_override 70`}</code></pre>
             <a href="/custom-campaigns#l4d2-pack">Custom campaigns</a> page: twelve add-on files
             for your <code>addons</code> folder. That page also shows which campaigns are in the
             vote.
+          </p>
+          <p>
+            Season 1 adds mirrored campaigns, every chapter flipped left to right, and every match
+            vote has one. Install them once from the{' '}
+            <a href="/custom-campaigns#mirror-pack">same page</a>: thirteen more add-on files for
+            the same folder.
           </p>
         </Panel>
         <Panel id="faq">

@@ -4,7 +4,8 @@ import { campaignTint, chapterName } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { Figure, Figures, PageHeader } from '../components/PageHeader';
 import { DocLayout, type DocSection } from '../components/DocLayout';
-import { L4D2Pack, L4D2_PACK_SIZE } from './L4D2Pack';
+import { L4D2Pack, L4D2_PACK_SIZE, mb } from './L4D2Pack';
+import { MirrorPack, MIRROR_PACK_BYTES } from './MirrorPack';
 
 /** 300 MB, not 314572800. Nobody installing a campaign cares about bytes. */
 function fileSize(bytes: number): string {
@@ -23,19 +24,21 @@ export function CustomCampaigns() {
   const { data, error } = useFetch((s) => api.customCampaigns(s), []);
   const campaigns = data?.campaigns ?? null;
 
-  // The L4D2 pack section needs no data, so it renders at once and a
+  // The L4D2 and mirror pack sections need no data, so it renders at once and a
   // /custom-campaigns#l4d2-pack link lands on it before the list has loaded.
   return (
     <div class="page page--list">
       <PageHeader eyebrow="Downloads" title="Custom campaigns">
         <Figures>
           <Figure label="L4D2 campaigns" value={L4D2_PACK_SIZE} sub="every one, in one download" />
+          <Figure label="Mirrored campaigns" value={mb(MIRROR_PACK_BYTES)} sub="Season 1's Wrong Way maps" />
           {campaigns && <Figure label="Custom campaigns" value={campaigns.length} sub="beyond the stock four" />}
           {campaigns && <Figure label="In the match vote" value={campaigns.filter((c) => c.inPool).length} sub="can come up in a match" />}
         </Figures>
       </PageHeader>
       <DocLayout sections={SECTIONS}>
         <L4D2Pack />
+        <MirrorPack />
         <CampaignList data={data} error={error} />
       </DocLayout>
     </div>
@@ -44,6 +47,7 @@ export function CustomCampaigns() {
 
 const SECTIONS: DocSection[] = [
   { id: 'l4d2-pack', label: 'The L4D2 campaigns' },
+  { id: 'mirror-pack', label: 'The mirrored campaigns' },
   { id: 'installing', label: 'Installing one' },
   { id: 'campaigns', label: 'The campaigns' },
 ];
