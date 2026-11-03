@@ -134,7 +134,7 @@ const PACK_FAQ: { q: string; a: preact.ComponentChildren }[] = [
   },
 ];
 
-export function PieceRow({ piece, status, note, onGet }: {
+function PieceRow({ piece, status, note, onGet }: {
   piece: L4D2Piece; status: 'have' | 'updated' | null; note?: string; onGet: () => void;
 }) {
   return (
