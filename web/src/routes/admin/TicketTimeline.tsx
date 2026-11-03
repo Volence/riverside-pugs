@@ -3,8 +3,8 @@ import { modApi, ticketAttachmentUrl, type TicketAttachment, type TicketEvent, t
 import { fmtBytes } from '../../format';
 import { fmtTime, type Run } from './useAction';
 
-/** A friendly label for a length of minutes, matching AdminTicket.tsx's
- *  LENGTHS labels for the values a moderator can actually pick ("1 hour",
+/** A friendly label for a length of minutes, matching banLengths.ts's
+ *  BAN_LENGTHS labels for the values a moderator can actually pick ("1 hour",
  *  "3 days"), with a plain fallback for anything else. */
 function fmtMinutes(m: number): string {
   if (m >= 1440 && m % 1440 === 0) { const d = m / 1440; return `${d} day${d === 1 ? '' : 's'}`; }

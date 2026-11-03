@@ -115,6 +115,23 @@ describe('AdminTicket', () => {
     expect(screen.queryByText('Discord sanctions')).toBeNull();
   });
 
+  // Staff asked for the days between 1 and 7 (2026-11-03).
+  it('offers the steps between a day and a week to an admin', async () => {
+    mockMod.ticket.mockResolvedValue(detail());
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    const select = await screen.findByRole('combobox', { name: 'Ban length' });
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toEqual(['1 hour', '6 hours', '12 hours', '1 day', '2 days', '3 days', '4 days', '5 days', '7 days', '14 days', '30 days', 'Permanent']);
+  });
+
+  it('keeps a moderator\'s ban lengths under their cap', async () => {
+    mockMod.ticket.mockResolvedValue(detail({ viewer: { isAdmin: false, banCapMinutes: 10080 } }));
+    render(<AdminTicket id={1} onBack={() => {}} onOpen={() => {}} />);
+    const select = await screen.findByRole('combobox', { name: 'Ban length' });
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toEqual(['1 hour', '6 hours', '12 hours', '1 day', '2 days', '3 days', '4 days', '5 days', '7 days']);
+  });
+
   it('shows Time out but no server Ban control for a Discord-only ticket', async () => {
     mockMod.ticket.mockResolvedValue(detail({
       ticket: { ...detail().ticket, ...DISCORD_TARGET },

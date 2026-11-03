@@ -5,10 +5,8 @@ import { fmtTime, type Run } from '../useAction';
 import { timeoutCause, timeoutOffenses } from '../../../format';
 import { sanctionText } from '../AdminTicket';
 import { RestoreRating, abandonOutcome, restoredText } from '../RestoreRating';
+import { BAN_LENGTHS } from '../banLengths';
 
-const LENGTHS: [value: string, label: string][] = [
-  ['', 'Permanent'], ['60', '1 hour'], ['1440', '1 day'], ['10080', '1 week'], ['43200', '30 days'],
-];
 
 type Props = { d: PlayerFileData; busy: boolean; run: Run; can: (a: FileAction) => boolean };
 
@@ -95,7 +93,7 @@ export function StandingBanner({ d, busy, run, can }: Props) {
           <input value={reason} placeholder="Reason (shown to them)" aria-label="Ban reason" autoFocus
             onInput={(e) => setReason((e.target as HTMLInputElement).value)} />
           <select value={minutes} aria-label="Ban length" onChange={(e) => setMinutes((e.target as HTMLSelectElement).value)}>
-            {LENGTHS.map(([value, label]) => <option key={label} value={value}>{label}</option>)}
+            {BAN_LENGTHS.map(([m, label]) => <option key={label} value={m === null ? '' : String(m)}>{label}</option>)}
           </select>
           <button class="btn" type="submit" disabled={busy || !reason.trim()}>Ban</button>
           <button class="chip" type="button" onClick={() => setOpen(false)}>Cancel</button>

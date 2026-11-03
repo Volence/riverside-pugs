@@ -8,13 +8,11 @@ import { fmtTime, useAction } from './useAction';
 import { reportLine } from './AdminTickets';
 import { FileSummary } from './file/FileSummary';
 import { TicketTimeline } from './TicketTimeline';
+import { BAN_LENGTHS } from './banLengths';
 
 const OUTCOMES = [['action_taken', 'Action taken'], ['warned', 'Warned'], ['no_action', 'No action'], ['invalid', 'Invalid report']] as const;
-const LENGTHS: [minutes: number | null, label: string][] = [
-  [60, '1 hour'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [43200, '30 days'], [null, 'Permanent'],
-];
 // Discord's own timeout ceiling, unrelated to the server ban's 30-day option
-// above: a Discord timeout can run up to 28 days, and unlike a ban has no
+// (banLengths.ts): a Discord timeout can run up to 28 days, and unlike a ban has no
 // Permanent choice at all.
 const DISCORD_TIMEOUT_MAX_MINUTES = 40320;
 const TIMEOUT_LENGTHS: [minutes: number, label: string][] = [
@@ -63,10 +61,9 @@ export function AdminTicket({ id, onBack, onOpen }: { id: number; onBack: () => 
   if (!data) return <Panel><p class="muted">Loading...</p></Panel>;
   const { ticket: t, caseFile: c } = data;
   const cap = data.viewer.banCapMinutes;
-  const lengths = LENGTHS.filter(([m]) => cap === null || (m !== null && m <= cap));
-  // Its own list, not LENGTHS: the server ban's 30-day option is not one of
-  // Discord's choices, and Discord's own 28-day maximum IS a choice here,
-  // above the 7-day ceiling LENGTHS happens to have. A moderator's cap still
+  const lengths = BAN_LENGTHS.filter(([m]) => cap === null || (m !== null && m <= cap));
+  // Its own list, not BAN_LENGTHS: the server ban's 30-day option is not one
+  // of Discord's choices, and Discord's own 28-day maximum IS a choice here. A moderator's cap still
   // holds, never above Discord's own ceiling.
   const timeoutCap = Math.min(cap ?? DISCORD_TIMEOUT_MAX_MINUTES, DISCORD_TIMEOUT_MAX_MINUTES);
   const timeoutLengths = TIMEOUT_LENGTHS.filter(([m]) => m <= timeoutCap);
