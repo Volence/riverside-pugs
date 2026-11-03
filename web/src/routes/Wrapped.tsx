@@ -98,12 +98,26 @@ export default Wrapped;
 const reducedMotion = (): boolean => {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 };
+/** How long a card stays before the deck moves on by itself (owner, 2026-11-03:
+ *  a story deck that does not play looks broken). The current bar fills over
+ *  this time and its animationend is the advance, so pausing is just pausing
+ *  that animation. */
+export const CARD_MS = 7000;
+/** A press held this long pauses instead of counting as a tap. */
+const HOLD_MS = 300;
 
 export function Deck({ cards, community, player, sharePath }: {
   cards: CardKey[]; community: WrappedCommunity; player: WrappedPlayer | null; sharePath: string | null;
 }) {
   const [idx, setIdx] = useState(0);
   const [tearing, setTearing] = useState(false);
+  // Autoplay: off for reduced motion; the Pause button, a held press and a
+  // hidden tab each stop it.
+  const [auto] = useState(() => !reducedMotion());
+  const [paused, setPaused] = useState(false);
+  const [held, setHeld] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  const pressAt = useRef(0);
   const touch = useRef<{ x: number; y: number } | null>(null);
   const last = cards.length - 1;
   const at = Math.min(idx, last);
@@ -128,10 +142,18 @@ export function Deck({ cards, community, player, sharePath }: {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  useEffect(() => {
+    const onVis = () => setHidden(document.visibilityState === 'hidden');
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   // Tap: the left third goes back, the rest goes on. Links and buttons on a
   // card keep their own click.
   const onCardClick = (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest('a, button')) return;
+    // The end of a hold to pause, not a tap.
+    if (pressAt.current && Date.now() - pressAt.current >= HOLD_MS) return;
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
     if (box.width > 0 && e.clientX - box.left < box.width / 3) go(at - 1); else go(at + 1);
   };
@@ -144,8 +166,16 @@ export function Deck({ cards, community, player, sharePath }: {
     if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(t.clientY - start.y)) { e.preventDefault(); go(dx < 0 ? at + 1 : at - 1); }
   };
 
+  const onPressStart = (e: PointerEvent) => {
+    if ((e.target as HTMLElement).closest('a, button')) { pressAt.current = 0; return; }
+    pressAt.current = Date.now(); setHeld(true);
+  };
+  const onPressEnd = () => setHeld(false);
+
   const key = cards[at];
   const cyan = key === 'next';
+  const playing = auto && at < last;
+  const running = playing && !paused && !held && !hidden;
   return (
     <div class="wrapped">
       <div
@@ -154,14 +184,35 @@ export function Deck({ cards, community, player, sharePath }: {
         onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}
       >
         <div class="wrapped-phone__bars" aria-hidden="true">
-          {cards.map((c, i) => <i key={`${c}-${i}`} class={i <= at ? 'on' : ''} />)}
+          {cards.map((c, i) => (
+            <i key={`${c}-${i}`} class={i < at || (i === at && !playing) ? 'on' : ''}>
+              {i === at && playing && (
+                <b
+                  key={at}
+                  class="wrapped-phone__fill"
+                  style={{ animationDuration: `${CARD_MS}ms`, animationPlayState: running ? 'running' : 'paused' }}
+                  onAnimationEnd={() => go(at + 1)}
+                />
+              )}
+            </i>
+          ))}
         </div>
-        <div class="wrapped-card" aria-live="polite" aria-roledescription="story card" data-card={key} onClick={onCardClick}>
+        <div
+          class="wrapped-card" aria-live="polite" aria-roledescription="story card" data-card={key} onClick={onCardClick}
+          onPointerDown={onPressStart} onPointerUp={onPressEnd} onPointerCancel={onPressEnd} onPointerLeave={onPressEnd}
+        >
           <CardBody k={key} community={community} player={player} />
         </div>
         <div class="wrapped-phone__nav">
           <button type="button" onClick={() => go(at - 1)} disabled={at === 0} aria-label="Previous card">Back</button>
-          <span>{`${at + 1} / ${cards.length}`}</span>
+          <span>
+            {`${at + 1} / ${cards.length}`}
+            {playing && (
+              <button type="button" class="wrapped-phone__pause" onClick={() => setPaused(!paused)} aria-pressed={paused}>
+                {paused ? 'Play' : 'Pause'}
+              </button>
+            )}
+          </span>
           <button type="button" onClick={() => go(at + 1)} disabled={at === last} aria-label="Next card">Next</button>
         </div>
       </div>

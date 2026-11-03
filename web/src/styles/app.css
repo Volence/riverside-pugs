@@ -4916,6 +4916,9 @@ tr.is-selected td { background: color-mix(in srgb, var(--accent) 8%, transparent
 .wrapped-phone__bars { display: flex; gap: 3px; }
 .wrapped-phone__bars i { flex: 1; height: 3px; background: rgba(217, 203, 176, 0.2); border-radius: 2px; display: block; }
 .wrapped-phone__bars i.on { background: var(--w-bone); }
+.wrapped-phone__bars i { overflow: hidden; }
+.wrapped-phone__fill { display: block; height: 100%; width: 100%; background: var(--w-bone); transform-origin: left; animation: wrapped-fill linear 1 both; }
+@keyframes wrapped-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .wrapped-phone.is-cyan .wrapped-phone__bars i.on { background: var(--w-red); }
 .wrapped-card {
   display: grid; align-content: center; gap: 12px; padding: 8px 6px; text-align: left;
@@ -4950,8 +4953,21 @@ tr.is-selected td { background: color-mix(in srgb, var(--accent) 8%, transparent
 .wrapped-phone__nav button:disabled { opacity: 0.35; cursor: default; }
 .wrapped-phone :is(a, button):focus-visible { outline: 2px solid var(--w-bright); outline-offset: 2px; }
 .wrapped-phone__nav span { font-family: var(--font-label); font-size: 0.72rem; letter-spacing: 0.14em; color: var(--w-muted); font-variant-numeric: tabular-nums; }
+.wrapped-phone__nav span { display: inline-flex; align-items: center; gap: 10px; }
+.wrapped-phone__nav .wrapped-phone__pause { min-height: 28px; padding: 3px 10px; border-color: rgba(217, 203, 176, 0.18); color: var(--w-muted); }
 .wrapped-share { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; justify-content: center; max-width: 380px; }
 .wrapped-share__note { overflow-wrap: anywhere; font-size: var(--fs-dense); }
+/* Desktop: as tall as the window allows and wider than a phone (4:5), with
+   the type scaled up inside, so the deck does not sit small in the middle of a
+   big screen (owner, 2026-11-03). The height is what limits it: the cards were
+   laid out for a 380 x 720 phone, and anything they do not fill scrolls. */
+@media (min-width: 760px) and (min-height: 700px) {
+  .wrapped-phone { width: auto; max-width: none; height: min(calc(100svh - 190px), 900px); aspect-ratio: 4 / 5; min-height: 0; }
+  .wrapped-phone > * { zoom: 1.15; }
+}
+@media (min-width: 900px) and (min-height: 960px) {
+  .wrapped-phone > * { zoom: 1.3; }
+}
 @media (max-width: 420px) {
   .wrapped-phone { min-height: 0; aspect-ratio: auto; height: calc(100svh - 160px); min-height: 520px; }
   .wrapped-card .big { font-size: 3rem; }

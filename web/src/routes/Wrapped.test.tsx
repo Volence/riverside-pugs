@@ -143,3 +143,40 @@ describe('Wrapped page', () => {
     expect(screen.queryByRole('button', { name: 'Share this Wrapped' })).toBeNull();
   });
 });
+
+describe('Wrapped autoplay', () => {
+  const fill = () => document.querySelector('.wrapped-phone__fill') as HTMLElement | null;
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('the current bar fills and moves on; Pause and a held press stop it; the last card stays', async () => {
+    mockApi.wrapped.mockResolvedValue({ community: COMMUNITY, me: FULL, loggedIn: true });
+    render(<Wrapped />);
+    await screen.findByText('Bone Breaker');
+    expect(fill()!.style.animationPlayState).toBe('running');
+    fireEvent.animationEnd(fill()!);
+    expect(screen.getByText('2 / 19')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(fill()!.style.animationPlayState).toBe('paused');
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+    expect(fill()!.style.animationPlayState).toBe('running');
+
+    fireEvent.pointerDown(card());
+    expect(fill()!.style.animationPlayState).toBe('paused');
+    fireEvent.pointerUp(card());
+    expect(fill()!.style.animationPlayState).toBe('running');
+
+    await goTo('next');
+    expect(fill()).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
+  });
+
+  it('does not play for reduced motion', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
+    mockApi.wrapped.mockResolvedValue({ community: COMMUNITY, me: FULL, loggedIn: true });
+    render(<Wrapped />);
+    await screen.findByText('Bone Breaker');
+    expect(fill()).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
+  });
+});
