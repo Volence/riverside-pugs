@@ -4,6 +4,7 @@ import { upsertPlayer, activatePlayer, linkDiscord } from '../src/players.js';
 import { completeMatch } from '../src/matchResult.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { COMMAND_DEFS, handleCommand } from '../src/discord/commands.js';
+import type { MessagePayload } from '../src/discord/transport.js';
 import type { Dump } from '../src/dumpParse.js';
 import type { PickedMember } from '../src/discord/transport.js';
 
@@ -240,12 +241,30 @@ describe('/report', () => {
 describe('/duo and /unduo', () => {
   beforeEach(() => { db.prepare('UPDATE seasons SET ranks = 1').run(); });
 
-  it('/duo posts an invite that pings only the invitee, with Accept and Decline', async () => {
-    const r = await run('duo', { user: '905' });
-    expect(r.ephemeral).toBe(false);
-    expect(r.payload.mentionUserIds).toEqual(['905']);
-    expect(text(r)).toMatch(/dq:\d+:a/);
-    expect(text(r)).toMatch(/dq:\d+:d/);
+  // Owner, Season 1 launch: the invite is private. It goes to the invitee by
+  // DM with the buttons; the channel only shows the inviter a private reply.
+  const sent: { to: string; payload: MessagePayload }[] = [];
+  const runDm = (fail = false) => handleCommand({
+    db, matchmaker: mm, publicUrl: URL_,
+    dm: async (to, payload) => { if (fail) throw new Error('50007'); sent.push({ to, payload }); },
+  }, { kind: 'command', name: 'duo', userId: '900', userName: 'u', options: { user: '905' }, picked: {}, presserTimedOutUntil: null });
+  beforeEach(() => { sent.length = 0; });
+
+  it('/duo DMs the invitee Accept and Decline and answers the inviter privately', async () => {
+    const r = await runDm();
+    expect(r.ephemeral).toBe(true);
+    expect(text(r)).toMatch(/by DM/);
+    expect(text(r)).not.toMatch(/dq:/);
+    expect(sent.map((s) => s.to)).toEqual(['905']);
+    const dm = JSON.stringify(sent[0].payload);
+    expect(dm).toMatch(/dq:\d+:a/);
+    expect(dm).toMatch(/dq:\d+:d/);
+  });
+
+  it('/duo to someone with closed DMs still invites them, and says to use the Play page', async () => {
+    const r = await runDm(true);
+    expect(r.ephemeral).toBe(true);
+    expect(text(r)).toMatch(/DMs are closed.*Play page/);
   });
 
   it('/duo to an unlinked user says so privately', async () => {
