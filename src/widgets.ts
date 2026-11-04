@@ -22,6 +22,8 @@ export * from './widgetTypes.js';
 /** A widget's `tz` (minutes east of UTC) further out than any real zone is
  *  read as UTC. */
 const MAX_TZ_MIN = 840;
+/** How far ahead of the server clock a session `since` may be and still count (clamped to now). */
+const MAX_SINCE_SKEW_MS = 10 * 60_000;
 
 /** sqlite 'YYYY-MM-DD HH:MM:SS' (UTC) as epoch ms; NaN for anything else. */
 function sqliteMs(s: string | null | undefined): number {
@@ -126,7 +128,12 @@ export function widgetData(
   const profile = profileData(db, steamid, null);
   if (!profile) return null;
   const tz = Number.isFinite(opts.tzOffsetMin) && Math.abs(opts.tzOffsetMin) <= MAX_TZ_MIN ? opts.tzOffsetMin : 0;
-  const since = opts.since !== null && Number.isFinite(opts.since) && opts.since <= now ? opts.since : null;
+  // `since` comes from the OBS PC's clock: a lead of up to 10 minutes is clock
+  // skew and reads as "now"; further ahead is rejected.
+  const since = opts.since === null || !Number.isFinite(opts.since) ? null
+    : opts.since <= now ? opts.since
+    : opts.since - now <= MAX_SINCE_SKEW_MS ? now
+    : null;
 
   // Live: a match on /live with the player on a roster, else one they just finished.
   let live: WidgetLive | null = null;

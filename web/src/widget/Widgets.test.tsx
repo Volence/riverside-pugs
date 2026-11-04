@@ -84,7 +84,18 @@ describe('live widget', () => {
       unmount();
     }
     const { container } = render(<Widget params={params('live', 'bar')} data={payload()} />);
-    expect(container.textContent).toContain('M3 live');
+    expect(container.textContent).toContain('M3 438 live');
+  });
+
+  it('bar current-map chip shows the half-time score once the first half ends, else just "live"', () => {
+    const half = render(<Widget params={params('live', 'bar')} data={payload()} />);
+    expect(half.container.querySelector('.w-chip.is-now')?.textContent).toBe('M3 438 live');
+    half.unmount();
+    const mineHalf = render(<Widget params={params('live', 'bar')} data={live({ halfTime: { ordinal: 2, mineSurvived: true, score: 1234 } })} />);
+    expect(mineHalf.container.querySelector('.w-chip.is-now')?.textContent).toBe('M3 1,234 live');
+    mineHalf.unmount();
+    const first = render(<Widget params={params('live', 'bar')} data={live({ halfTime: null })} />);
+    expect(first.container.querySelector('.w-chip.is-now')?.textContent).toBe('M3 live');
   });
 
   it('labels maps from 1 and says which of how many', () => {
@@ -133,7 +144,7 @@ describe('live widget', () => {
   it('bar chips name who won each map', () => {
     const { container } = render(<Widget params={params('live', 'bar')} data={payload()} />);
     const chips = [...container.querySelectorAll('.w-chip')].map((c) => c.textContent);
-    expect(chips).toEqual(['M1 Opponents', 'M2 Opponents', 'M3 live', 'M4']);
+    expect(chips).toEqual(['M1 Opponents', 'M2 Opponents', 'M3 438 live', 'M4']);
   });
 
   it('final match shows Final', () => {
@@ -151,13 +162,13 @@ describe('live widget', () => {
     }
   });
 
-  it('live renders nothing when live is null, and "Not in a match" with idle=note', () => {
+  it('live renders nothing when live is null, and "No public match" with idle=note', () => {
     for (const style of STYLES_FOR.live) {
       const hidden = render(<Widget params={params('live', style)} data={payload({ live: null })} />);
       expect(hidden.container.innerHTML, style).toBe('');
       hidden.unmount();
       const note = render(<Widget params={params('live', style, { idle: 'note' })} data={payload({ live: null })} />);
-      expect(note.container.textContent, style).toBe('Not in a match');
+      expect(note.container.textContent, style).toBe('No public match');
       note.unmount();
     }
   });
