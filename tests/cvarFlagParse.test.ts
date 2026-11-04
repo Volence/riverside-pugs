@@ -25,6 +25,17 @@ describe('L4DV client setting line', () => {
     expect(parse(STAMP + BODY.replace('76561198030288393', 'nobody'))).toBeNull();
   });
 
+  // pug-match's rates gate (pug-rates.inc) reports a player whose net settings
+  // went bad during live play on the same line, lerp in milliseconds.
+  it('takes the net settings pug-match reports, lerp in ms and rate up to seven digits', () => {
+    expect(parse(`${STAMP}L4DV id=76561198030288393 cvar=lerp value=50.0 act=live`))
+      .toEqual({ kind: 'cvar_flag', steamid: '76561198030288393', cvar: 'lerp', value: 50, act: 'live' });
+    expect(parse(`${STAMP}L4DV id=76561198030288393 cvar=cl_cmdrate value=30 act=live`)).toMatchObject({ cvar: 'cl_cmdrate', value: 30 });
+    expect(parse(`${STAMP}L4DV id=76561198030288393 cvar=cl_updaterate value=20 act=fixed`)).toMatchObject({ cvar: 'cl_updaterate', act: 'fixed' });
+    expect(parse(`${STAMP}L4DV id=76561198030288393 cvar=rate value=1000000 act=live`)).toMatchObject({ cvar: 'rate', value: 1000000 });
+    expect(parse(`${STAMP}L4DV id=76561198030288393 cvar=rate value=10000000 act=live`)).toBeNull();
+  });
+
   // Same protection as every other token-less line: the marker only counts as
   // the first thing after the engine's timestamp, never inside chat.
   it('refuses a line forged through chat', () => {

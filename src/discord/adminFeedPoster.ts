@@ -229,6 +229,24 @@ export class AdminFeedPoster {
         // it; `live` means they switched after the round went live.
         const who = this.name(e.steamid);
         const match = `[#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        // Net settings from pug-match's rates gate. It only reports live play:
+        // in ready-up it holds the player in spectator instead. Everyone in the
+        // game was told in chat at the same moment.
+        if (e.cvar !== 'cpu_level') {
+          const setting = e.cvar === 'lerp' ? `\`lerp ${e.value} ms\`` : `\`${e.cvar} ${e.value}\``;
+          if (e.act === 'fixed') {
+            return {
+              text: `✅ ${who} fixed their net settings (${setting}) during live play in match ${match}.`,
+              color: COLOR.account,
+            };
+          }
+          return {
+            text: `🔧 ${who} has net settings outside the server's limits (${setting}) during live play in match ${match}. `
+              + 'Ready-up checks them, so they changed it after the round went live. The server told everyone in chat '
+              + 'and will hold them in spectator at the next ready-up unless they fix it. Worth a look if it keeps happening.',
+            color: COLOR.problem,
+          };
+        }
         if (e.act === 'fixed') {
           return {
             text: `✅ ${who} changed Effect Detail off Low (\`${e.cvar} ${e.value}\`) and can ready up for match ${match}.`,

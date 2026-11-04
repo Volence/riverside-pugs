@@ -425,6 +425,22 @@ describe('admin feed', () => {
     for (const i of [0, 1, 2]) expect(line(i)).toContain(`[#${matchId}](https://pug.test/match/${matchId})`);
   });
 
+  it('net settings from the rates gate name the setting, the value and that everyone was told', async () => {
+    const line = (i: number) => t.live()[i].payload.embeds[0].description ?? '';
+    publishAdminEvent({ kind: 'cvar_flag', steamid: IDS[2], matchId, cvar: 'lerp', value: 50, act: 'live' });
+    publishAdminEvent({ kind: 'cvar_flag', steamid: IDS[3], matchId, cvar: 'rate', value: 30000, act: 'live' });
+    publishAdminEvent({ kind: 'cvar_flag', steamid: IDS[2], matchId, cvar: 'lerp', value: 0, act: 'fixed' });
+    await feed.idle();
+    expect(line(0)).toContain('**player2**');
+    expect(line(0)).toContain('lerp 50 ms');
+    expect(line(0)).toContain('during live play');
+    expect(line(0)).not.toContain('Effect Detail');
+    expect(line(1)).toContain('`rate 30000`');
+    expect(line(2)).toContain('fixed');
+    expect(line(2)).toContain('lerp 0 ms');
+    for (const i of [0, 1, 2]) expect(line(i)).toContain(`[#${matchId}](https://pug.test/match/${matchId})`);
+  });
+
   it('a recent ban elsewhere is worded as context and links the match', async () => {
     publishAdminEvent({
       kind: 'steam_signal', steamid: IDS[2], matchId,

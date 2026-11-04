@@ -8,8 +8,11 @@ const TOKEN_RE = /^[0-9a-f]{32}$/;
 
 export const PHASE_STATES = ['live', 'paused', 'readyup', 'roundover', 'loading'] as const;
 export type PhaseState = typeof PHASE_STATES[number];
-/** Client settings l4d_cvarwatch reports. Anything else on an L4DV line is refused. */
-export const WATCHED_CVARS = ['cpu_level'] as const;
+/** Client settings reported on an L4DV line; anything else is refused.
+ *  cpu_level comes from l4d_cvarwatch. The net settings come from pug-match's
+ *  rates gate (pug-rates.inc) when a player's go out of bounds during live
+ *  play; `lerp` is the lerp the engine uses, in milliseconds. */
+export const WATCHED_CVARS = ['cpu_level', 'lerp', 'cl_cmdrate', 'cl_updaterate', 'rate'] as const;
 export type WatchedCvar = typeof WATCHED_CVARS[number];
 /** What l4d_cvarwatch did about it. `held`: the ready gate took their ready
  *  back. `fixed`: a held player changed the setting. `live`: seen out of
@@ -249,9 +252,10 @@ export type LogEvent =
   // aimlock and bhop, straight off Little Anti-Cheat's own forwards. Absent
   // for every other cheat and for an older plugin, which sends none of them.
   | { kind: 'lilac_flag'; steamid: string; cheat: number; banned: boolean; reason?: LilacReason }
-  // A client setting that matters for fairness, from l4d_cvarwatch.smx: once
-  // per connection, only when the value is out of bounds. Only cpu_level so
-  // far (0 thins smoke, fire and the boomer cloud enough to see through).
+  // A client setting that matters for fairness, only when the value is out of
+  // bounds: cpu_level from l4d_cvarwatch.smx once per connection (0 thins
+  // smoke, fire and the boomer cloud enough to see through), and the net
+  // settings from pug-match's rates gate once per player per live spell.
   | { kind: 'cvar_flag'; steamid: string; cvar: WatchedCvar; value: number; act: CvarAct }
   // A crash spray (a malformed VTF, the L4D2-Community-Update #115 exploit)
   // caught by spray_exploit_fixer, reported by l4d_spray_report.smx. Blocked
@@ -683,7 +687,7 @@ function parseSourcePinned(body: string): LogEvent | null | undefined {
     const f = kv(body.split(/\s+/).slice(1));
     const steamid = steamId64Of(f.id ?? '');
     if (!steamid || !(WATCHED_CVARS as readonly string[]).includes(f.cvar ?? '')) return null;
-    if (!/^-?\d{1,6}(\.\d{1,6})?$/.test(f.value ?? '')) return null;
+    if (!/^-?\d{1,7}(\.\d{1,6})?$/.test(f.value ?? '')) return null;
     const act = f.act ?? 'live';
     if (!(CVAR_ACTS as readonly string[]).includes(act)) return null;
     return { kind: 'cvar_flag', steamid, cvar: f.cvar as WatchedCvar, value: Number(f.value), act: act as CvarAct };
