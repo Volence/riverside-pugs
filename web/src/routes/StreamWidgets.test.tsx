@@ -30,15 +30,50 @@ beforeEach(() => {
   writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  try { localStorage.clear(); } catch { /* none */ }
+});
+
+/** The section starts closed; open it the way a player does. */
+function renderOpen() {
+  const r = render(<StreamWidgets steamid={ID} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Set up a widget' }));
+  return r;
+}
 
 const pick = (group: string, label: string) =>
   fireEvent.click(within(screen.getByRole('group', { name: group })).getByRole('button', { name: label }));
 
 describe('stream widgets setup', () => {
-  it('changing kind and style updates the copied URL', async () => {
+  it('starts closed and loads nothing until opened', () => {
     mockApi.widget.mockResolvedValue(payload());
     render(<StreamWidgets steamid={ID} />);
+    expect(screen.getByRole('heading', { name: 'Stream widgets' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Style' })).toBeNull();
+    expect(mockApi.widget).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Set up a widget' }));
+    expect(screen.getByRole('group', { name: 'Style' })).toBeTruthy();
+    expect(mockApi.widget).toHaveBeenCalled();
+  });
+
+  it('remembers open and hidden in this browser', () => {
+    mockApi.widget.mockResolvedValue(payload());
+    renderOpen();
+    cleanup();
+    render(<StreamWidgets steamid={ID} />);
+    expect(screen.getByRole('group', { name: 'Style' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide setup' }));
+    expect(screen.queryByRole('group', { name: 'Style' })).toBeNull();
+    cleanup();
+    render(<StreamWidgets steamid={ID} />);
+    expect(screen.getByRole('button', { name: 'Set up a widget' })).toBeTruthy();
+  });
+
+  it('changing kind and style updates the copied URL', async () => {
+    mockApi.widget.mockResolvedValue(payload());
+    renderOpen();
     expect(screen.getByRole('heading', { name: 'Stream widgets' })).toBeTruthy();
     pick('Widget', 'Rating');
     pick('Style', 'Corner');
@@ -53,7 +88,7 @@ describe('stream widgets setup', () => {
 
   it('style choices follow the kind', () => {
     mockApi.widget.mockResolvedValue(payload());
-    render(<StreamWidgets steamid={ID} />);
+    renderOpen();
     pick('Widget', 'Queue');
     const styles = within(screen.getByRole('group', { name: 'Style' })).getAllByRole('button').map((b) => b.textContent);
     expect(styles).toEqual(['Corner', 'Bar']);
@@ -67,7 +102,7 @@ describe('stream widgets setup', () => {
 
   it('a style the new kind lacks falls back to its default', () => {
     mockApi.widget.mockResolvedValue(payload());
-    render(<StreamWidgets steamid={ID} />);
+    renderOpen();
     pick('Style', 'Scoreboard');
     pick('Widget', 'Last match');
     expect(within(screen.getByRole('group', { name: 'Style' })).getByRole('button', { name: 'Card' }).getAttribute('aria-pressed')).toBe('true');
@@ -76,7 +111,7 @@ describe('stream widgets setup', () => {
 
   it('the preview uses sample data when not in a match', async () => {
     mockApi.widget.mockResolvedValue(payload());
-    const { container } = render(<StreamWidgets steamid={ID} />);
+    const { container } = renderOpen();
     await screen.findByText("Sample: shows your match when you're in one");
     expect(mockApi.widget).toHaveBeenCalledWith(ID, expect.any(Number));
     const teams = container.querySelectorAll('.w-game [data-team]');
@@ -94,7 +129,7 @@ describe('stream widgets setup', () => {
       halfTime: null, final: false,
     };
     mockApi.widget.mockResolvedValue(payload({ live }));
-    const { container } = render(<StreamWidgets steamid={ID} />);
+    const { container } = renderOpen();
     await waitFor(() => expect(container.querySelector('.w-game')?.textContent).toContain('777'));
     expect(screen.queryByText("Sample: shows your match when you're in one")).toBeNull();
   });
@@ -102,7 +137,7 @@ describe('stream widgets setup', () => {
   it('refreshes the preview every 20 seconds', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     mockApi.widget.mockResolvedValue(payload());
-    render(<StreamWidgets steamid={ID} />);
+    renderOpen();
     await vi.waitFor(() => expect(mockApi.widget).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(20_000);
     expect(mockApi.widget).toHaveBeenCalledTimes(2);
@@ -110,7 +145,7 @@ describe('stream widgets setup', () => {
 
   it('says what OBS refresh and ?reset=1 do', () => {
     mockApi.widget.mockResolvedValue(payload());
-    render(<StreamWidgets steamid={ID} />);
+    renderOpen();
     expect(screen.getByText('Show your Riverside numbers on stream. In OBS: Sources, +, Browser, then paste the link.')).toBeTruthy();
     expect(screen.getByText(/Refresh browser when scene becomes active" is optional/)).toBeTruthy();
     // ?reset=1 belongs to This stream, the one widget with a session count.
