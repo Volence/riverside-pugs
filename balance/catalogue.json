@@ -723,7 +723,7 @@
       "group": "items",
       "label": "Health item style",
       "source": "cvar",
-      "note": "Where health items come from. 0 map default, 1 kits become pills, 2 same but finale kits stay, 3 finale kits become pills and every other pill or kit is removed, 4 kits become pills and only saferoom kits are removed.",
+      "note": "Where health items come from. 0 map default, 1 kits become pills, 2 same but finale kits stay, 3 finale kits become pills and every other pill or kit is removed, 4 kits become pills and only saferoom kits are removed, 5 every pill and kit is removed on every map, finales too.",
       "detail": true
     },
     {
@@ -1870,6 +1870,16 @@
       "when": {
         "cvar": "rotoblin_health_style",
         "equals": "3"
+      },
+      "reviewed": true
+    },
+    {
+      "id": "health_items_none",
+      "group": "items",
+      "text": "No health items on the map and no first aid kits, finales included. Every survivor is given one bottle of pills when each half goes live.",
+      "when": {
+        "cvar": "rotoblin_health_style",
+        "equals": "5"
       },
       "reviewed": true
     },
