@@ -31,6 +31,8 @@ import { StreamWidgets } from './StreamWidgets';
 
 /** Maps with fewer games than this fold away on the by-map bars: a 0W 2L map says little. */
 const MAP_MIN_SAMPLE = 5;
+/** Recent matches listed before "Show more"; the server sends up to 20. */
+const MATCHES_SHOWN = 10;
 
 export function Profile(
   { steamid, session, refresh }: { steamid: string; session?: Session; refresh?: () => void },
@@ -69,6 +71,7 @@ export function Profile(
   // they genuinely disagree: a map you win while dying constantly looks fine
   // on one and terrible on the other.
   const [mapSort, setMapSort] = useState<MapSort>('winrate');
+  const [allMatches, setAllMatches] = useState(false);
 
   if (error) {
     return (
@@ -121,6 +124,12 @@ export function Profile(
   const low = history.length ? Math.min(...history.map((h) => h.sr)) : null;
   // The last game's change, only while that season is still being played.
   const lastDelta = currentScope && matches.length ? matches[0].srDelta : null;
+  // The card beside the header: the rank with its progress, then the SR line.
+  // SR belongs to one season: none on the Career view, nothing to draw before
+  // a first game.
+  const rankCardShown = currentScope && !empty && Boolean(season?.rank) && season?.sr != null && !season?.placing;
+  const trendShown = !career && !empty && !season?.placing && history.length > 1;
+  const srCardShown = !career && !empty && (Boolean(season?.placing) || trendShown || rankCardShown);
   const headStats: { label: string; value: string | number }[] = empty ? [] : career ? [
     { label: 'Record', value: `${record.wins}W ${record.losses}L` },
     { label: 'Matches', value: totals.games },
@@ -128,7 +137,8 @@ export function Profile(
     { label: 'Seasons', value: seasonsPlayed.filter((s) => s.games > 0).length },
   ] : [
     { label: 'Record', value: `${record.wins}W ${record.losses}L` },
-    { label: 'Peak', value: peak ?? 'n/a' },
+    // The SR card beside the header carries the peak when it draws the line.
+    ...(trendShown ? [] : [{ label: 'Peak', value: peak ?? 'n/a' }]),
     // The one game count on the page (the figures and totals panels used to
     // repeat it).
     { label: 'Matches', value: totals.games },
@@ -140,11 +150,21 @@ export function Profile(
   const best = (data.pastSeasons ?? []).filter((p) => p.finalRank !== null)
     .sort((a, b) => a.finalRank! - b.finalRank!)[0];
 
+  const own = session?.kind === 'active' && session.me.steamid === steamid;
+  // Your own page, signed in but maybe still pending: the account section.
+  const mine = session && (session.kind === 'active' || session.kind === 'pending') && session.me.steamid === steamid ? session : null;
+  const ownAny = mine !== null;
+  const shownMatches = allMatches ? matches : matches.slice(0, MATCHES_SHOWN);
+
+  // Top to bottom (owner, 2026-11-04): who this is and where they stand, the
+  // season's headline numbers, recent games beside the people side, the
+  // per-map detail, the weeks, the history, and last the owner's own
+  // settings. Each thing is said once.
   return (
     <div class="page page--profile prof">
       <div class="stack">
         <ScopeBar scope={scopeInfo} seasons={seasonsPlayed} onPick={setScope} />
-        <div class="prof__hero">
+        <div class={`prof__hero${srCardShown ? '' : ' prof__hero--solo'}`}>
         <Headliner
           eyebrow={`Joined ${fmtDate(player.createdAt)} · ${scopeName}`}
           name={player.name}
@@ -166,7 +186,9 @@ export function Profile(
           rating={career ? null : rating ? rating.sr : null}
           unratedText={career ? 'All seasons' : currentScope ? 'Unrated this season' : `Unrated in ${scopeName}`}
           placing={season?.placing ?? null}
-          rankSlot={season && !season.placing && (season.rank || season.top10) ? (
+          // The rank card beside the header shows the rank and Top 10 when it
+          // is there; a past season's view has no card, so they ride here.
+          rankSlot={season && !season.placing && !rankCardShown && (season.rank || season.top10) ? (
             <>
               {season.rank && <SeasonRankBadge rank={season.rank} />}
               {season.top10 && <Top10Tag />}
@@ -175,74 +197,60 @@ export function Profile(
           delta={lastDelta}
           stats={headStats}
         />
-        {/* SR belongs to one season: none on the Career view, nothing to draw
-            before a first game. */}
-        {!career && !empty && (season?.placing ? (
+        {srCardShown && (season?.placing ? (
           <Panel class="prof__trend">
             <h3>{`SR in ${scopeName}`}</h3>
             <p class="muted">{`Placement: ${season.placing.played} of ${season.placing.of} games played. SR and rank show after the last one.`}</p>
           </Panel>
-        ) : history.length > 1 && (
+        ) : (
           <Panel class="prof__trend">
             <h3>{`SR in ${scopeName}`}</h3>
-            <Sparkline values={history.map((h) => h.sr)} />
-            <dl class="prof__trendfacts">
-              <div><dt>Now</dt><dd class="num">{history[history.length - 1].sr}</dd></div>
-              <div><dt>Peak</dt><dd class="num">{peak}</dd></div>
-              <div><dt>Low</dt><dd class="num">{low}</dd></div>
-              <div><dt>Rated games</dt><dd class="num">{history.length}</dd></div>
-            </dl>
+            {rankCardShown && <RankCard rank={season!.rank!} sr={season!.sr!} top10={season!.top10} />}
+            {trendShown && (
+              <>
+                <Sparkline values={history.map((h) => h.sr)} />
+                <dl class="prof__trendfacts">
+                  <div><dt>Now</dt><dd class="num">{history[history.length - 1].sr}</dd></div>
+                  <div><dt>Peak</dt><dd class="num">{peak}</dd></div>
+                  <div><dt>Low</dt><dd class="num">{low}</dd></div>
+                  <div><dt>Rated games</dt><dd class="num">{history.length}</dd></div>
+                </dl>
+              </>
+            )}
           </Panel>
         ))}
         </div>
 
-        <SocialChips links={data.social} twitchName={player.twitchName} />
-
-        {session?.kind === 'active' && session.me.steamid !== steamid && (
-          <div class="admin-actions">
-            <ReportPlayer target={{ steamid, name: player.name }} />
-            <DuoInviteChip steamid={steamid} />
-            {(session.me.isAdmin || session.me.isMod) && (
-              <button class="chip" type="button"
-                onClick={async () => {
-                  setTicketError(null);
-                  setTicketPassed(false);
-                  try {
-                    const r = await modApi.open(steamid, '', false);
-                    // No id means the case is restricted and this account is
-                    // not on its list, so there is nothing to navigate to.
-                    if (r.ticketId === null) setTicketPassed(true);
-                    else location.href = ticketUrl(r.ticketId);
-                  } catch (err) {
-                    setTicketError(err instanceof ApiError ? err.message : 'Could not open a ticket.');
-                  }
-                }}>
-                Open a ticket
-              </button>
-            )}
-            {ticketPassed && <p class="muted">Passed to the owners. They will add you to the ticket if they need you.</p>}
-            {ticketError && <p class="error">{ticketError}</p>}
-          </div>
-        )}
-
-        {session && (session.kind === 'active' || session.kind === 'pending') && session.me.steamid === steamid && (
-          <Panel>
-            <DiscordLinkCard me={session.me} onChange={refresh} />
-            {/* Active players only: the backend refuses a profile write or a
-                Twitch link from an account that is pending or banned. The
-                Discord card above stays, since linking is how they get in. */}
-            {session.kind === 'active' && (
-              <ProfileEdit
-                data={data}
-                twitchEnabled={session.me.twitchEnabled ?? false}
-                twitchLinked={Boolean(session.me.twitch)}
-                onSaved={() => refresh?.()}
-              />
-            )}
-          </Panel>
-        )}
-        {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}
-        {session?.kind === 'active' && session.me.steamid === steamid && <StreamWidgets steamid={steamid} />}
+        <div class="prof__links">
+          <SocialChips links={data.social} twitchName={player.twitchName} />
+          {ownAny && <a class="chip" href="#account">Account settings</a>}
+          {session?.kind === 'active' && session.me.steamid !== steamid && (
+            <div class="admin-actions">
+              <ReportPlayer target={{ steamid, name: player.name }} />
+              <DuoInviteChip steamid={steamid} />
+              {(session.me.isAdmin || session.me.isMod) && (
+                <button class="chip" type="button"
+                  onClick={async () => {
+                    setTicketError(null);
+                    setTicketPassed(false);
+                    try {
+                      const r = await modApi.open(steamid, '', false);
+                      // No id means the case is restricted and this account is
+                      // not on its list, so there is nothing to navigate to.
+                      if (r.ticketId === null) setTicketPassed(true);
+                      else location.href = ticketUrl(r.ticketId);
+                    } catch (err) {
+                      setTicketError(err instanceof ApiError ? err.message : 'Could not open a ticket.');
+                    }
+                  }}>
+                  Open a ticket
+                </button>
+              )}
+              {ticketPassed && <p class="muted">Passed to the owners. They will add you to the ticket if they need you.</p>}
+              {ticketError && <p class="error">{ticketError}</p>}
+            </div>
+          )}
+        </div>
 
         {empty && (
           <Panel class="profile-empty">
@@ -260,17 +268,6 @@ export function Profile(
           </Panel>
         )}
 
-        {currentScope && season?.rank && season.sr !== null && !season.placing && (
-          <Panel>
-            <h3>Season rank</h3>
-            <RankCard rank={season.rank} sr={season.sr} top10={season.top10} />
-          </Panel>
-        )}
-
-        <Trophies past={data.pastSeasons ?? []} />
-
-        <SeasonHistory past={data.pastSeasons ?? []} own={session?.kind === 'active' && session.me.steamid === steamid} />
-
         {!noStats && (
           <ProfileFigures
             totals={totals} statTotals={statTotals} record={record}
@@ -281,7 +278,6 @@ export function Profile(
         <div class="prof__cols">
           <div class="prof__main">
             <ProfileEvents events={data.events} />
-            <ProfileWeekly steamid={steamid} />
 
             <Panel class="panel--table prof__matches">
               <h3>Recent matches</h3>
@@ -300,7 +296,7 @@ export function Profile(
                       </tr>
                     </thead>
                     <tbody>
-                      {matches.map((m) => (
+                      {shownMatches.map((m) => (
                         <tr key={m.id} style={{ '--campaign': campaignTint(m.campaign) } as Record<string, string>}>
                           <td><ResultChip result={m.result} /></td>
                           <td class="campaign-cell">
@@ -316,6 +312,11 @@ export function Profile(
                   </table>
                 </div>
               )}
+              {matches.length > shownMatches.length && (
+                <button type="button" class="btn btn--ghost btn--sm prof__more" onClick={() => setAllMatches(true)}>
+                  {`Show ${matches.length - shownMatches.length} more`}
+                </button>
+              )}
             </Panel>
           </div>
 
@@ -323,16 +324,6 @@ export function Profile(
             <WeeklyAwardChips awards={data.weeklyAwards ?? []} />
             {!noStats && <ChemistryPanel chemistry={data.chemistry} />}
             {!noStats && <EndorsementCounts endorsements={data.endorsements} />}
-            {!noStats && <Panel>
-              <h3>{`${scopeName} totals`}</h3>
-              <dl class="totals">
-                <div><dt>SI damage</dt><dd class="num">{totals.siDamage}</dd></div>
-                <div><dt>SI kills</dt><dd class="num">{totals.siKills}</dd></div>
-                <div><dt>Commons</dt><dd class="num">{totals.commonKills}</dd></div>
-                <div><dt>Friendly fire</dt><dd class="num">{totals.ffDealt}</dd></div>
-                <div><dt>Revives</dt><dd class="num">{totals.revives}</dd></div>
-              </dl>
-            </Panel>}
             <SharedPanel steamid={steamid} session={session ?? { kind: 'anonymous' }} />
           </aside>
         </div>
@@ -399,61 +390,92 @@ export function Profile(
               );
             })()}
 
-            <Tabs
-              active={mapMode}
-              onSelect={(k) => setMapMode(k as 'avg' | 'total')}
-              tabs={[{ key: 'avg', label: 'Per map' }, { key: 'total', label: 'Totals' }]}
-            />
-            <div class="table-wrap lb lb--norank">
-              <table>
-                <thead>
-                  <tr>
-                    <th class="lb__pcol">Map</th>
-                    <th class="num">Played</th>
-                    <th class="num">W</th>
-                    <th class="num">L</th>
-                    {mapCols.map((k) => <th class="num" key={k} title={statHelp(k)}>{labelFor(k)}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {byMap.map((r) => (
-                    <tr key={r.map}>
-                      <td class="lb__pcol pname">
-                        <a href={`/map/${encodeURIComponent(r.map)}`}>{mapName(r.map)}</a>
-                      </td>
-                      <td class="num">{r.games}</td>
-                      <td class="num">{r.wins}</td>
-                      <td class="num">{r.losses}</td>
-                      {mapCols.map((k) => {
-                        const v = (mapMode === 'avg' ? r.avgStats : r.stats)[k];
-                        return (
-                          <td class={`num${v ? '' : ' is-dim'}`} key={k}>
-                            {v ?? <span class="muted">n/a</span>}
-                          </td>
-                        );
-                      })}
+            {/* Every stat on every map is a wide table; it opens on request so
+                the bars stay the first read. */}
+            <details class="prof__maptable">
+              <summary>{`Full table: every stat on all ${byMap.length} ${byMap.length === 1 ? 'map' : 'maps'}`}</summary>
+              <Tabs
+                active={mapMode}
+                onSelect={(k) => setMapMode(k as 'avg' | 'total')}
+                tabs={[{ key: 'avg', label: 'Per map' }, { key: 'total', label: 'Totals' }]}
+              />
+              <div class="table-wrap lb lb--norank">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="lb__pcol">Map</th>
+                      <th class="num">Played</th>
+                      <th class="num">W</th>
+                      <th class="num">L</th>
+                      {mapCols.map((k) => <th class="num" key={k} title={statHelp(k)}>{labelFor(k)}</th>)}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {byMap.map((r) => (
+                      <tr key={r.map}>
+                        <td class="lb__pcol pname">
+                          <a href={`/map/${encodeURIComponent(r.map)}`}>{mapName(r.map)}</a>
+                        </td>
+                        <td class="num">{r.games}</td>
+                        <td class="num">{r.wins}</td>
+                        <td class="num">{r.losses}</td>
+                        {mapCols.map((k) => {
+                          const v = (mapMode === 'avg' ? r.avgStats : r.stats)[k];
+                          return (
+                            <td class={`num${v ? '' : ' is-dim'}`} key={k}>
+                              {v ?? <span class="muted">n/a</span>}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           </Panel>
         )}
 
-        {privateRows.length > 0 && (
-          <Panel>
-            <h3>Only you can see this</h3>
-            <p class="muted">
-              Shown to you alone. Nobody else sees these numbers and they never appear on a leaderboard.
-            </p>
-            <table>
-              <tbody>
-                {privateRows.map(([k, v]) => (
-                  <tr key={k}><td>{labelFor(k)}</td><td class="num">{v}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          </Panel>
+        <ProfileWeekly steamid={steamid} />
+
+        <SeasonHistory past={data.pastSeasons ?? []} own={own} />
+
+        {/* The server sends privateStatTotals to the player themselves only. */}
+        {(mine || privateRows.length > 0) && (
+          <section class="prof__account" id="account" aria-labelledby="prof-account">
+            <h2 class="prof__account-title" id="prof-account">Your account</h2>
+            {mine && <Panel>
+              <DiscordLinkCard me={mine.me} onChange={refresh} />
+              {/* Active players only: the backend refuses a profile write or a
+                  Twitch link from an account that is pending or banned. The
+                  Discord card above stays, since linking is how they get in. */}
+              {own && (
+                <ProfileEdit
+                  data={data}
+                  twitchEnabled={mine.me.twitchEnabled ?? false}
+                  twitchLinked={Boolean(mine.me.twitch)}
+                  onSaved={() => refresh?.()}
+                />
+              )}
+            </Panel>}
+            {privateRows.length > 0 && (
+              <Panel>
+                <h3>Only you can see this</h3>
+                <p class="muted">
+                  Shown to you alone. Nobody else sees these numbers and they never appear on a leaderboard.
+                </p>
+                <table>
+                  <tbody>
+                    {privateRows.map(([k, v]) => (
+                      <tr key={k}><td>{labelFor(k)}</td><td class="num">{v}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Panel>
+            )}
+            {own && <MyReports />}
+            {own && <StreamWidgets steamid={steamid} />}
+          </section>
         )}
       </div>
     </div>
@@ -495,8 +517,8 @@ function ProfileFigures(
   tiles.push({
     key: 'winrate',
     label: 'Win rate',
+    // No W-L under it: the header's Record is the same number.
     value: decided > 0 ? `${Math.round((record.wins / decided) * 100)}%` : 'n/a',
-    sub: `${record.wins}W ${record.losses}L`,
   });
   const sid = per(totals.siDamage);
   if (sid !== null) tiles.push({ key: 'sidmg', label: 'SI dmg / match', value: sid });
@@ -529,7 +551,8 @@ function ProfileFigures(
     .sort(([ka, a], [kb, b]) => a.rank - b.rank || labelOf(ka).localeCompare(labelOf(kb)));
 
   return (
-    <Panel>
+    <Panel class="prof__glance">
+      <h3>{`${scopeName} at a glance`}</h3>
       <Figures>
         {tiles.map((t) => (
           <Figure
@@ -548,6 +571,17 @@ function ProfileFigures(
           ))}
         </div>
       )}
+      {/* The raw counts behind the per-match tiles, in one quiet line. */}
+      <div class="prof__totals">
+        <p class="eyebrow">{`${scopeName} totals`}</p>
+        <dl class="prof__totals-list">
+          <div><dt>SI damage</dt><dd class="num">{totals.siDamage}</dd></div>
+          <div><dt>SI kills</dt><dd class="num">{totals.siKills}</dd></div>
+          <div><dt>Commons</dt><dd class="num">{totals.commonKills}</dd></div>
+          <div><dt>Friendly fire</dt><dd class="num">{totals.ffDealt}</dd></div>
+          <div><dt>Revives</dt><dd class="num">{totals.revives}</dd></div>
+        </dl>
+      </div>
     </Panel>
   );
 }
@@ -651,29 +685,26 @@ function SharedPanel({ steamid, session }: { steamid: string; session: Session }
   );
 }
 
-/** "120 SR to Gold I", with a bar across the current division. */
-/** Every finished season, frozen as it ended: place, rank, SR, peak, record. */
 /** Season-end trophies, newest first: the peak rank of every finished ranked
  *  season, and a Top 10 finish in any season. */
 function Trophies({ past }: { past: PastSeason[] }) {
   const won = past.filter((p) => p.peakRank || p.top10);
   if (won.length === 0) return null;
   return (
-    <Panel>
-      <h3>Trophies</h3>
-      <div class="trophies">
-        {won.map((p) => <Trophy key={p.seasonId} season={p.name} peakRank={p.peakRank ?? null} place={p.top10 ? p.finalRank : null} />)}
-      </div>
-    </Panel>
+    <div class="trophies" aria-label="Trophies">
+      {won.map((p) => <Trophy key={p.seasonId} season={p.name} peakRank={p.peakRank ?? null} place={p.top10 ? p.finalRank : null} />)}
+    </div>
   );
 }
 
+/** Finished seasons in one panel: the trophies as a strip, then the table. */
 function SeasonHistory({ past, own }: { past: PastSeason[]; own: boolean }) {
   const wrapped = useWrappedFor(own ? past : []);
   if (past.length === 0) return null;
   return (
     <Panel class="panel--table">
       <h3>Past seasons</h3>
+      <Trophies past={past} />
       <div class="table-wrap">
         <table class="season-history">
           <thead>
