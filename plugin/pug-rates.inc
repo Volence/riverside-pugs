@@ -14,9 +14,14 @@
 // moved by this module (a sudden 3v4 is the wrong answer to a changed cvar);
 // the player just cannot come back from spectator until fixed.
 //
-// Thresholds are the owner's (2026-09-27): what riversidepug.com's autoexec.cfg
-// sets. Every one is a cvar and can be turned off on its own, and
-// sm_pug_rates_enforce 0 turns the whole gate off.
+// Defaults are today's limits, so nobody's experience changes: the lerp cap
+// is lerptracker's sm_max_lerp (0.067) and the rate and Effect Detail checks
+// are off. Keep sm_pug_rates_max_lerp at or below sm_max_lerp, or the two
+// plugins fight over a player between the two values again. The owner's
+// stricter limits (2026-09-27: what riversidepug.com's autoexec.cfg sets,
+// lerp 0.01, cmd/upd 100, rate 100000, cpu_level 1) are a separate,
+// announced rule change. Every limit is a cvar and can be turned off on its
+// own, and sm_pug_rates_enforce 0 turns the whole gate off.
 //
 // Effect Detail (cpu_level) is held the same way, at the owner's ask ("they
 // should at least behave similarly"). Low thins smoke and the boomer cloud
@@ -47,16 +52,16 @@ void RatesInit()
 	g_cvRatesEnforce = CreateConVar("sm_pug_rates_enforce", "1",
 		"1 = rostered players whose net settings fail the sm_pug_rates_* limits are kept off their team (moved to spectator during ready-up). 0 = no check.",
 		FCVAR_NOTIFY, true, 0.0, true, 1.0);
-	g_cvRatesMaxLerp = CreateConVar("sm_pug_rates_max_lerp", "0.01",
-		"Highest lerp allowed on a team, in seconds (0.01 = 10 ms). -1 = no lerp check.",
+	g_cvRatesMaxLerp = CreateConVar("sm_pug_rates_max_lerp", "0.067",
+		"Highest lerp allowed on a team, in seconds (0.067 = 67 ms, same as sm_max_lerp). -1 = no lerp check.",
 		FCVAR_NOTIFY, true, -1.0, true, 1.0);
-	g_cvRatesMinCmd = CreateConVar("sm_pug_rates_min_cmdrate", "100",
+	g_cvRatesMinCmd = CreateConVar("sm_pug_rates_min_cmdrate", "0",
 		"Lowest cl_cmdrate allowed on a team. 0 = no check.", FCVAR_NOTIFY, true, 0.0, true, 1000.0);
-	g_cvRatesMinUpd = CreateConVar("sm_pug_rates_min_updaterate", "100",
+	g_cvRatesMinUpd = CreateConVar("sm_pug_rates_min_updaterate", "0",
 		"Lowest cl_updaterate allowed on a team. 0 = no check.", FCVAR_NOTIFY, true, 0.0, true, 1000.0);
-	g_cvRatesMinRate = CreateConVar("sm_pug_rates_min_rate", "100000",
+	g_cvRatesMinRate = CreateConVar("sm_pug_rates_min_rate", "0",
 		"Lowest rate allowed on a team. 0 = no check.", FCVAR_NOTIFY, true, 0.0, true, 10000000.0);
-	g_cvRatesMinCpu = CreateConVar("sm_pug_rates_min_cpu_level", "1",
+	g_cvRatesMinCpu = CreateConVar("sm_pug_rates_min_cpu_level", "0",
 		"Lowest cpu_level (Effect Detail: 0 Low, 1 Medium, 2 High) allowed on a team. 0 = no check.",
 		FCVAR_NOTIFY, true, 0.0, true, 2.0);
 	// For the lerp the engine will actually use, the same way lerptracker
