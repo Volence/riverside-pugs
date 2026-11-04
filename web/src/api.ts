@@ -608,6 +608,10 @@ export interface LiveMatch {
   /** Win chance so far (src/winProb.ts); null when it cannot be priced,
    *  absent from an older server. */
   winLine?: WinLine | null;
+  /** The first half of the map in progress (ordinal is 0-based), shown once
+   *  it is older than the live delay; null otherwise, absent from an older
+   *  server. Not included in teamAScore/teamBScore. */
+  halfTime?: { ordinal: number; survTeam: 'a' | 'b'; score: number } | null;
 }
 
 export interface MatchDemo {

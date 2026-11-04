@@ -114,6 +114,10 @@ export interface LiveMatch {
   /** Win chance after every half so far, priced against the maps still to
    *  play (src/winProb.ts); null when the plan or the rounds cannot carry one. */
   winLine: WinLine | null;
+  /** The first half of the map in progress, so a scoreboard can show it
+   *  before MAP_RESULT folds it into teamAScore/teamBScore. Null until that
+   *  half has ended reliably and is as old as the live viewer's delay. */
+  halfTime: { ordinal: number; survTeam: 'a' | 'b'; score: number } | null;
 }
 
 /** The odds are decoration on the live page: a fault in them must never take
@@ -737,6 +741,19 @@ export function roundsFor(db: DB, matchId: number): RoundRow[] {
     }));
 }
 
+/** The ended first half of the map after the `mapsDone` finished ones. Only
+ *  a reliable row (a known side and score) and only once it is older than
+ *  DEFAULT_DELAY_MS: /api/live is public, so it must not tell anyone a result
+ *  the delayed live viewer has not shown yet. */
+function halfTimeFor(db: DB, matchId: number, mapsDone: number, now: number): LiveMatch['halfTime'] {
+  const row = db.prepare(
+    `SELECT surv_team, score, ended_at FROM match_rounds
+     WHERE match_id = ? AND ordinal = ? AND half = 1 AND reliable = 1 AND ended_at IS NOT NULL`,
+  ).get(matchId, mapsDone) as { surv_team: 'a' | 'b'; score: number; ended_at: string } | undefined;
+  if (!row || sqliteToMs(row.ended_at) > now - DEFAULT_DELAY_MS) return null;
+  return { ordinal: mapsDone, survTeam: row.surv_team, score: row.score };
+}
+
 export function recordMapResult(db: DB, token: string, map: string, a: number, b: number): void {
   const id = liveMatchIdOf(db, token);
   if (id === null) return;
@@ -1002,6 +1019,7 @@ export function getLiveMatches(db: DB, showDiscordNames = false, form?: FormPara
       teamAScore: maps.reduce((t, x) => t + x.teamAScore, 0),
       teamBScore: maps.reduce((t, x) => t + x.teamBScore, 0),
       winLine: safeWinLine(db, m.id, m.campaign, form, live),
+      halfTime: halfTimeFor(db, m.id, maps.length, now),
       demos: demosOf.all(m.id) as LiveDemo[],
       events: (eventsOf.all(m.id, LIVE_EVENT_LIMIT) as {
         seq: number; kind: string; actor: string; target: string | null;

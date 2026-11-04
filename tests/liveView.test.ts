@@ -1156,3 +1156,59 @@ describe('liveView: ready-up ledger', () => {
   });
 });
 
+
+describe('liveView: half-time score', () => {
+  // The first half of the map in progress, so a scoreboard can show it before
+  // MAP_RESULT. Public payload: only a finished, trusted half, and only once it
+  // is as old as the live viewer's delay.
+  function seedHalf(endedSql: string | null, reliable = 1): number {
+    const id = seedLive();
+    const map = db.prepare(
+      'INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (?, ?, ?, ?, ?)',
+    );
+    map.run(id, 'm0', 0, 500, 400);
+    map.run(id, 'm1', 1, 300, 600);
+    db.prepare(
+      `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, started_at, ended_at)
+       VALUES (?, 2, 1, 'a', 438, ?, datetime('now', '-300 seconds'), ${endedSql === null ? 'NULL' : `datetime('now', '${endedSql}')`})`,
+    ).run(id, reliable);
+    return id;
+  }
+
+  it('halfTime shows the first half of the map in progress once it is older than the delay', () => {
+    seedHalf('-60 seconds');
+    const m = getLiveMatches(db)[0];
+    expect(m.halfTime).toEqual({ ordinal: 2, survTeam: 'a', score: 438 });
+    expect(m.teamAScore).toBe(800);
+    expect(m.teamBScore).toBe(1000);
+  });
+
+  it('halfTime is null within the delay', () => {
+    seedHalf('-3 seconds');
+    expect(getLiveMatches(db)[0].halfTime).toBeNull();
+  });
+
+  it('halfTime is null for an unreliable or unfinished half', () => {
+    seedHalf('-60 seconds', 0);
+    expect(getLiveMatches(db)[0].halfTime).toBeNull();
+    db = openDb(':memory:');
+    seedHalf(null);
+    expect(getLiveMatches(db)[0].halfTime).toBeNull();
+  });
+
+  it('halfTime is null once the second half has also ended', () => {
+    // MAP_RESULT writes the map row, so the half is part of teamAScore now and
+    // must not be shown a second time.
+    const id = seedHalf('-120 seconds');
+    db.prepare(
+      `INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score, reliable, started_at, ended_at)
+       VALUES (?, 2, 2, 'b', 390, 1, datetime('now', '-100 seconds'), datetime('now', '-60 seconds'))`,
+    ).run(id);
+    db.prepare(
+      "INSERT INTO match_live_maps (match_id, map, ordinal, team_a_score, team_b_score) VALUES (?, 'm2', 2, 438, 390)",
+    ).run(id);
+    const m = getLiveMatches(db)[0];
+    expect(m.halfTime).toBeNull();
+    expect(m.teamAScore).toBe(1238);
+  });
+});
