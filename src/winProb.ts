@@ -579,6 +579,20 @@ export type InHalfProvider = (
 let inHalfProvider: InHalfProvider | null = null;
 export function provideInHalfPoints(fn: InHalfProvider): void { inHalfProvider = fn; }
 
+/** The maps a match is planned to play: the campaign's chapters up to its
+ *  stop map (see stopAfterMap). Null when that is unknown: no missions
+ *  directory, an unregistered campaign, or a scrim or event game, which
+ *  choose their own maps (a stage's chapter count, a tiebreak map). */
+export function matchPlan(db: DB, matchId: number, campaign: string): string[] | null {
+  const kind = (db.prepare('SELECT kind FROM matches WHERE id = ?').get(matchId) as { kind: string } | undefined)?.kind;
+  if (kind !== 'pug') return null;
+  const chapters = campaignRegistry(db).get(campaign)?.maps ?? [];
+  const stop = stopAfterMap(db, campaign);
+  if (chapters.length === 0 || stop === null) return null;
+  const plan = chapters.slice(0, chapters.indexOf(stop) + 1);
+  return plan.length === 0 ? null : plan;
+}
+
 /**
  * The line so far for a match being played, priced against the maps it still
  * has to play: the campaign's chapters up to its stop map (see stopAfterMap).
@@ -589,15 +603,8 @@ export function provideInHalfPoints(fn: InHalfProvider): void { inHalfProvider =
  * (each played half's own points before its half-end point).
  */
 export function liveWinLine(db: DB, matchId: number, campaign: string, model: WinModel = winModel(db), opts: LiveLineOpts = {}): WinLine | null {
-  // Scrims and event games choose their own maps (a stage's chapter count, a
-  // tiebreak map), which the campaign's stop map does not know about.
-  const kind = (db.prepare('SELECT kind FROM matches WHERE id = ?').get(matchId) as { kind: string } | undefined)?.kind;
-  if (kind !== 'pug') return null;
-  const chapters = campaignRegistry(db).get(campaign)?.maps ?? [];
-  const stop = stopAfterMap(db, campaign);
-  if (chapters.length === 0 || stop === null) return null;
-  const plan = chapters.slice(0, chapters.indexOf(stop) + 1);
-  if (plan.length === 0) return null;
+  const plan = matchPlan(db, matchId, campaign);
+  if (plan === null) return null;
 
   const rows = roundsWithMaps(db, matchId, 'match_live_maps').filter((r) => r.endedAt !== null);
   // A score the plugin could not read is stored as a 0; pricing it as a real

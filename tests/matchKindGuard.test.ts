@@ -36,6 +36,7 @@ const ALLOWED: Record<string, number> = {
   'src/aimRules.ts': 1,             // end-of-match aim sweep, every kind (same reason as inputBursts)
   'src/fingerprintReplay.ts': 1,    // replays every match end, every kind, as the end-of-match sweep does
   'src/campaignRegistry.ts': 1,     // has the player got the maps: a scrim on a custom map counts too
+  'src/widgets.ts': 1,              // live widget's final hold: any public match /live showed, every kind
 };
 
 const RAW = /state\s*=\s*'completed'|state\s+IN\s*\([^)]*'completed'/g;
