@@ -3173,6 +3173,10 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'duo_pop_skips', 'held_ms', 'INTEGER');
   ensureColumn(db, 'match_players', 'duo_partner', 'TEXT');
   ensureColumn(db, 'match_players', 'duo_bonus', 'REAL');
+  // The news poster's follow-up messages when a long post is split over
+  // several (src/discord/newsPoster.ts): a JSON array of message ids after
+  // discord_message_id, in order. NULL when the post is one message.
+  ensureColumn(db, 'news_posts', 'discord_extra_ids', 'TEXT');
   // Who was in the lobby a ballot was drawn for (src/ballot.ts weighs the
   // draw by each player's history). Ballots from before it get their
   // match's players, which for a queue match are the lobby.
