@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 
 /**
- * Call `fn` when the server's hub broadcasts one of `names`.
+ * Call `fn` with the name when the server's hub broadcasts one of `names`.
  *
  * The app's own socket lives in useLiveState at the root and re-fetches the
  * player state on 'refresh' only (see wakesLiveState). A page that wants any
@@ -10,7 +10,7 @@ import { useEffect, useRef } from 'preact/hooks';
  *
  * Same reconnect as useLiveState. Does nothing where there is no WebSocket.
  */
-export function useHubEvent(names: string[], fn: () => void): void {
+export function useHubEvent(names: string[], fn: (event: string) => void): void {
   const latest = useRef(fn);
   latest.current = fn;
   const key = names.join(',');
@@ -29,7 +29,7 @@ export function useHubEvent(names: string[], fn: () => void): void {
       ws.onmessage = (m) => {
         try {
           const { event } = JSON.parse(String(m.data)) as { event?: string };
-          if (event && wanted.has(event)) latest.current();
+          if (event && wanted.has(event)) latest.current(event);
         } catch {
           /* not one of ours */
         }

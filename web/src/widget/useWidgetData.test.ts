@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/preact';
 import type { WidgetPayload } from '../../../src/widgetTypes';
-import { WIDGET_POLL_MS, sessionSince, useWidgetData, widgetApiPath } from './useWidgetData';
+import { DEFAULT_DELAY_MS } from '../../../src/replayTail';
+import { LIVE_NUDGE_MS, NUDGE_JITTER_MS, REFRESH_NUDGE_MS, WIDGET_POLL_MS, sessionSince, useWidgetData, widgetApiPath } from './useWidgetData';
 
 const ID = '76561198000000001';
 
@@ -22,10 +23,30 @@ async function flush() {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/** Stands in for the site's /ws hub: `say` delivers a broadcast by name. */
+class FakeSocket {
+  static all: FakeSocket[] = [];
+  onmessage: ((m: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  constructor(public url: string) { FakeSocket.all.push(this); }
+  close() { /* nothing to tear down */ }
+  say(event: string) { this.onmessage?.({ data: JSON.stringify({ event }) }); }
+}
+
+/** Broadcast to every open fake socket and let the timers settle. */
+async function broadcast(event: string) {
+  await act(async () => {
+    for (const s of FakeSocket.all) s.say(event);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
+  FakeSocket.all = [];
+  vi.stubGlobal('WebSocket', FakeSocket);
 });
 afterEach(() => {
   cleanup();
@@ -111,6 +132,130 @@ describe('useWidgetData', () => {
     await flush();
     unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(WIDGET_POLL_MS * 3); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useWidgetData broadcasts', () => {
+  const after = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    fetchMock.mockImplementation(async () => json(payload('Alice')));
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('waits out the live delay before fetching after a "live" broadcast', () => {
+    // Sooner and it asks before the new score is released, then shows it
+    // only on the next regular poll.
+    expect(LIVE_NUDGE_MS).toBeGreaterThan(DEFAULT_DELAY_MS);
+  });
+
+  it('listens on the site hub', async () => {
+    renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    expect(FakeSocket.all.map((s) => new URL(s.url).pathname)).toEqual(['/ws']);
+  });
+
+  it('fetches once the live delay has passed after a "live" broadcast', async () => {
+    renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    await broadcast('live');
+    await after(LIVE_NUDGE_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await after(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Then back on the regular timer from that fetch.
+    await after(WIDGET_POLL_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await after(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('fetches soon after a "refresh" broadcast', async () => {
+    renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    await broadcast('refresh');
+    await after(REFRESH_NUDGE_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await after(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('spreads the fetch by up to the jitter', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    await broadcast('refresh');
+    await after(REFRESH_NUDGE_MS + NUDGE_JITTER_MS / 2 - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await after(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores other broadcasts', async () => {
+    renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    await broadcast('server_chat');
+    await after(WIDGET_POLL_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('never pushes a sooner poll later', async () => {
+    renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    // The regular poll is due in 5 s; a "live" nudge would be later.
+    await after(WIDGET_POLL_MS - 5000);
+    await broadcast('live');
+    await after(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a nudge that arrives while a fetch is in flight', async () => {
+    let release: (r: Response) => void = () => {};
+    fetchMock
+      .mockResolvedValueOnce(json(payload('Alice')))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { release = r; }))
+      .mockImplementation(async () => json(payload('Bob')));
+    const { result } = renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    await after(WIDGET_POLL_MS); // second fetch starts and hangs
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await broadcast('refresh');
+    await act(async () => { release(json(payload('Alice'))); await vi.advanceTimersByTimeAsync(0); });
+    await after(REFRESH_NUDGE_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current).toEqual({ kind: 'ok', data: payload('Bob') });
+  });
+
+  it('keeps polling when a nudge comes due during a slow fetch', async () => {
+    let release: (r: Response) => void = () => {};
+    fetchMock
+      .mockResolvedValueOnce(json(payload('Alice')))
+      .mockImplementationOnce(() => new Promise<Response>((r) => { release = r; }))
+      .mockImplementation(async () => json(payload('Bob')));
+    const { result } = renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    await after(WIDGET_POLL_MS); // second fetch starts and hangs
+    await broadcast('refresh');
+    await after(REFRESH_NUDGE_MS); // the nudge comes due while it hangs
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => { release(json(payload('Alice'))); await vi.advanceTimersByTimeAsync(0); });
+    // The missed nudge runs straight after, then the regular chain carries on.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current).toEqual({ kind: 'ok', data: payload('Bob') });
+    await after(WIDGET_POLL_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('closes its socket on unmount', async () => {
+    const { unmount } = renderHook(() => useWidgetData(ID, { since: null }));
+    await flush();
+    const close = vi.spyOn(FakeSocket.all[0], 'close');
+    unmount();
+    expect(close).toHaveBeenCalled();
+    await broadcast('live');
+    await after(LIVE_NUDGE_MS + NUDGE_JITTER_MS);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
