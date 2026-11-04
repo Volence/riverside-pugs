@@ -1554,8 +1554,9 @@ CREATE TABLE IF NOT EXISTS skeet_streak_scans (
 
 -- Four-slot campaign ballots (src/ballot.ts), one row per lobby that drew
 -- one, for the owner to review. options_json: [{slug, slot, weight, base,
--- since, bump}] in ballot order; votes_json: {slug: votes} at the tally.
--- winner and match_id stay null for a pop that never finished its vote.
+-- bump, lastPlayedBy, ignoredBy}] in ballot order; votes_json: {slug:
+-- votes} at the tally; players_json: the lobby's steamids. winner and
+-- match_id stay null for a pop that never finished its vote.
 CREATE TABLE IF NOT EXISTS ballots (
   id           INTEGER PRIMARY KEY,
   lobby_id     TEXT NOT NULL UNIQUE,
@@ -1563,7 +1564,8 @@ CREATE TABLE IF NOT EXISTS ballots (
   options_json TEXT NOT NULL,
   votes_json   TEXT,
   winner       TEXT,
-  match_id     INTEGER REFERENCES matches(id)
+  match_id     INTEGER REFERENCES matches(id),
+  players_json TEXT
 );
 
 -- The lost-vote bump: extra ballot weight for a campaign that drew two or
@@ -3171,6 +3173,15 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'duo_pop_skips', 'held_ms', 'INTEGER');
   ensureColumn(db, 'match_players', 'duo_partner', 'TEXT');
   ensureColumn(db, 'match_players', 'duo_bonus', 'REAL');
+  // Who was in the lobby a ballot was drawn for (src/ballot.ts weighs the
+  // draw by each player's history). Ballots from before it get their
+  // match's players, which for a queue match are the lobby.
+  if (!(db.prepare('PRAGMA table_info(ballots)').all() as { name: string }[]).some((c) => c.name === 'players_json')) {
+    db.exec('ALTER TABLE ballots ADD COLUMN players_json TEXT');
+    db.exec(`UPDATE ballots SET players_json = (
+      SELECT json_group_array(player_id) FROM match_players WHERE match_id = ballots.match_id
+    ) WHERE match_id IS NOT NULL`);
+  }
   db.exec(`
     -- Stat-aware team balance (src/statBalance.ts): one row per queue match at
     -- team creation, whether balance_stats_enabled was on or not. Teams are

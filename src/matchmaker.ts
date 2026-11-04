@@ -764,7 +764,7 @@ export class Matchmaker {
       // back to the whole pool rather than stop a pop.
       if (ballotMode(this.db) === 'slots') {
         try {
-          opts.mapPool = createBallot(this.db, id, opts.mapPool, this.deps.rng ?? Math.random);
+          opts.mapPool = createBallot(this.db, id, opts.mapPool, players, this.deps.rng ?? Math.random);
         } catch (err) {
           console.error(`[matchmaker] could not draw a ballot for ${id}, offering the whole pool:`, err);
         }
