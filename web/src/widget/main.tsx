@@ -1,6 +1,7 @@
 import { render } from 'preact';
 import { useEffect } from 'preact/hooks';
 import { SEASON_THEMES, type SeasonThemeId } from '../api';
+import { setCampaignNames } from '../format';
 import { applySeasonTheme } from '../seasonTheme';
 import { parseWidgetUrl, type WidgetParams } from './params';
 import { Widget } from './Widgets';
@@ -36,4 +37,12 @@ function App({ params }: { params: WidgetParams }) {
   return <Widget params={params} data={state.data} />;
 }
 
-if (params) render(<App params={params} />, document.getElementById('widget')!);
+if (params) {
+  // Display names for custom campaigns, as the site registers them (as the
+  // caster overlay does). Not awaited: a slug is an acceptable fallback until
+  // the next poll redraws.
+  fetch('/api/campaigns/names').then((r) => (r.ok ? r.json() : null)).then((r: { names?: Record<string, string> } | null) => {
+    if (r?.names) setCampaignNames(r.names);
+  }).catch(() => { /* slugs it is */ });
+  render(<App params={params} />, document.getElementById('widget')!);
+}
