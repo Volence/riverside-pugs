@@ -28,7 +28,7 @@ describe('NewsPoster', () => {
     publishNews(db, a.id);
     poster.start();
     await poster.idle();
-    expect(t.live().map((m) => m.payload.embeds[0].title)).toEqual(['A']);
+    expect(t.live().map((m) => m.payload.content!.split('\n')[0])).toEqual(['# A']);
 
     deleteNews(db, a.id);
     expect(state(a.id)).toMatchObject({ discord_state: 'remove' });
@@ -73,24 +73,36 @@ describe('NewsPoster', () => {
     publishNews(db, a.id);
     updateNews(db, a.id, { kind: 'news', title: 'A2', body: 'a' });
     await poster.sync(a.id);
-    expect(t.live().map((m) => m.payload.embeds[0].title)).toEqual(['A2']);
+    expect(t.live().map((m) => m.payload.content!.split('\n')[0])).toEqual(['# A2']);
     expect(t.sends).toBe(1);
   });
 });
 
 describe('the news card', () => {
-  it('labels patch notes, links the post, and pings nobody', () => {
+  it('posts a plain message with the title as a heading, links the post, and pings nobody', () => {
     const p = newsPayload({ id: 7, kind: 'patch', title: 'Patch notes Oct 21', body: '## Fixes\n- one' }, 'https://pug.test');
-    expect(p.embeds[0]).toMatchObject({ title: 'Patch notes Oct 21', url: 'https://pug.test/news/7', footer: 'Patch notes', description: '**Fixes**\n- one' });
+    expect(p.content).toBe('# Patch notes Oct 21\n-# Patch notes\n\n## Fixes\n- one');
+    expect(p.embeds).toEqual([]);
     expect(p.components[0][0]).toEqual({ kind: 'link', url: 'https://pug.test/news/7', label: 'Read on the site' });
     expect(p.mentionUserIds).toEqual([]);
     expect(p.mentionRoleIds).toEqual([]);
-    expect(p.content).toBeUndefined();
-    expect(newsPayload({ id: 1, kind: 'news', title: 'x', body: '' }, 'https://pug.test').embeds[0].footer).toBe('News');
+    expect(newsPayload({ id: 1, kind: 'news', title: 'x', body: '' }, 'https://pug.test').content).toBe('# x\n-# News');
+  });
+
+  it('fits a long post in one Discord message', () => {
+    const body = Array.from({ length: 400 }, (_, i) => `- line ${i}`).join('\n');
+    const p = newsPayload({ id: 1, kind: 'news', title: 'T'.repeat(120), body }, 'https://pug.test');
+    expect(p.content!.length).toBeLessThanOrEqual(2000);
+    expect(p.content!.endsWith('*Read the rest on the site.*')).toBe(true);
+  });
+
+  it('wraps link targets so Discord shows no preview', () => {
+    expect(discordBody('from https://a.com/x#pack. Then [here](https://b.com) and <https://c.com>'))
+      .toBe('from <https://a.com/x#pack>. Then [here](<https://b.com/>) and <https://c.com>');
   });
 
   it('drops links that are not http or https and keeps their text', () => {
-    expect(discordBody('[ok](https://a.com/x) [bad](javascript:void) [ftp](ftp://x)')).toBe('[ok](https://a.com/x) bad ftp');
+    expect(discordBody('[ok](https://a.com/x) [bad](javascript:void) [ftp](ftp://x)')).toBe('[ok](<https://a.com/x>) bad ftp');
     expect(discordBody('[bad](javascript:alert(1))')).not.toContain('javascript');
   });
 

@@ -141,13 +141,14 @@ describe('news routes: Discord', () => {
     expect(pub.channelSet).toBe(true);
     const [msg] = t.live();
     expect(msg.channelId).toBe(CHANNEL);
-    expect(msg.payload.embeds[0]).toMatchObject({ title: 'Patch notes Oct 21', url: `https://pug.test/news/${id}`, footer: 'Patch notes' });
+    expect(msg.payload.content).toMatch(/^# Patch notes Oct 21\n-# Patch notes\n/);
+    expect(msg.payload.components[0][0]).toMatchObject({ url: `https://pug.test/news/${id}` });
     expect(row(id)).toMatchObject({ discord_message_id: msg.id, discord_channel_id: CHANNEL, discord_state: null });
 
     const ed = await call('POST', `/api/admin/news/${id}`, ADMIN, { kind: 'patch', title: 'Patch notes Oct 21', body: '- Uzi back to 20 damage\n- Tank punch fix' });
     expect(ed.json().post.discord).toBe('posted');
     expect(t.live()).toHaveLength(1);
-    expect(t.live()[0].payload.embeds[0].description).toContain('Tank punch fix');
+    expect(t.live()[0].payload.content).toContain('Tank punch fix');
 
     const un = (await call('POST', `/api/admin/news/${id}/unpublish`, ADMIN)).json();
     expect(un.post.discord).toBe('none');
