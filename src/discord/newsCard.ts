@@ -1,13 +1,14 @@
 import type { NewsKind } from '../news.js';
 import type { MessagePayload } from './transport.js';
 
-/** How much of the body the embed carries. Discord allows 4096 in a
- *  description; a news post in a channel reads better short, with the rest a
- *  click away. */
-export const NEWS_EMBED_BODY_MAX = 1500;
+/** Discord's limit on a bot message's content. The post goes up as a plain
+ *  message rather than an embed: an embed is a narrow card that shows
+ *  headings as bold lines, a message gets the full width and real headings,
+ *  the same as a post staff write in the channel by hand. */
+export const NEWS_MESSAGE_MAX = 2000;
 
-const COLOR: Record<NewsKind, number> = { news: 0xc8102e, patch: 0x2bb3a3 };
 const LABEL: Record<NewsKind, string> = { news: 'News', patch: 'Patch notes' };
+const MORE = '*Read the rest on the site.*';
 
 /** http and https links only, as on the site. */
 function safeHref(raw: string): string | null {
@@ -22,44 +23,40 @@ function safeHref(raw: string): string | null {
 }
 
 /**
- * The body as Discord markdown: the site's subset is nearly Discord's own, so
- * this only turns headings into bold lines (an embed shows # literally on
- * some clients) and drops any link whose target is not http or https, keeping
- * its text. Mentions cannot ping from an embed, and the payload allows none.
- * Cut at a line break near `max` with a pointer to the rest on the site.
+ * The body as Discord markdown: the site's subset is nearly Discord's own,
+ * headings included, so this only drops any link whose target is not http or
+ * https, keeping its text, and puts every link target in <> so Discord shows
+ * no preview card under the post. Mentions cannot ping: the payload allows
+ * none. Cut at a line break near `max` with a pointer to the rest on the site.
  */
-export function discordBody(body: string, max = NEWS_EMBED_BODY_MAX): string {
-  const lines = body.replace(/\r\n?/g, '\n').split('\n').map((line) => {
-    const h = /^\s*#{1,3}\s+(.+)$/.exec(line);
-    const text = h ? `**${h[1]!.trim()}**` : line;
-    return text.replace(/\[([^\]\n]*)\]\(([^)\s]*)\)/g, (all, label: string, href: string) => {
-      const ok = safeHref(href);
-      return ok ? `[${label}](${ok})` : label;
-    });
-  });
+export function discordBody(body: string, max = NEWS_MESSAGE_MAX): string {
+  const lines = body.replace(/\r\n?/g, '\n').split('\n').map((line) =>
+    line
+      .replace(/\[([^\]\n]*)\]\(([^)\s]*)\)/g, (all, label: string, href: string) => {
+        const ok = safeHref(href);
+        return ok ? `[${label}](<${ok}>)` : label;
+      })
+      .replace(/(?<![(<\w])https?:\/\/[^\s<>]*[^\s<>.,;:!?)]/gi, '<$&>'));
   const out = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   if (out.length <= max) return out;
-  const room = max - 40;
+  const room = max - MORE.length - 2;
   const cut = out.slice(0, room);
   const at = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf(' '));
-  return `${(at > room / 2 ? cut.slice(0, at) : cut).trimEnd()}\n\n*Read the rest on the site.*`;
+  return `${(at > room / 2 ? cut.slice(0, at) : cut).trimEnd()}\n\n${MORE}`;
 }
 
-/** The news channel's message for one post: an embed titled and linked to
- *  the post on the site, the trimmed body, the kind as the footer, and a
- *  link button. No content line and no mentions. */
+/** The news channel's message for one post: the title as a heading, the kind
+ *  in small text under it, the body trimmed to fit, and a link button to the
+ *  post on the site. No embed and no mentions. */
 export function newsPayload(
   post: { id: number; kind: NewsKind; title: string; body: string }, publicUrl: string,
 ): MessagePayload {
   const url = `${publicUrl}/news/${post.id}`;
+  const head = `# ${post.title.replace(/\s+/g, ' ').trim()}\n-# ${LABEL[post.kind]}`;
+  const body = discordBody(post.body, NEWS_MESSAGE_MAX - head.length - 2);
   return {
-    embeds: [{
-      title: post.title.slice(0, 256),
-      url,
-      description: discordBody(post.body) || undefined,
-      color: COLOR[post.kind],
-      footer: LABEL[post.kind],
-    }],
+    content: body ? `${head}\n\n${body}` : head,
+    embeds: [],
     components: [[{ kind: 'link', url, label: 'Read on the site' }]],
     mentionUserIds: [],
     mentionRoleIds: [],
