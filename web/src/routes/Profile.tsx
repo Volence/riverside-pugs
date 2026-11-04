@@ -27,6 +27,7 @@ import type { PastSeason, ProfileScopeInfo, ProfileScopeRequest, WrappedSeason }
 import { loadWrappedSeasons } from '../wrapped';
 import { withNetDamageAsSi } from '../../../src/siDamage';
 import { ProfileWeekly } from '../components/ProfileWeekly';
+import { StreamWidgets } from './StreamWidgets';
 
 /** Maps with fewer games than this fold away on the by-map bars: a 0W 2L map says little. */
 const MAP_MIN_SAMPLE = 5;
@@ -241,6 +242,7 @@ export function Profile(
           </Panel>
         )}
         {session?.kind === 'active' && session.me.steamid === steamid && <MyReports />}
+        {session?.kind === 'active' && session.me.steamid === steamid && <StreamWidgets steamid={steamid} />}
 
         {empty && (
           <Panel class="profile-empty">

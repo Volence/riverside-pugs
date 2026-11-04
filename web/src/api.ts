@@ -7,6 +7,8 @@ import type { DemoSync } from './replay/demoTick';
 import type { DrillSpec } from '../../src/drillSpec';
 import type { OverlayFeed, StudioState } from '../../src/cast/types';
 import type { VetoConfig } from '../../src/events/vetoConfig';
+import type { WidgetPayload } from '../../src/widgetTypes';
+import { widgetApiPath } from './widget/useWidgetData';
 
 export type Team = 'a' | 'b';
 export type Winner = Team | 'draw';
@@ -3696,6 +3698,9 @@ export const api = {
     get<{ pending: PendingEndorsement[] }>('/api/endorse/pending', signal),
   profile: (steamid: string, signal?: AbortSignal, scope?: ProfileScopeRequest) =>
     get<Profile>(`/api/players/${encodeURIComponent(steamid)}${scope === undefined ? '' : `?season=${scope}`}`, signal),
+  /** A stream widget's data (the profile preview); the URL is the widget page's own. */
+  widget: (steamid: string, since: number | null, signal?: AbortSignal) =>
+    get<WidgetPayload>(widgetApiPath(steamid, since), signal),
 
   register: (code: string) => post('/api/register', { code }),
   /** Whose Discord a link code is for. Reads, never spends. */

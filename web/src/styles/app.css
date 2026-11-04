@@ -2992,6 +2992,26 @@ tbody tr.is-lifted td { opacity: 0.55; }
 .socialchip--twitch { border-color: color-mix(in srgb, var(--rating) 45%, var(--border)); }
 .socialchip--twitch .socialchip__label { color: var(--rating); }
 
+/* ---- Stream widgets (own profile; the panels are web/src/widget/widget.css) ---- */
+
+.swidgets { display: grid; gap: var(--sp-3); }
+.swidgets > * { margin: 0; }
+.swidgets__picks { display: grid; gap: var(--sp-2); }
+.swidgets__pick { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); align-items: center; gap: var(--sp-3); }
+.swidgets__chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.swidgets__chips .chip { min-height: 30px; padding-inline: var(--sp-2); }
+.swidgets__preview { border: 1px solid var(--border); }
+.swidgets__msg { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: var(--sp-4); text-align: center; }
+.swidgets__under { display: flex; flex-wrap: wrap; gap: var(--sp-3); font-size: var(--fs-dense); }
+.swidgets__link { display: flex; gap: var(--sp-2); }
+.swidgets__link .field__input { flex: 1; min-width: 0; font-family: var(--font-mono, monospace); font-size: var(--fs-dense); }
+.swidgets__size { font-family: var(--font-label); font-size: var(--fs-dense); letter-spacing: 0.04em; }
+.swidgets__help { font-size: var(--fs-dense); }
+@media (max-width: 640px) {
+  .swidgets__pick { grid-template-columns: 1fr; gap: var(--sp-1); }
+  .swidgets__chips .chip { min-height: 44px; }
+}
+
 /* ---- Profile editor ---- */
 
 .profileedit { margin-top: var(--sp-3); }

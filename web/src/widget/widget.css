@@ -31,6 +31,9 @@
   background: radial-gradient(ellipse at 60% 40%, #4a5a4a 0%, #262c26 45%, #121411 100%);
 }
 .w-game .w-root { position: absolute; }
+/* The profile preview shrinks a panel wider than its box (--wfit, set by
+ * StreamWidgets); the OBS page never sets it. */
+.w-game .w-root { --w-base: calc(16px * var(--wsize, 1) * var(--wfit, 1)); }
 .w-game .w-style-card .w-panel { margin: 0.75em; }
 .w-game .w-style-corner .w-panel { margin: 0.75em; }
 
@@ -78,8 +81,10 @@
 .w-total.is-leading { font-weight: 700; }
 .w-lead { color: var(--text-bright); font-size: 0.6em; margin-right: 0.3em; vertical-align: 0.25em; }
 .w-cell.is-won { font-weight: 700; }
-.is-up { color: var(--win); }
-.is-down { color: var(--loss); }
+/* Scoped: the site also uses is-up / is-down, and the profile preview
+ * brings this file into the site's CSS. */
+.w-root .is-up { color: var(--win); }
+.w-root .is-down { color: var(--loss); }
 .w-result { font-family: var(--font-label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 .w-result.is-win { color: var(--win); }
 .w-result.is-loss { color: var(--loss); }
