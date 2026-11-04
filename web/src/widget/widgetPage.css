@@ -1,0 +1,5 @@
+/* The stream widget page itself: an OBS browser source over the streamer's
+ * scene, so the page stays transparent and only the widget panel paints. */
+@import '../styles/tokens.css';
+
+html, body { margin: 0; background: transparent; overflow: hidden; }
