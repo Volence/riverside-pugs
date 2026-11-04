@@ -3,7 +3,7 @@ import { openDb, type DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { createNews, deleteNews, plainExcerpt, publishNews, unpublishNews, updateNews } from '../src/news.js';
 import { NewsPoster } from '../src/discord/newsPoster.js';
-import { discordBody, newsPayload } from '../src/discord/newsCard.js';
+import { discordBody, newsPayloads, splitMessages } from '../src/discord/newsCard.js';
 import { FakeTransport } from './fakes/fakeTransport.js';
 
 const ADMIN = '76561199000000830';
@@ -78,22 +78,99 @@ describe('NewsPoster', () => {
   });
 });
 
-describe('the news card', () => {
-  it('posts a plain message with the title as a heading, links the post, and pings nobody', () => {
-    const p = newsPayload({ id: 7, kind: 'patch', title: 'Patch notes Oct 21', body: '## Fixes\n- one' }, 'https://pug.test');
-    expect(p.content).toBe('# Patch notes Oct 21\n-# Patch notes\n\n## Fixes\n- one');
-    expect(p.embeds).toEqual([]);
-    expect(p.components[0][0]).toEqual({ kind: 'link', url: 'https://pug.test/news/7', label: 'Read on the site' });
-    expect(p.mentionUserIds).toEqual([]);
-    expect(p.mentionRoleIds).toEqual([]);
-    expect(newsPayload({ id: 1, kind: 'news', title: 'x', body: '' }, 'https://pug.test').content).toBe('# x\n-# News');
+describe('NewsPoster with a split post', () => {
+  const long = (n: number) => Array.from({ length: n }, (_, i) => `- line ${i} of the long post`).join('\n');
+  const ids = (id: number) => db.prepare('SELECT discord_message_id, discord_extra_ids FROM news_posts WHERE id = ?').get(id) as { discord_message_id: string; discord_extra_ids: string | null };
+
+  it('sends every part in order, edits them in place, and takes them all down', async () => {
+    setSetting(db, 'discord_news_channel_id', CHANNEL);
+    const a = createNews(db, ADMIN, { kind: 'news', title: 'A', body: long(150) });
+    publishNews(db, a.id);
+    await poster.sync(a.id);
+    const n = t.live().length;
+    expect(n).toBeGreaterThan(1);
+    expect(JSON.parse(ids(a.id).discord_extra_ids!)).toHaveLength(n - 1);
+    const sends = t.sends;
+
+    updateNews(db, a.id, { kind: 'news', title: 'A2', body: long(150) });
+    await poster.sync(a.id);
+    expect(t.sends).toBe(sends);
+    expect(t.live()[0]!.payload.content!.startsWith('# A2')).toBe(true);
+
+    updateNews(db, a.id, { kind: 'news', title: 'A3', body: 'short now' });
+    await poster.sync(a.id);
+    expect(t.sends).toBe(sends);
+    expect(t.live()).toHaveLength(1);
+    expect(ids(a.id).discord_extra_ids).toBeNull();
+
+    updateNews(db, a.id, { kind: 'news', title: 'A4', body: long(150) });
+    await poster.sync(a.id);
+    expect(t.live()).toHaveLength(n);
+    expect(t.live()[0]!.payload.content!.startsWith('# A4')).toBe(true);
+
+    deleteNews(db, a.id);
+    await poster.sync(a.id);
+    expect(t.live()).toHaveLength(0);
   });
 
-  it('fits a long post in one Discord message', () => {
-    const body = Array.from({ length: 400 }, (_, i) => `- line ${i}`).join('\n');
-    const p = newsPayload({ id: 1, kind: 'news', title: 'T'.repeat(120), body }, 'https://pug.test');
-    expect(p.content!.length).toBeLessThanOrEqual(2000);
-    expect(p.content!.endsWith('*Read the rest on the site.*')).toBe(true);
+  it('takes down the parts already sent when a later one fails, and sends it whole next pass', async () => {
+    setSetting(db, 'discord_news_channel_id', CHANNEL);
+    const a = createNews(db, ADMIN, { kind: 'news', title: 'A', body: long(150) });
+    publishNews(db, a.id);
+    const realSend = t.send.bind(t);
+    let calls = 0;
+    t.send = async (c, p) => { if (++calls === 2) throw new Error('discord down'); return realSend(c, p); };
+    await poster.sync(a.id);
+    expect(t.live()).toHaveLength(0);
+    expect(state(a.id)).toMatchObject({ discord_state: 'pending' });
+    t.send = realSend;
+    await poster.sync();
+    expect(t.live().length).toBeGreaterThan(1);
+    expect(state(a.id)).toMatchObject({ discord_state: null });
+  });
+});
+
+describe('the news card', () => {
+  it('posts a plain message with the title as a heading, links the post, and pings nobody', () => {
+    const [p, more] = newsPayloads({ id: 7, kind: 'patch', title: 'Patch notes Oct 21', body: '## Fixes\n- one' }, 'https://pug.test');
+    expect(more).toBeUndefined();
+    expect(p!.content).toBe('# Patch notes Oct 21\n-# Patch notes\n\n## Fixes\n- one');
+    expect(p!.embeds).toEqual([]);
+    expect(p!.components[0]![0]).toEqual({ kind: 'link', url: 'https://pug.test/news/7', label: 'Read on the site' });
+    expect(p!.mentionUserIds).toEqual([]);
+    expect(p!.mentionRoleIds).toEqual([]);
+    expect(newsPayloads({ id: 1, kind: 'news', title: 'x', body: '' }, 'https://pug.test')[0]!.content).toBe('# x\n-# News');
+  });
+
+  it('splits a long post over several messages, a section at a time, with the button on the last', () => {
+    const section = (n: number) => `## Part ${n}\n${Array.from({ length: 40 }, (_, i) => `- point ${n}.${i}`).join('\n')}`;
+    const body = [1, 2, 3, 4].map(section).join('\n\n');
+    const ps = newsPayloads({ id: 1, kind: 'news', title: 'Season', body }, 'https://pug.test');
+    expect(ps.length).toBeGreaterThan(1);
+    for (const p of ps) expect(p.content!.length).toBeLessThanOrEqual(2000);
+    expect(ps.slice(1).every((p) => p.content!.startsWith('## Part'))).toBe(true);
+    expect(ps.map((p) => p.components.length)).toEqual([...ps.slice(1).map(() => 0), 1]);
+    expect(ps.map((p) => p.content).join('\n\n')).toBe(`# Season\n-# News\n\n${body}`);
+  });
+
+  it('stops at five messages and points to the site', () => {
+    const body = Array.from({ length: 2000 }, (_, i) => `- line ${i}`).join('\n');
+    const ps = newsPayloads({ id: 1, kind: 'news', title: 'T', body }, 'https://pug.test');
+    expect(ps).toHaveLength(5);
+    expect(ps[4]!.content!.length).toBeLessThanOrEqual(2000);
+    expect(ps[4]!.content!.endsWith('*Read the rest on the site.*')).toBe(true);
+  });
+
+  it('keeps headings with nothing between them in the same message', () => {
+    const text = `${'a '.repeat(700)}\n\n## Other updates\n\n## Finales\n\n${'b '.repeat(400)}`;
+    const [first, second] = splitMessages(text);
+    expect(first!.endsWith('a')).toBe(true);
+    expect(second!.startsWith('## Other updates\n\n## Finales')).toBe(true);
+  });
+
+  it('splitMessages never loses text and cuts a run with no break at the limit', () => {
+    const run = 'x'.repeat(4500);
+    expect(splitMessages(run).map((p) => p.length)).toEqual([2000, 2000, 500]);
   });
 
   it('wraps link targets so Discord shows no preview', () => {

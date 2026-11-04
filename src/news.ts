@@ -42,6 +42,9 @@ export interface NewsRow {
   updated_at: string;
   published_at: string | null;
   discord_message_id: string | null;
+  /** JSON array of the follow-up message ids when the post is split over
+   *  several messages, after discord_message_id. */
+  discord_extra_ids: string | null;
   discord_channel_id: string | null;
   discord_state: DiscordState | null;
   discord_error: string | null;
