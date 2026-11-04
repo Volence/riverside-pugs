@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/preact';
 import { Widget } from './Widgets';
+import { setCampaignNames } from '../format';
 import { STYLES_FOR, type WidgetParams, type WidgetStyle } from './params';
 import { WIDGET_KINDS, type WidgetKind, type WidgetPayload } from '../../../src/widgetTypes';
 
@@ -97,6 +98,19 @@ describe('live widget', () => {
     const board = render(<Widget params={params('live', 'board')} data={payload()} />);
     const heads = [...board.container.querySelectorAll('th')].map((th) => th.textContent);
     expect(heads).toEqual(['No Mercy', 'M1', 'M2', 'M3', 'M4', 'Total']);
+  });
+
+  it('a custom campaign shows its registered name, not its slug', () => {
+    setCampaignNames({ widget_test_custom: 'Widget Test Custom' });
+    const data = live({ campaign: 'widget_test_custom' });
+    for (const style of STYLES_FOR.live) {
+      const { container, unmount } = render(<Widget params={params('live', style)} data={data} />);
+      expect(container.textContent, style).not.toContain('widget_test_custom');
+      if (style !== 'bar') expect(container.textContent, style).toContain('Widget Test Custom');
+      unmount();
+    }
+    const card = render(<Widget params={params('live', 'card')} data={data} />);
+    expect(card.container.textContent).toContain('Widget Test Custom · map 3 of 4');
   });
 
   it('an unknown map count shows "map N" and no columns past the current map', () => {
