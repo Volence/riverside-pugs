@@ -8,6 +8,10 @@ interface Row { id: number; match_id: number | null; kind: string; detail: strin
 const MEANING: Record<string, string> = {
   cpu_level: 'low effect detail, which thins smoke, fire and the boomer cloud enough to see infected through. '
     + 'Some players set it for frame rate; the server settings check expects 1 or higher',
+  lerp: 'interpolation (in ms) above the server limit, which shows other players further in the past than everyone else sees them',
+  cl_cmdrate: 'fewer commands a second to the server than the limit allows',
+  cl_updaterate: 'fewer updates a second from the server than the limit allows',
+  rate: 'a bandwidth cap below the server limit',
 };
 
 function summaryOf(r: Row): string {
@@ -15,7 +19,9 @@ function summaryOf(r: Row): string {
   const meaning = MEANING[r.kind] ?? 'a setting outside the allowed range';
   switch (cvarActOf(r.detail)) {
     case 'held': return `Held in ready-up for ${r.kind} ${value}: ${meaning}.`;
-    case 'fixed': return `Changed ${r.kind} to ${value} after being held in ready-up.`;
+    case 'fixed': return r.kind === 'cpu_level'
+      ? `Changed ${r.kind} to ${value} after being held in ready-up.`
+      : `Fixed ${r.kind} (now ${value}) during live play.`;
     default: return `Played with ${r.kind} ${value}: ${meaning}.`;
   }
 }

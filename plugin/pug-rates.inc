@@ -42,7 +42,15 @@ ConVar g_cvRatesSvMinUpd;
 ConVar g_cvRatesSvMinRatio;
 ConVar g_cvRatesSvMaxRatio;
 
+// Net settings, as bits, for what a live-play report covers.
+#define RATES_LERP 1
+#define RATES_CMD  2
+#define RATES_UPD  4
+#define RATES_RATE 8
+#define RATES_CPU_TOLD 16   // Effect Detail Low, told in chat; l4d_cvarwatch files its own report
+
 float g_fRatesWarnedAt[MAXPLAYERS + 1];
+int g_iRatesLiveTold[MAXPLAYERS + 1];  // net settings reported failing during live play, not yet fixed
 bool g_bRatesHeld[MAXPLAYERS + 1];   // last lock tick found this client failing
 float g_fRatesCpu[MAXPLAYERS + 1] = {-1.0, ...};   // last cpu_level answer, -1 unknown
 int g_iRatesCpuUid[MAXPLAYERS + 1];  // userid that answer belongs to
@@ -136,6 +144,24 @@ bool RatesCpuLow(int client)
 	return g_fRatesCpu[client] >= 0.0 && g_fRatesCpu[client] < float(minCpu);
 }
 
+/** Which net settings fail the limits, as RATES_* bits. Effect Detail is
+ *  separate (RatesCpuLow). */
+int RatesFails(int client)
+{
+	int fails = 0;
+	float maxLerp = g_cvRatesMaxLerp.FloatValue;
+	// A thousandth of a millisecond of slack: the client stores cl_interp as a
+	// float, so "0.01" can read back as 0.0100000007.
+	if (maxLerp >= 0.0 && RatesLerp(client) > maxLerp + 0.000001) fails |= RATES_LERP;
+	int minCmd = g_cvRatesMinCmd.IntValue;
+	if (minCmd > 0 && RatesInfoInt(client, "cl_cmdrate") < minCmd) fails |= RATES_CMD;
+	int minUpd = g_cvRatesMinUpd.IntValue;
+	if (minUpd > 0 && RatesInfoInt(client, "cl_updaterate") < minUpd) fails |= RATES_UPD;
+	int minRate = g_cvRatesMinRate.IntValue;
+	if (minRate > 0 && RatesInfoInt(client, "rate") < minRate) fails |= RATES_RATE;
+	return fails;
+}
+
 /** Whether a client's settings pass. On failure `why` holds what to type, one
  *  console command per problem, ready to paste, and `cpuLow` says Effect
  *  Detail is too low (a menu setting, so it gets its own line). */
@@ -145,29 +171,11 @@ bool RatesOk(int client, char[] why, int maxlen, bool &cpuLow)
 	cpuLow = false;
 	if (!RatesEnforced() || IsFakeClient(client)) return true;
 	cpuLow = RatesCpuLow(client);
-
-	float maxLerp = g_cvRatesMaxLerp.FloatValue;
-	// A thousandth of a millisecond of slack: the client stores cl_interp as a
-	// float, so "0.01" can read back as 0.0100000007.
-	if (maxLerp >= 0.0 && RatesLerp(client) > maxLerp + 0.000001)
-	{
-		Format(why, maxlen, "%s cl_interp 0; cl_interp_ratio 0;", why);
-	}
-	int minCmd = g_cvRatesMinCmd.IntValue;
-	if (minCmd > 0 && RatesInfoInt(client, "cl_cmdrate") < minCmd)
-	{
-		Format(why, maxlen, "%s cl_cmdrate %d;", why, minCmd);
-	}
-	int minUpd = g_cvRatesMinUpd.IntValue;
-	if (minUpd > 0 && RatesInfoInt(client, "cl_updaterate") < minUpd)
-	{
-		Format(why, maxlen, "%s cl_updaterate %d;", why, minUpd);
-	}
-	int minRate = g_cvRatesMinRate.IntValue;
-	if (minRate > 0 && RatesInfoInt(client, "rate") < minRate)
-	{
-		Format(why, maxlen, "%s rate %d;", why, minRate);
-	}
+	int fails = RatesFails(client);
+	if (fails & RATES_LERP) Format(why, maxlen, "%s cl_interp 0; cl_interp_ratio 0;", why);
+	if (fails & RATES_CMD) Format(why, maxlen, "%s cl_cmdrate %d;", why, g_cvRatesMinCmd.IntValue);
+	if (fails & RATES_UPD) Format(why, maxlen, "%s cl_updaterate %d;", why, g_cvRatesMinUpd.IntValue);
+	if (fails & RATES_RATE) Format(why, maxlen, "%s rate %d;", why, g_cvRatesMinRate.IntValue);
 	return why[0] == '\0' && !cpuLow;
 }
 
@@ -199,6 +207,54 @@ void RatesWarn(int client, const char[] why, bool cpuLow, bool now_, bool playin
 	if (!playing) PrintHintText(client, "Held in spectator: game settings off.\nSee chat for what to change.");
 }
 
+/** One L4DV line per net setting in `bits`, with the client's current value
+ *  (lerp in ms), for the site's admin feed. Same line l4d_cvarwatch sends for
+ *  Effect Detail, which it already reports during live play itself. */
+void RatesReport(int client, int bits, const char[] act)
+{
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return;
+	if (bits & RATES_LERP) PugLog("L4DV id=%s cvar=lerp value=%.1f act=%s", id, RatesLerp(client) * 1000.0, act);
+	if (bits & RATES_CMD) PugLog("L4DV id=%s cvar=cl_cmdrate value=%d act=%s", id, RatesInfoInt(client, "cl_cmdrate"), act);
+	if (bits & RATES_UPD) PugLog("L4DV id=%s cvar=cl_updaterate value=%d act=%s", id, RatesInfoInt(client, "cl_updaterate"), act);
+	if (bits & RATES_RATE) PugLog("L4DV id=%s cvar=rate value=%d act=%s", id, RatesInfoInt(client, "rate"), act);
+}
+
+/** Append `item` to a comma-separated list. */
+void RatesListAdd(char[] list, int maxlen, const char[] item)
+{
+	if (list[0] != '\0') StrCat(list, maxlen, ", ");
+	StrCat(list, maxlen, item);
+}
+
+/** A player on a team during live play whose net settings just went out of
+ *  bounds: nothing moves them mid-round (owner 2026-11-04: notice first, act
+ *  only if reports show it is common), so everyone is told in chat and the
+ *  site's admin feed gets it. Once per spell; fixing it re-arms. */
+void RatesLiveNotice(int client, int fails, bool cpuLow)
+{
+	int now = fails | (cpuLow ? RATES_CPU_TOLD : 0);
+	int fresh = now & ~g_iRatesLiveTold[client];
+	if (fresh == 0) return;
+	bool first = g_iRatesLiveTold[client] == 0;
+	g_iRatesLiveTold[client] |= now;
+	RatesReport(client, fresh & ~RATES_CPU_TOLD, "live");
+	if (!first) return;
+	char what[96], item[32];
+	if (fails & RATES_LERP)
+	{
+		Format(item, sizeof(item), "lerp %.1f ms (max %.1f)", RatesLerp(client) * 1000.0, g_cvRatesMaxLerp.FloatValue * 1000.0);
+		RatesListAdd(what, sizeof(what), item);
+	}
+	if (fails & RATES_CMD) { Format(item, sizeof(item), "cl_cmdrate %d", RatesInfoInt(client, "cl_cmdrate")); RatesListAdd(what, sizeof(what), item); }
+	if (fails & RATES_UPD) { Format(item, sizeof(item), "cl_updaterate %d", RatesInfoInt(client, "cl_updaterate")); RatesListAdd(what, sizeof(what), item); }
+	if (fails & RATES_RATE) { Format(item, sizeof(item), "rate %d", RatesInfoInt(client, "rate")); RatesListAdd(what, sizeof(what), item); }
+	if (cpuLow) RatesListAdd(what, sizeof(what), "Effect Detail Low");
+	char name[MAX_NAME_LENGTH];
+	GetClientName(client, name, sizeof(name));
+	PrintToChatAll("\x04[PUG]\x01 %s changed their game settings during live play (%s). Staff have been told; they will be held in spectator at the next ready-up unless they fix it.", name, what);
+}
+
 /** Called by Timer_TeamLock for each rostered client, before it places them.
  *  True means leave this client alone this tick. */
 bool RatesHold(int client, int have)
@@ -209,6 +265,11 @@ bool RatesHold(int client, int have)
 	bool cpuLow;
 	if (RatesOk(client, why, sizeof(why), cpuLow))
 	{
+		if (g_iRatesLiveTold[client] & ~RATES_CPU_TOLD)
+		{
+			RatesReport(client, g_iRatesLiveTold[client] & ~RATES_CPU_TOLD, "fixed");
+		}
+		g_iRatesLiveTold[client] = 0;
 		if (g_bRatesHeld[client])
 		{
 			g_bRatesHeld[client] = false;
@@ -232,6 +293,7 @@ bool RatesHold(int client, int have)
 		moved = true;
 	}
 	bool playing = onTeam && !moved;
+	if (playing && g_State == MS_Live) RatesLiveNotice(client, RatesFails(client), cpuLow);
 	if ((first && !playing) || moved)
 	{
 		char name[MAX_NAME_LENGTH];
@@ -250,6 +312,7 @@ void RatesClientReset(int client)
 {
 	g_fRatesWarnedAt[client] = 0.0;
 	g_bRatesHeld[client] = false;
+	g_iRatesLiveTold[client] = 0;
 	g_fRatesCpu[client] = -1.0;
 	g_iRatesCpuUid[client] = 0;
 }
