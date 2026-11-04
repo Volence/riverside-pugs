@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks';
 import { SEASON_THEMES, type SeasonThemeId } from '../api';
 import { applySeasonTheme } from '../seasonTheme';
 import { parseWidgetUrl, type WidgetParams } from './params';
+import { Widget } from './Widgets';
 import { sessionSince, useWidgetData } from './useWidgetData';
 import './widgetPage.css';
 
@@ -20,14 +21,19 @@ const since = params ? sessionSince(params.steamid, Date.now(), new URLSearchPar
 const knownTheme = (t: string | null): SeasonThemeId | null =>
   SEASON_THEMES.some((s) => s.id === t) ? t as SeasonThemeId : null;
 
+/** ?theme=<look> or ?theme=standard tries a look on this one load (not kept,
+ *  so a browser source on air never sticks to a preview). */
+const asked = new URLSearchParams(location.search).get('theme');
+const themeOverride: SeasonThemeId | null | undefined =
+  asked === 'standard' ? null : knownTheme(asked) ?? undefined;
+
 function App({ params }: { params: WidgetParams }) {
   const state = useWidgetData(params.steamid, { since });
-  const theme = state.kind === 'ok' ? knownTheme(state.data.theme) : undefined;
+  const theme = state.kind === 'ok' ? (themeOverride !== undefined ? themeOverride : knownTheme(state.data.theme)) : undefined;
   // The season's look swaps the tokens on <html> (tokens.css [data-season]).
   useEffect(() => { if (theme !== undefined) applySeasonTheme(theme); }, [theme]);
   if (state.kind !== 'ok') return null;
-  // The renderers arrive with Task 4: <Widget params={params} data={state.data} />.
-  return null;
+  return <Widget params={params} data={state.data} />;
 }
 
 if (params) render(<App params={params} />, document.getElementById('widget')!);

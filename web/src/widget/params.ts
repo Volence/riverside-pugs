@@ -29,12 +29,15 @@ export const DEFAULT_STYLE: Record<WidgetKind, WidgetStyle> = {
 };
 
 /** Browser source width x height to suggest in OBS. Medium is the base;
- *  small and large scale it by the --wsize factors (0.8, 1.3). */
+ *  small and large scale it by the --wsize factors (0.8, 1.3). Measured from
+ *  the renderers (widget.css) at medium with a 26-character name, a five-map
+ *  campaign and the Final tag: bar 950 x 38, card 327 x 212, corner 291 x 84,
+ *  board 547 x 112, plus some room. The panel scales exactly with --wsize. */
 const BASE_PX: Record<WidgetStyle, [number, number]> = {
-  bar: [900, 64],
-  card: [420, 260],
-  corner: [320, 110],
-  board: [760, 160],
+  bar: [1000, 48],
+  card: [360, 240],
+  corner: [320, 100],
+  board: [640, 130],
 };
 const SCALE: Record<WidgetSize, number> = { s: 0.8, m: 1, l: 1.3 };
 const scaled = (style: WidgetStyle) => Object.fromEntries(
