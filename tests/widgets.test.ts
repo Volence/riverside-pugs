@@ -166,8 +166,16 @@ describe('GET /api/widget/:steamid', () => {
     const at = (tz: number) => widgetData(db, P1, { tzOffsetMin: tz, since: null, now })!.rating!.todayDelta;
     expect(at(9999)).toBe(at(0));
     expect(at(Number.NaN)).toBe(at(0));
-    expect(widgetData(db, P1, { tzOffsetMin: 0, since: now + 1000, now })!.session).toBeNull();
+    expect(widgetData(db, P1, { tzOffsetMin: 0, since: now + 10 * 60_000 + 1, now })!.session).toBeNull();
     expect(widgetData(db, P1, { tzOffsetMin: 0, since: Number.NaN, now })!.session).toBeNull();
+  });
+
+  it('a since slightly ahead of the server clock (OBS clock skew) clamps to now; far ahead stays rejected', () => {
+    const now = Date.parse('2026-11-04T03:00:00Z');
+    seedRated('2026-11-04 01:30:00', 25, 26);
+    const skewed = widgetData(db, P1, { tzOffsetMin: 0, since: now + 60_000, now })!.session;
+    expect(skewed).toEqual({ since: now, srDelta: 0, wins: 0, losses: 0 });
+    expect(widgetData(db, P1, { tzOffsetMin: 0, since: now + 3_600_000, now })!.session).toBeNull();
   });
 });
 

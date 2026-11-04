@@ -42,7 +42,7 @@ function panelFor(p: WidgetParams, d: WidgetPayload): JSX.Element | null {
   switch (p.kind) {
     case 'live':
       if (d.live) return <LivePanel style={p.style} live={d.live} name={d.player.name} />;
-      return p.idle === 'note' ? <Note style={p.style} text="Not in a match" /> : null;
+      return p.idle === 'note' ? <Note style={p.style} text="No public match" /> : null;
     case 'rating':
       return d.rating ? <RatingPanel style={p.style} r={d.rating} /> : null;
     case 'session':
@@ -80,6 +80,8 @@ interface MapCol {
   mine: string | null;
   theirs: string | null;
   winner: Side | 'tie' | null;
+  /** The current map's first-half score once that half has ended, else null. */
+  half: string | null;
 }
 
 /** The maps to draw. Ordinals are 0-based (labels add one). With an unknown
@@ -87,7 +89,7 @@ interface MapCol {
 function mapColumns(l: WidgetLive): MapCol[] {
   const cols: MapCol[] = [...l.maps].sort((a, b) => a.ordinal - b.ordinal).map((m) => ({
     ordinal: m.ordinal, state: 'done', map: m.map, mine: num(m.mine), theirs: num(m.theirs),
-    winner: m.mine > m.theirs ? 'mine' : m.theirs > m.mine ? 'theirs' : 'tie',
+    winner: m.mine > m.theirs ? 'mine' : m.theirs > m.mine ? 'theirs' : 'tie', half: null,
   }));
   let next = l.mapsPlayed;
   const room = l.mapsTotal === null || l.mapsPlayed < l.mapsTotal;
@@ -96,15 +98,16 @@ function mapColumns(l: WidgetLive): MapCol[] {
     const ht = l.halfTime;
     // The team that survived the first half has a score; the other is still playing.
     const survived: Side | null = ht ? (ht.mineSurvived ? 'mine' : 'theirs') : null;
+    const half = ht ? num(ht.score) : null;
     cols.push({
-      ordinal, state: 'now', map: l.currentMap, winner: null,
-      mine: survived === 'mine' ? num(ht!.score) : 'playing',
-      theirs: survived === 'theirs' ? num(ht!.score) : 'playing',
+      ordinal, state: 'now', map: l.currentMap, winner: null, half,
+      mine: survived === 'mine' ? half : 'playing',
+      theirs: survived === 'theirs' ? half : 'playing',
     });
     next = ordinal + 1;
   }
   if (!l.final && l.mapsTotal !== null) {
-    for (let o = next; o < l.mapsTotal; o++) cols.push({ ordinal: o, state: 'next', map: null, mine: null, theirs: null, winner: null });
+    for (let o = next; o < l.mapsTotal; o++) cols.push({ ordinal: o, state: 'next', map: null, mine: null, theirs: null, winner: null, half: null });
   }
   return cols;
 }
@@ -146,7 +149,7 @@ function LivePanel({ style, live: l, name }: { style: WidgetStyle; live: WidgetL
         <span class="w-chips">
           {cols.map((c) => (
             <span class={cls('w-chip', c.state === 'now' && 'is-now', c.state === 'next' && 'is-next', c.winner === 'mine' && 'is-mine')}>
-              {`M${c.ordinal + 1}`}{c.state === 'now' ? ' live' : c.winner === 'tie' ? ' tie' : c.winner ? ` ${label(c.winner)}` : ''}
+              {`M${c.ordinal + 1}`}{c.state === 'now' ? (c.half ? ` ${c.half} live` : ' live') : c.winner === 'tie' ? ' tie' : c.winner ? ` ${label(c.winner)}` : ''}
             </span>
           ))}
         </span>
