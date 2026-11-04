@@ -40,11 +40,18 @@ import { matchWinLine } from '../winProb.js';
 import { formOption } from '../winForm.js';
 import { winLiveOption } from '../winLive/liveState.js';
 import { bookedSidesFor } from '../matchSides.js';
+import { widgetData } from '../widgets.js';
+import { QUEUE_SIZE } from '../queue.js';
 
 /** A face on the recent-matches list. */
 interface ListPlayer { steamid: string; name: string; avatar: string | null }
 
-export interface StatsRouteOpts { db: DB; demoDir?: string; r2?: R2Config | null }
+export interface StatsRouteOpts {
+  db: DB; demoDir?: string; r2?: R2Config | null;
+  /** The public queue (Matchmaker.publicQueue), for the queue widget. Absent,
+   *  the widget payload carries no queue. */
+  queue?: () => { count: number; players: { steamid: string }[] };
+}
 
 const RECENT_MATCH_LIMIT = 50;
 
@@ -193,6 +200,26 @@ export async function statsRoutes(app: FastifyInstance, opts: StatsRouteOpts): P
     if (!scope) return reply.code(400).send({ error: 'bad season' });
     const data = profileData(db, steamid, viewerOf(req), scope);
     if (!data) return reply.code(404).send({ error: 'no such player' });
+    return data;
+  });
+
+  /** A player's stream widgets (OBS browser sources). Public and keyless,
+   *  like the profile: everything in it is already public on the site.
+   *  ?tz= is minutes east of UTC (for "today"), ?since= epoch ms (the
+   *  session start); garbage in either is ignored, not an error. */
+  app.get('/api/widget/:steamid', async (req, reply) => {
+    const { steamid } = req.params as { steamid: string };
+    const q = req.query as { tz?: string; since?: string };
+    const num = (v: string | undefined) => (v === undefined || v.trim() === '' ? Number.NaN : Number(v));
+    const since = num(q.since);
+    const data = widgetData(db, steamid, { tzOffsetMin: num(q.tz), since: Number.isFinite(since) ? since : null });
+    reply.header('Cache-Control', 'no-store');
+    if (!data) return reply.code(404).send({ error: 'no such player' });
+    if (opts.queue) {
+      const pq = opts.queue();
+      // The lobby size the queue page counts to (web/src/queueSize.ts).
+      data.queue = { count: pq.count, size: QUEUE_SIZE, inQueue: pq.players.some((p) => p.steamid === steamid) };
+    }
     return data;
   });
 

@@ -2269,7 +2269,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db,
     moderation: () => deps.discordModeration ?? bot?.transport.moderation ?? null,
   });
-  await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2 });
+  await app.register(statsRoutes, { db: deps.db, demoDir: deps.config.demoDir, r2, queue: () => matchmaker.publicQueue() });
   await app.register(weeklyRoutes, { db: deps.db });
   await app.register(wrappedRoutes, { db: deps.db });
   // News and patch notes (src/news.ts). The poster is read per request: the
