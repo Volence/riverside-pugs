@@ -12,13 +12,24 @@ import { getSetting, getStickyCampaigns } from './settings.js';
  * pool, then the sticky campaigns. The vote itself is unchanged: plurality,
  * random tie-break, a random option when nobody votes.
  *
- * Inside a slot the draw is weighted toward campaigns nobody has played for a
- * while: 1 + n/10, capped at 3, where n is the completed queue PUGs (on any
- * campaign) since this one was last played or won a vote. Counting every
- * campaign's matches is what makes it fair across slots: three L4D2 picks in a
- * row raise every L4D1 campaign's count by the same three. Never played is the
- * cap. A campaign that lost a vote with two or more votes gets a bump on top,
- * which halves at every later tally it does not win and goes once it wins.
+ * The draw is about the players in the lobby, not the server (owner,
+ * 2026-11-04):
+ *
+ * - A campaign any of them played in their last match is left out, from its
+ *   slot and from the stickies. A slot that empties that way falls back to
+ *   the campaigns the fewest of them last played.
+ * - Inside a slot the draw is weighted toward campaigns these players have
+ *   not played for a while. Each player gives a campaign 1 + n/10, capped at
+ *   3, where n is the completed PUGs that player has played since they last
+ *   played it; never played is the cap. The campaign's weight is the average
+ *   over the lobby.
+ * - A campaign a player saw on a ballot that gave it no votes steps back for
+ *   that player: half way toward a just-played campaign, wearing off by half
+ *   at every later ballot that player is in, and gone once they play it. One
+ *   vote is enough to count as wanted.
+ * - A campaign that lost a vote with two or more votes gets a bump on top,
+ *   for every lobby: it halves at every later tally it does not win and goes
+ *   once it wins.
  */
 
 export const BALLOT_SLOTS: readonly CampaignCategory[] = ['l4d1', 'l4d2', 'custom', 'mirror'];
@@ -27,9 +38,16 @@ export const WEIGHT_STEP = 10;
 export const WEIGHT_CAP = 3;
 /** What a close loss (two or more votes) adds to a campaign's weight. */
 export const LOST_VOTE_BUMP = 0.5;
+/** How far a no-vote showing moves a campaign toward a just-played one. */
+export const IGNORED_STEP = 0.5;
+/** A player's tallied ballots looked back over for no-vote showings. By the
+ *  last one a step has worn off to under 1%. */
+export const IGNORED_LOOKBACK = 8;
 /** A decayed bump under this is dropped rather than halved forever. */
 const BUMP_FLOOR = 0.01;
 export const MAX_STICKIES = 3;
+/** Played matches past which every campaign is at the cap anyway. */
+const PLAYED_LOOKBACK = (WEIGHT_CAP - 1) * WEIGHT_STEP + 1;
 
 export type BallotMode = 'all' | 'slots';
 
@@ -42,29 +60,61 @@ export interface BallotOption {
   slot: CampaignCategory | 'sticky';
   /** What the draw used: base + bump. Null for a sticky (not drawn). */
   weight: number | null;
+  /** The lobby average of each player's weight. Null for a sticky. */
   base: number | null;
-  /** Completed queue PUGs since it was last played; null = never. */
-  since: number | null;
   bump: number;
+  /** Lobby players whose last match was on it: 0 unless its slot had to
+   *  fall back. Absent on ballots drawn before 2026-11-04. */
+  lastPlayedBy?: number;
+  /** Lobby players it is stepped back for after a no-vote showing.
+   *  Absent on ballots drawn before 2026-11-04. */
+  ignoredBy?: number;
+  /** Ballots drawn before 2026-11-04 only: server-wide completed queue PUGs
+   *  since it was last played; null = never. */
+  since?: number | null;
 }
 
 export interface BallotCandidate { slug: string; category: CampaignCategory }
 
+/** One lobby player's history, newest first, by match id. */
+export interface PlayerHistory {
+  /** Completed PUGs they played. */
+  played: { matchId: number; campaign: string }[];
+  /** Tallied ballots they were in. */
+  ballots: { matchId: number; options: string[]; votes: Readonly<Record<string, number>> }[];
+}
+
 export interface DrawInput {
   /** The pool, already narrowed to campaigns the site can run. */
   candidates: BallotCandidate[];
-  since: ReadonlyMap<string, number | null>;
+  /** One per lobby player. */
+  histories: PlayerHistory[];
   bumps: ReadonlyMap<string, number>;
-  /** The last queue match's campaign, left out of its slot. */
-  exclude: string | null;
   stickies: string[];
   rng: () => number;
 }
 
-/** A slot's weight before any bump: 1 + n/WEIGHT_STEP, capped; never played is the cap. */
+/** A player's weight before any step back: 1 + n/WEIGHT_STEP, capped; never played is the cap. */
 export function baseWeight(since: number | null): number {
   if (since === null) return WEIGHT_CAP;
   return Math.min(1 + since / WEIGHT_STEP, WEIGHT_CAP);
+}
+
+/** One player's weight for a campaign, and whether a no-vote showing is
+ *  holding it back. Each showing since they last played it keeps
+ *  1 - IGNORED_STEP / 2^k of the weight above 1, k being their tallied
+ *  ballots since. */
+export function playerWeight(h: PlayerHistory, slug: string): { weight: number; ignored: boolean } {
+  const at = h.played.findIndex((p) => p.campaign === slug);
+  const base = baseWeight(at < 0 ? null : at);
+  const lastPlayed = at < 0 ? 0 : h.played[at].matchId;
+  let keep = 1;
+  h.ballots.slice(0, IGNORED_LOOKBACK).forEach((b, k) => {
+    if (b.matchId > lastPlayed && b.options.includes(slug) && !b.votes[slug]) {
+      keep *= 1 - IGNORED_STEP / 2 ** k;
+    }
+  });
+  return { weight: 1 + (base - 1) * keep, ignored: keep < 1 };
 }
 
 /** One weighted pick. `rng` returns [0, 1) like Math.random. */
@@ -79,25 +129,31 @@ function weightedPick<T extends { weight: number }>(items: T[], rng: () => numbe
 }
 
 /** The ballot: one drawn option per non-empty slot in BALLOT_SLOTS order,
- *  then each sticky not already drawn. Pure, for tests. */
+ *  then each sticky not already drawn and not anyone's last campaign. Pure,
+ *  for tests. */
 export function drawBallot(input: DrawInput): BallotOption[] {
+  const lastPlayedBy = (slug: string) => input.histories.filter((h) => h.played[0]?.campaign === slug).length;
   const out: BallotOption[] = [];
   for (const slot of BALLOT_SLOTS) {
     const inSlot = input.candidates
-      .filter((c) => c.category === slot && c.slug !== input.exclude)
+      .filter((c) => c.category === slot)
       .map((c) => {
-        const since = input.since.get(c.slug) ?? null;
-        const base = baseWeight(since);
+        const each = input.histories.map((h) => playerWeight(h, c.slug));
+        const base = each.length === 0 ? WEIGHT_CAP : each.reduce((a, w) => a + w.weight, 0) / each.length;
         const bump = input.bumps.get(c.slug) ?? 0;
-        return { slug: c.slug, since, base, bump, weight: base + bump };
+        return {
+          slug: c.slug, base, bump, weight: base + bump,
+          lastPlayedBy: lastPlayedBy(c.slug), ignoredBy: each.filter((w) => w.ignored).length,
+        };
       });
     if (inSlot.length === 0) continue;
-    const pick = weightedPick(inSlot, input.rng);
-    out.push({ slug: pick.slug, slot, weight: pick.weight, base: pick.base, since: pick.since, bump: pick.bump });
+    const fewest = Math.min(...inSlot.map((c) => c.lastPlayedBy));
+    const pick = weightedPick(inSlot.filter((c) => c.lastPlayedBy === fewest), input.rng);
+    out.push({ ...pick, slot });
   }
   for (const slug of input.stickies.slice(0, MAX_STICKIES)) {
-    if (out.some((o) => o.slug === slug)) continue;
-    out.push({ slug, slot: 'sticky', weight: null, base: null, since: input.since.get(slug) ?? null, bump: input.bumps.get(slug) ?? 0 });
+    if (out.some((o) => o.slug === slug) || lastPlayedBy(slug) > 0) continue;
+    out.push({ slug, slot: 'sticky', weight: null, base: null, bump: input.bumps.get(slug) ?? 0, lastPlayedBy: 0, ignoredBy: 0 });
   }
   return out;
 }
@@ -126,39 +182,35 @@ export function loadBumps(db: DB): Map<string, number> {
   return new Map(rows.map((r) => [r.slug, r.bump]));
 }
 
-/** Completed queue PUGs since each campaign was last played (a completed PUG
- *  on it, from the queue or not) or won a vote (any queue match on it, since
- *  a queue match only exists because its campaign won one). Null when
- *  neither ever happened. */
-export function matchesSince(db: DB, slugs: string[]): Map<string, number | null> {
-  const anchorOf = db.prepare(`
-    SELECT MAX(id) AS id FROM matches
-    WHERE campaign = ? AND (origin = 'queue' OR (${completedPug()}))`);
-  const countAfter = db.prepare(`
-    SELECT COUNT(*) AS n FROM matches WHERE ${completedPug()} AND origin = 'queue' AND id > ?`);
-  const out = new Map<string, number | null>();
-  for (const slug of slugs) {
-    const anchor = (anchorOf.get(slug) as { id: number | null }).id;
-    out.set(slug, anchor === null ? null : (countAfter.get(anchor) as { n: number }).n);
-  }
-  return out;
-}
-
-/** The campaign the most recent queue match was made for, whatever became of it. */
-export function lastQueueCampaign(db: DB): string | null {
-  const row = db.prepare("SELECT campaign FROM matches WHERE origin = 'queue' ORDER BY id DESC LIMIT 1")
-    .get() as { campaign: string } | undefined;
-  return row?.campaign ?? null;
+/** Each player's recent completed PUGs (from the queue or not) and the
+ *  tallied ballots they were in, newest first. */
+export function loadHistories(db: DB, players: string[]): PlayerHistory[] {
+  const played = db.prepare(`
+    SELECT m.id AS matchId, m.campaign FROM match_players mp JOIN matches m ON m.id = mp.match_id
+    WHERE mp.player_id = ? AND ${completedPug('m')} ORDER BY m.id DESC LIMIT ${PLAYED_LOOKBACK}`);
+  const ballots = db.prepare(`
+    SELECT b.match_id AS matchId, b.options_json, b.votes_json FROM ballots b, json_each(b.players_json) j
+    WHERE j.value = ? AND b.winner IS NOT NULL AND b.match_id IS NOT NULL
+    ORDER BY b.id DESC LIMIT ${IGNORED_LOOKBACK}`);
+  return players.map((p) => ({
+    played: played.all(p) as PlayerHistory['played'],
+    ballots: (ballots.all(p) as { matchId: number; options_json: string; votes_json: string | null }[]).map((r) => ({
+      matchId: r.matchId,
+      options: (JSON.parse(r.options_json) as BallotOption[]).map((o) => o.slug),
+      votes: r.votes_json ? JSON.parse(r.votes_json) as Record<string, number> : {},
+    })),
+  }));
 }
 
 /**
  * Draw and record a ballot for a new lobby. `pool` is the vote pool the lobby
- * would otherwise offer (map_pool minus practice maps). Returns the options in
+ * would otherwise offer (map_pool minus practice maps); `players` is the
+ * lobby, whose histories weight the draw. Returns the options in
  * ballot order; when nothing at all can be drawn (an empty pool and no
  * stickies) it returns `pool` unchanged and records nothing, so a pop never
  * gets an empty vote.
  */
-export function createBallot(db: DB, lobbyId: string, pool: string[], rng: () => number): string[] {
+export function createBallot(db: DB, lobbyId: string, pool: string[], players: string[], rng: () => number): string[] {
   const registry = campaignRegistry(db);
   const candidates: BallotCandidate[] = pool
     .map((slug) => registry.get(slug))
@@ -170,14 +222,14 @@ export function createBallot(db: DB, lobbyId: string, pool: string[], rng: () =>
   const stickies = getStickyCampaigns(db).filter((slug) => runnable.has(slug)).slice(0, MAX_STICKIES);
   const options = drawBallot({
     candidates,
-    since: matchesSince(db, [...new Set([...candidates.map((c) => c.slug), ...stickies])]),
+    histories: loadHistories(db, players),
     bumps: loadBumps(db),
-    exclude: lastQueueCampaign(db),
     stickies,
     rng,
   });
   if (options.length === 0) return pool;
-  db.prepare('INSERT INTO ballots (lobby_id, options_json) VALUES (?, ?)').run(lobbyId, JSON.stringify(options));
+  db.prepare('INSERT INTO ballots (lobby_id, options_json, players_json) VALUES (?, ?, ?)')
+    .run(lobbyId, JSON.stringify(options), JSON.stringify(players));
   return options.map((o) => o.slug);
 }
 
