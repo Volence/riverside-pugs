@@ -21,21 +21,22 @@
 .w-style-corner { justify-content: flex-end; align-items: flex-end; }
 .w-style-board { justify-content: center; align-items: flex-end; }
 
-/* The profile preview: a stand-in for game footage behind the panel. Scene
- * colours, not theme colours: they stand for whatever the streamer plays. */
+/* The profile preview: a strip of stand-in game footage behind the panel,
+ * as tall as the panel. Scene colours, not theme colours: they stand for
+ * whatever the streamer plays. The panel keeps its side (bar and board
+ * centred, card left, corner right) as a hint of where it goes. */
 .w-game {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  box-sizing: border-box;
+  padding: 12px;
   overflow: hidden;
   background: radial-gradient(ellipse at 60% 40%, #4a5a4a 0%, #262c26 45%, #121411 100%);
 }
-.w-game .w-root { position: absolute; }
+.w-game .w-root { position: relative; inset: auto; }
 /* The profile preview shrinks a panel wider than its box (--wfit, set by
  * StreamWidgets); the OBS page never sets it. */
 .w-game .w-root { --w-base: calc(16px * var(--wsize, 1) * var(--wfit, 1)); }
-.w-game .w-style-card .w-panel { margin: 0.75em; }
-.w-game .w-style-corner .w-panel { margin: 0.75em; }
 
 /* A solid dark panel, 92% so a hint of the game shows through. The fill is a
  * layer behind the content (not color-mix) for older OBS Chromium builds. */
@@ -154,6 +155,12 @@
 .w-board { padding: 0.5em 0.9em; border-bottom: 0; }
 .w-board .w-foot { justify-content: flex-end; margin: 0 0 0.2em; }
 .w-board table { border-collapse: collapse; }
+/* The profile preview also loads the site's table rules (app.css: full
+ * width, a fixed font size, 46 px rows, row rules, a hover fill); the board is sized
+ * in em off the panel and draws its own lines. */
+.w-board table { width: auto; font-size: 1em; }
+.w-board th, .w-board td { height: auto; border-bottom: 0; }
+.w-board tbody tr, .w-board tbody tr:hover { background: none; transition: none; }
 .w-board th {
   font-family: var(--font-label);
   font-weight: 500;

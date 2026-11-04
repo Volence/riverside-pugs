@@ -11,7 +11,8 @@ import { Widget } from '../widget/Widgets';
  * "Stream widgets" on a player's own profile: pick a widget, a style and a
  * size, see it over a stand-in game with the player's real numbers, and copy
  * the OBS browser source link (/widget/<steamid>/<kind>, web/src/widget).
- * Presets only, as the widget page draws them.
+ * Presets only, as the widget page draws them. Closed until the player asks:
+ * most players do not stream.
  */
 
 const KIND_LABEL: Record<WidgetKind, string> = {
@@ -24,6 +25,8 @@ const IDLE: [WidgetParams['idle'], string][] = [['hide', 'Hide'], ['note', 'Show
 const HAS_IDLE: readonly WidgetKind[] = ['live', 'queue'];
 
 const COPIED_MS = 2000;
+/** Open or closed is remembered in this browser, so a streamer finds it open. */
+const OPEN_KEY = 'stream-widgets-open';
 
 /** Stands in for a match while the player is not in one: No Mercy, map 3
  *  at half-time, the player's team trailing. */
@@ -72,10 +75,11 @@ function usePreviewData(steamid: string, since: number) {
 }
 
 /**
- * Shrinks the panel to fit the preview box. The widget is drawn at its real
- * size for a 1080p scene, so a bar (about 1000 px wide) is wider than the
- * profile column. Everything in a panel is in em off one base, so a factor
- * on that base (--wfit, widget.css .w-game .w-root) scales it exactly.
+ * Shrinks the panel to fit the preview's width. The widget is drawn at its
+ * real size for a 1080p scene, so a bar (about 1000 px wide) is wider than
+ * the profile column. Everything in a panel is in em off one base, so a
+ * factor on that base (--wfit, widget.css .w-game .w-root) scales it
+ * exactly. Width only: the preview's height follows the panel.
  */
 function useFit(deps: unknown[]) {
   const box = useRef<HTMLDivElement>(null);
@@ -88,11 +92,10 @@ function useFit(deps: unknown[]) {
       const panel = el.querySelector<HTMLElement>('.w-panel');
       const game = el.querySelector<HTMLElement>('.w-game');
       if (!panel || !game || !panel.offsetWidth || !game.clientWidth) return;
-      // The panel's size at full scale; it is linear in --wfit.
+      // The panel's width at full scale; it is linear in --wfit.
       const w = panel.offsetWidth / fitRef.current;
-      const h = panel.offsetHeight / fitRef.current;
       const room = 0.92;
-      const next = Math.min(1, (game.clientWidth * room) / w, (game.clientHeight * room) / h);
+      const next = Math.min(1, (game.clientWidth * room) / w);
       if (Math.abs(next - fitRef.current) > 0.01) { fitRef.current = next; setFit(next); }
     };
     measure();
@@ -125,6 +128,36 @@ function Choice<T extends string>(
 }
 
 export function StreamWidgets({ steamid }: { steamid: string }): JSX.Element {
+  const [open, setOpenState] = useState(() => {
+    try { return localStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
+  });
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    try {
+      if (next) localStorage.setItem(OPEN_KEY, '1');
+      else localStorage.removeItem(OPEN_KEY);
+    } catch { /* no storage: closed on the next visit */ }
+  };
+
+  return (
+    <Panel class="swidgets">
+      <h3>Stream widgets</h3>
+      <p class="muted">Show your Riverside numbers on stream. In OBS: Sources, +, Browser, then paste the link.</p>
+      {open ? (
+        <>
+          <Setup steamid={steamid} />
+          <div><button type="button" class="btn btn--ghost btn--sm" onClick={() => setOpen(false)}>Hide setup</button></div>
+        </>
+      ) : (
+        <div><button type="button" class="btn btn--ghost btn--sm" onClick={() => setOpen(true)}>Set up a widget</button></div>
+      )}
+    </Panel>
+  );
+}
+
+/** The pickers, preview and link: mounted only while open, so a closed
+ *  section never polls. */
+function Setup({ steamid }: { steamid: string }): JSX.Element {
   const [kind, setKind] = useState<WidgetKind>('live');
   // The style the player picked, if any. Each kind uses it when it has it,
   // and its own default otherwise.
@@ -175,10 +208,7 @@ export function StreamWidgets({ steamid }: { steamid: string }): JSX.Element {
   const { box, fit } = useFit([kind, style, size, idle, data]);
 
   return (
-    <Panel class="swidgets">
-      <h3>Stream widgets</h3>
-      <p class="muted">Show your Riverside numbers on stream. In OBS: Sources, +, Browser, then paste the link.</p>
-
+    <>
       <div class="swidgets__picks">
         <Choice label="Widget" options={WIDGET_KINDS.map((k) => [k, KIND_LABEL[k]])} value={kind} onPick={setKind} />
         <Choice label="Style" options={STYLES_FOR[kind].map((s) => [s, STYLE_LABEL[s]])} value={style} onPick={setStyle} />
@@ -214,6 +244,6 @@ export function StreamWidgets({ steamid }: { steamid: string }): JSX.Element {
           (<code>&amp;reset=1</code> if it already has a <code>?</code>), then remove it: while it is in the link, every load starts the count again.
         </p>
       )}
-    </Panel>
+    </>
   );
 }
