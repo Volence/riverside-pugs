@@ -12,13 +12,16 @@ const apiPort = process.env.API_PORT ?? '8080';
  *  In dev the Vite server owns the browser and proxies everything the backend owns
  *  to :8080 (or API_PORT), so `npm run dev` gives HMR on the frontend without the API moving. */
 /** The caster studio's OBS overlays are a second page (web/overlay.html) with
- *  no site chrome. In production the server answers /overlay/* with it (see
- *  the not-found handler in src/server.ts); this does the same in dev. */
+ *  no site chrome, and the players' stream widgets a third (web/widget.html).
+ *  In production the server answers /overlay/* and /widget/<steamid>/<kind>
+ *  with them (see the not-found handler in src/server.ts); this does the same
+ *  in dev. */
 const overlayPages: Plugin = {
   name: 'overlay-pages',
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
       if (req.url && /^\/overlay\/[a-z]+\/?(\?|$)/.test(req.url)) req.url = `/overlay.html${req.url.slice(req.url.indexOf('?') >= 0 ? req.url.indexOf('?') : req.url.length)}`;
+      else if (req.url && /^\/widget\/\d{17}\/[a-z]+\/?(\?|$)/.test(req.url)) req.url = `/widget.html${req.url.slice(req.url.indexOf('?') >= 0 ? req.url.indexOf('?') : req.url.length)}`;
       next();
     });
   },
@@ -34,6 +37,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL('./web/index.html', import.meta.url)),
         overlay: fileURLToPath(new URL('./web/overlay.html', import.meta.url)),
+        widget: fileURLToPath(new URL('./web/widget.html', import.meta.url)),
       },
     },
   },

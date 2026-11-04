@@ -2490,6 +2490,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     if (isPageRequest(req.method, req.url) && /^\/overlay\/[a-z]+\/?(\?|$)/.test(req.url)) {
       return reply.type('text/html').header('Cache-Control', 'no-cache').header('Referrer-Policy', 'no-referrer').sendFile('overlay.html');
     }
+    // Stream widgets (OBS browser sources): a page of their own, public and
+    // keyless. A malformed path falls through to the app shell. cacheControl
+    // false: otherwise @fastify/static replaces no-cache with its own header.
+    if (isPageRequest(req.method, req.url) && /^\/widget\/\d{17}\/[a-z]+\/?(\?|$)/.test(req.url)) {
+      return reply.type('text/html').header('Cache-Control', 'no-cache').sendFile('widget.html', { cacheControl: false });
+    }
     if (isPageRequest(req.method, req.url)) return reply.type('text/html').sendFile('index.html');
     return reply.code(404).send({ error: 'not found' });
   });
