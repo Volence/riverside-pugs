@@ -32,7 +32,7 @@ function WeekRow({ r, awards }: { r: WeeklyHistoryRow; awards: boolean }) {
       <td class="num pweek__opt">{n0(r.commonKills)}</td>
       <td class="num pweek__opt">{n0(r.damageAsSi)}</td>
       {awards && (
-        <td class="pweek__awards">
+        <td class="pweek__awards pweek__opt">
           {r.awards.map((a) => (
             <span class="pweek__award" key={`${a.key}:${a.kind}`}>
               {a.kind === 'avg' ? `${a.label} (avg)` : a.kind === 'total' ? `${a.label} (total)` : a.label}
@@ -63,6 +63,9 @@ export function ProfileWeekly({ steamid }: { steamid: string }) {
   return (
     <section class="panel pweek" aria-label="Weekly">
       <h3>Weekly</h3>
+      {/* Weeks are not cut by season, so the season picker above does not
+          narrow them; say so rather than look like a scoping bug. */}
+      <p class="muted pweek__scope">Every week played, across all seasons.</p>
       {now && now.games > 0 && (
         <div class="pweek__now">
           <p class="pweek__nowline">
@@ -93,7 +96,7 @@ export function ProfileWeekly({ steamid }: { steamid: string }) {
                 <th class="num">Skeets</th>
                 <th class="num pweek__opt">Commons</th>
                 <th class="num pweek__opt">Dmg as SI</th>
-                {anyAwards && <th>Awards</th>}
+                {anyAwards && <th class="pweek__opt">Awards</th>}
               </tr>
             </thead>
             <tbody>{shown.map((r) => <WeekRow key={r.week} r={r} awards={anyAwards} />)}</tbody>
