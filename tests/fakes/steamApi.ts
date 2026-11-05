@@ -50,6 +50,7 @@ export function fakeSteam(accounts: Record<string, FakeSteamAccount>): FakeSteam
             players: ids.filter((id) => accounts[id] && !accounts[id].noSummary).map((id) => ({
               steamid: id,
               personaname: `persona ${id.slice(-3)}`,
+              avatarfull: `https://avatars.steamstatic.com/${id}_full.jpg`,
               communityvisibilitystate: accounts[id].visibility ?? 3,
               ...(accounts[id].profilestate === undefined ? { profilestate: 1 } : { profilestate: accounts[id].profilestate }),
               ...(accounts[id].timecreated === undefined ? {} : { timecreated: accounts[id].timecreated }),

@@ -41,7 +41,10 @@ describe('fetchSteamSignals', () => {
         bans: { vac: 1, game: 2, daysSince: 40, community: true, economy: 'probation' } },
     });
     const got = (await fetchSteamSignals([A], 'key', steam.fetch, { sharing: true })).get(A)!;
-    expect(got.summary).toEqual({ timeCreated: 1_200_000_000, visibility: 3, profileState: 1 });
+    expect(got.summary).toEqual({
+      timeCreated: 1_200_000_000, visibility: 3, profileState: 1,
+      personaName: 'persona 001', avatar: `https://avatars.steamstatic.com/${A}_full.jpg`,
+    });
     expect(got.bans).toEqual({
       vacBanned: true, vacBans: 1, gameBans: 2, daysSinceLastBan: 40, communityBanned: true, economyBan: 'probation',
     });
@@ -75,7 +78,7 @@ describe('fetchSteamSignals', () => {
   it('reads a private profile as unknown, never as zero', async () => {
     const steam = fakeSteam({ [A]: { visibility: 1, l4d1Minutes: 'hidden', level: 'hidden' } });
     const got = (await fetchSteamSignals([A], 'key', steam.fetch)).get(A)!;
-    expect(got.summary).toEqual({ timeCreated: null, visibility: 1, profileState: 1 });
+    expect(got.summary).toMatchObject({ timeCreated: null, visibility: 1, profileState: 1 });
     expect(got.games).toEqual({ visible: false, l4d1Minutes: null });
     expect(got.level).toBeNull();
   });
@@ -125,6 +128,28 @@ describe('refreshSteamSignals', () => {
       bans_checked_at: NOW.toISOString(), games_visible: 1, l4d1_minutes: 6120, steam_level: 14,
       lender_id: null, lender_seen_at: null, checked_at: NOW.toISOString(),
     });
+  });
+
+  it('refreshes the Steam name and avatar on the players row', async () => {
+    player(A);
+    const steam = fakeSteam({ [A]: {} });
+    await refreshSteamSignals({ db, apiKey: 'key', fetchFn: steam.fetch, now: () => NOW }, [A]);
+    expect(db.prepare('SELECT name, steam_name, avatar FROM players WHERE steamid = ?').get(A)).toEqual({
+      name: 'persona 001', steam_name: 'persona 001', avatar: `https://avatars.steamstatic.com/${A}_full.jpg`,
+    });
+  });
+
+  it('keeps an admin display name and a stored persona Steam said nothing about', async () => {
+    player(A);
+    player(B);
+    db.prepare("UPDATE players SET name = 'Shown', name_override = 'Shown' WHERE steamid = ?").run(A);
+    db.prepare("UPDATE players SET avatar = 'old.jpg' WHERE steamid = ?").run(B);
+    const steam = fakeSteam({ [A]: {}, [B]: { noSummary: true } });
+    await refreshSteamSignals({ db, apiKey: 'key', fetchFn: steam.fetch, now: () => NOW }, [A, B]);
+    expect(db.prepare('SELECT name, steam_name FROM players WHERE steamid = ?').get(A))
+      .toEqual({ name: 'Shown', steam_name: 'persona 001' });
+    expect(db.prepare('SELECT name, avatar FROM players WHERE steamid = ?').get(B))
+      .toEqual({ name: 'n02', avatar: 'old.jpg' });
   });
 
   it('degrades silently to no signals without an api key', async () => {

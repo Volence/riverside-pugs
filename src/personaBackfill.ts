@@ -23,25 +23,23 @@ export async function backfillPersonas(db: DB, apiKey: string | null, fetchFn?: 
   const personas = await fetchPersonas(rows.map((r) => r.steamid), apiKey, fetchFn);
   if (personas.size === 0) return 0;
 
-  // An admin's display name outranks the persona; the persona is still kept.
-  const updateBoth = db.prepare(
-    'UPDATE players SET steam_name = @name, name = COALESCE(name_override, @name), avatar = @avatar WHERE steamid = @steamid');
-  const updateName = db.prepare(
-    'UPDATE players SET steam_name = @name, name = COALESCE(name_override, @name) WHERE steamid = @steamid');
-  const updateAvatar = db.prepare('UPDATE players SET avatar = ? WHERE steamid = ?');
   let n = 0;
   db.transaction(() => {
-    for (const [steamid, p] of personas) {
-      if (p.name === null && p.avatar === null) continue;
-
-      if (p.name !== null && p.avatar !== null) {
-        n += updateBoth.run({ name: p.name, avatar: p.avatar, steamid }).changes;
-      } else if (p.name !== null) {
-        n += updateName.run({ name: p.name, steamid }).changes;
-      } else {
-        n += updateAvatar.run(p.avatar, steamid).changes;
-      }
-    }
+    for (const [steamid, p] of personas) n += applyPersona(db, steamid, p);
   })();
   return n;
+}
+
+/**
+ * Write a Steam persona onto the players row. Either half may be null, and a
+ * null half leaves what is stored alone. An admin's display name outranks the
+ * persona; the persona is still kept in steam_name. Returns rows changed.
+ */
+export function applyPersona(db: DB, steamid: string, p: { name: string | null; avatar: string | null }): number {
+  if (p.name === null && p.avatar === null) return 0;
+  return db.prepare(
+    `UPDATE players SET steam_name = COALESCE(@name, steam_name),
+            name = COALESCE(name_override, @name, name), avatar = COALESCE(@avatar, avatar)
+      WHERE steamid = @steamid`,
+  ).run({ name: p.name, avatar: p.avatar, steamid }).changes;
 }
