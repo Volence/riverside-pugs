@@ -1,7 +1,7 @@
 # Sub-project 2 Design: Orchestrator + `pug-match` Plugin + Deploy
 
 **Date:** 2026-07-30
-**Status:** Approved design, pre-implementation
+**Status:** built and live; the pug-match plugin began 2026-08-03 (7afd2a5f).
 **Builds on:** sub-project 1 (backend core) at `/home/volence/l4d/pug`
 **Parent spec:** `2026-07-30-l4d1-pug-system-design.md`
 

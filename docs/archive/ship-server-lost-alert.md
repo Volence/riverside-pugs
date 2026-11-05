@@ -1,3 +1,5 @@
+> Shipped 2026-10-10 (77e1c684, src/serverLost.ts). Archived ship note; "not deployed" below was true when it was written.
+
 # Ship notes: server-lost alert + ops report endpoint (branch server-lost-alert)
 
 Two small additions in one commit. Not deployed.

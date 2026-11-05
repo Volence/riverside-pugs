@@ -1,6 +1,6 @@
 # HUD editor v2: edit the insides of a panel, preview with the real art
 
-Status: design agreed in conversation 2026-09-22, spec written the same day. Nothing built.
+Status: design agreed in conversation 2026-09-22, spec written the same day. Plan 1 (honest preview) shipped 2026-09-22 (d33abba1); whether plan 2 ("editing the insides") was built is unverified.
 
 Scope: web app only, all of it client side, built on the v1 HUD editor
 (`2026-09-21-hud-editor-design.md`, branch `worktree-hud-editor`). No server code, no

@@ -1,7 +1,7 @@
 # Social profiles, the streams page, chemistry, and endorsements
 
-Status: design approved in conversation 2026-09-20, spec written the same day. Nothing
-built.
+Status: shipped 2026-09-20/21 (5e851d5b profiles, d2163cd1 endorsements, 02b105da chemistry).
+Design approved in conversation 2026-09-20, spec written the same day.
 
 Scope: web app only. No plugin change, no game server change, no cfg change. Work happens on
 a worktree and nothing is deployed until the owner says so.

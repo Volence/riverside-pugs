@@ -1,7 +1,7 @@
 # The L4D2 campaigns in the PUG rotation
 
-Status: design approved in conversation 2026-09-20, spec written the same day. Nothing
-built. Every fact below was measured on 2026-09-20 against the live boxes and the real
+Status: shipped 2026-09-20 (12f4476d; plan `2026-09-20-l4d2-campaigns.md`). Design approved in
+conversation 2026-09-20, spec written the same day. Every fact below was measured on 2026-09-20 against the live boxes and the real
 pack, not recalled.
 
 Related: `2026-09-18-custom-campaigns-design.md` and

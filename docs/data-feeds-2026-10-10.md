@@ -1,3 +1,5 @@
+> Shipped 2026-10-10 (merge 73ec04ab, pug-match 0.3.30). Kept as the reference for these feeds (code cites this path); "nothing here is deployed" below is out of date.
+
 # Data feeds: connection funnel, flow and cause codes, SI lives
 
 Branch `data-feeds`, built 2026-10-09 for owner review on 2026-10-10. Ideas 3, 6 and 7 of the

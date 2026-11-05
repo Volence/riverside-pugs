@@ -1,7 +1,7 @@
 # L4D1 Ranked PUG System: Design
 
 **Date:** 2026-07-30
-**Status:** Approved design, pre-implementation
+**Status:** built and live; implementation began 2026-07-30 (d924f511). This is the original design; later specs changed parts of it.
 **Working name:** `pug` (rename later is a find-and-replace; not a blocker)
 
 ## What this is

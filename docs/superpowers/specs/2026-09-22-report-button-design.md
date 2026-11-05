@@ -1,6 +1,6 @@
 # Report button: a form in Discord for filing a report
 
-Design, 2026-09-22. Status: approved by the owner, not built.
+Design, 2026-09-22. Status: shipped 2026-09-22 (d10ffa9a).
 
 ## The problem
 

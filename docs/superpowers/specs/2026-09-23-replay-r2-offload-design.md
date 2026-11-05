@@ -1,6 +1,6 @@
 # Finished replays move to R2; nothing changes for viewers
 
-Status: design approved by the owner in conversation 2026-09-23. Not built.
+Status: design approved by the owner in conversation 2026-09-23. Shipped 2026-09-23 (edf0eece).
 
 ## Why
 

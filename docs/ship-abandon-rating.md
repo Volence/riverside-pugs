@@ -1,3 +1,5 @@
+> Shipped 2026-10-10 (merge a48427fc, pug-match 0.3.31). Kept for the owner rulings (code cites this path); "nothing deployed" below is out of date.
+
 # Abandon rating (owner rulings 2026-10-10)
 
 Branch `abandon-rating`, pug-match 0.3.31. Built and tested locally. Nothing deployed.

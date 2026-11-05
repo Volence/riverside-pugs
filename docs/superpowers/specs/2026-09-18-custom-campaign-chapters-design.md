@@ -1,6 +1,6 @@
 # Where a campaign stops: choosing whether the finale is played
 
-Status: **design, not started.** Spec written 2026-09-18, rewritten the same day after the owner narrowed the scope. This is plan 2 of the custom campaign work.
+Status: shipped 2026-09-18 (04d1f65f, 3ac596a0; plan `2026-09-18-campaign-stop-point.md`). Spec written 2026-09-18, rewritten the same day after the owner narrowed the scope. This is plan 2 of the custom campaign work.
 
 Related:
 - `docs/superpowers/specs/2026-09-18-custom-campaigns-design.md`: plan 1, the upload/install/pool/stats half. Shipped and live. Sections 4 and 4b of that spec are superseded here.

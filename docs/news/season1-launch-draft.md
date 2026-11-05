@@ -1,3 +1,5 @@
+> History: draft for the Season 1 launch news post (season started 2026-11-03). Kept because the launch runbook cites it; the site's News editor holds whatever was actually posted.
+
 <!--
 Draft for the News editor (Setup > News). NOT in any database yet.
 Kind: News. Title: Season 1: Wrong Way starts Nov 3

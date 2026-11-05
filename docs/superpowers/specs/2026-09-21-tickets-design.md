@@ -1,6 +1,6 @@
 # Tickets: player reports as cases, with a mirrored Discord discussion
 
-Status: design approved in conversation 2026-09-21, spec written the same day. Nothing built.
+Status: design approved in conversation 2026-09-21, spec written the same day. Shipped 2026-09-21 (96e75ecf and the tickets-phase plans).
 
 Scope: web app and the in-process Discord bot. No plugin change, no game server change, no
 cfg change. Work happens on the `worktree-tickets` worktree and nothing is deployed until the

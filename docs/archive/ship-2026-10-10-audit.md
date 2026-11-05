@@ -1,3 +1,5 @@
+> Shipped 2026-10-10 (merge 2ddc433e, pug-match 0.3.29). Archived ship note; "nothing was deployed" below was true when it was written.
+
 # Ship 2026-10-10: audit fixes (plugin review D/E, pause ghost M1, ban sync)
 
 Built 2026-10-09 on branch `audit-fixes` (worktree `.claude/worktrees/audit-fixes`,

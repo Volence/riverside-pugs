@@ -1,3 +1,5 @@
+> Shipped 2026-09-24 (afd7bce1, "Demo tick sync"). Archived idea note; the body is the pre-build plan.
+
 # Demo tick bookmarks (idea, 2026-09-14)
 
 Owner's ask: watching a SourceTV demo back in game, jump straight to the events
