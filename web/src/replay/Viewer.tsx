@@ -54,12 +54,13 @@ const STAGE_MAX_VH = 78;
  * margins, and on a wide window floated outside the card on both sides.
  *
  * Why 1.0: this is the owner's call for portrait maps, and 1.0 is where the
- * shipped maps split with room to spare. The 22 overviews have nothing
- * between hospital03 at 0.92 and hospital01 at 1.05, so no map sits near the
- * line and rounding in a future capture cannot flip one. The four below it
- * (caves 0.59, airport03 0.74, farm04 0.74, hospital03 0.92) are the maps
- * that were leaving most of the page empty; a square or wider map already
- * fills most of the 1018px frame stacked, and keeps that layout exactly.
+ * shipped maps split with room to spare. The 54 overviews have nothing
+ * between hospital03 at 0.92 and c5m4_quarter at 1.03, so no map sits near
+ * the line and rounding in a future capture cannot flip one. The eight below
+ * it (c13m4 and c5m3 0.55, caves 0.59, farm04 and airport03 0.74, c14m1
+ * 0.78, c2m2 0.83, hospital03 0.92) are the maps that were leaving most of
+ * the page empty; a square or wider map already fills most of the 1018px
+ * frame stacked, and keeps that layout exactly.
  */
 export const PORTRAIT_ASPECT = 1.0;
 
