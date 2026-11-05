@@ -6,6 +6,11 @@ import { twitchCacheStale } from './twitchPoll.js';
  *  who ever linked: the community grows and the page should not. */
 export const OFFLINE_CAP = 24;
 
+/** A channel is listed only while its owner has played a Riverside match this
+ *  recently, live or not (owner's call, 2026-11-05). The next match lists it
+ *  again: nothing is stored, the check runs on every read. */
+export const STREAM_ACTIVE_DAYS = 30;
+
 export interface StreamMatch { id: number; campaign: string; map: string | null }
 
 export interface StreamCard {
@@ -50,6 +55,10 @@ interface Row {
   last_live_at: string | null;
 }
 
+function activeSince(now: Date): string {
+  return new Date(now.getTime() - STREAM_ACTIVE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
 /**
  * The three tiers.
  *
@@ -67,6 +76,10 @@ export function streamsView(
   // LEFT JOIN, so somebody who linked a minute ago and has never been polled
   // still appears, as offline, rather than vanishing until the next tick.
   //
+  // Played a match in the last STREAM_ACTIVE_DAYS, so the page lists the
+  // community as it is now rather than everyone who ever linked. Aborted
+  // matches do not count: nobody played them.
+  //
   // Members in good standing only, which is inGoodStanding (src/standing.ts)
   // written as SQL: active, no ban in force, not merged into another account.
   // The title and thumbnail on a card are whatever the streamer typed into
@@ -81,8 +94,11 @@ export function streamsView(
        AND p.status = 'active'
        AND NOT EXISTS (SELECT 1 FROM bans b WHERE b.player_id = p.steamid
                        AND b.lifted_at IS NULL AND (b.expires_at IS NULL OR b.expires_at > ?))
-       AND NOT EXISTS (SELECT 1 FROM player_aliases a WHERE a.steamid = p.steamid)`,
-  ).all(now.toISOString()) as Row[];
+       AND NOT EXISTS (SELECT 1 FROM player_aliases a WHERE a.steamid = p.steamid)
+       AND EXISTS (SELECT 1 FROM match_players mp JOIN matches m ON m.id = mp.match_id
+                   WHERE mp.player_id = p.steamid AND m.state IN ('live', 'completed')
+                     AND m.created_at >= datetime(?))`,
+  ).all(now.toISOString(), activeSince(now)) as Row[];
 
   // Who is on a live match roster, and which match. A player on two live
   // matches is not a state the matchmaker can produce, so first wins.

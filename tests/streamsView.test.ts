@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import { activatePlayer, upsertPlayer } from '../src/players.js';
 import { banPlayer, liftExpiredBans } from '../src/admin/players.js';
-import { OFFLINE_CAP, streamsView } from '../src/streamsView.js';
+import { OFFLINE_CAP, STREAM_ACTIVE_DAYS, streamsView } from '../src/streamsView.js';
 
 const T0 = new Date('2026-09-20T12:00:00.000Z');
 let db: DB;
@@ -13,9 +13,21 @@ function player(id: string, name: string) {
   activatePlayer(db, id);
 }
 
+/** A linked channel, whose owner played a match yesterday so the view lists it. */
 function linked(id: string, twitchId: string, login: string) {
   db.prepare('UPDATE players SET twitch_id = ?, twitch_name = ? WHERE steamid = ?')
     .run(twitchId, login, id);
+  played(id, new Date(T0.getTime() - DAY));
+}
+
+const DAY = 24 * 60 * 60 * 1000;
+let playedSeq = 9000;
+/** One match on `id`'s roster, created at `at`. */
+function played(id: string, at: Date, state: 'completed' | 'aborted' = 'completed') {
+  const matchId = playedSeq++;
+  db.prepare("INSERT INTO matches (id, season_id, state, campaign, created_at) VALUES (?,1,?,'dead_air',datetime(?))")
+    .run(matchId, state, at.toISOString());
+  db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?,?,'a')").run(matchId, id);
 }
 
 /** What a completed poll records besides the rows. Staleness is measured from
@@ -60,6 +72,30 @@ beforeEach(() => {
 });
 
 describe('streamsView', () => {
+  it(`hides a channel, live or not, until its owner plays again within ${STREAM_ACTIVE_DAYS} days`, () => {
+    player('1', 'alice');
+    player('2', 'bob');
+    db.prepare("UPDATE players SET twitch_id = '11', twitch_name = 'alicetv' WHERE steamid = '1'").run();
+    db.prepare("UPDATE players SET twitch_id = '22', twitch_name = 'bobtv' WHERE steamid = '2'").run();
+    status('1', true);
+    status('2', false);
+    const ids = () => {
+      const v = streamsView(db, { engaged: [], now: T0 });
+      return [...v.inPug, ...v.live, ...v.offline].map((c) => c.steamid).sort();
+    };
+    // Never played.
+    expect(ids()).toEqual([]);
+    // Played, but too long ago; an aborted match last week does not count.
+    played('1', new Date(T0.getTime() - (STREAM_ACTIVE_DAYS + 1) * DAY));
+    played('2', new Date(T0.getTime() - (STREAM_ACTIVE_DAYS + 1) * DAY));
+    played('2', new Date(T0.getTime() - 7 * DAY), 'aborted');
+    expect(ids()).toEqual([]);
+    // Inside the window, and a match being played right now counts.
+    played('1', new Date(T0.getTime() - (STREAM_ACTIVE_DAYS - 1) * DAY));
+    liveMatch(77, 'dead_air', null, ['2']);
+    expect(ids()).toEqual(['1', '2']);
+  });
+
   it('is empty and stale before anything has polled', () => {
     expect(streamsView(db, { engaged: [], now: T0 }))
       .toEqual({ stale: true, inPug: [], live: [], offline: [], offlineTotal: 0 });

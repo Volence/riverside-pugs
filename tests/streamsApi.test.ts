@@ -41,6 +41,9 @@ function linkedAndLive(steamid: string, twitchId: string, login: string, live: b
     `INSERT INTO twitch_status (player_id, is_live, viewers, checked_at, last_live_at)
      VALUES (?,?,?,?,?)`,
   ).run(steamid, live ? 1 : 0, 18, nowIso, nowIso);
+  // A recent match, or the view leaves the channel off as inactive.
+  const { lastInsertRowid } = db.prepare("INSERT INTO matches (season_id, state, campaign) VALUES (1, 'completed', 'dead_air')").run();
+  db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'a')").run(lastInsertRowid, steamid);
 }
 
 describe('GET /api/streams', () => {

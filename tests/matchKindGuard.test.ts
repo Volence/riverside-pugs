@@ -37,6 +37,7 @@ const ALLOWED: Record<string, number> = {
   'src/fingerprintReplay.ts': 1,    // replays every match end, every kind, as the end-of-match sweep does
   'src/campaignRegistry.ts': 1,     // has the player got the maps: a scrim on a custom map counts too
   'src/widgets.ts': 1,              // live widget's final hold: any public match /live showed, every kind
+  'src/streamsView.ts': 1,          // Streams lists recent players: a scrim or tournament match is playing too
 };
 
 const RAW = /state\s*=\s*'completed'|state\s+IN\s*\([^)]*'completed'/g;

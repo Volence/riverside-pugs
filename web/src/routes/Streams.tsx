@@ -167,8 +167,8 @@ export function Streams() {
       {nothing && (
         <Panel>
           <Empty>
-            Nobody has linked a Twitch channel yet. Connect yours from your profile and you
-            will show up here.
+            Nobody who has played in the last 30 days has a Twitch channel linked. Connect
+            yours from your profile and you will show up here while you keep playing.
           </Empty>
         </Panel>
       )}

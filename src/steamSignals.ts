@@ -1,6 +1,7 @@
 import type { DB } from './db.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { resolveAlias } from './aliases.js';
+import { applyPersona } from './personaBackfill.js';
 
 /**
  * What Steam says about an account, fetched, stored and turned into the two
@@ -37,6 +38,10 @@ export interface SummarySignal {
   /** communityvisibilitystate. 3 is public. */
   visibility: number | null;
   profileState: number | null;
+  /** The persona, kept on the players row rather than here (see
+   *  applyPersona). Null when Steam left it out. */
+  personaName: string | null;
+  avatar: string | null;
 }
 
 export interface BanSignal {
@@ -102,6 +107,8 @@ async function fetchSummaries(ids: string[], key: string, fetchFn: FetchFn): Pro
         timeCreated: int(p.timecreated),
         visibility: int(p.communityvisibilitystate),
         profileState: int(p.profilestate),
+        personaName: typeof p.personaname === 'string' ? p.personaname : null,
+        avatar: typeof p.avatarfull === 'string' ? p.avatarfull : null,
       });
     }
   }
@@ -362,6 +369,10 @@ export async function refreshSteamSignals(deps: SignalDeps, steamids: string[], 
     for (const id of due) {
       const s = fetched.get(id)!;
       storeSignals(db, id, s, now);
+      // The same answer carries the persona, which otherwise only changed
+      // on a fresh sign-in, and a session renews itself for as long as the
+      // player keeps visiting.
+      if (s.summary) applyPersona(db, id, { name: s.summary.personaName, avatar: s.summary.avatar });
       lenderNow.set(id, s.sharing?.lender ?? null);
       written++;
     }

@@ -162,7 +162,7 @@ export function ProfileEdit(
           ) : (
             <span class="field__static">
               <a class="btn" href="/auth/twitch" {...BACKEND}>Connect Twitch</a>
-              <span class="muted">Linking puts you on the Streams page.</span>
+              <span class="muted">Linking puts you on the Streams page while you have played a match in the last 30 days.</span>
             </span>
           )}
         </div>
