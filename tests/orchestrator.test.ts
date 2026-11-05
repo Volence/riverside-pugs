@@ -5,7 +5,7 @@ import { setSetting } from '../src/settings.js';
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import net from 'node:net';
 import { openDb, type DB } from '../src/db.js';
-import { RealOrchestrator } from '../src/orchestrator.js';
+import { RealOrchestrator, readyNotice } from '../src/orchestrator.js';
 import { ServerReleaser } from '../src/serverRelease.js';
 import { addServer, getServer, setHasDlc4 } from '../src/serverPool.js';
 import { LogListener } from '../src/logListener.js';
@@ -109,7 +109,7 @@ describe('RealOrchestrator', () => {
     expect(srv.cmds.some((c) => c.startsWith(`sm_pug_match ${mid} ${m.token} no_mercy`))).toBe(true);
     expect(srv.cmds.some((c) => c.startsWith('changelevel'))).toBe(true);
     // Shown on the ready-up panel; must follow pug_match, which sets the generic one.
-    const notice = srv.cmds.indexOf(`l4d_ready_league_notice "Riverside PUG #${mid}"`);
+    const notice = srv.cmds.indexOf(`l4d_ready_league_notice "Season 1 - PUG #${mid}"`);
     expect(notice).toBeGreaterThan(srv.cmds.indexOf('exec pug_match'));
     // The leaver rules come from the settings, after pug_match.
     expect(srv.cmds.indexOf('sm_pug_leave_budget 300')).toBeGreaterThan(srv.cmds.indexOf('exec pug_match'));
@@ -885,6 +885,19 @@ describe('stop-after map', () => {
     await orch.setupMatch(mid);
 
     expect(matchCmd(cmds)).toMatch(/^sm_pug_match \d+ \S+ dead_air$/);
+  });
+});
+
+describe('readyNotice', () => {
+  it('names the match season, made safe for the console', () => {
+    const db = openDb(':memory:');
+    const mid = seedMatch(db);
+    db.prepare('UPDATE seasons SET name = ? WHERE id = ?').run('Season 1: Wrong Way', currentSeasonId(db));
+    expect(readyNotice(db, mid)).toBe(`Season 1: Wrong Way - PUG #${mid}`);
+    db.prepare('UPDATE seasons SET name = ? WHERE id = ?').run('S2 "Höt"; quit', currentSeasonId(db));
+    expect(readyNotice(db, mid)).toBe(`S2 H?t quit - PUG #${mid}`);
+    db.prepare('UPDATE seasons SET name = ? WHERE id = ?').run('   ', currentSeasonId(db));
+    expect(readyNotice(db, mid)).toBe(`Riverside PUG #${mid}`);
   });
 });
 

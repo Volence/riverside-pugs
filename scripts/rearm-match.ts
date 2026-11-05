@@ -28,6 +28,8 @@ import { loadConfig } from '../src/config.js';
 import { RconClient } from '../src/rcon.js';
 import { getServer } from '../src/serverPool.js';
 import { getSetting } from '../src/settings.js';
+import { readyNotice } from '../src/orchestrator.js';
+import { quoted } from '../src/serverSetup.js';
 import { serverPasswordFor } from '../src/matchToken.js';
 import { stopAfterMap } from '../src/stopPoint.js';
 import { campaignRegistry, firstMapOf, setMissionsDirs } from '../src/campaignRegistry.js';
@@ -83,7 +85,7 @@ try {
 
   await rcon.exec(`logaddress_add ${config.logPublicAddress}`);
   await rcon.exec('exec pug_match');
-  await rcon.exec(`l4d_ready_league_notice "Riverside PUG #${matchId}"`);
+  await rcon.exec(`l4d_ready_league_notice ${quoted(readyNotice(db, matchId))}`);
   await rcon.exec(`sm_pug_leave_budget ${settingInt('leave_budget_seconds', 300)}`);
   await rcon.exec(`sm_pug_leave_autounpause ${getSetting(db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
   await rcon.exec(`sv_password "${serverPasswordFor(match.token)}"`);
