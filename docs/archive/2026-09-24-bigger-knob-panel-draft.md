@@ -1,5 +1,7 @@
 # The bigger knob panel (sub-project 5): draft for the owner
 
+> Archived 2026-11-05 by the owner as an idea, not planned. Never approved or built.
+
 Date: 2026-09-24. Status: **draft, not approved, not built.** Written while the
 owner was away as a starting point for brainstorming. Sub-project 5 decides which
 settings admins can change from the site and within what ranges, and gives the

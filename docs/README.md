@@ -22,11 +22,10 @@ Source code cites these paths, so they stay where they are. Many "Status:" lines
 before the build and never updated; where a line was clearly wrong it now says when the work
 shipped and which commit (dates are commit dates from git log).
 
-Every plan has been built and merged. Every spec has too, except two drafts that wait for an owner call
-(keep or drop):
-
-- `specs/2026-09-24-bigger-knob-panel-draft.md` (sub-project 5, not approved, not built)
-- `specs/2026-09-25-site-balance-layer-design.md` (agent draft of the same idea, not approved, not built)
+Every plan has been built and merged, and so has every spec. Two never-built drafts for a bigger
+balance knob panel (admins change many more settings and weapon stats from the site) were archived
+as "idea, not planned" on 2026-11-05 (owner): `archive/2026-09-24-bigger-knob-panel-draft.md` and
+`archive/2026-09-25-site-balance-layer-design.md`.
 
 Two partial cases: `specs/2026-09-22-hud-editor-panel-internals-design.md` shipped its plan 1
 (honest preview), and whether its plan 2 was built is unverified; the balance control panel's
