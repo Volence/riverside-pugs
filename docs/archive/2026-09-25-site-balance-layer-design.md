@@ -1,5 +1,7 @@
 # The site's balance layer (sub-project 5: the bigger knob panel)
 
+> Archived 2026-11-05 by the owner as an idea, not planned. Never approved or built.
+
 Date: 2026-09-25. Status: **draft written overnight by an agent, not approved,
 nothing built.** It turns `2026-09-24-bigger-knob-panel-draft.md` and the owner's
 answers there (Q6 to Q9) into a design, and connects it to the config audit of
