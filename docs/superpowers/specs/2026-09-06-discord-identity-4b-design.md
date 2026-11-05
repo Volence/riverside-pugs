@@ -1,7 +1,7 @@
 # Sub-project 4b: Discord Identity, Linking + Gate
 
 **Date:** 2026-09-06
-**Status:** Design, awaiting review. **Blocked on credentials only you can create.**
+**Status:** shipped 2026-09-17 (de11513c Discord identity, 7314f1e0 membership gate).
 **Parent:** `2026-09-06-dual-surface-design.md`
 
 ## Goal

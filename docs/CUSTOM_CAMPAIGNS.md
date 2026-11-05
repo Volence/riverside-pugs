@@ -1,14 +1,14 @@
 # Custom campaigns: turning it on
 
-This feature lets an admin upload a custom versus campaign VPK, push it to both
-game servers, and put it in the pool players vote from. None of that works
+This feature lets an admin upload a custom versus campaign VPK, push it to every
+enabled game server, and put it in the pool players vote from. None of that works
 until the box is configured. This is that configuration, plus how to check it
 actually worked.
 
 Everything here is web-only. There is no plugin change in this plan: the
 existing `sm_pug_match <matchId> <token> <campaign>` call and `changelevel`
-already handle a custom campaign once its VPK is sitting in `addons/` on both
-servers, because a custom campaign's mission comes from the VPK itself, not
+already handle a custom campaign once its VPK is sitting in `addons/` on every
+server, because a custom campaign's mission comes from the VPK itself, not
 from anything the plugin generates. (Mission generation from a campaign's
 `included`/`play_order` columns, so an admin can drop chapters, is a separate
 plan, written once this piece is live.)
@@ -68,80 +68,52 @@ worth knowing the cause up front rather than debugging it live.
 
 ## 2. The per-server rows
 
-Every server the pool installs to needs six columns filled in the `servers`
-table before `transportFor` (`src/addonsTransport.ts`) will return a working
-transport for it: `addons_transport`, `addons_dir`, and (for FTP) `ftp_host`,
-`ftp_port`, `ftp_user`, `ftp_password`. These are added by migration
-(`src/db.ts`) with safe defaults: `addons_transport` defaults to `'local'`
-and every other column defaults to `NULL`, so an existing server row is
-inert until an admin fills it in. Nothing writes to a guessed path.
+Rewritten 2026-11-05 for the current pool: Dallas plus Riverside #3, #4, #5
+and #6. Chicago (NFO, FTP) left the pool in September 2026 and is retired;
+its row stays in `servers` with `enabled = 0` for history, and nothing installs
+to it.
 
-**This half-configured state is not silent.** `transportFor` returns `null`
-whenever a server is not fully configured for its transport: no
-`addons_dir` at all, or `addons_transport = 'ftp'` with any of `ftp_host` /
-`ftp_user` / `ftp_password` missing. `installCampaign`
-(`src/campaignInstall.ts`) treats a `null` transport as an immediate failure,
-not a skip: it writes an `installed` row of state `failed` with the error
-`server is not configured with an addons transport`. That failure is what
-the admin panel's install list shows for that server, so a missing column
-reads as a red row in the panel, not as a campaign that looks installed
-everywhere when it is not.
+A campaign is installed to every row in `servers` with `enabled = 1`
+(`targets` in `src/routes/campaigns.ts`). `transportFor`
+(`src/addonsTransport.ts`) picks the transport from the row's
+`addons_transport` column, and returns `null` when the row is not fully
+configured for it:
 
-**Confirm the actual server names before running anything below.** A SQLite
-`UPDATE ... WHERE name = 'Dallas'` that matches no row is a silent no-op: no
-error, no changed rows, and `addons_dir` stays `NULL` on whichever row you
-meant to fill in. That surfaces much later as a campaign that looks
-poolable everywhere else and simply never leaves `pending`, which is a much
-harder thing to trace back to a typo'd name than catching it here. Open the
-shell and check first:
+| `addons_transport` | Used by | Columns it needs |
+|---|---|---|
+| `local` (the default) | Dallas, which runs the web app itself | `addons_dir` |
+| `sftp` | Riverside #3 to #6, reached over ssh | `addons_dir`, `ftp_host`, `ftp_user`, `ssh_key_path` (`ftp_port`, default 22) |
+| `ftp` | nothing now (it was Chicago's) | `addons_dir`, `ftp_host`, `ftp_user`, `ftp_password` (`ftp_port`, default 21) |
 
-    ssh root@45.32.199.85 'sqlite3 /home/pug/app/data/pug.db'
+The `sftp` transport reuses the `ftp_host` / `ftp_port` / `ftp_user` columns
+for the ssh host, port and user, and shells out to `scp` and `ssh` with the
+key named in `ssh_key_path`. It copies to `<name>.part` and then renames on the
+box, so srcds never sees a half-written VPK. The key the site uses is
+`/home/pug/.ssh/id_riverside_addons`, authorized for the `l4d` user on the
+Riverside boxes with `restrict,no-pty`. Before this transport existed
+(31376799, 2026-09-20), an `sftp` row fell through to a local file copy.
 
-```sql
-SELECT id, name FROM servers;
-```
+**A half-configured row is not silent.** A `null` transport makes
+`installCampaign` (`src/campaignInstall.ts`) write a `failed` install row with
+the error `server is not configured with an addons transport`, and the admin
+panel shows it in red. Because the pool only offers a campaign that is
+`installed` on every enabled server (`poolableCampaigns` in
+`src/campaignRegistry.ts`), one failed row keeps the campaign out of the
+Settings pool. If a box shows as missing a campaign, check that server's
+transport columns and its install rows first.
 
-Match the `WHERE name = '...'` clauses below against what that actually
-prints, not against the names used here as examples.
-
-### Dallas (local filesystem)
-
-Dallas runs the web app itself, so its transport is a plain file copy into
-the same directory `ADDONS_DIR` already points at:
-
-```sql
-UPDATE servers SET addons_transport = 'local',
-  addons_dir = '/home/l4d/l4d1-server/left4dead/addons'
-WHERE name = 'Dallas';
-```
-
-### Chicago (FTP)
-
-Chicago (NFO) has no shared filesystem and no SSH, so its transport is FTP,
-the same channel `ops/pull-chicago-files.py` already uses to pull demos and
-replays off it. Read the credentials from `/etc/pug-chicago.env` on the
-Dallas box rather than retyping them anywhere:
-
-    ssh root@45.32.199.85 'cat /etc/pug-chicago.env'
-
-That file holds `FTP_HOST`, `FTP_USER`, `FTP_PASS` (and `DEMO_DIR` /
-`REPLAY_DIR`, which are unrelated to this feature). Use those exact values:
-
-```sql
-UPDATE servers SET addons_transport = 'ftp', addons_dir = '/left4dead/addons',
-  ftp_host = '<FTP_HOST from /etc/pug-chicago.env>', ftp_port = 21,
-  ftp_user = '<FTP_USER from /etc/pug-chicago.env>',
-  ftp_password = '<FTP_PASS from /etc/pug-chicago.env>'
-WHERE name = 'Chicago';
-```
-
-`/left4dead/addons` matches the same FTP root `pull-chicago-files.py` already
-uses (`/left4dead`, with `/left4dead/replays` alongside it). Run both
-statements against `/home/pug/app/data/pug.db` on the Dallas box, with the
-site stopped or at least between installs, the same as any other manual row
-edit. `sqlite3` is already on the box for this:
+Before editing a row by hand, list the real names and settings, since an
+`UPDATE ... WHERE name = '...'` that matches nothing is a silent no-op:
 
     ssh root@45.32.199.85 'sqlite3 /home/pug/app/data/pug.db'
+
+```sql
+SELECT id, name, enabled, addons_transport, addons_dir, ftp_host, ftp_port,
+       ftp_user, ssh_key_path FROM servers;
+```
+
+Edit rows with the site stopped or at least between installs, the same as any
+other manual row edit.
 
 ## 3. Deploy order
 
@@ -150,8 +122,8 @@ This plan is web-only. There is no plugin change to stage, so
 
     ./deploy-web.sh
 
-Do the **first** campaign upload with both servers empty (no players
-connected). `localTransport.put` and `ftpTransport.put` both land the VPK
+Do the **first** campaign upload with every server empty (no players
+connected). `localTransport.put` and `sftpTransport.put` both land the VPK
 under a temp name and rename it into place so a running srcds never mounts a
 half-written file, but srcds only reads `addons/` at map load. A VPK that
 appears while a match is live does not affect that match, but it does change
@@ -160,24 +132,24 @@ be running at the time. Uploading with the servers empty means the first
 mount of a new campaign VPK happens on nobody's live game.
 
 Later uploads (a second campaign, a re-upload after fixing a bad VPK) carry
-the same risk on a smaller scale: the safest time is still whenever both
+the same risk on a smaller scale: the safest time is still whenever the
 servers are empty. `ops/README.md`'s "Live server: no unasked changes" rule
 applies here as much as anywhere else on this box.
 
 ## 4. Verify it worked
 
-After deploying and filling in both servers' rows:
+After deploying and filling in every enabled server's row:
 
 1. **Upload a campaign.** Admin -> Campaigns -> upload a VPK containing a
    versus mission. A successful upload returns the parsed campaign as a
    draft with its chapters; publish it from there.
-2. **Confirm both servers show `installed`.** Publishing kicks off the
+2. **Confirm every server shows `installed`.** Publishing kicks off the
    install to every enabled server in the background (`installCampaign`,
    not awaited by the publish request). Reload the admin panel a few
-   seconds later and check the install list under that campaign: both
-   Dallas and Chicago should read `installed`. If either reads `failed`,
+   seconds later and check the install list under that campaign: Dallas
+   and Riverside #3 to #6 should all read `installed`. If one reads `failed`,
    the error column, or the panel's audit log entry, whichever the row saved
-   will name the reason: e.g. a missing transport column, an FTP auth
+   will name the reason: e.g. a missing transport column, an ssh key
    failure, or a size mismatch after a truncated transfer.
 3. **Confirm the download link serves the file.** `GET
    /download/campaign/<slug>` should return the VPK with a matching

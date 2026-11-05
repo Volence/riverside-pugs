@@ -1,6 +1,6 @@
 # SourceTV: no delay, every spectator on record, and the map-change drop
 
-Status: design approved by the owner in conversation 2026-09-23. Not built.
+Status: design approved by the owner in conversation 2026-09-23. Shipped 2026-09-23 (7e3416aa l4d_tvwatch, 901992cc sessions).
 
 ## Why
 

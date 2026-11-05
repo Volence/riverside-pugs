@@ -1,7 +1,7 @@
 # In-game PUG entry point, public deployment, and match demos
 
 Date: 2026-09-11
-Status: approved, implementation starting
+Status: shipped 2026-09-11 (4493d9ef self-started matches and demo recording, 8e805af7 web deploy script).
 
 ## Problem
 

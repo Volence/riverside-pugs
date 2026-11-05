@@ -1,6 +1,6 @@
 # Cancelled matches end properly, and bans reach every game server
 
-Status: **implemented on master (unreleased); see the ship checklist in
+Status: **shipped 2026-09-19 (35dd3be0 teardown, f40b7aab ban sync); see the ship checklist in
 `docs/superpowers/notes/2026-09-19-teardown-and-bans-ship-checklist.md`.** Written after the
 first real PUG night (2026-09-18/19) surfaced both problems in one incident. Revised the
 same day after a local spike; see "What the spike established".

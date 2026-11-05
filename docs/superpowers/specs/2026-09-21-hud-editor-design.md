@@ -1,6 +1,6 @@
 # HUD editor: design a Left 4 Dead HUD on the site, download it as a VPK
 
-Status: design approved in conversation 2026-09-21, spec written the same day. Nothing built.
+Status: design approved in conversation 2026-09-21, spec written the same day. Shipped 2026-09-22 (1974062d and the hud-editor plans).
 
 Scope: web app only, all of it client side. No server code, no database, no plugin, no game
 server change. Work happens on the `worktree-hud-editor` worktree and nothing is deployed

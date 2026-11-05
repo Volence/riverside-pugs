@@ -1,7 +1,7 @@
 # Sub-project 4a: Frontend Migration + Redesign
 
 **Date:** 2026-09-06
-**Status:** Design, pre-implementation
+**Status:** shipped 2026-09-06 (2b426260).
 **Parent:** `2026-09-06-dual-surface-design.md`
 
 ## Goal

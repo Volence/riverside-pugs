@@ -1,3 +1,5 @@
+> Done: Season 1 started 2026-11-03. Kept as the template for the Season 2 launch (2027-01-05).
+
 # Season 1 "Wrong Way" launch runbook
 
 Season 1 starts **Tue 2026-11-03** and ends **Mon 2027-01-04**; Season 2 starts Tue 2027-01-05.

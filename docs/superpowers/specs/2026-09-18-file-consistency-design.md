@@ -1,7 +1,7 @@
 # File consistency for L4D1: killing the content-swap class
 
 Status: **Phase 1 PASSED 2026-09-17**. ForceExactFile enforces on L4D1, confirmed with a real
-client. Phase 2 (the file list) is not started. Spec written 2026-09-18.
+client. Phase 2 (the file list) shipped 2026-09-19 (40053a69; plan `2026-09-19-file-consistency-phase2-web.md`). Spec written 2026-09-18.
 
 Related: `docs/superpowers/specs/2026-09-17-integrity-design.md` (the replay analyzer,
 which targets a different class of cheating entirely and does not touch this one).

@@ -1,6 +1,6 @@
 # Custom campaigns: upload, pool, stats, and a page that tells people how to install them
 
-Status: **design approved 2026-09-18, not started.** Spec written 2026-09-18.
+Status: shipped 2026-09-18 (ffa99c4e and plan `2026-09-18-custom-campaigns-web.md`); Riverside over ssh 2026-09-20 (31376799). Spec written 2026-09-18.
 
 Related:
 - `docs/superpowers/specs/2026-08-13-passifice-l4d1-design.md` — the precedent that decides

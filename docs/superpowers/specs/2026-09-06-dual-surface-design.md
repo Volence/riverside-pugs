@@ -1,7 +1,7 @@
 # Dual-Surface PUG: Website + Discord Bot Design
 
 **Date:** 2026-09-06
-**Status:** Approved direction (topology + decomposition), pre-implementation
+**Status:** built; the new site (4a, 2026-09-06, 2b426260) and the Discord bot (2026-09-17, 7314f1e0) are both live.
 **Supersedes:** the "Discord: webhook notifications only. No bot." row in
 `2026-07-30-l4d1-pug-system-design.md`
 

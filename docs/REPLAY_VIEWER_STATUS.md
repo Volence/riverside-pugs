@@ -1,3 +1,5 @@
+> Status: shipped. The viewer has been live on riversidepug.com since 2026-09-12 (built on feat/skill-stats-5, e.g. 56192dea, 3e4ce359); bookmarks and avatars are live too. This is the 09-12 build record, kept because a plan cites it; "nothing deployed" below is out of date.
+
 # Replay viewer: status and what is left
 
 Written 2026-09-12 at the end of the build session. Branch `feat/skill-stats-5`,
