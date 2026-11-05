@@ -89,6 +89,9 @@ describe('the live board', () => {
     expect((within(card).getByRole('link', { name: '#81' }) as HTMLAnchorElement).getAttribute('href')).toBe('/match/81');
 
     expect((await row('alice')).textContent).toContain('On the server');
+    const alice = await row('alice');
+    expect((within(alice).getByRole('link', { name: 'alice' }) as HTMLAnchorElement).getAttribute('href')).toBe('/admin/people/1');
+    expect((within(alice).getByRole('link', { name: 'public profile' }) as HTMLAnchorElement).getAttribute('href')).toBe('/player/1');
     expect((await row('bob')).textContent).toContain('Dropped 0:42 ago');
     expect((await row('bob')).textContent).toContain('4:18 left');
     expect((await row('bob')).textContent).toMatch(/rejected by the file check at \d/);

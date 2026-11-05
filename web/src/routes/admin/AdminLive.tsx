@@ -12,6 +12,7 @@ import { AdminQueuePanel, AdminServersPanel, OpenMatchesPanel, RecentResultsPane
 import { BookingsPanel } from './BookingsPanel';
 import { PracticeLeasesPanel } from './PracticeLeasesPanel';
 import { ChatDrawer } from './ChatDrawer';
+import { fileUrl } from './adminRoutes';
 import { BOOKING_REASON, chatFromUrl, liveStateLabel, OLD_PLUGIN_REASON, SELF_STARTED_REASON, countdown, countUp, funnelText, isLow, liveFromUrl, reasonText } from '../../liveBoard';
 
 /** A safety net under the websocket, not the mechanism: a nudge lost while
@@ -243,7 +244,10 @@ function PlayerRow({ match: m, player: p, elapsedS, holdMaxMinutes, lowAlertSeco
 
   return (
     <li class={`live-row live-row--${s.kind}`}>
-      <a class="live-row__name" href={`/player/${p.steamid}`}>{p.name}</a>
+      <span class="live-row__who">
+        <a class="live-row__name" href={fileUrl(p.steamid)} title="Player File">{p.name}</a>
+        <a class="live-row__profile muted" href={`/player/${p.steamid}`}>public profile</a>
+      </span>
 
       <span class="live-row__status">
         {s.kind === 'connected' && (

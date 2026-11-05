@@ -2654,6 +2654,8 @@ tbody tr.is-lifted td { opacity: 0.55; }
 }
 .live-row--connected .live-row__status { color: var(--win); }
 .live-row--never_connected .live-row__status, .live-row--dropped .live-row__status { color: var(--text); }
+.live-row__who { display: flex; flex-direction: column; min-width: 0; }
+.live-row__profile { font-size: var(--fs-dense); }
 .live-row__left { font-size: 1.15em; }
 .live-row__left.is-low { color: var(--loss); }
 .live-row__left.is-held { color: var(--rating); }
