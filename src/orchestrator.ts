@@ -26,6 +26,7 @@ import { pushLogSecret } from './logAuth.js';
 import { holdMaxSeconds } from './presence.js';
 import { endNotes, standingSnapshot, type StandingSnapshot } from './endNotes.js';
 import { seasonOneLive } from './seasonThemes.js';
+import { consoleText, quoted } from './serverSetup.js';
 import type { RequeueResult } from './matchRequeue.js';
 
 /** What one attempt to collect a match came to.
@@ -249,8 +250,8 @@ export class RealOrchestrator implements Orchestrator {
       await rcon.exec('exec pug_match');
       // The first line of the in-game ready-up panel. After pug_match, whose
       // rotoblin_pug_4v4.cfg sets the generic "Riverside PUG"; nothing on the
-      // per-map config path resets it, so the number holds for the whole match.
-      await rcon.exec(`l4d_ready_league_notice "Riverside PUG #${matchId}"`);
+      // per-map config path resets it, so the line holds for the whole match.
+      await rcon.exec(`l4d_ready_league_notice ${quoted(readyNotice(this.db, matchId))}`);
       // The leaver rules for this match, from the admin settings.
       await rcon.exec(`sm_pug_leave_budget ${settingNumber(this.db, 'leave_budget_seconds', 300, { integer: true, min: 0 })}`);
       await rcon.exec(`sm_pug_leave_autounpause ${getSetting(this.db, 'leave_auto_unpause') === '0' ? 0 : 1}`);
@@ -592,4 +593,14 @@ async function expectPugOk(rcon: RconClient, cmd: string): Promise<string> {
   const res = await rcon.exec(cmd);
   if (!res.includes('PUGOK')) throw new Error(`${cmd.split(' ')[0]} rejected: ${res.trim() || '(no response)'}`);
   return res;
+}
+
+/** The ready-up panel's first line: the match's season and number, so the
+ *  season name an admin sets on the site reaches the game without a cfg
+ *  change. The panel adds "  ·  riversidepug.com" and holds 64 characters. */
+export function readyNotice(db: DB, matchId: number): string {
+  const row = db.prepare('SELECT s.name FROM matches m JOIN seasons s ON s.id = m.season_id WHERE m.id = ?')
+    .get(matchId) as { name: string } | undefined;
+  const season = row ? consoleText(row.name, 40).trim() : '';
+  return season ? `${season} - PUG #${matchId}` : `Riverside PUG #${matchId}`;
 }
