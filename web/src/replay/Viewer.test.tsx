@@ -415,13 +415,18 @@ describe('Viewer portrait layout', () => {
 
   it('splits the shipped maps at PORTRAIT_ASPECT with a gap either side of it', () => {
     // The threshold sits in the empty band between the tallest portrait map
-    // (hospital03, 0.92) and the squarest landscape one (hospital01, 1.05),
-    // so no shipped map is within a rounding error of changing layout.
-    const aspects = Object.keys(OVERVIEWS).map((m) => mapAspect({ ...HEADER, map: m }));
+    // (hospital03, 0.92) and the squarest landscape one (c5m4_quarter, 1.03),
+    // so no shipped map is within a rounding error of changing layout. The
+    // set is listed by name so a new overview that lands portrait is noticed.
+    const maps = Object.keys(OVERVIEWS);
+    const aspects = maps.map((m) => mapAspect({ ...HEADER, map: m }));
+    expect(maps.filter((m) => isPortraitAspect(mapAspect({ ...HEADER, map: m }))).sort()).toEqual([
+      'c13m4_cutthroatcreek', 'c14m1_junkyard', 'c2m2_fairgrounds', 'c5m3_cemetery',
+      'l4d_vs_airport03_garage', 'l4d_vs_farm04_barn', 'l4d_vs_hospital03_sewers', 'l4d_vs_smalltown01_caves',
+    ]);
     const portrait = aspects.filter(isPortraitAspect);
-    expect(portrait.length).toBe(4);
     expect(Math.max(...portrait)).toBeLessThan(PORTRAIT_ASPECT - 0.05);
-    expect(Math.min(...aspects.filter((a) => !isPortraitAspect(a)))).toBeGreaterThan(PORTRAIT_ASPECT + 0.03);
+    expect(Math.min(...aspects.filter((a) => !isPortraitAspect(a)))).toBeGreaterThan(PORTRAIT_ASPECT + 0.02);
     expect(isPortraitAspect(mapAspect({ ...HEADER, map: PORTRAIT }))).toBe(true);
   });
 
