@@ -1,14 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_LINKS, navLinksFor } from './Nav';
-
-describe('navLinksFor', () => {
-  it('before Season 1: Patch notes is the tracker page and there is no News', () => {
-    const early = navLinksFor(false);
-    expect(early.map(([h]) => h)).not.toContain('/news');
-    expect(early.find(([, l]) => l === 'Patch notes')?.[0]).toBe('/balance');
-    expect(navLinksFor(true)).toBe(NAV_LINKS);
-  });
-});
+import { NAV_LINKS } from './Nav';
 
 describe('NAV_LINKS', () => {
   it('gives every static page a target so the SPA router does not swallow it', () => {
@@ -22,16 +13,15 @@ describe('NAV_LINKS', () => {
     }
   });
 
-  it('offers the hand-written patch notes right after Matches; the change log is under them, not in the nav', () => {
-    const paths = NAV_LINKS.map(([href]) => href);
-    const i = paths.indexOf('/matches');
-    expect(paths[i + 1]).toBe('/patch-notes');
-    expect(NAV_LINKS.find(([href]) => href === '/patch-notes')?.[1]).toBe('Patch notes');
-    expect(paths).not.toContain('/balance');
-  });
-
-  it('offers News, which holds staff announcements and quick patch notes', () => {
-    expect(NAV_LINKS.find(([href]) => href === '/news')?.[1]).toBe('News');
+  // 2026-11-06 (owner): Patch notes and News carried the same posts, and
+  // Matches and Campaigns are both stats, so each pair is one item with a tab
+  // strip on its pages (components/SectionTabs.tsx).
+  it('folds Matches and Campaigns into Stats, and News, Patch notes and the change log into News', () => {
+    expect(NAV_LINKS.map(([, label]) => label)).toEqual([
+      'Play', 'Live', 'Streams', 'Leaderboard', 'Stats', 'News', 'Custom', 'HUD', 'How to play',
+    ]);
+    expect(NAV_LINKS.find(([, l]) => l === 'Stats')?.[0]).toBe('/matches');
+    expect(NAV_LINKS.find(([, l]) => l === 'News')?.[0]).toBe('/news');
   });
 
   it('folds the crosshair maker, HUD editor and community into one HUD item', () => {
@@ -46,9 +36,9 @@ describe('NAV_LINKS', () => {
     expect(NAV_LINKS.map(([, label]) => label)).not.toContain('Community');
   });
 
-  it('offers Custom alongside Campaigns, at its own path', () => {
+  it('keeps Custom its own item, apart from the Campaigns stats', () => {
     const paths = NAV_LINKS.map(([href]) => href);
-    expect(paths).toContain('/maps');
+    expect(paths).not.toContain('/maps');
     expect(paths).toContain('/custom-campaigns');
     // /maps is stats about maps played; this is how to install one. Merging the
     // two would break bookmarks and muddle both jobs.
@@ -65,11 +55,6 @@ import { api } from '../api';
 afterEach(cleanup);
 
 describe('Nav', () => {
-  it('calls the maps route Campaigns and keeps its path', () => {
-    const maps = NAV_LINKS.find(([href]) => href === '/maps');
-    expect(maps?.[1]).toBe('Campaigns');
-  });
-
   it('shows the wordmark and no live indicator when nothing is live', () => {
     const { container } = render(
       <LocationProvider><Nav session={{ kind: 'anonymous' }} state={null} /></LocationProvider>,
@@ -147,9 +132,9 @@ describe('Nav', () => {
     );
     expect(screen.getByRole('link', { name: 'Compete' })).toBeTruthy();
     for (const gone of ['Teams', 'Bookings', 'Scrims', 'Events']) expect(screen.queryByRole('link', { name: gone })).toBeNull();
-    // Where the four were: right after Matches.
+    // Where the four were: right after Stats.
     const labels = screen.getAllByRole('link').map((a) => a.textContent);
-    expect(labels[labels.indexOf('Matches') + 1]).toBe('Compete');
+    expect(labels[labels.indexOf('Stats') + 1]).toBe('Compete');
     unmount();
     const outside = { steamid: '2', name: 'bob', avatar: null, status: 'active', isAdmin: false };
     render(<LocationProvider><Nav session={{ kind: 'active', me: outside }} state={null} /></LocationProvider>);
@@ -217,16 +202,16 @@ describe('Nav current page', () => {
     expect(at(path)).toEqual(['HUD']);
   });
 
-  it.each(['/balance', '/balance/values'])('marks Patch notes current on %s', (path) => {
-    expect(at(path)).toEqual(['Patch notes']);
+  it.each(['/news', '/news/3', '/patch-notes', '/balance', '/balance/values'])('marks News current on %s', (path) => {
+    expect(at(path)).toEqual(['News']);
   });
 
-  it.each(['/news', '/news/3'])('has no News before Season 1, so nothing is current on %s', (path) => {
-    expect(at(path)).toEqual([]);
+  it.each(['/matches', '/maps'])('marks Stats current on %s', (path) => {
+    expect(at(path)).toEqual(['Stats']);
   });
 
   it('marks only the matching item elsewhere', () => {
-    expect(at('/maps')).toEqual(['Campaigns']);
+    expect(at('/custom-campaigns')).toEqual(['Custom']);
     cleanup();
     expect(at('/')).toEqual(['Play']);
   });
@@ -251,6 +236,6 @@ describe('Nav current page in the competitive section', () => {
   });
 
   it('leaves Compete alone elsewhere', () => {
-    expect(at('/matches')).toEqual(['Matches']);
+    expect(at('/matches')).toEqual(['Stats']);
   });
 });

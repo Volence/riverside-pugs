@@ -3,6 +3,7 @@ import { useSeasonLook } from '../../seasonTheme';
 import { useFetch } from '../../hooks/useFetch';
 import { Empty } from '../../components/bits';
 import { PageHeader } from '../../components/PageHeader';
+import { SectionTabs, NEWS_SECTION } from '../../components/SectionTabs';
 import { GameValuesView } from './GameValuesView';
 
 /** The public Game values page: what every balance setting is right now, the
@@ -12,6 +13,7 @@ export function GameValues() {
   const seasonOne = useSeasonLook()?.ranks === true;
   return (
     <div class="page page--list">
+      <SectionTabs section={NEWS_SECTION} active="changelog" />
       <PageHeader eyebrow="Balance" title="Game values">
         <p>
           Every balance setting as our servers run it, next to the vanilla Left 4 Dead value. Changes

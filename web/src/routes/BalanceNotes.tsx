@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { SectionTabs, NEWS_SECTION } from '../components/SectionTabs';
 import { DocLayout } from '../components/DocLayout';
 import { useSeasonLook } from '../seasonTheme';
 import { PatchEntryView } from './balance/PatchEntryView';
@@ -39,6 +40,7 @@ export function BalanceNotes() {
 
   return (
     <div class="page page--list">
+      <SectionTabs section={NEWS_SECTION} active="changelog" />
       {/* Before Season 1 this is still the Patch notes page; from Season 1 the
           hand-written notes take that name and this becomes the change log. */}
       <PageHeader eyebrow={seasonOne ? 'Patch notes' : 'Balance'} title={seasonOne ? 'Full change log' : 'Patch notes'}>

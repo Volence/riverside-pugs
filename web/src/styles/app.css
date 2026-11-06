@@ -1612,6 +1612,7 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
  * pages, with the same air under it as the HUD strip. Four short labels fit at
  * 390 px; .tabs scrolls the strip, never the page, if a font runs wide. */
 .competetabs + .page-head { margin-top: var(--sp-5); }
+.sectiontabs + .page-head { margin-top: var(--sp-5); }
 .tabs__count {
   margin-left: 0.4em;
   padding: 0 0.4em;

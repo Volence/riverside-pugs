@@ -5,7 +5,7 @@ import { campaignName } from '../format';
 import type { Session } from '../hooks/useLiveState';
 import { competeTabFor } from './CompeteTabs';
 import { hudTabFor } from './HudTabs';
-import { useSeasonLook } from '../seasonTheme';
+import { NEWS_SECTION, STATS_SECTION, sectionTabFor } from './SectionTabs';
 
 /** [href, label, target?].
  *
@@ -22,6 +22,10 @@ import { useSeasonLook } from '../seasonTheme';
  *  HUD is a section: the HUD editor, the crosshair maker and the community
  *  page share one item, and a tab strip on each page moves between them.
  *
+ *  Stats (Matches, Campaigns) and News (News, Patch notes, the change log)
+ *  are sections the same way (components/SectionTabs.tsx). Custom stays its
+ *  own item: it is how to install custom campaigns, not stats about them.
+ *
  *  Compete is a section the same way: Scrims, Bookings, Teams and Events
  *  share one item (only for viewers the competitive switch lets in, so it is
  *  added in Nav rather than listed here) and a tab strip on each list page. */
@@ -30,36 +34,22 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/live', 'Live'],
   ['/streams', 'Streams'],
   ['/leaderboard', 'Leaderboard'],
-  ['/matches', 'Matches'],
-  ['/patch-notes', 'Patch notes'],
+  ['/matches', 'Stats'],
   ['/news', 'News'],
-  ['/maps', 'Campaigns'],
   ['/custom-campaigns', 'Custom'],
   ['/hud', 'HUD'],
   ['/how-to-play', 'How to play'],
 ];
 
-/** The nav before Season 1 starts (owner ruling 2026-10-20: nothing that
- *  launches with Season 1 shows early): Patch notes is still the balance
- *  tracker's page and there is no News. */
-export function navLinksFor(seasonOne: boolean): readonly (readonly [string, string, string?])[] {
-  if (seasonOne) return NAV_LINKS;
-  return NAV_LINKS.filter(([href]) => href !== '/news')
-    .map((l) => (l[0] === '/patch-notes' ? (['/balance', 'Patch notes'] as const) : l));
-}
-
 /** Whether a nav item is the page being shown. The HUD item stands for its
  *  whole section, so it is current on the crosshair and community pages too,
- *  and Patch notes for the balance pages under it (Game values). Compete is
+ *  and Stats and News likewise for theirs. Compete is
  *  the only item that points at /events or /scrims (it lands on one or the
  *  other) and stands for every competitive page, detail pages included. */
 function isCurrent(href: string, path: string): boolean {
   if (href === '/hud') return hudTabFor(path) !== null;
-  // Patch notes stands for the hand-written notes and the full change log
-  // under them (/balance, Game values).
-  if (href === '/patch-notes') return path === href || path === '/balance' || path.startsWith('/balance/');
-  if (href === '/balance') return path === href || path.startsWith('/balance/');
-  if (href === '/news') return path === href || path.startsWith('/news/');
+  if (href === '/matches') return sectionTabFor(STATS_SECTION, path) !== null;
+  if (href === '/news') return sectionTabFor(NEWS_SECTION, path) !== null;
   if (href === '/events' || href === '/scrims') return competeTabFor(path) !== null;
   return path === href;
 }
@@ -90,10 +80,9 @@ export function Nav(
   const live = state?.match && state.match.state === 'live' ? state.match : null;
   // Compete only for viewers the competitive switch lets in (/api/me teams).
   // It lands on Events while a tournament is open or about to start.
-  const base = navLinksFor(useSeasonLook()?.ranks === true);
   const links = me?.teams
-    ? [...base.slice(0, 5), [me.competeHome === 'events' ? '/events' : '/scrims', 'Compete'] as const, ...base.slice(5)]
-    : base;
+    ? [...NAV_LINKS.slice(0, 5), [me.competeHome === 'events' ? '/events' : '/scrims', 'Compete'] as const, ...NAV_LINKS.slice(5)]
+    : NAV_LINKS;
   const myTeams = me?.teams ? me.myTeams ?? [] : [];
 
   return (

@@ -6,6 +6,7 @@ import { useFetch } from '../hooks/useFetch';
 import { campaignName, campaignTint, fmtAgo, fmtDate } from '../format';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { SectionTabs, STATS_SECTION } from '../components/SectionTabs';
 
 /** Up to four faces for one side of a row, best SI damage first (the server's
  *  order). A missing avatar is the name's first letter on a plain square. */
@@ -163,6 +164,7 @@ export function Matches() {
 
   return (
     <div class="page page--list">
+      <SectionTabs section={STATS_SECTION} active="matches" />
       <PageHeader
         eyebrow={eyebrow}
         title="Recent matches"
