@@ -354,11 +354,18 @@ export function renderMatch(v: MatchView): MessagePayload {
   if (v.state === 'live' && v.canSpectate) {
     row.push({ kind: 'button', customId: `m:${v.matchId}:spectate`, label: 'Watch', style: 'secondary' });
   }
-  row.push(link(`${v.publicUrl}/match/${v.matchId}`, 'Match page'));
+  // While it is being played the match page has nothing to show yet (no
+  // roster or score until it finishes), so a live card points at its card on
+  // the Live page. The card is re-rendered on finish/abort, which puts the
+  // match page back.
+  const page = v.state === 'live'
+    ? { url: `${v.publicUrl}/live#match-${v.matchId}`, label: 'Watch live' }
+    : { url: `${v.publicUrl}/match/${v.matchId}`, label: 'Match page' };
+  row.push(link(page.url, page.label));
   return {
     embeds: [{
       title: `Riverside PUG #${v.matchId}: ${v.campaignName}`,
-      url: `${v.publicUrl}/match/${v.matchId}`,
+      url: page.url,
       color: v.state === 'aborted' || v.state === 'finished' ? COLOR.muted : open ? COLOR.accent : COLOR.muted,
       description: [STATE_LINE[v.state], ...extra].join('\n'),
       fields: [

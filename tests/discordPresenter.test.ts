@@ -172,13 +172,23 @@ describe('renderMatch', () => {
     teamA: [alice], teamB: [bob], voice: null, unlinked: ['b*o_b'],
   };
 
-  it('live: both teams, connect and match page buttons', () => {
+  it('live: both teams, connect, and the Live page instead of the match page', () => {
     const p = renderMatch({ ...base, state: 'live' });
     expect(text(p)).toContain('Dead Air');
     expect(text(p)).toContain('<@111> (1200)');
     const b = buttons(p);
     expect(b).toContainEqual(expect.objectContaining({ customId: 'm:42:connect' }));
-    expect(b).toContainEqual(expect.objectContaining({ url: `${URL_}/match/42` }));
+    expect(b).toContainEqual(expect.objectContaining({ url: `${URL_}/live#match-42`, label: 'Watch live' }));
+    expect(b.find((x) => x.kind === 'link' && x.url.endsWith('/match/42'))).toBeUndefined();
+    expect(p.embeds[0].url).toBe(`${URL_}/live#match-42`);
+  });
+
+  it('finished and aborted cards link the match page again', () => {
+    for (const state of ['finished', 'aborted', 'waiting', 'configuring'] as const) {
+      const p = renderMatch({ ...base, state });
+      expect(buttons(p)).toContainEqual(expect.objectContaining({ url: `${URL_}/match/42`, label: 'Match page' }));
+      expect(p.embeds[0].url).toBe(`${URL_}/match/42`);
+    }
   });
 
   it('waiting for a server says so and has no connect button yet', () => {

@@ -516,25 +516,31 @@ describe('MatchDetail', () => {
   // 2026-09-21: the same /match/:id link an admin-feed post gives out while
   // the match is still running, so it has to say something other than "Match
   // not found." until it ends.
-  it('says a match still being played is in progress, with the campaign and a link to Live', async () => {
+  // 2026-11-06: a live match goes straight to its card on the Live page
+  // (/live#match-N); the in-progress note was one more click to get there.
+  it('swaps a live match for its card on the Live page', async () => {
+    window.history.replaceState(null, '', '/match/103');
     mockApi.match.mockResolvedValue({ ongoing: true, id: 103, campaign: 'no_mercy', state: 'live' });
-    render(<MatchDetail id="103" me={null} />);
-    await waitFor(() => expect(screen.getByText(/Match #103 is still being played/)).toBeTruthy());
-    expect(screen.getByText('Match #103: No Mercy')).toBeTruthy();
-    const live = screen.getByText('Live page') as HTMLAnchorElement;
-    expect(live.getAttribute('href')).toBe('/live');
+    render(<LocationProvider><MatchDetail id="103" me={null} /></LocationProvider>);
+    await waitFor(() => expect(window.location.pathname + window.location.hash).toBe('/live#match-103'));
     // None of the fields a finished match renders are on the page.
     expect(screen.queryByText('Match totals')).toBeNull();
+    window.history.replaceState(null, '', '/');
   });
 
-  it('says a match is waiting for a server, or being set up, in those words', async () => {
+  it('says a match is waiting for a server, or being set up, in those words, with a link to Live', async () => {
+    window.history.replaceState(null, '', '/match/104');
     mockApi.match.mockResolvedValue({ ongoing: true, id: 104, campaign: 'no_mercy', state: 'waiting' });
-    render(<MatchDetail id="104" me={null} />);
+    render(<LocationProvider><MatchDetail id="104" me={null} /></LocationProvider>);
     await waitFor(() => expect(screen.getByText(/Waiting for a server/)).toBeTruthy());
+    expect(screen.getByText('Match #104: No Mercy')).toBeTruthy();
+    expect((screen.getByText('Live page') as HTMLAnchorElement).getAttribute('href')).toBe('/live#match-104');
+    expect(window.location.pathname).toBe('/match/104');
 
     mockApi.match.mockResolvedValue({ ongoing: true, id: 105, campaign: 'no_mercy', state: 'configuring' });
-    render(<MatchDetail id="105" me={null} />);
+    render(<LocationProvider><MatchDetail id="105" me={null} /></LocationProvider>);
     await waitFor(() => expect(screen.getByText(/Setting up the server/)).toBeTruthy());
+    window.history.replaceState(null, '', '/');
   });
 
   it('shows one map at a time, with a chip row to pick another', async () => {
