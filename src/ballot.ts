@@ -15,9 +15,11 @@ import { getSetting, getStickyCampaigns } from './settings.js';
  * The draw is about the players in the lobby, not the server (owner,
  * 2026-11-04):
  *
- * - A campaign any of them played in their last match is left out, from its
- *   slot and from the stickies. A slot that empties that way falls back to
- *   the campaigns the fewest of them last played.
+ * - A campaign any of them played in their last RECENT_WINDOW matches is
+ *   left out, from its slot and from the stickies (owner, 2026-11-06: one
+ *   match in between let Dead Air back on four ballots in a row). A slot
+ *   that empties that way offers the campaign whose most recent player
+ *   played it longest ago, so a slot cannot swing between two campaigns.
  * - Inside a slot the draw is weighted toward campaigns these players have
  *   not played for a while. Each player gives a campaign 1 + n/10, capped at
  *   3, where n is the completed PUGs that player has played since they last
@@ -46,6 +48,8 @@ export const IGNORED_LOOKBACK = 8;
 /** A decayed bump under this is dropped rather than halved forever. */
 const BUMP_FLOOR = 0.01;
 export const MAX_STICKIES = 3;
+/** A campaign in any lobby player's last this many matches is left out. */
+export const RECENT_WINDOW = 3;
 /** Played matches past which every campaign is at the cap anyway. */
 const PLAYED_LOOKBACK = (WEIGHT_CAP - 1) * WEIGHT_STEP + 1;
 
@@ -63,8 +67,14 @@ export interface BallotOption {
   /** The lobby average of each player's weight. Null for a sticky. */
   base: number | null;
   bump: number;
-  /** Lobby players whose last match was on it: 0 unless its slot had to
-   *  fall back. Absent on ballots drawn before 2026-11-04. */
+  /** Lobby players with it in their last RECENT_WINDOW matches: 0 unless
+   *  its slot had to fall back. Absent on ballots drawn before 2026-11-06. */
+  recentBy?: number;
+  /** Matches since the lobby player who played it most recently last did;
+   *  null = none of them in their lookback. Absent before 2026-11-06. */
+  freshest?: number | null;
+  /** Ballots drawn 2026-11-04 to 11-06 only: lobby players whose last
+   *  match was on it. */
   lastPlayedBy?: number;
   /** Lobby players it is stepped back for after a no-vote showing.
    *  Absent on ballots drawn before 2026-11-04. */
@@ -128,11 +138,23 @@ function weightedPick<T extends { weight: number }>(items: T[], rng: () => numbe
   return items[items.length - 1];
 }
 
+/** Matches since the lobby player who played `slug` most recently last did;
+ *  null when none of them has it in their history. */
+function freshestPlay(histories: PlayerHistory[], slug: string): number | null {
+  let min: number | null = null;
+  for (const h of histories) {
+    const at = h.played.findIndex((p) => p.campaign === slug);
+    if (at >= 0 && (min === null || at < min)) min = at;
+  }
+  return min;
+}
+
 /** The ballot: one drawn option per non-empty slot in BALLOT_SLOTS order,
- *  then each sticky not already drawn and not anyone's last campaign. Pure,
- *  for tests. */
+ *  then each sticky not already drawn and not recent for anyone. Pure, for
+ *  tests. */
 export function drawBallot(input: DrawInput): BallotOption[] {
-  const lastPlayedBy = (slug: string) => input.histories.filter((h) => h.played[0]?.campaign === slug).length;
+  const recentBy = (slug: string) => input.histories
+    .filter((h) => h.played.slice(0, RECENT_WINDOW).some((p) => p.campaign === slug)).length;
   const out: BallotOption[] = [];
   for (const slot of BALLOT_SLOTS) {
     const inSlot = input.candidates
@@ -143,17 +165,28 @@ export function drawBallot(input: DrawInput): BallotOption[] {
         const bump = input.bumps.get(c.slug) ?? 0;
         return {
           slug: c.slug, base, bump, weight: base + bump,
-          lastPlayedBy: lastPlayedBy(c.slug), ignoredBy: each.filter((w) => w.ignored).length,
+          recentBy: recentBy(c.slug), freshest: freshestPlay(input.histories, c.slug),
+          ignoredBy: each.filter((w) => w.ignored).length,
         };
       });
     if (inSlot.length === 0) continue;
-    const fewest = Math.min(...inSlot.map((c) => c.lastPlayedBy));
-    const pick = weightedPick(inSlot.filter((c) => c.lastPlayedBy === fewest), input.rng);
+    let pool = inSlot.filter((c) => c.recentBy === 0);
+    if (pool.length === 0) {
+      // Every one is recent for someone: the longest ago wins, never played
+      // (null) beating any count.
+      const stalest = (c: typeof inSlot[number]) => c.freshest ?? Infinity;
+      const best = Math.max(...inSlot.map(stalest));
+      pool = inSlot.filter((c) => stalest(c) === best);
+    }
+    const pick = weightedPick(pool, input.rng);
     out.push({ ...pick, slot });
   }
   for (const slug of input.stickies.slice(0, MAX_STICKIES)) {
-    if (out.some((o) => o.slug === slug) || lastPlayedBy(slug) > 0) continue;
-    out.push({ slug, slot: 'sticky', weight: null, base: null, bump: input.bumps.get(slug) ?? 0, lastPlayedBy: 0, ignoredBy: 0 });
+    if (out.some((o) => o.slug === slug) || recentBy(slug) > 0) continue;
+    out.push({
+      slug, slot: 'sticky', weight: null, base: null, bump: input.bumps.get(slug) ?? 0,
+      recentBy: 0, freshest: freshestPlay(input.histories, slug), ignoredBy: 0,
+    });
   }
   return out;
 }

@@ -1554,7 +1554,7 @@ CREATE TABLE IF NOT EXISTS skeet_streak_scans (
 
 -- Four-slot campaign ballots (src/ballot.ts), one row per lobby that drew
 -- one, for the owner to review. options_json: [{slug, slot, weight, base,
--- bump, lastPlayedBy, ignoredBy}] in ballot order; votes_json: {slug:
+-- bump, recentBy, freshest, ignoredBy}] in ballot order; votes_json: {slug:
 -- votes} at the tally; players_json: the lobby's steamids. winner and
 -- match_id stay null for a pop that never finished its vote.
 CREATE TABLE IF NOT EXISTS ballots (
