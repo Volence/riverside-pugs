@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../src/db.js';
 import {
-  baseWeight, playerWeight, drawBallot, nextBumps, loadHistories, createBallot, finishBallot,
-  loadBumps, recentBallots, MAX_STICKIES, RECENT_WINDOW, type BallotCandidate, type PlayerHistory,
+  rankPoints, ignoredKeep, drawBallot, nextBumps, loadHistories, createBallot, finishBallot,
+  loadBumps, recentBallots, MAX_STICKIES, RECENT_WINDOW, SLOT_TOP, type BallotCandidate, type PlayerHistory,
 } from '../src/ballot.js';
 import { Matchmaker } from '../src/matchmaker.js';
 import { upsertPlayer, currentSeasonId } from '../src/players.js';
@@ -29,46 +29,43 @@ const draw = (over: Partial<Parameters<typeof drawBallot>[0]> = {}) => drawBallo
   candidates: POOL, histories: [hist([])], bumps: new Map(), stickies: [], rng: () => 0, ...over,
 });
 
-describe('baseWeight', () => {
-  it('is 1 + n/10 capped at 3, and the cap when never played', () => {
-    expect(baseWeight(0)).toBe(1);
-    expect(baseWeight(5)).toBe(1.5);
-    expect(baseWeight(20)).toBe(3);
-    expect(baseWeight(80)).toBe(3);
-    expect(baseWeight(null)).toBe(3);
+describe('rankPoints', () => {
+  it('gives 4/3/2 to the three played longest ago and 0 to the rest', () => {
+    const h = hist(['a', 'b', 'c', 'd']);
+    expect(Object.fromEntries(rankPoints(h, ['a', 'b', 'c', 'd']))).toEqual({ d: 4, c: 3, b: 2, a: 0 });
+    const six = hist(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(Object.fromEntries(rankPoints(six, ['a', 'b', 'c', 'd', 'e', 'f']))).toEqual({ f: 4, e: 3, d: 2, c: 0, b: 0, a: 0 });
+  });
+
+  it('ranks never played first, ties sharing their places\' points', () => {
+    // x, y, z share places one to three: (4 + 3 + 2) / 3.
+    expect(Object.fromEntries(rankPoints(hist(['a']), ['a', 'x', 'y', 'z']))).toEqual({ x: 3, y: 3, z: 3, a: 0 });
+    // Five never played share 4 + 3 + 2 + 0 + 0.
+    const five = rankPoints(hist(['a']), ['a', 'v', 'w', 'x', 'y', 'z']);
+    expect(five.get('v')).toBe(1.8);
+    expect(five.get('a')).toBe(0);
   });
 });
 
-describe('playerWeight', () => {
-  it('counts the player\'s own matches since they last played it', () => {
-    const h = hist(['a', 'b', 'c', 'no_mercy', 'd']);
-    expect(playerWeight(h, 'no_mercy')).toEqual({ weight: 1.3, ignored: false });
-    expect(playerWeight(h, 'a').weight).toBe(1);
-    expect(playerWeight(h, 'dead_air').weight).toBe(3);
-  });
-
-  it('steps a no-vote showing half way back, wearing off by half per later ballot', () => {
+describe('ignoredKeep', () => {
+  it('halves for a no-vote showing, wearing off by half per later ballot', () => {
     const shown = { matchId: 101, options: ['dead_air', 'x'], votes: { x: 6 } };
     const other = { matchId: 102, options: ['y'], votes: { y: 6 } };
-    // Never played (3): just shown and ignored keeps half of the 2 above 1.
-    expect(playerWeight(hist([], [shown]), 'dead_air')).toEqual({ weight: 2, ignored: true });
-    // One ballot later it keeps three quarters, then seven eighths.
-    expect(playerWeight(hist([], [other, shown]), 'dead_air').weight).toBe(2.5);
-    expect(playerWeight(hist([], [other, other, shown]), 'dead_air').weight).toBe(2.75);
-  });
-
-  it('does not step back for one vote, or for a showing before they last played it', () => {
-    const oneVote = { matchId: 101, options: ['dead_air', 'x'], votes: { x: 5, dead_air: 1 } };
-    expect(playerWeight(hist([], [oneVote]), 'dead_air')).toEqual({ weight: 3, ignored: false });
-    // Played in match 100, shown and ignored in a ballot for match 90.
-    const before = { matchId: 90, options: ['dead_air'], votes: { x: 6 } };
-    expect(playerWeight(hist(['dead_air'], [before]), 'dead_air')).toEqual({ weight: 1, ignored: false });
+    expect(ignoredKeep(hist([], [shown]), 'dead_air')).toBe(0.5);
+    expect(ignoredKeep(hist([], [other, shown]), 'dead_air')).toBe(0.75);
+    expect(ignoredKeep(hist([], [other, other, shown]), 'dead_air')).toBe(0.875);
   });
 
   it('stacks two showings', () => {
     const shown = (matchId: number) => ({ matchId, options: ['dead_air'], votes: { x: 6 } });
-    // 3 -> keeps 1/2 (newest) * 3/4 (one ballot older) of 2 = 0.75 -> 1.75.
-    expect(playerWeight(hist([], [shown(102), shown(101)]), 'dead_air').weight).toBe(1.75);
+    expect(ignoredKeep(hist([], [shown(102), shown(101)]), 'dead_air')).toBe(0.375);
+  });
+
+  it('does not count one vote, or a showing before they last played it', () => {
+    const oneVote = { matchId: 101, options: ['dead_air', 'x'], votes: { x: 5, dead_air: 1 } };
+    expect(ignoredKeep(hist([], [oneVote]), 'dead_air')).toBe(1);
+    const before = { matchId: 90, options: ['dead_air'], votes: { x: 6 } };
+    expect(ignoredKeep(hist(['dead_air'], [before]), 'dead_air')).toBe(1);
   });
 });
 
@@ -85,36 +82,60 @@ describe('drawBallot', () => {
     expect(b.map((o) => o.slot)).toEqual(['l4d1', 'l4d2', 'mirror']);
   });
 
-  it('weights by the lobby average of each player\'s weight', () => {
-    // Player one played no_mercy three matches ago (1.3), player two never
-    // (3): no_mercy averages 2.15; dead_air is never played by either (3).
-    // Total 5.15, so rng below 2.15/5.15 is no_mercy.
-    const histories = [hist(['x', 'y', 'z', 'no_mercy']), hist([])];
-    const pick = (r: number) => draw({ histories, rng: () => r })[0];
-    expect(pick(0.41).slug).toBe('no_mercy');
-    expect(pick(0.42).slug).toBe('dead_air');
-    expect(pick(0.41)).toMatchObject({ weight: 2.15, base: 2.15, bump: 0, recentBy: 0, freshest: 3, ignoredBy: 0 });
+  it('offers the L4D1 campaign the fewest just played when every one is someone\'s last', () => {
+    // Owner's example: last played blood_harvest by 2, no_mercy 2,
+    // death_toll 3, dead_air 1. Each player gives their own last 0 and the
+    // other three 3: dead_air 21/8, blood_harvest and no_mercy 18/8,
+    // death_toll 15/8. L4D1 offers its top score, whatever the rng.
+    const l4d1 = ['no_mercy', 'death_toll', 'dead_air', 'blood_harvest'];
+    const last = ['blood_harvest', 'blood_harvest', 'no_mercy', 'no_mercy', 'death_toll', 'death_toll', 'death_toll', 'dead_air'];
+    const histories = last.map((c) => hist([c]));
+    expect(SLOT_TOP.l4d1).toBe(1);
+    for (const r of [0, 0.5, 0.99]) {
+      const b = drawBallot({ candidates: l4d1.map((s) => C(s, 'l4d1')), histories, bumps: new Map(), stickies: [], rng: () => r });
+      expect(b[0]).toMatchObject({ slug: 'dead_air', base: 2.625, recentBy: 1 });
+    }
   });
 
-  it('adds the lost-vote bump on top of the base weight', () => {
+  it('draws the other slots from their top three, weighted by score', () => {
+    // e5 never played (4), e4 (3), e3 (2), e2 and e1 (0): 4/9, 3/9, 2/9.
+    const histories = [hist(['x', 'y', 'z', 'e1', 'e2', 'e3', 'e4'])];
+    const slugs = ['e1', 'e2', 'e3', 'e4', 'e5'];
+    const pick = (category: BallotCandidate['category'], r: number) => drawBallot({
+      candidates: slugs.map((s) => C(s, category)), histories, bumps: new Map(), stickies: [], rng: () => r,
+    })[0].slug;
+    expect(SLOT_TOP).toEqual({ l4d1: 1, l4d2: 3, custom: 3, mirror: 3 });
+    for (const category of ['l4d2', 'custom', 'mirror'] as const) {
+      expect([0.44, 0.45, 0.77, 0.78, 0.99].map((r) => pick(category, r))).toEqual(['e5', 'e4', 'e4', 'e3', 'e3']);
+    }
+    expect([0, 0.5, 0.99].map((r) => pick('l4d1', r))).toEqual(['e5', 'e5', 'e5']);
+  });
+
+  it('adds the lost-vote bump on top of the score', () => {
+    // dead_air played longer ago (4) than no_mercy (3).
     const histories = [hist(['x', 'y', 'z', 'no_mercy', 'dead_air'])];
-    // no_mercy 1.3 + 0.4 = 1.7 vs dead_air 1.4: no_mercy takes 1.7/3.1.
-    const bumps = new Map([['no_mercy', 0.4]]);
-    expect(draw({ histories, bumps, rng: () => 0.54 })[0].slug).toBe('no_mercy');
-    expect(draw({ histories, bumps, rng: () => 0.55 })[0].slug).toBe('dead_air');
+    expect(draw({ histories })[0]).toMatchObject({ slug: 'dead_air', base: 4, weight: 4, bump: 0 });
+    const b = draw({ histories, bumps: new Map([['no_mercy', 1.5]]) });
+    expect(b[0]).toMatchObject({ slug: 'no_mercy', base: 3, bump: 1.5, weight: 4.5 });
   });
 
-  it('counts the players a no-vote showing holds it back for', () => {
+  it('halves a player\'s points after a no-vote showing, and counts them', () => {
     const shown = { matchId: 101, options: ['no_mercy'], votes: { x: 6 } };
-    const b = draw({ histories: [hist([], [shown]), hist([])], rng: () => 0 });
-    expect(b[0]).toMatchObject({ slug: 'no_mercy', base: 2.5, ignoredBy: 1 });
+    // Alone in its slot: 4 from each, halved for player one, averages 3.
+    const b = draw({ candidates: [C('no_mercy', 'l4d1')], histories: [hist([], [shown]), hist([])] });
+    expect(b[0]).toMatchObject({ slug: 'no_mercy', base: 3, ignoredBy: 1 });
+    // Against dead_air (3.5 from each) it loses: (1.75 + 3.5) / 2.
+    expect(draw({ histories: [hist([], [shown]), hist([])] })[0].slug).toBe('dead_air');
   });
 
   it('leaves out a campaign in any lobby player\'s last three matches', () => {
     expect(RECENT_WINDOW).toBe(3);
     const b = draw({ histories: [hist(['x', 'y', 'no_mercy']), hist(['the_parish', 'hard_rain'])] });
-    // Both L4D2 campaigns are recent for player two: the older one, hard_rain.
+    // Both L4D2 campaigns are recent for player two, so both are scored:
+    // hard_rain is the older one for them (3.75 against 3.25).
     expect(b.map((o) => o.slug)).toEqual(['dead_air', 'hard_rain', 'dbd', 'no_mercy_mirror']);
+    expect(b[0]).toMatchObject({ recentBy: 0 });
+    expect(b[1]).toMatchObject({ recentBy: 1, base: 3.75 });
   });
 
   it('offers one played four matches ago again', () => {
@@ -122,11 +143,11 @@ describe('drawBallot', () => {
     expect(b[0]).toMatchObject({ slug: 'no_mercy', recentBy: 0, freshest: 3 });
   });
 
-  it('falls back to the campaign played longest ago when every one is recent', () => {
-    // no_mercy was one match ago for player two; dead_air two for player one.
-    const histories = [hist(['x', 'y', 'dead_air']), hist(['x', 'no_mercy']), hist(['dbd'])];
-    const b = draw({ histories, rng: () => 0 });
-    expect(b[0]).toMatchObject({ slot: 'l4d1', slug: 'dead_air', recentBy: 1, freshest: 2 });
+  it('scores every campaign in a slot where all are recent', () => {
+    // dead_air: 3 + 4 + 4 + 3.5; no_mercy: 4 + 3 + 3 + 3.5.
+    const histories = [hist(['x', 'y', 'dead_air']), hist(['no_mercy']), hist(['x', 'no_mercy']), hist(['dbd'])];
+    const b = draw({ histories, rng: () => 0.99 });
+    expect(b[0]).toMatchObject({ slot: 'l4d1', slug: 'dead_air', recentBy: 1, base: 3.625 });
     // The only custom campaign is still offered.
     expect(b[2]).toMatchObject({ slot: 'custom', slug: 'dbd', recentBy: 1, freshest: 0 });
   });
@@ -160,26 +181,26 @@ describe('drawBallot', () => {
 describe('nextBumps', () => {
   it('bumps a loser with two or more votes, not one with one', () => {
     const next = nextBumps(new Map(), { no_mercy: 5, dead_air: 2, hard_rain: 1 }, 'no_mercy');
-    expect([...next]).toEqual([['dead_air', 0.5]]);
+    expect([...next]).toEqual([['dead_air', 1]]);
   });
 
   it('halves standing bumps each tally and drops them once tiny', () => {
-    let b: Map<string, number> = new Map([['dead_air', 0.5]]);
+    let b: Map<string, number> = new Map([['dead_air', 1]]);
     b = nextBumps(b, { no_mercy: 8 }, 'no_mercy');
-    expect(b.get('dead_air')).toBe(0.25);
+    expect(b.get('dead_air')).toBe(0.5);
     for (let i = 0; i < 10; i++) b = nextBumps(b, { no_mercy: 8 }, 'no_mercy');
     expect(b.has('dead_air')).toBe(false);
   });
 
   it('stacks a new loss on a decayed bump', () => {
     const next = nextBumps(new Map([['dead_air', 0.5]]), { no_mercy: 4, dead_air: 3 }, 'no_mercy');
-    expect(next.get('dead_air')).toBe(0.75);
+    expect(next.get('dead_air')).toBe(1.25);
   });
 
   it('resets the winner', () => {
     const next = nextBumps(new Map([['dead_air', 1]]), { dead_air: 4, no_mercy: 4 }, 'dead_air');
     expect(next.has('dead_air')).toBe(false);
-    expect(next.get('no_mercy')).toBe(0.5);
+    expect(next.get('no_mercy')).toBe(1);
   });
 });
 
@@ -255,14 +276,14 @@ describe('createBallot and finishBallot', () => {
     const [rec] = recentBallots(db);
     expect(rec).toMatchObject({ lobbyId: 'lob_1', winner: 'the_parish', matchId, votes: { the_parish: 5, dead_air: 3 } });
     expect(rec.options.map((o) => o.slot)).toEqual(['l4d1', 'l4d2', 'mirror']);
-    expect(rec.options[0]).toMatchObject({ slug: 'dead_air', weight: 3, recentBy: 0, freshest: null, ignoredBy: 0 });
-    expect([...loadBumps(db)]).toEqual([['dead_air', 0.5]]);
+    expect(rec.options[0]).toMatchObject({ slug: 'dead_air', weight: 4, recentBy: 0, freshest: null, ignoredBy: 0 });
+    expect([...loadBumps(db)]).toEqual([['dead_air', 1]]);
 
     // A second finish of the same lobby changes nothing.
     finishBallot(db, 'lob_1', { dead_air: 8 }, 'dead_air', matchId);
-    expect([...loadBumps(db)]).toEqual([['dead_air', 0.5]]);
+    expect([...loadBumps(db)]).toEqual([['dead_air', 1]]);
 
-    // Both saw no_mercy_mirror get no votes: it steps back half way for each.
+    // Both saw no_mercy_mirror get no votes: half its points for each.
     const next = createBallot(db, 'lob_2', ['no_mercy_mirror'], [P1, P2], () => 0);
     expect(next).toEqual(['no_mercy_mirror']);
     expect(recentBallots(db)[0].options[0]).toMatchObject({ base: 2, ignoredBy: 2 });

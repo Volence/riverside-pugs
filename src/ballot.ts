@@ -18,29 +18,32 @@ import { getSetting, getStickyCampaigns } from './settings.js';
  * - A campaign any of them played in their last RECENT_WINDOW matches is
  *   left out, from its slot and from the stickies (owner, 2026-11-06: one
  *   match in between let Dead Air back on four ballots in a row). A slot
- *   that empties that way offers the campaign whose most recent player
- *   played it longest ago, so a slot cannot swing between two campaigns.
- * - Inside a slot the draw is weighted toward campaigns these players have
- *   not played for a while. Each player gives a campaign 1 + n/10, capped at
- *   3, where n is the completed PUGs that player has played since they last
- *   played it; never played is the cap. The campaign's weight is the average
- *   over the lobby.
+ *   that empties that way is scored over all of its campaigns instead.
+ * - The rest are scored by points (owner, 2026-11-06). Each player ranks
+ *   them by how long since they played each one: the one played longest ago
+ *   gets 4 points, the next 3, the next 2, any others 0 (in L4D1, with four
+ *   campaigns, that is 4/3/2/0). Never played counts as longest ago, and
+ *   campaigns tied on a player's ranking share those places' points. A
+ *   campaign's score is the average over the lobby. L4D1 offers its top
+ *   score; the other slots draw from their top three, weighted by score.
  * - A campaign a player saw on a ballot that gave it no votes steps back for
- *   that player: half way toward a just-played campaign, wearing off by half
- *   at every later ballot that player is in, and gone once they play it. One
- *   vote is enough to count as wanted.
+ *   that player: half its points, wearing off by half at every later ballot
+ *   that player is in, and gone once they play it. One vote is enough to
+ *   count as wanted.
  * - A campaign that lost a vote with two or more votes gets a bump on top,
  *   for every lobby: it halves at every later tally it does not win and goes
  *   once it wins.
  */
 
 export const BALLOT_SLOTS: readonly CampaignCategory[] = ['l4d1', 'l4d2', 'custom', 'mirror'];
-/** Matches since last played for one more unit of weight. */
-export const WEIGHT_STEP = 10;
-export const WEIGHT_CAP = 3;
-/** What a close loss (two or more votes) adds to a campaign's weight. */
-export const LOST_VOTE_BUMP = 0.5;
-/** How far a no-vote showing moves a campaign toward a just-played one. */
+/** A player's points for the campaigns they played longest ago, longest
+ *  first; every later place gets 0. */
+export const RANK_POINTS: readonly number[] = [4, 3, 2];
+/** How many of a slot's top scores its draw is made from. */
+export const SLOT_TOP: Readonly<Record<CampaignCategory, number>> = { l4d1: 1, l4d2: 3, custom: 3, mirror: 3 };
+/** What a close loss (two or more votes) adds to a campaign's score. */
+export const LOST_VOTE_BUMP = 1;
+/** The share of a player's points a no-vote showing takes away. */
 export const IGNORED_STEP = 0.5;
 /** A player's tallied ballots looked back over for no-vote showings. By the
  *  last one a step has worn off to under 1%. */
@@ -50,8 +53,11 @@ const BUMP_FLOOR = 0.01;
 export const MAX_STICKIES = 3;
 /** A campaign in any lobby player's last this many matches is left out. */
 export const RECENT_WINDOW = 3;
-/** Played matches past which every campaign is at the cap anyway. */
-const PLAYED_LOOKBACK = (WEIGHT_CAP - 1) * WEIGHT_STEP + 1;
+/** A player's completed PUGs looked back over; a campaign further back
+ *  ranks as never played. */
+const PLAYED_LOOKBACK = 40;
+/** Scores closer than this are a tie (they are averages of fractions). */
+const SCORE_EPSILON = 1e-9;
 
 export type BallotMode = 'all' | 'slots';
 
@@ -62,9 +68,10 @@ export function ballotMode(db: DB): BallotMode {
 export interface BallotOption {
   slug: string;
   slot: CampaignCategory | 'sticky';
-  /** What the draw used: base + bump. Null for a sticky (not drawn). */
+  /** What the draw used: base + bump. Null for a sticky (not drawn). On
+   *  ballots drawn before 2026-11-07 a 1-3 weight, since then a 0-4 score. */
   weight: number | null;
-  /** The lobby average of each player's weight. Null for a sticky. */
+  /** The lobby average of each player's points. Null for a sticky. */
   base: number | null;
   bump: number;
   /** Lobby players with it in their last RECENT_WINDOW matches: 0 unless
@@ -104,19 +111,32 @@ export interface DrawInput {
   rng: () => number;
 }
 
-/** A player's weight before any step back: 1 + n/WEIGHT_STEP, capped; never played is the cap. */
-export function baseWeight(since: number | null): number {
-  if (since === null) return WEIGHT_CAP;
-  return Math.min(1 + since / WEIGHT_STEP, WEIGHT_CAP);
+/** Each player's points for `slugs`: ranked by matches since they last
+ *  played each one (never played first), RANK_POINTS down that ranking,
+ *  ties sharing their places' points. Pure. */
+export function rankPoints(h: PlayerHistory, slugs: string[]): Map<string, number> {
+  const since = (slug: string) => {
+    const at = h.played.findIndex((p) => p.campaign === slug);
+    return at < 0 ? Infinity : at;
+  };
+  const sorted = slugs.map((slug) => ({ slug, n: since(slug) })).sort((x, y) => y.n - x.n);
+  const out = new Map<string, number>();
+  for (let i = 0; i < sorted.length;) {
+    let j = i;
+    while (j < sorted.length && sorted[j].n === sorted[i].n) j++;
+    let sum = 0;
+    for (let k = i; k < j; k++) sum += RANK_POINTS[k] ?? 0;
+    for (let k = i; k < j; k++) out.set(sorted[k].slug, sum / (j - i));
+    i = j;
+  }
+  return out;
 }
 
-/** One player's weight for a campaign, and whether a no-vote showing is
- *  holding it back. Each showing since they last played it keeps
- *  1 - IGNORED_STEP / 2^k of the weight above 1, k being their tallied
- *  ballots since. */
-export function playerWeight(h: PlayerHistory, slug: string): { weight: number; ignored: boolean } {
+/** The share of a player's points for a campaign left after no-vote
+ *  showings: each showing since they last played it takes
+ *  IGNORED_STEP / 2^k, k being their tallied ballots since. Pure. */
+export function ignoredKeep(h: PlayerHistory, slug: string): number {
   const at = h.played.findIndex((p) => p.campaign === slug);
-  const base = baseWeight(at < 0 ? null : at);
   const lastPlayed = at < 0 ? 0 : h.played[at].matchId;
   let keep = 1;
   h.ballots.slice(0, IGNORED_LOOKBACK).forEach((b, k) => {
@@ -124,12 +144,14 @@ export function playerWeight(h: PlayerHistory, slug: string): { weight: number; 
       keep *= 1 - IGNORED_STEP / 2 ** k;
     }
   });
-  return { weight: 1 + (base - 1) * keep, ignored: keep < 1 };
+  return keep;
 }
 
 /** One weighted pick. `rng` returns [0, 1) like Math.random. */
 function weightedPick<T extends { weight: number }>(items: T[], rng: () => number): T {
   const total = items.reduce((a, it) => a + it.weight, 0);
+  // All zero: an even pick.
+  if (total <= 0) return items[Math.min(Math.floor(rng() * items.length), items.length - 1)];
   let r = rng() * total;
   for (const it of items) {
     r -= it.weight;
@@ -157,28 +179,29 @@ export function drawBallot(input: DrawInput): BallotOption[] {
     .filter((h) => h.played.slice(0, RECENT_WINDOW).some((p) => p.campaign === slug)).length;
   const out: BallotOption[] = [];
   for (const slot of BALLOT_SLOTS) {
-    const inSlot = input.candidates
-      .filter((c) => c.category === slot)
-      .map((c) => {
-        const each = input.histories.map((h) => playerWeight(h, c.slug));
-        const base = each.length === 0 ? WEIGHT_CAP : each.reduce((a, w) => a + w.weight, 0) / each.length;
-        const bump = input.bumps.get(c.slug) ?? 0;
-        return {
-          slug: c.slug, base, bump, weight: base + bump,
-          recentBy: recentBy(c.slug), freshest: freshestPlay(input.histories, c.slug),
-          ignoredBy: each.filter((w) => w.ignored).length,
-        };
-      });
+    const inSlot = input.candidates.filter((c) => c.category === slot);
     if (inSlot.length === 0) continue;
-    let pool = inSlot.filter((c) => c.recentBy === 0);
-    if (pool.length === 0) {
-      // Every one is recent for someone: the longest ago wins, never played
-      // (null) beating any count.
-      const stalest = (c: typeof inSlot[number]) => c.freshest ?? Infinity;
-      const best = Math.max(...inSlot.map(stalest));
-      pool = inSlot.filter((c) => stalest(c) === best);
-    }
-    const pick = weightedPick(pool, input.rng);
+    const fresh = inSlot.filter((c) => recentBy(c.slug) === 0);
+    // Every one recent for someone: score them all.
+    const scored = (fresh.length > 0 ? fresh : inSlot).map((c) => c.slug);
+    const perPlayer = input.histories.map((h) => ({ h, points: rankPoints(h, scored) }));
+    const options = scored.map((slug) => {
+      const each = perPlayer.map(({ h, points }) => {
+        const keep = ignoredKeep(h, slug);
+        return { points: points.get(slug)! * keep, ignored: keep < 1 };
+      });
+      const base = each.length === 0 ? RANK_POINTS[0] : each.reduce((a, e) => a + e.points, 0) / each.length;
+      const bump = input.bumps.get(slug) ?? 0;
+      return {
+        slug, base, bump, weight: base + bump,
+        recentBy: recentBy(slug), freshest: freshestPlay(input.histories, slug),
+        ignoredBy: each.filter((e) => e.ignored).length,
+      };
+    });
+    // The top SLOT_TOP scores, and anything tied with the last of them.
+    const ranked = [...options].sort((x, y) => y.weight - x.weight);
+    const cut = ranked[Math.min(SLOT_TOP[slot], ranked.length) - 1].weight;
+    const pick = weightedPick(ranked.filter((o) => o.weight >= cut - SCORE_EPSILON), input.rng);
     out.push({ ...pick, slot });
   }
   for (const slug of input.stickies.slice(0, MAX_STICKIES)) {
