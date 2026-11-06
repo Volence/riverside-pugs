@@ -212,7 +212,7 @@ describe('Matches', () => {
     expect(screen.getByText('Won')).toBeTruthy();
     expect(screen.queryByText('Team A')).toBeNull();
     // The tile row comes with the same fetch, so it must render too.
-    expect(screen.getByText('Matches')).toBeTruthy();
+    expect(screen.getByText('Matches', { selector: '.figure__label' })).toBeTruthy();
   });
 
   it("names a scrim or tournament game's teams and what it was part of", async () => {
@@ -258,7 +258,7 @@ describe('Matches', () => {
       },
     });
     render(<Matches />);
-    await waitFor(() => expect(screen.getByText('Matches')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Matches', { selector: '.figure__label' })).toBeTruthy());
     // "Team A" is reassigned every match, so counting wins under it aggregates
     // different people from match to match and means nothing.
     expect(screen.queryByText('Team A wins')).toBeNull();

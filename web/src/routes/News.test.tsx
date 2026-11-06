@@ -34,7 +34,7 @@ describe('the news list', () => {
     render(<News />);
     const link = await screen.findByRole('link', { name: 'Season 1 starts Nov 3' });
     expect(link.getAttribute('href')).toBe('/news/3');
-    expect(screen.getByText('Patch notes')).toBeTruthy();
+    expect(screen.getByText('Patch notes', { selector: '.news__kind' })).toBeTruthy();
     expect(screen.getByText('Uzi back to 20')).toBeTruthy();
     expect(screen.queryByRole('navigation', { name: 'Pages' })).toBeNull();
   });

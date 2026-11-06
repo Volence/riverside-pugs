@@ -3,6 +3,7 @@ import { newsApi, NEWS_BODY_MAX, ApiError, type NewsKind, type NewsPost } from '
 import { useFetch } from '../hooks/useFetch';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
+import { SectionTabs, NEWS_SECTION } from '../components/SectionTabs';
 import { RichText } from '../components/RichText';
 
 export const NEWS_KIND_LABEL: Record<NewsKind, string> = { news: 'News', patch: 'Patch notes' };
@@ -33,6 +34,7 @@ export function News({ kind }: { kind?: NewsKind } = {}) {
   const base = kind === 'patch' ? '/patch-notes' : '/news';
   return (
     <div class="page page--news">
+      <SectionTabs section={NEWS_SECTION} active={kind === 'patch' ? 'patch' : 'news'} />
       {kind === 'patch' ? (
         <PageHeader eyebrow="Riverside" title="Patch notes">
           <p>What changed and why, in plain words. Every exact number the game tracks is in the <a href="/balance">full change log</a>.</p>

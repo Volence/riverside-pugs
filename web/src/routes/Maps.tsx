@@ -4,6 +4,7 @@ import { useFetch } from '../hooks/useFetch';
 import { campaignName, campaignTint, chapterName, fmtClock, mapName, survivalLabel } from '../format';
 import { Empty, Panel, PageSkeleton } from '../components/bits';
 import { PageHeader, Figures, Figure } from '../components/PageHeader';
+import { SectionTabs, STATS_SECTION } from '../components/SectionTabs';
 import { mapThumb } from '../../../src/mapThumbs';
 import { CampaignTiles } from '../components/CampaignTiles';
 
@@ -90,6 +91,7 @@ export function Maps() {
 
   return (
     <div class="page page--list">
+      <SectionTabs section={STATS_SECTION} active="campaigns" />
       <PageHeader title="Campaigns">
         {maps.length > 0 && (
           <Figures>
