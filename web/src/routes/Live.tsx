@@ -56,6 +56,17 @@ export function Live({ me }: { me: string | null }) {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
+  // /live#match-N (the Discord card of a live match, and /match/N while it is
+  // still being played) lands on that match's card. The cards only exist
+  // after the first fetch, so the browser's own jump to the hash misses them.
+  const [jumped, setJumped] = useState(false);
+  useEffect(() => {
+    if (jumped || !matches?.length) return;
+    setJumped(true);
+    const id = window.location.hash.slice(1);
+    if (id) document.getElementById(id)?.scrollIntoView();
+  }, [matches, jumped]);
+
   if (matches === null) return <div class="page page--list" />;
 
   return (
@@ -111,7 +122,7 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
     players.map((p) => ({ ...p, stats: deriveLiveStats(mp.stats[p.steamid] ?? {}) }));
 
   return (
-    <Panel>
+    <Panel id={`match-${m.id}`}>
       <VersusHeader
         teamA={m.teamA.map((p) => p.name)}
         teamB={m.teamB.map((p) => p.name)}

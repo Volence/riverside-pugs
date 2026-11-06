@@ -1,5 +1,6 @@
 import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
 import { api, type BookedSides, type MatchDetail as MatchDetailData, type MatchOngoing, type MatchPlayerStats, type ReportMoment, type Team } from '../api';
 import { useFetch } from '../hooks/useFetch';
 import { campaignName, deriveLiveStats, fmtBytes, fmtDate, fmtLatency, mapName, orderStatKeysBySide, statGroupStarts, resultLabel, winnerLabel } from '../format';
@@ -344,15 +345,24 @@ const ONGOING_LINE: Record<MatchOngoing['state'], string> = {
  * between, not a dead end. There is no roster or score here on purpose: the
  * server only ever sends id, campaign and state for a match still in
  * progress, never the server address, the token or a password.
+ *
+ * A live match has its card on the Live page, so the URL is swapped for that
+ * card rather than making the reader click through this one. Waiting and
+ * configuring matches are not on the Live page yet, so they stay here.
  */
 function OngoingMatch({ data }: { data: MatchOngoing }) {
+  const { route } = useLocation();
+  const livePage = `/live#match-${data.id}`;
+  useEffect(() => {
+    if (data.state === 'live') route(livePage, true);
+  }, [data.state, livePage]);
   return (
     <div class="page page--match">
       <Panel>
         <PageHeader eyebrow="In progress" title={`Match #${data.id}: ${campaignName(data.campaign)}`} />
         <Empty>
           Match #{data.id} is still being played. {ONGOING_LINE[data.state]}
-          {' '}Watch it on the <a href="/live">Live page</a>, or come back here once it has finished.
+          {' '}Watch it on the <a href={livePage}>Live page</a>, or come back here once it has finished.
         </Empty>
       </Panel>
     </div>
