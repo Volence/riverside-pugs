@@ -160,7 +160,7 @@ describe('the Game configs desk routes', () => {
     expect(await configKeys()).toEqual({ bookings: ['standard'], events: ['standard'] });
     const list = (await call('GET', '/api/admin/game-configs', ADMIN)).json().gameConfigs;
     expect(list.map((g: { key: string; label: string; enabled: boolean; locked: boolean }) => [g.key, g.label, g.enabled, g.locked]))
-      .toEqual([['standard', 'Standard (Rotoblin PUG 4v4)', true, true], ['zonemod', 'ZoneMod', false, false]]);
+      .toEqual([['standard', 'Standard (Roto-AZ Riverside 4v4)', true, true], ['zonemod', 'ZoneMod', false, false]]);
     expect((await call('POST', '/api/admin/game-configs/zonemod/delete', ADMIN)).statusCode).toBe(200);
     expect((await call('GET', '/api/admin/game-configs', ADMIN)).json().gameConfigs).toHaveLength(1);
     expect((db.prepare('SELECT action FROM admin_actions ORDER BY id').all() as { action: string }[]).map((a) => a.action))

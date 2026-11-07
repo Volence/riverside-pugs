@@ -247,7 +247,7 @@ describe('setup failures', () => {
   it('a config that never runs on a box already past Pub is caught (pool boxes boot in 4v4 VS)', async () => {
     // The old check was "game type no longer says Pub", which any pool box
     // passes before the exec runs at all. The pending marker cannot pass that way.
-    const restart = async (server: ServerRow) => { restarted.push(server.name); box[server.name].type = 'Roto-AZ / 4v4 VS'; return true; };
+    const restart = async (server: ServerRow) => { restarted.push(server.name); box[server.name].type = 'Roto-AZ Riverside / 4v4 VS'; return true; };
     const r = build({ restart });
     box.ccc.failExec = 99;
     const id = book();
