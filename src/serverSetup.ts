@@ -27,9 +27,13 @@ export const STARTUP_GRACE_MS = 4_000;
  *  Rotoblin's stock startup (NFO Chicago) boot its Pub mode instead. Until
  *  2026-10-09 the wait looked only for "Pub", which the pool boxes never say,
  *  so every lease and booking setup sat out all STARTUP_POLLS. */
-export const BOOT_GAME_TYPE = 'Roto-AZ / 4v4 VS';
+export const BOOT_GAME_TYPE = 'Roto-AZ Riverside / 4v4 VS';
+/** The boot name before the 2026-11-07 rename (Harry asked that our fork be
+ *  named apart from his Rotoblin-AZMod); a box keeps it until it restarts
+ *  onto the new cfgs. */
+const OLD_BOOT_GAME_TYPE = 'Roto-AZ / 4v4 VS';
 export function isBootGameType(type: string): boolean {
-  return type === BOOT_GAME_TYPE || type.includes('Pub');
+  return type === BOOT_GAME_TYPE || type === OLD_BOOT_GAME_TYPE || type.includes('Pub');
 }
 
 /** Written into `l4d_game_type_name` in the same burst as `exec <cfg>`. Every

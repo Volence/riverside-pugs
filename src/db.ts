@@ -2821,7 +2821,12 @@ export function openDb(path: string): DB {
   // to the reviewed side; '' when none.
   ensureColumn(db, 'scrim_reviews', 'note', "TEXT NOT NULL DEFAULT ''");
   db.prepare(
-    "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Rotoblin PUG 4v4)', 'pug_match')",
+    "INSERT OR IGNORE INTO game_configs (key, label, cfg) VALUES ('standard', 'Standard (Roto-AZ Riverside 4v4)', 'pug_match')",
+  ).run();
+  // Our balance is named Roto-AZ Riverside since 2026-11-07 (Harry's request);
+  // rename the seeded label unless an admin has already changed it.
+  db.prepare(
+    "UPDATE game_configs SET label = 'Standard (Roto-AZ Riverside 4v4)' WHERE key = 'standard' AND label = 'Standard (Rotoblin PUG 4v4)'",
   ).run();
   // PUG, Standard Cup and Casual Scrim: see src/rulesets.ts for what each sets.
   seedRulesetTemplates(db);

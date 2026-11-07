@@ -15,7 +15,7 @@ const { AdminGameConfigs } = await import('./AdminGameConfigs');
 const { ApiError } = await import('../../../api');
 
 const ROWS: AdminGameConfig[] = [
-  { key: 'standard', label: 'Standard (Rotoblin PUG 4v4)', cfg: 'pug_match', enabled: true, locked: true, inUse: { bookings: 3, events: 0 } },
+  { key: 'standard', label: 'Standard (Roto-AZ Riverside 4v4)', cfg: 'pug_match', enabled: true, locked: true, inUse: { bookings: 3, events: 0 } },
   { key: 'zonemod', label: 'ZoneMod 4v4', cfg: 'zonemod_4v4', enabled: true, locked: false, inUse: { bookings: 0, events: 1 } },
   { key: 'spare', label: 'Spare config', cfg: 'spare', enabled: false, locked: false, inUse: { bookings: 0, events: 0 } },
 ];
@@ -34,10 +34,10 @@ describe('AdminGameConfigs', () => {
   it('shows each config with the cfg it execs and what uses it; standard can only be relabelled', async () => {
     render(<AdminGameConfigs />);
     await screen.findByText('ZoneMod 4v4', { selector: 'strong' });
-    expect(rowOf('Standard (Rotoblin PUG 4v4)').textContent).toContain('exec pug_match');
-    expect(rowOf('Standard (Rotoblin PUG 4v4)').textContent).toContain('In use: 3 open bookings');
-    expect(button(rowOf('Standard (Rotoblin PUG 4v4)'), 'Turn off')).toBeNull();
-    expect(button(rowOf('Standard (Rotoblin PUG 4v4)'), 'Delete')).toBeNull();
+    expect(rowOf('Standard (Roto-AZ Riverside 4v4)').textContent).toContain('exec pug_match');
+    expect(rowOf('Standard (Roto-AZ Riverside 4v4)').textContent).toContain('In use: 3 open bookings');
+    expect(button(rowOf('Standard (Roto-AZ Riverside 4v4)'), 'Turn off')).toBeNull();
+    expect(button(rowOf('Standard (Roto-AZ Riverside 4v4)'), 'Delete')).toBeNull();
     expect(button(rowOf('ZoneMod 4v4'), 'Delete')).toBeNull();
     expect(rowOf('Spare config').textContent).toContain('Off');
     expect(button(rowOf('Spare config'), 'Turn on')).toBeTruthy();

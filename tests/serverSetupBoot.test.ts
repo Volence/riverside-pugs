@@ -16,7 +16,9 @@ describe('waitForStartup', () => {
   it('still accepts a Pub boot (Rotoblin stock startup, NFO Chicago)', () => {
     expect(isBootGameType('Rotoblin Pub VS')).toBe(true);
     expect(isBootGameType('Roto-AZ / 4v4 VS')).toBe(true);
+    expect(isBootGameType('Roto-AZ Riverside / 4v4 VS')).toBe(true);
     expect(isBootGameType('Roto-AZ / 4v4 PUG')).toBe(false);
+    expect(isBootGameType('Roto-AZ Riverside / 4v4 PUG')).toBe(false);
     expect(isBootGameType('')).toBe(false);
   });
 

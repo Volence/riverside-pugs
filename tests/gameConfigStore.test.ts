@@ -20,7 +20,7 @@ describe('game configs', () => {
   it('adds a config, enabled, with the cfg setup will exec, and audits it', () => {
     expect(errOf(createGameConfig(db, { by: ADMIN, key: 'zonemod', label: 'ZoneMod 4v4', cfg: 'zonemod_4v4' }))).toBe('ok');
     expect(configs()).toEqual([
-      { key: 'standard', label: 'Standard (Rotoblin PUG 4v4)', cfg: 'pug_match', enabled: 1 },
+      { key: 'standard', label: 'Standard (Roto-AZ Riverside 4v4)', cfg: 'pug_match', enabled: 1 },
       { key: 'zonemod', label: 'ZoneMod 4v4', cfg: 'zonemod_4v4', enabled: 1 },
     ]);
     expect(audit()).toEqual([{ action: 'game_config_create', target: 'zonemod', detail: JSON.stringify({ after: { label: 'ZoneMod 4v4', cfg: 'zonemod_4v4', enabled: true } }) }]);
@@ -73,7 +73,7 @@ describe('game configs', () => {
     expect(errOf(deleteGameConfig(db, { by: ADMIN, key: 'spare' }))).toBe('ok');
     must(E.deleteDraftEvent(db, { eventId, by: ADMIN }));
     expect(errOf(deleteGameConfig(db, { by: ADMIN, key: 'zonemod' }))).toBe('ok');
-    expect(configs()).toEqual([{ key: 'standard', label: 'Standard (Rotoblin PUG 4v4)', cfg: 'pug_match', enabled: 1 }]);
+    expect(configs()).toEqual([{ key: 'standard', label: 'Standard (Roto-AZ Riverside 4v4)', cfg: 'pug_match', enabled: 1 }]);
     expect(audit().slice(-2).map((a) => [a.action, a.target])).toEqual([['game_config_delete', 'spare'], ['game_config_delete', 'zonemod']]);
   });
 
