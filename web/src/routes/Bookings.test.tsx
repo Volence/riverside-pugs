@@ -16,6 +16,7 @@ const OPTIONS = {
   gameConfigs: [{ key: 'standard', label: 'Standard' }],
   limits: { daysAhead: 14, playlistMax: 4 },
   estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60 },
+  canBook: true, eventOnly: false,
   myTeams: [], teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
 };
 const MINE = {

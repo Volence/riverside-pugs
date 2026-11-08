@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { getPlayer } from '../players.js';
-import { competitiveAccess } from '../teams/access.js';
+import { competitiveAccess, scrimEventId, scrimSideAllowed } from '../teams/access.js';
 import { inGoodStanding } from '../standing.js';
 import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool } from '../settings.js';
@@ -94,8 +94,13 @@ export async function bookingRoutes(app: FastifyInstance, opts: BookingRoutesOpt
       // The slot length is estimated from the campaigns (estimateMinutes),
       // and these are its inputs, so a form can show it as boxes are ticked.
       estimate: estimateOptions(db, campaigns),
-      myTeams: myTeams(db, me).filter((t) => t.role !== 'member').map(team),
-      teams: liveTeams(db).map(team),
+      // Owner 2026-11-08: booking a scrim follows the scrims switch; a form
+      // without it shows only the bookings. Under scrims_enabled = event the
+      // form offers that event's teams only, with no pickup side.
+      canBook: B.canBookScrims(db, me),
+      eventOnly: scrimEventId(db) !== null,
+      myTeams: myTeams(db, me).filter((t) => t.role !== 'member' && scrimSideAllowed(db, { teamId: t.id })).map(team),
+      teams: liveTeams(db).filter((t) => scrimSideAllowed(db, { teamId: t.id })).map(team),
     };
   });
 

@@ -29,6 +29,7 @@ beforeEach(() => {
   const ins = db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, ?, 'active')");
   P.forEach((id, i) => ins.run(id, `p${i}`));
   setSetting(db, 'competitive_enabled', 'everyone');
+  setSetting(db, 'scrims_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest', 'crash_course']));
   servers = ['a', 'bb', 'ccc', 'dddd'].map((n) => {
     const id = addServer(db, { name: n, host: 'h', port: 27000 + n.length, rconPort: 1, rconPassword: 'x' });

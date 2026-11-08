@@ -23,6 +23,7 @@ beforeEach(() => {
   const ins = db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, ?, 'active')");
   P.forEach((id, i) => ins.run(id, `p${i}`));
   setSetting(db, 'competitive_enabled', 'everyone');
+  setSetting(db, 'scrims_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_air', 'blood_harvest', 'crash_course']));
   // Most of this file exercises SR ranges and the fit filter, so it runs with
   // scrim_show_sr on; the 'scrim_show_sr off' block below covers the default.

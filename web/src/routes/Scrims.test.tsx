@@ -22,6 +22,7 @@ const OPTIONS: ScrimOptions = {
   campaigns: [{ slug: 'no_mercy', name: 'No Mercy', minutes: 70 }, { slug: 'death_toll', name: 'Death Toll', minutes: 45 }],
   limits: { daysAhead: 14, playlistMax: 4, noteMax: 200, acceptCampaignsMax: 2 },
   estimate: { perCampaign: { no_mercy: 70, death_toll: 45 }, base: 15, slack: 10, step: 30, min: 60 },
+  eventOnly: false,
   myTeams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }],
   teams: [{ id: 1, slug: 'mice', name: 'Mice', tag: 'MM' }, { id: 2, slug: 'rats', name: 'Rats', tag: 'RT' }],
   showSr: false,

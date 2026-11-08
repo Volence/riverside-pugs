@@ -83,6 +83,7 @@ beforeEach(() => {
   const ins = db.prepare("INSERT INTO players (steamid, name, status, discord_id) VALUES (?, ?, 'active', ?)");
   P.forEach((id, i) => ins.run(id, `p${i}`, `d${i}`));
   setSetting(db, 'competitive_enabled', 'everyone');
+  setSetting(db, 'scrims_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll', 'dead_center']));
   setSetting(db, 'pug_reserve_servers', '1');
   for (const n of ['a', 'bb', 'ccc']) {

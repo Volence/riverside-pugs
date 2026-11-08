@@ -130,7 +130,7 @@ function PostForm({ options, busy, onSubmit }: { options: ScrimOptions; busy: bo
         <label class="teamfield">Your side
           <select aria-label="Your side" value={teamId === null ? '' : String(teamId)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setTeamId(v ? Number(v) : null); }}>
             {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
-            <option value="">A pickup group (just me for now)</option>
+            {!options.eventOnly && <option value="">A pickup group (just me for now)</option>}
           </select>
         </label>
         <label class="teamfield">Start (your time)<input aria-label="Start" type="datetime-local" value={when} onInput={(e) => setWhen((e.target as HTMLInputElement).value)} /></label>
@@ -199,7 +199,7 @@ function AcceptForm({
       <label class="teamfield">Accept as
         <select aria-label={`Accept as (post ${post.id})`} value={teamId === null ? '' : String(teamId)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setTeamId(v ? Number(v) : null); }}>
           {choices.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
-          {!post.challenge && <option value="">A pickup group (just me for now)</option>}
+          {!post.challenge && !options.eventOnly && <option value="">A pickup group (just me for now)</option>}
         </select>
       </label>
       {max > 0 && (
@@ -258,7 +258,7 @@ function BoardRow({
           )
           : open
             ? <AcceptForm post={post} options={options} busy={busy} onSubmit={async (t, c) => { const ok = await onAccept(t, c); if (ok) setOpen(false); return ok; }} onCancel={() => setOpen(false)} />
-            : <p class="inlinerow"><button class="btn btn--sm" onClick={() => setOpen(true)}>Accept</button></p>}
+            : (!options.eventOnly || options.myTeams.length > 0) && <p class="inlinerow"><button class="btn btn--sm" onClick={() => setOpen(true)}>Accept</button></p>}
     </li>
   );
 }
@@ -548,7 +548,7 @@ export function Scrims({ session }: { session: Session }) {
       <PageHeader eyebrow="Competitive" title="Scrims" />
       {error && <p class="error" role="alert">{error}</p>}
 
-      {options && (
+      {options && (!options.eventOnly || options.myTeams.length > 0) && (
         <Panel>
           <h3>Post a scrim</h3>
           <PostForm options={options} busy={busy} onSubmit={post} />

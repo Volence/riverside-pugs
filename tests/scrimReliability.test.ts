@@ -24,6 +24,7 @@ beforeEach(() => {
   P.forEach((id, i) => ins.run(id, `p${i}`));
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(STAFF);
   setSetting(db, 'competitive_enabled', 'everyone');
+  setSetting(db, 'scrims_enabled', 'everyone');
   setSetting(db, 'map_pool', JSON.stringify(['no_mercy', 'death_toll']));
   for (const n of ['a', 'bb', 'ccc', 'dddd']) {
     const id = addServer(db, { name: n, host: 'h', port: 27000 + n.length, rconPort: 1, rconPassword: 'x' });

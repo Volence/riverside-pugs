@@ -2788,6 +2788,10 @@ export interface BookingOptions {
   /** The slot is estimated from the campaigns (bookings by campaign); these
    *  are its inputs, for the live "About 2 h 30" line. */
   estimate: SlotEstimate;
+  /** Owner 2026-11-08: whether the scrims switch lets this player book a scrim. */
+  canBook: boolean;
+  /** Draft tourney 2 plan: scrims are open to one event's teams, so no pickup side. */
+  eventOnly: boolean;
   myTeams: { id: number; slug: string; name: string; tag: string }[];
   teams: { id: number; slug: string; name: string; tag: string }[];
 }
@@ -2932,6 +2936,8 @@ export interface ScrimOptions {
     daysAhead: number; playlistMax: number; noteMax: number; acceptCampaignsMax: number;
   };
   estimate: SlotEstimate;
+  /** Draft tourney 2 plan: scrims are open to one event's teams, so no pickup side. */
+  eventOnly: boolean;
   myTeams: { id: number; slug: string; name: string; tag: string }[];
   teams: { id: number; slug: string; name: string; tag: string }[];
   /** scrim_show_sr: off, the post form has no SR range and sends none. */

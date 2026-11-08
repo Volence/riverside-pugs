@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DB } from '../db.js';
 import { makeOptionalViewer, makeRequireActive } from './guards.js';
 import { getPlayer } from '../players.js';
-import { scrimsAccess } from '../teams/access.js';
+import { scrimEventId, scrimSideAllowed, scrimsAccess } from '../teams/access.js';
 import { inGoodStanding } from '../standing.js';
 import { liveTeams, myTeams } from '../teams/teams.js';
 import { getCampaignPool, settingNumber } from '../settings.js';
@@ -90,8 +90,11 @@ export async function scrimRoutes(app: FastifyInstance, opts: ScrimRoutesOpts): 
       },
       // A post's block is estimated from its campaigns, as a booking's slot is.
       estimate: estimateOptions(db, campaigns),
-      myTeams: myTeams(db, me).filter((t) => t.role !== 'member').map(team),
-      teams: liveTeams(db).map(team),
+      // Draft tourney 2 plan: under scrims_enabled = event the forms offer that
+      // event's teams only, with no pickup side.
+      eventOnly: scrimEventId(db) !== null,
+      myTeams: myTeams(db, me).filter((t) => t.role !== 'member' && scrimSideAllowed(db, { teamId: t.id })).map(team),
+      teams: liveTeams(db).filter((t) => scrimSideAllowed(db, { teamId: t.id })).map(team),
       // scrim_show_sr: off, the page hides the SR range, the fit filter and
       // every SR figure.
       showSr: showSr(db),
