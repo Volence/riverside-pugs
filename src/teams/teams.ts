@@ -32,6 +32,8 @@ export interface TeamRow {
   logo_key: string | null; region: string; captain_steamid: string; created_by: string;
   origin: 'site' | 'draft' | 'pickup'; origin_ref: string | null; join_link_token: string | null;
   created_at: string; disbanded_at: string | null;
+  /** Set on a draft event's team (draft tourney 2 plan): see setEventTeam. */
+  event_entry_id: number | null;
 }
 export interface MemberRow {
   id: number; team_id: number; steamid: string; role: TeamRole; joined_at: string; left_at: string | null;
@@ -64,6 +66,7 @@ export const TEAM_ERRORS = {
   team_busy: { status: 409, text: 'This team has a booked scrim or an event entry. Cancel the booking or withdraw the entry first.' },
   not_eligible: { status: 409, text: 'That player is banned or on hold, so they cannot captain the team.' },
   keep_short: { status: 409, text: 'Fewer than three of the drafted players can join a team right now.' },
+  event_team: { status: 409, text: 'This team belongs to a draft event. Staff change it on the Events desk until the event ends.' },
 } as const satisfies Record<string, { status: number; text: string }>;
 export type TeamError = keyof typeof TEAM_ERRORS;
 
@@ -166,10 +169,12 @@ export function roleOf(db: DB, teamId: number, steamid: string): TeamRole | null
   return r?.role ?? null;
 }
 
+/** Teams that count toward the membership cap: a draft event's team does
+ *  not (setEventTeam), so a drafted player on site teams is never stuck. */
 export function activeMembershipCount(db: DB, steamid: string): number {
   return (db.prepare(
     `SELECT COUNT(*) AS n FROM team_members m JOIN teams t ON t.id = m.team_id
-      WHERE m.steamid = ? AND m.left_at IS NULL AND t.disbanded_at IS NULL`,
+      WHERE m.steamid = ? AND m.left_at IS NULL AND t.disbanded_at IS NULL AND t.event_entry_id IS NULL`,
   ).get(steamid) as { n: number }).n;
 }
 
@@ -178,7 +183,7 @@ export function rosterSize(db: DB, teamId: number): number {
 }
 
 function createdCount(db: DB, steamid: string): number {
-  return (db.prepare('SELECT COUNT(*) AS n FROM teams WHERE created_by = ? AND disbanded_at IS NULL').get(steamid) as { n: number }).n;
+  return (db.prepare('SELECT COUNT(*) AS n FROM teams WHERE created_by = ? AND disbanded_at IS NULL AND event_entry_id IS NULL').get(steamid) as { n: number }).n;
 }
 
 export function canCreate(db: DB, steamid: string): boolean {
@@ -289,21 +294,21 @@ export function createTeam(
 /** A free name: the name, then "name 2", "name 3" with the base cut so the
  *  suffix fits NAME_MAX (drafts plan D3b Ruling 4). Null when none of the
  *  first 99 is free. */
-function freeName(db: DB, name: string): { name: string; key: string } | null {
+function freeName(db: DB, name: string, except = 0): { name: string; key: string } | null {
   for (let k = 1; k <= 99; k++) {
     const suffix = k === 1 ? '' : ` ${k}`;
     const base = Array.from(name).slice(0, NAME_MAX - suffix.length).join('').trimEnd();
     const n = normalizeName(`${base}${suffix}`);
-    if (n.ok && !nameTaken(db, n.key)) return { name: n.name, key: n.key };
+    if (n.ok && !nameTaken(db, n.key, except)) return { name: n.name, key: n.key };
   }
   return null;
 }
 
 /** A free tag: the tag, then its first 4 characters and a digit 2 to 9. */
-function freeTag(db: DB, tag: string): { tag: string; key: string } | null {
+function freeTag(db: DB, tag: string, except = 0): { tag: string; key: string } | null {
   for (let k = 1; k <= 9; k++) {
     const t = normalizeTag(k === 1 ? tag : `${tag.slice(0, 4)}${k}`);
-    if (t.ok && !tagTaken(db, t.key)) return { tag: t.tag, key: t.key };
+    if (t.ok && !tagTaken(db, t.key, except)) return { tag: t.tag, key: t.key };
   }
   return null;
 }
@@ -358,6 +363,100 @@ export function addDraftMember(db: DB, o: { teamId: number; steamid: string; now
   })();
 }
 
+/** A tag for an event team whose entry has none: the name's letters and
+ *  digits, upper-cased, cut to 5 ('DT' when fewer than 2). */
+function tagFromName(name: string): string {
+  const t = name.normalize('NFKD').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 5);
+  return t.length >= 2 ? t : 'DT';
+}
+
+/**
+ * A draft event's team (draft tourney 2 plan, owner 2026-11-08: the draft
+ * teams scrim as teams before the event), made or brought in line with its
+ * entry: name, tag and logo, the captain, and exactly `members` (the entry's
+ * starters) on the roster. origin 'draft', origin_ref the event id,
+ * event_entry_id the entry. Drafted players join whatever their caps or
+ * standing say, and the team never counts toward a cap (activeMembershipCount).
+ * A taken name or tag takes the next free one, as a kept team does. Anyone
+ * who leaves comes off the team's scrims that have not started. Call inside
+ * the transaction of the entry's own change.
+ */
+export function setEventTeam(db: DB, o: {
+  entryId: number; eventId: number; name: string; tag: string; logoKey: string | null; captain: string; members: string[]; at: string;
+}): Result<{ id: number }> {
+  const t = db.prepare('SELECT * FROM teams WHERE event_entry_id = ? AND disbanded_at IS NULL').get(o.entryId) as TeamRow | undefined;
+  const name = freeName(db, o.name, t?.id ?? 0);
+  if (!name) return fail('name_taken');
+  const tag = freeTag(db, o.tag || tagFromName(o.name), t?.id ?? 0);
+  if (!tag) return fail('tag_taken');
+  let id: number;
+  if (!t) {
+    id = Number(db.prepare(
+      `INSERT INTO teams (name, name_key, tag, tag_key, slug, logo_key, captain_steamid, created_by, origin, origin_ref, event_entry_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`,
+    ).run(name.name, name.key, tag.tag, tag.key, slugFor(db, name.name), o.logoKey, o.captain, o.captain, String(o.eventId), o.entryId, o.at).lastInsertRowid);
+  } else {
+    id = t.id;
+    db.prepare('UPDATE teams SET name = ?, name_key = ?, tag = ?, tag_key = ?, logo_key = ?, captain_steamid = ? WHERE id = ?')
+      .run(name.name, name.key, tag.tag, tag.key, o.logoKey, o.captain, id);
+  }
+  const want = new Set([o.captain, ...o.members]);
+  for (const m of activeMembers(db, id)) {
+    if (want.has(m.steamid)) continue;
+    db.prepare('UPDATE team_members SET left_at = ? WHERE id = ?').run(o.at, m.id);
+    dropFromTeamBookings(db, id, m.steamid, 'left', o.at);
+  }
+  const insert = db.prepare('INSERT INTO team_members (team_id, steamid, role, joined_at) VALUES (?, ?, ?, ?)');
+  const setRole = db.prepare('UPDATE team_members SET role = ? WHERE team_id = ? AND steamid = ? AND left_at IS NULL');
+  for (const s of want) {
+    const role: TeamRole = s === o.captain ? 'captain' : 'member';
+    const has = roleOf(db, id, s);
+    if (has === null) insert.run(id, s, role, o.at);
+    else if (has !== role) setRole.run(role, id, s);
+  }
+  return ok({ id });
+}
+
+/**
+ * Bring a draft entry's team in line with the entry (setEventTeam): its
+ * name, tag, logo, captain and starters. A match stand-in (a sub place)
+ * stays off it. Nothing for a team entry. Called by src/events/entries.ts at
+ * the end of the transaction of every draft roster or identity write.
+ */
+export function syncEventTeam(db: DB, entryId: number, at: string): void {
+  const entry = db.prepare('SELECT id, event_id, name, tag, logo_key, captain_steamid FROM event_entries WHERE id = ?').get(entryId) as
+    { id: number; event_id: number; name: string; tag: string; logo_key: string | null; captain_steamid: string | null } | undefined;
+  if (!entry || entry.captain_steamid === null) return;
+  const starters = (db.prepare("SELECT steamid FROM event_entry_players WHERE entry_id = ? AND role = 'starter' AND removed_at IS NULL ORDER BY id")
+    .all(entry.id) as { steamid: string }[]).map((r) => r.steamid);
+  const r = setEventTeam(db, {
+    entryId: entry.id, eventId: entry.event_id, name: entry.name, tag: entry.tag, logoKey: entry.logo_key,
+    captain: entry.captain_steamid, members: starters, at,
+  });
+  // Only a name or tag with every fallback taken gets here; roll the change back.
+  if (!r.ok) throw new Error(`event team for entry ${entry.id}: ${r.error}`);
+}
+
+/** The events minute tick: close the team of every draft entry whose event
+ *  finished or was cancelled (or is gone). One with a scrim still open waits
+ *  for it to end. */
+export function closeEndedEventTeams(db: DB, now: Date): number[] {
+  const at = now.toISOString();
+  const rows = db.prepare(
+    `SELECT t.id FROM teams t LEFT JOIN event_entries e ON e.id = t.event_entry_id LEFT JOIN events v ON v.id = e.event_id
+      WHERE t.event_entry_id IS NOT NULL AND t.disbanded_at IS NULL AND (v.id IS NULL OR v.status IN ('finished','cancelled'))`,
+  ).all() as { id: number }[];
+  const closed: number[] = [];
+  for (const { id } of rows) {
+    db.transaction(() => {
+      if (teamBusy(db, id)) return;
+      closeTeam(db, id, at);
+      closed.push(id);
+    })();
+  }
+  return closed;
+}
+
 export interface InviteRow {
   id: number; team_id: number; steamid: string; invited_by: string; created_at: string;
   responded_at: string | null; response: 'accepted' | 'declined' | 'cancelled' | null;
@@ -368,6 +467,15 @@ const isManager = (role: TeamRole | null): boolean => role === 'captain' || role
 function liveTeam(db: DB, teamId: number): TeamRow | null {
   const t = getTeam(db, teamId);
   return t && !t.disbanded_at ? t : null;
+}
+
+/** A live team its own members and staff may change here: a draft event's
+ *  team follows its entry instead (setEventTeam), so every hand edit is
+ *  refused event_team. */
+function ownTeam(db: DB, teamId: number): Result<TeamRow> {
+  const t = liveTeam(db, teamId);
+  if (!t) return fail('not_found');
+  return t.event_entry_id !== null ? fail('event_team') : ok(t);
 }
 
 export function getInvite(db: DB, id: number): InviteRow | undefined {
@@ -388,6 +496,7 @@ export function pendingInvitesFor(db: DB, steamid: string): (InviteRow & { slug:
 /** Add a player to a live team as a member, with every joining rule. Also
  *  closes any open invite they had to this team. Call inside a transaction. */
 function addMember(db: DB, team: TeamRow, steamid: string, now: string): Result<null> {
+  if (team.event_entry_id !== null) return fail('event_team');
   if (roleOf(db, team.id, steamid)) return fail('already_member');
   if (!getPlayer(db, steamid) || !inGoodStanding(db, steamid)) return fail('not_player');
   if (rosterSize(db, team.id) >= ROSTER_MAX) return fail('roster_full');
@@ -403,8 +512,9 @@ export function invitePlayer(
 ): Result<{ inviteId: number }> {
   const now = (o.now ?? new Date()).toISOString();
   return db.transaction((): Result<{ inviteId: number }> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     if (!isManager(roleOf(db, team.id, o.by))) return fail('not_manager');
     if (!getPlayer(db, o.target) || !inGoodStanding(db, o.target)) return fail('not_player');
     // Admin-only mode is for trying the feature out before anyone else sees
@@ -475,8 +585,9 @@ export function cancelInvite(db: DB, o: { inviteId: number; by: string; now?: Da
 /** On: a fresh random token (replacing any old one). Off: none. Captain only. */
 export function setJoinLink(db: DB, o: { teamId: number; by: string; on: boolean }): Result<{ token: string | null }> {
   return db.transaction((): Result<{ token: string | null }> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     if (roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
     const token = o.on ? randomBytes(16).toString('base64url') : null;
     db.prepare('UPDATE teams SET join_link_token = ? WHERE id = ?').run(token, team.id);
@@ -538,8 +649,9 @@ export function leaveTeam(
 ): Result<{ disbanded: boolean; captain: string | null }> {
   const now = (o.now ?? new Date()).toISOString();
   return db.transaction((): Result<{ disbanded: boolean; captain: string | null }> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     if (!roleOf(db, team.id, o.steamid)) return fail('not_member');
     // The last one out closes the team, which a pending scrim or event entry forbids.
     if (rosterSize(db, team.id) === 1 && teamBusy(db, team.id)) return fail('team_busy');
@@ -554,8 +666,9 @@ export function kickMember(
 ): Result<{ disbanded: boolean; captain: string | null }> {
   const now = (o.now ?? new Date()).toISOString();
   return db.transaction((): Result<{ disbanded: boolean; captain: string | null }> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     const mine = roleOf(db, team.id, o.by);
     if (!isManager(mine)) return fail('not_manager');
     const theirs = roleOf(db, team.id, o.target);
@@ -572,8 +685,9 @@ export function setRole(db: DB, o: { teamId: number; by: string; target: string;
   if (o.role !== 'cocaptain' && o.role !== 'member') return fail('bad_role');
   const role = o.role;
   return db.transaction((): Result<null> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     if (roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
     const theirs = roleOf(db, team.id, o.target);
     if (!theirs) return fail('not_member');
@@ -585,8 +699,9 @@ export function setRole(db: DB, o: { teamId: number; by: string; target: string;
 
 export function transferCaptain(db: DB, o: { teamId: number; by: string; target: string; staff?: boolean }): Result<null> {
   return db.transaction((): Result<null> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     // A co-captain may take the team over from a captain banned for good:
     // that captain will never log in again, and every captain-only action
     // (and booking the team as an opponent) would otherwise wait on staff.
@@ -609,8 +724,9 @@ export function renameTeam(
   db: DB, o: { teamId: number; by: string; staff?: boolean; name?: unknown; tag?: unknown },
 ): Result<{ name: string; tag: string }> {
   return db.transaction((): Result<{ name: string; tag: string }> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     if (!o.staff && roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
     let name = team.name, nameKey = team.name_key, tag = team.tag, tagKey = team.tag_key;
     if (o.name !== undefined) {
@@ -633,8 +749,9 @@ export function renameTeam(
 export function disbandTeam(db: DB, o: { teamId: number; by: string; staff?: boolean; now?: Date }): Result<null> {
   const now = (o.now ?? new Date()).toISOString();
   return db.transaction((): Result<null> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     if (!o.staff && roleOf(db, team.id, o.by) !== 'captain') return fail('not_allowed');
     if (teamBusy(db, team.id)) return fail('team_busy');
     closeTeam(db, team.id, now);
@@ -644,8 +761,9 @@ export function disbandTeam(db: DB, o: { teamId: number; by: string; staff?: boo
 
 export function setLogoKey(db: DB, o: { teamId: number; by: string; staff?: boolean; logoKey: string | null }): Result<null> {
   return db.transaction((): Result<null> => {
-    const team = liveTeam(db, o.teamId);
-    if (!team) return fail('not_found');
+    const own = ownTeam(db, o.teamId);
+    if (!own.ok) return own;
+    const team = own.value;
     if (!o.staff && !isManager(roleOf(db, team.id, o.by))) return fail('not_manager');
     db.prepare('UPDATE teams SET logo_key = ? WHERE id = ?').run(o.logoKey, team.id);
     return ok(null);

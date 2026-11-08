@@ -93,6 +93,36 @@ export function signUp(
   })();
 }
 
+/**
+ * Staff add a signup after the close (draft tourney 2 plan, owner 10-24
+ * night: late signup after close), while the cut is still unpublished. The
+ * player must pass the event's eligibility, as at signUp. They join the end of
+ * signup order on the bench; staff swap them into the pool by hand if they
+ * are needed. Nothing else in the working cut moves. One
+ * 'draft_signup_late' row.
+ */
+export function addLateSignup(
+  db: DB, o: { eventId: number; steamid: string; captainPref: CaptainPref; actor: string; now: Date },
+): V.Checked<SignupRow> {
+  const at = o.now.toISOString();
+  if (!CAPTAIN_PREFS.includes(o.captainPref)) return V.fail('bad_captain_pref');
+  return db.transaction((): V.Checked<SignupRow> => {
+    const found = cutOpen(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    const elig = E.fieldsOf(ev).eligibility;
+    const facts = playerFacts(db, o.steamid, o.now);
+    const problems = R.problemsOf(elig, facts, 'starter');
+    if (problems.length > 0) return V.fail('ineligible', [{ steamid: o.steamid, problems: problems.map((p) => R.problemText(p, elig, facts)) }]);
+    if (signupOf(db, ev.id, o.steamid)) return V.fail('already_signed_up');
+    const id = Number(db.prepare(
+      "INSERT INTO draft_signups (event_id, steamid, captain_pref, note, created_at, role) VALUES (?, ?, ?, NULL, ?, 'bench')",
+    ).run(ev.id, o.steamid, o.captainPref, at).lastInsertRowid);
+    E.logEvent(db, ev.id, o.actor, 'draft_signup_late', at, { steamid: o.steamid, captainPref: o.captainPref });
+    return V.ok(db.prepare('SELECT * FROM draft_signups WHERE id = ?').get(id) as SignupRow);
+  })();
+}
+
 /** The player's own withdrawal, while signups are open. */
 export function withdrawSignup(db: DB, o: { eventId: number; steamid: string; now: Date }): V.Checked<null> {
   const at = o.now.toISOString();

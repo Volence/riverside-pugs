@@ -467,6 +467,7 @@ describe('event_log guard', () => {
       pickCaptains: { action: 'draft_captains_picked', setup: cut, run: (f) => D.pickCaptains(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
       swapPoolBench: { action: 'draft_swap', setup: cut, run: (f) => D.swapPoolBench(f.db, { eventId: f.eventId, poolSteamid: DP[0], benchSteamid: DP[11], actor: ADMIN, now: NOW }) },
       publishCut: { action: 'draft_cut_published', setup: publishable, run: (f) => D.publishCut(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW }) },
+      addLateSignup: { action: 'draft_signup_late', setup: cut, run: (f) => D.addLateSignup(f.db, { eventId: f.eventId, steamid: DP[12], captainPref: 'no', actor: ADMIN, now: NOW }) },
       // Captaincy offers (Task 4). cut gives 12 willing signups, 3 teams and
       // no captains, so the first offer goes to the highest SR, DP[11].
       startOffers: { action: 'draft_offers_started', setup: cut, run: (f) => D.startOffers(f.db, { eventId: f.eventId, actor: ADMIN, now: NOW, minutes: 30 }) },
@@ -793,7 +794,7 @@ describe('event_log guard', () => {
         expect(r).toEqual({ ok: true, value: { made: false, closed: 'captain_standing' } });
         expect(logCount(x.f)).toBe(before + 1);
         expect(x.f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: 'keep_closed' });
-        expect(x.f.db.prepare('SELECT COUNT(*) AS n FROM teams WHERE origin = ?').get('draft')).toEqual({ n: 0 });
+        expect(x.f.db.prepare('SELECT COUNT(*) AS n FROM teams WHERE origin = ? AND event_entry_id IS NULL').get('draft')).toEqual({ n: 0 });
       });
       it('writes nothing when its event_log row cannot be written', () => {
         const x = banned();

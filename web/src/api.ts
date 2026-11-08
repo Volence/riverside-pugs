@@ -3277,6 +3277,8 @@ export const adminApi = {
   draftCaptain: (id: number, steamid: string, captain: boolean) => post(`/api/admin/events/${id}/draft/captain`, { steamid, captain }),
   draftPickCaptains: (id: number) => post<{ ok: true; captains: string[]; short: number }>(`/api/admin/events/${id}/draft/pick-captains`),
   draftSwap: (id: number, pool: string, bench: string) => post(`/api/admin/events/${id}/draft/swap`, { pool, bench }),
+  /** Draft tourney 2 plan: staff add a signup after the close, onto the bench, until the cut is published. */
+  draftLateSignup: (id: number, steamid: string) => post(`/api/admin/events/${id}/draft/late-signup`, { steamid }),
   /** A refused cut throws a CutChangedError carrying the CutChangedBody. */
   draftPublish: async (id: number) => {
     try {
@@ -3340,6 +3342,8 @@ export const adminApi = {
   releaseEventHold: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/release-hold`),
   holdAllEventMatches: (id: number, reason: string) => post<{ held: number }>(`/api/admin/events/${id}/hold-all`, { reason }),
   releaseAllEventHolds: (id: number) => post<{ released: number; failed: number }>(`/api/admin/events/${id}/release-all`),
+  /** Draft tourney 2 plan: freeze or unfreeze every game of the event on a box. */
+  freezeAllEventGames: (id: number, on: boolean) => post<{ done: number; skipped: number }>(`/api/admin/events/${id}/${on ? 'freeze-all' : 'unfreeze-all'}`),
   freezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/freeze`),
   unfreezeEventMatch: (id: number, matchId: number) => post(`/api/admin/events/${id}/matches/${matchId}/unfreeze`),
   techPenaltyEventMatch: (id: number, matchId: number, pauseId: number, penalty: 'warning' | 'forfeit') =>

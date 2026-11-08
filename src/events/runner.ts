@@ -1,6 +1,6 @@
 import type { DB } from '../db.js';
 import type { Notifier } from '../notify/notify.js';
-import { getTeam } from '../teams/teams.js';
+import { closeEndedEventTeams, getTeam } from '../teams/teams.js';
 import * as E from './events.js';
 import * as D from './drafts.js';
 import * as N from './entries.js';
@@ -116,6 +116,12 @@ export class EventRunner {
       } catch (err) {
         console.error(`[events] closing signups of event ${ev.id} failed:`, err instanceof Error ? err.message : err);
       }
+    }
+    // Draft tourney 2 plan: a draft team made for scrims closes once its event is over.
+    try {
+      closeEndedEventTeams(db, now);
+    } catch (err) {
+      console.error('[events] closing ended event teams failed:', err instanceof Error ? err.message : err);
     }
     // Drafts plan D1 Ruling 6: move each running captaincy offer chain along.
     // Two mutations a tick: expire a due offer, then offer the next. Either
