@@ -4,7 +4,7 @@ import { inGoodStanding } from '../standing.js';
 import { hasActiveBan } from '../banState.js';
 import { resolveAlias } from '../aliases.js';
 import { hasUnsafeChars } from '../profileFields.js';
-import { competitiveAccess, scrimSideAllowed } from '../teams/access.js';
+import { competitiveAccess, scrimSideAllowed, scrimsAccess } from '../teams/access.js';
 import { activeMembers, getTeam, roleOf } from '../teams/teams.js';
 import { getCampaignPool } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
@@ -217,6 +217,10 @@ export function bookingRules(b: BookingRow): MatchRules | null {
 
 /** May use competitive play now: the switch lets them in and they are in good standing. */
 export const canUse = (db: DB, steamid: string): boolean => competitiveAccess(db, steamid) && inGoodStanding(db, steamid);
+/** May book a scrim or captain one (owner 2026-11-08): the scrims switch lets
+ *  them in, not just the competitive one, so a direct booking from the
+ *  Bookings tab follows the same switch as the scrim board. */
+export const canBookScrims = (db: DB, steamid: string): boolean => scrimsAccess(db, steamid) && inGoodStanding(db, steamid);
 
 function logEvent(db: DB, id: number, actor: string | null, event: string, detail: object, now: Date): void {
   db.prepare('INSERT INTO booking_events (booking_id, at, actor, event, detail) VALUES (?, ?, ?, ?, ?)')
@@ -305,7 +309,7 @@ export function createBooking(db: DB, o: {
   const now = o.now ?? new Date();
   const nowMs = now.getTime();
   const limits = bookingLimits(db);
-  if (!canUse(db, o.by)) return fail('not_open');
+  if (!canBookScrims(db, o.by)) return fail('not_open');
   const startMs = parseStart(o.startsAt, nowMs, limits);
   if (startMs === null) return fail('bad_time');
   const playlist = parsePlaylist(db, o.playlist, limits.playlistMax);
@@ -345,14 +349,14 @@ export function createBooking(db: DB, o: {
       if (!t || t.disbanded_at || t.id === teamId) return fail('bad_opponent');
       const oppRole = roleOf(db, t.id, o.by);
       if (oppRole === 'captain' || oppRole === 'cocaptain') return fail('bad_opponent');
-      if (!canUse(db, t.captain_steamid)) return fail('not_open');
+      if (!canBookScrims(db, t.captain_steamid)) return fail('not_open');
       bTeam = t.id;
       bCaptain = t.captain_steamid;
     } else {
       const p = getPlayer(db, opp.steamid);
       if (!p || p.status !== 'active') return fail('not_player');
       if (aPeople.includes(opp.steamid)) return fail('bad_opponent');
-      if (!canUse(db, opp.steamid)) return fail('not_open');
+      if (!canBookScrims(db, opp.steamid)) return fail('not_open');
       bCaptain = opp.steamid;
       bInvitee = opp.steamid;
     }
@@ -519,7 +523,7 @@ export function confirmBooking(db: DB, o: { bookingId: number; by: string; now?:
     const s = sideRow(db, b.id, 'b')!;
     if (s.confirmed_at !== null) return fail('already_confirmed');
     if (!managesSide(db, s, o.by)) return fail('not_manager');
-    if (!canUse(db, o.by)) return fail('not_open');
+    if (!canBookScrims(db, o.by)) return fail('not_open');
     const party = partyOf(s);
     // A scrim invite sent before a block cannot then be taken up.
     if (b.purpose === 'scrim' && blocked(db, partyOf(sideRow(db, b.id, 'a')!), party)) return fail('not_available');

@@ -103,6 +103,7 @@ describe('Notifier', () => {
 describe('booking messages', () => {
   beforeEach(() => {
     setSetting(db, 'competitive_enabled', 'everyone');
+    setSetting(db, 'scrims_enabled', 'everyone');
     setSetting(db, 'map_pool', JSON.stringify(['no_mercy']));
     for (const n of ['a', 'bb', 'ccc']) {
       const id = addServer(db, { name: n, host: '10.0.0.9', port: 27015 + n.length, rconPort: 1, rconPassword: 'x' });

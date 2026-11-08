@@ -174,7 +174,9 @@ describe('scrims for one event', () => {
     const book = (opponent: unknown) => createBooking(f.db, {
       by: t1.captain_steamid, teamId: t1.id, opponent, startsAt: START, playlist: ['no_mercy'], now: NOW,
     });
-    expect(err(book({ steamid: P[15] }))).toBe('event_only');
+    // Someone off the event teams cannot even open scrims; an event captain as a pickup side is still refused.
+    expect(err(book({ steamid: P[15] }))).toBe('not_open');
+    expect(err(book({ steamid: t2.captain_steamid }))).toBe('event_only');
     expect(err(book({ teamId: t2.id }))).not.toBe('event_only');
   });
 
@@ -182,6 +184,18 @@ describe('scrims for one event', () => {
     const f = setup();
     setSetting(f.db, 'scrims_enabled', 'everyone');
     expect(scrimSideAllowed(f.db, { captain: P[15]! })).toBe(true);
+  });
+});
+
+describe('bookings follow the scrims switch (owner 2026-11-08)', () => {
+  it('a direct scrim booking needs scrims open to the player, not just teams', () => {
+    const f = published();
+    setSetting(f.db, 'map_pool', JSON.stringify(['no_mercy']));
+    const t1 = teamOf(f, f.entries[0]!)!;
+    const t2 = teamOf(f, f.entries[1]!)!;
+    const START = new Date(NOW.getTime() + 26 * 3_600_000).toISOString();
+    setSetting(f.db, 'scrims_enabled', 'admins');
+    expect(err(createBooking(f.db, { by: t1.captain_steamid, teamId: t1.id, opponent: { teamId: t2.id }, startsAt: START, playlist: ['no_mercy'], now: NOW }))).toBe('not_open');
   });
 });
 

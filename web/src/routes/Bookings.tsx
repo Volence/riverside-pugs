@@ -98,13 +98,13 @@ function BookForm({ options, onError }: { options: BookingOptions; onError: (e: 
         <label class="teamfield">Your side
           <select aria-label="Your side" value={teamId === null ? '' : String(teamId)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setTeamId(v ? Number(v) : null); }}>
             {options.myTeams.map((t) => <option key={t.id} value={String(t.id)}>[{t.tag}] {t.name}</option>)}
-            <option value="">A pickup group (just me for now)</option>
+            {!options.eventOnly && <option value="">A pickup group (just me for now)</option>}
           </select>
         </label>
         <fieldset class="bookform__fieldset">
           <legend class="teamsub">Against</legend>
           <label><input type="radio" name="against" checked={against === 'team'} onChange={() => setAgainst('team')} /> A team</label>
-          <label><input type="radio" name="against" checked={against === 'player'} onChange={() => setAgainst('player')} /> A player and their group</label>
+          {!options.eventOnly && <label><input type="radio" name="against" checked={against === 'player'} onChange={() => setAgainst('player')} /> A player and their group</label>}
           {against === 'team'
             ? <select aria-label="Opponent team" value={oppTeam === null ? '' : String(oppTeam)} onChange={(e) => { const v = (e.target as HTMLSelectElement).value; setOppTeam(v ? Number(v) : null); }}>
                 <option value="">Pick a team</option>
@@ -226,7 +226,7 @@ export function Bookings({ session }: { session: Session }) {
           <RecordLine record={mine.record} />
         </Panel>
       )}
-      {options && (
+      {options?.canBook && (!options.eventOnly || options.myTeams.length > 0) && (
         <Panel>
           <h3>Book a server</h3>
           <BookForm options={options} onError={setError} />

@@ -45,6 +45,7 @@ beforeEach(async () => {
   db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
   db.prepare('UPDATE players SET is_caster = 1 WHERE steamid IN (?, ?)').run(CASTER, HALF);
   db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'competitive_enabled'").run();
+  db.prepare("UPDATE settings SET value = 'everyone' WHERE key = 'scrims_enabled'").run();
   db.prepare("UPDATE settings SET value = ? WHERE key = 'map_pool'").run(JSON.stringify(['no_mercy', 'death_toll']));
   for (const n of ['a', 'bb', 'ccc']) {
     const id = addServer(db, { name: n, host: '9.9.9.9', port: 27014 + n.length, rconPort: 1, rconPassword: 'x' });
