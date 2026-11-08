@@ -88,7 +88,7 @@ describe('answers and the team (Rulings 3, 5 to 8)', () => {
     expect(K.keptFrom(f.db, made.teamId)).toEqual({ eventSlug: f.slug, eventName: 'Draft Night', placement: null });
     // Review Focus 4: a second settle makes nothing.
     expect(err(settle(f, x))).toBe('keep_closed');
-    expect(f.db.prepare("SELECT COUNT(*) AS n FROM teams WHERE origin = 'draft'").get()).toEqual({ n: 1 });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM teams WHERE origin = 'draft' AND event_entry_id IS NULL").get()).toEqual({ n: 1 });
   });
 
   it('Review Focus 1: the fourth player accepts after the team is made and joins it', () => {
@@ -163,7 +163,7 @@ describe('the captain\'s standing (Task 1 review ruling)', () => {
     expect(f.db.prepare('SELECT action FROM event_log ORDER BY id DESC LIMIT 1').get()).toEqual({ action: 'keep_closed' });
     expect(K.keepOf(f.db, x.keepId)).toMatchObject({ status: 'lapsed', team_id: null });
     expect(K.keepOf(f.db, x.keepId)?.closed_at).not.toBeNull();
-    expect(f.db.prepare("SELECT COUNT(*) AS n FROM teams WHERE origin = 'draft'").get()).toEqual({ n: 0 });
+    expect(f.db.prepare("SELECT COUNT(*) AS n FROM teams WHERE origin = 'draft' AND event_entry_id IS NULL").get()).toEqual({ n: 0 });
     expect(err(settle(f, x))).toBe('keep_closed');
   });
 });

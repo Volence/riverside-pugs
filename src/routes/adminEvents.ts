@@ -437,6 +437,23 @@ export async function adminEventRoutes(
     typeof b.pool !== 'string' || typeof b.bench !== 'string' ? null
       : D.swapPoolBench(db, { eventId: ev.id, poolSteamid: b.pool, benchSteamid: b.bench, actor: me, now: new Date() }));
 
+  /** Draft tourney 2 plan: staff add a signup after the close, onto the
+   *  bench, until the cut is published. An ineligible player's problems
+   *  come back as at a player's own signup. */
+  app.post('/api/admin/events/:id/draft/late-signup', async (req, reply) => {
+    const me = requireAdmin(req, reply);
+    if (!me) return;
+    const ev = eventOf((req.params as { id: string }).id);
+    if (!ev) return refuse(reply, 'not_found');
+    const b = (req.body ?? {}) as { steamid?: unknown; captainPref?: unknown };
+    if (typeof b.steamid !== 'string') return refuse(reply, 'bad_request');
+    const pref = b.captainPref === undefined ? 'no' : b.captainPref;
+    const r = D.addLateSignup(db, { eventId: ev.id, steamid: b.steamid, captainPref: pref as D.CaptainPref, actor: me, now: new Date() });
+    if (!r.ok) return refuseWith(reply, r);
+    logAdmin(db, me, 'event_draft_late_signup', ev.id, { slug: ev.slug, steamid: b.steamid, captainPref: pref });
+    return {};
+  });
+
   /**
    * Make teams (drafts plan D2a Rulings 2 to 5): staff read the working teams
    * with SR and the fairness readout (never in a player or public response);
@@ -834,6 +851,32 @@ export async function adminEventRoutes(
     logAdmin(db, me, 'event_release_all', ev.id, { matches: released, failed });
     return { released: released.length, failed: failed.length };
   });
+
+  /** Draft tourney 2 plan (owner, 10-24 night: pause all rooms): the games
+   *  hold-all leaves alone. Freeze (or unfreeze) every match of a live stage
+   *  that is on a box (connect or live), each through the series engine's
+   *  own freeze, all at once. A match already in that state, or whose box
+   *  does not answer, is counted as skipped; each one that took tells its
+   *  rosters as a single freeze does. */
+  const FREEZE_ALL: ReadonlySet<string> = new Set(['connect', 'live']);
+  for (const [path, on] of [['freeze-all', true], ['unfreeze-all', false]] as const) {
+    app.post(`/api/admin/events/:id/${path}`, async (req, reply) => {
+      const me = requireAdmin(req, reply);
+      if (!me) return;
+      const ev = eventOf((req.params as { id: string }).id);
+      if (!ev) return refuse(reply, 'not_found');
+      if (ev.status !== 'live') return refuse(reply, 'not_live');
+      if (!opts.series) return reply.code(404).send({ error: 'not found' });
+      const series = opts.series;
+      const ids = E.stagesOf(db, ev.id).filter((x) => x.status === 'live')
+        .flatMap((st) => P.matchesOf(db, st.id).filter((m) => FREEZE_ALL.has(m.status)).map((m) => m.id));
+      const results = await Promise.allSettled(ids.map((id) => series.freeze(id, me, on)));
+      const done = ids.filter((_, i) => { const r = results[i]!; return r.status === 'fulfilled' && r.value.ok; });
+      const skipped = ids.filter((id) => !done.includes(id));
+      logAdmin(db, me, on ? 'event_freeze_all' : 'event_unfreeze_all', ev.id, { matches: done, skipped });
+      return { done: done.length, skipped: skipped.length };
+    });
+  }
 
   /** Plan T4 Ruling 10: the stage's round schedule, applied at once on a
    *  started stage. One outer transaction (the inner ones become

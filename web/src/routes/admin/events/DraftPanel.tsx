@@ -1,13 +1,69 @@
 import { useState } from 'preact/hooks';
-import { adminApi, CutChangedError, type CutProblem, type SignupFacts } from '../../../api';
+import { adminApi, ApiError, CutChangedError, peopleApi, type CutProblem, type SignupFacts } from '../../../api';
 import { useFetch } from '../../../hooks/useFetch';
 import { Empty, Panel } from '../../../components/bits';
-import { fmtTime, useAction } from '../useAction';
+import { fmtTime, useAction, type Run } from '../useAction';
 
 const PREF: Record<SignupFacts['captainPref'], string> = { want: 'Wants', willing: 'Willing', no: 'No' };
 const ROLE: Record<string, string> = { captain: 'Captain', pool: 'Pool', bench: 'Bench' };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Draft tourney 2 plan (owner, 10-24 night): staff add someone who missed
+ *  the close, found by name (the People desk's search), onto the bench while
+ *  the cut is unpublished. The server checks eligibility; its reasons show
+ *  under the form. */
+function LateSignup({ eventId, signedUp, busy, run }: { eventId: number; signedUp: Set<string>; busy: boolean; run: Run }) {
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState<{ steamid: string; name: string }[] | null>(null);
+  const [pick, setPick] = useState('');
+  const [searchError, setSearchError] = useState('');
+  const [problems, setProblems] = useState<{ steamid: string; name: string; problems: string[] }[]>([]);
+  const chosen = found?.find((p) => p.steamid === pick);
+  const search = async () => {
+    setSearchError('');
+    try {
+      const r = await peopleApi.people(q.trim());
+      setFound(r.players.filter((p) => !signedUp.has(p.steamid)).slice(0, 10).map((p) => ({ steamid: p.steamid, name: p.name })));
+      setPick('');
+    } catch {
+      setSearchError('Could not search players.');
+    }
+  };
+  return (
+    <div class="replaceform" role="group" aria-label="Add a late signup">
+      <form class="inlinerow" onSubmit={(ev) => { ev.preventDefault(); void search(); }}>
+        <input type="search" aria-label="Find a player to add" placeholder="Add a late signup: name or SteamID" value={q} onInput={(ev) => setQ((ev.target as HTMLInputElement).value)} />
+        <button class="btn btn--ghost btn--sm" type="submit" disabled={q.trim() === ''}>Search</button>
+      </form>
+      {searchError && <p class="error">{searchError}</p>}
+      {found && found.length === 0 && <p class="muted">No players match who are not signed up already.</p>}
+      {found && found.length > 0 && (
+        <div class="inlinerow">
+          <select aria-label="Player to add" value={pick} onChange={(ev) => setPick((ev.target as HTMLSelectElement).value)}>
+            <option value="">Choose the player</option>
+            {found.map((p) => <option key={p.steamid} value={p.steamid}>{p.name}</option>)}
+          </select>
+          <button class="btn btn--sm" disabled={busy || !chosen} onClick={() => chosen && void run(async () => {
+            setProblems([]);
+            try {
+              await adminApi.draftLateSignup(eventId, chosen.steamid);
+            } catch (err) {
+              if (err instanceof ApiError && err.problems) setProblems(err.problems);
+              throw err;
+            }
+            setFound(null); setQ(''); setPick('');
+          }, { title: `Add ${chosen.name} after the close?`, body: 'They go on the bench at the end of the signup order. Swap them into the pool by hand if a team needs them.', confirmLabel: 'Add' })}>Add to the bench</button>
+        </div>
+      )}
+      {problems.length > 0 && (
+        <ul class="replaceform__problems" role="alert">
+          {problems.map((p) => <li key={p.steamid}><strong>{p.name}</strong>: {p.problems.join(' ')}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 /** One sentence per CutProblem code. The counts the codes do not carry come
  *  in `o`: from the table for the live list, from the server's own `cut`
@@ -189,6 +245,9 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
             </tbody>
           </table>
         </div>
+      )}
+      {locked && !published && canEdit && (
+        <LateSignup eventId={eventId} signedUp={new Set(data.signups.map((s) => s.steamid))} busy={busy} run={run} />
       )}
       {locked && !published && canEdit && (
         <div class="inlinerow">

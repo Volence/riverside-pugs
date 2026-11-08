@@ -428,6 +428,9 @@ function NightBar({ eventId, matches, canEdit, run, busy }: { eventId: number; m
   const count = (phases: RoomPhase[]) => open.filter((m) => phases.includes(m.phase)).length;
   const holdable = open.filter((m) => m.phase === 'waiting' || m.phase === 'ready' || m.phase === 'veto' || m.phase === 'lineup' || m.phase === 'server').length;
   const held = count(['hold']);
+  const onBox = open.filter((m) => m.phase === 'connect' || m.phase === 'live');
+  const unfrozen = onBox.filter((m) => !m.desk?.frozen).length;
+  const frozen = onBox.length - unfrozen;
   return (
     <div class="nightbar" aria-label="Matches tonight">
       <ul class="nightbar__counts">
@@ -461,6 +464,18 @@ function NightBar({ eventId, matches, canEdit, run, busy }: { eventId: number; m
               const r = await adminApi.releaseAllEventHolds(eventId);
               setSaid(`${r.released} released${r.failed > 0 ? `, ${r.failed} could not be (see the match below)` : ''}.`);
             }, { title: 'Release every staff hold?', body: 'Each match goes back to where it was with a fresh clock. Holds the site put on by itself (a game lost, no result) stay, since each needs a look.', confirmLabel: 'Release' })}>Release staff holds</button>
+          )}
+          {unfrozen > 0 && (
+            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(async () => {
+              const r = await adminApi.freezeAllEventGames(eventId, true);
+              setSaid(`${r.done} ${r.done === 1 ? 'game' : 'games'} frozen${r.skipped > 0 ? `, ${r.skipped} could not be (see the match below)` : ''}.`);
+            }, { title: `Freeze ${unfrozen} ${unfrozen === 1 ? 'game' : 'games'}?`, body: 'Every game on a server now pauses in game, as Freeze does on one match. Hold all rooms does the matches not on a server yet.', confirmLabel: 'Freeze all' })}>Freeze all games</button>
+          )}
+          {frozen > 0 && (
+            <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(async () => {
+              const r = await adminApi.freezeAllEventGames(eventId, false);
+              setSaid(`${r.done} ${r.done === 1 ? 'game' : 'games'} unfrozen${r.skipped > 0 ? `, ${r.skipped} could not be (see the match below)` : ''}.`);
+            }, { title: `Unfreeze ${frozen} ${frozen === 1 ? 'game' : 'games'}?`, body: 'Every frozen game on a server goes on.', confirmLabel: 'Unfreeze all' })}>Unfreeze all games</button>
           )}
           {said && <span class="muted" role="status">{said}</span>}
         </div>

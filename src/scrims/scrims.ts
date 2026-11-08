@@ -12,6 +12,7 @@ import { inNight } from './night.js';
 import { ACCEPT_CUTOFF_MS, openPostAt, nearestFreeSlot, proposedPlaylist, showSr, sideSr, srFits, type ScrimSide } from './rules.js';
 import { reliability, type Reliability } from './reliability.js';
 import { blocked } from './blocks.js';
+import { scrimSideAllowed } from '../teams/access.js';
 
 /**
  * Every rule about the scrim board (spec part 4, sections 1-2; scrim board
@@ -379,6 +380,8 @@ export function createPost(db: DB, o: {
       if (!target || target.disbanded_at || target.id === teamId || isManagerRole(roleOf(db, target.id, o.by))) return fail('bad_target');
     }
     const side: SideRef = { team_id: teamId, captain_steamid: captain };
+    // Draft tourney 2 plan: under scrims_enabled = event, only that event's teams post or are challenged.
+    if (!scrimSideAllowed(db, scrimSide(side)) || (targetId !== null && !scrimSideAllowed(db, { teamId: targetId }))) return fail('event_only');
     // A blocked pair cannot challenge each other, whichever side blocked.
     if (targetId !== null && blocked(db, partyOf(side), { teamId: targetId })) return fail('not_available');
     if (openPostAt(db, side, iso(startMs))) return fail('duplicate_post');
@@ -478,6 +481,7 @@ export function acceptPost(db: DB, o: {
       side = { team_id: null, captain_steamid: o.by };
     }
 
+    if (!scrimSideAllowed(db, scrimSide(side))) return fail('event_only');
     // Own side: anyone running both sides, or a member of the posting team
     // accepting as a pickup (the booking would put them on both sides).
     const posterManagers = new Set(managersOf(db, p));

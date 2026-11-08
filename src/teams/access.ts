@@ -38,7 +38,37 @@ export function scrimsAccess(db: DB, viewer: string | null): boolean {
   const mode = getSetting(db, 'scrims_enabled') ?? 'admins';
   if (mode === 'everyone') return true;
   if (mode === 'admins') return getPlayer(db, viewer!)?.is_admin === 1;
+  if (mode === 'event') return getPlayer(db, viewer!)?.is_admin === 1 || onScrimEventTeam(db, viewer!);
   return false;
+}
+
+/** The event `scrims_enabled = event` opens scrims for (draft tourney 2
+ *  plan), or null in any other mode or with no event set. */
+export function scrimEventId(db: DB): number | null {
+  if ((getSetting(db, 'scrims_enabled') ?? 'admins') !== 'event') return null;
+  const id = Number(getSetting(db, 'scrims_event_id') ?? '');
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** A live team of the scrim event whose entry is still in it. */
+const EVENT_TEAM_SQL = `SELECT 1 FROM teams t JOIN event_entries e ON e.id = t.event_entry_id
+  WHERE t.disbanded_at IS NULL AND e.event_id = ? AND e.status NOT IN ('dropped','disqualified')`;
+
+function onScrimEventTeam(db: DB, steamid: string): boolean {
+  const eventId = scrimEventId(db);
+  if (eventId === null) return false;
+  return db.prepare(`${EVENT_TEAM_SQL} AND t.id IN (SELECT team_id FROM team_members WHERE steamid = ? AND left_at IS NULL) LIMIT 1`)
+    .get(eventId, steamid) !== undefined;
+}
+
+/** Whether a scrim side (posting, accepting, challenged, or either side of a
+ *  scrim booking) may play: any side, except under `scrims_enabled = event`,
+ *  where only that event's teams may (no pickup sides, no site teams). */
+export function scrimSideAllowed(db: DB, side: { teamId: number } | { captain: string }): boolean {
+  if ((getSetting(db, 'scrims_enabled') ?? 'admins') !== 'event') return true;
+  const eventId = scrimEventId(db);
+  if (eventId === null || !('teamId' in side)) return false;
+  return db.prepare(`${EVENT_TEAM_SQL} AND t.id = ? LIMIT 1`).get(eventId, side.teamId) !== undefined;
 }
 
 /** Whether scrims are public (the Discord scrim cards and night reminder):

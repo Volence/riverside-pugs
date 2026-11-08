@@ -1771,9 +1771,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // Competitive platform (teams, later bookings and events): off | admins |
   // everyone. Off hides every team page and route.
   competitive_enabled: 'off',
-  // The scrim board on its own (off | admins | everyone), inside the switch
-  // above: events can be open to everyone while scrims stay with admins.
+  // The scrim board on its own (off | admins | event | everyone), inside the
+  // switch above: events can be open to everyone while scrims stay with
+  // admins. 'event' opens it to scrims_event_id's draft teams only.
   scrims_enabled: 'admins',
+  scrims_event_id: '0',
   team_membership_cap: '3',
   // Server bookings (plan 4a). Every number in spec section 3 is a setting.
   booking_max_upcoming: '4',
@@ -3182,6 +3184,11 @@ export function openDb(path: string): DB {
   // several (src/discord/newsPoster.ts): a JSON array of message ids after
   // discord_message_id, in order. NULL when the post is one message.
   ensureColumn(db, 'news_posts', 'discord_extra_ids', 'TEXT');
+  // A draft event's team (draft tourney 2 plan): the event_entries row it
+  // follows while the event lasts (src/teams/teams.ts setEventTeam). No
+  // REFERENCES, so nothing about the event ever waits on the team.
+  ensureColumn(db, 'teams', 'event_entry_id', 'INTEGER');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS teams_event_entry_live ON teams (event_entry_id) WHERE event_entry_id IS NOT NULL AND disbanded_at IS NULL');
   // Who was in the lobby a ballot was drawn for (src/ballot.ts weighs the
   // draw by each player's history). Ballots from before it get their
   // match's players, which for a queue match are the lobby.

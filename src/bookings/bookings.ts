@@ -4,7 +4,7 @@ import { inGoodStanding } from '../standing.js';
 import { hasActiveBan } from '../banState.js';
 import { resolveAlias } from '../aliases.js';
 import { hasUnsafeChars } from '../profileFields.js';
-import { competitiveAccess } from '../teams/access.js';
+import { competitiveAccess, scrimSideAllowed } from '../teams/access.js';
 import { activeMembers, getTeam, roleOf } from '../teams/teams.js';
 import { getCampaignPool } from '../settings.js';
 import { campaignRegistry } from '../campaignRegistry.js';
@@ -91,6 +91,7 @@ export interface PersonRow {
 export const BOOKING_ERRORS = {
   not_found: { status: 404, text: 'No such booking.' },
   not_open: { status: 409, text: 'That player cannot use scrims yet.' },
+  event_only: { status: 409, text: 'Scrims are open to one event\'s teams right now: book as your event team, against another of them.' },
   not_player: { status: 400, text: 'That is not an active player.' },
   bad_time: { status: 400, text: 'Pick a start time in the future, inside the booking window.' },
   bad_playlist: { status: 400, text: 'Pick campaigns from the map pool, each once, up to the limit.' },
@@ -357,6 +358,8 @@ export function createBooking(db: DB, o: {
     }
 
     const bParty: Party = bTeam !== null ? { teamId: bTeam } : { captain: bCaptain };
+    // Draft tourney 2 plan: under scrims_enabled = event, both sides are that event's teams.
+    if (!scrimSideAllowed(db, aParty) || !scrimSideAllowed(db, bParty)) return fail('event_only');
     // A blocked pair never books each other, whichever side blocked.
     if (blocked(db, aParty, bParty)) return fail('not_available');
 

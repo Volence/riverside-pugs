@@ -7,7 +7,7 @@ import { currentSeasonId, getPlayer } from '../players.js';
 import { seasonSr } from '../rating.js';
 import { inGoodStanding } from '../standing.js';
 import { competitiveAccess } from '../teams/access.js';
-import { activeMembers, getTeam, normalizeName, normalizeTag } from '../teams/teams.js';
+import { activeMembers, getTeam, normalizeName, normalizeTag, syncEventTeam } from '../teams/teams.js';
 import * as E from './events.js';
 import * as D from './drafts.js';
 import { roomOf } from './draftRoom.js';
@@ -441,6 +441,7 @@ export function createDraftEntries(db: DB, o: { eventId: number; actor: string; 
         checkedIn ? at : null, checkedIn ? o.actor : null, captain,
       ).lastInsertRowid);
       for (const s of four) addPlace(db, id, s, 'starter', at);
+      syncEventTeam(db, id, at);
       return id;
     });
     db.prepare('UPDATE events SET teams_made_at = ?, updated_at = ? WHERE id = ?').run(at, at, ev.id);
@@ -495,6 +496,7 @@ export function setEntryIdentity(
     const tag = o.tag === undefined ? entry.tag : t && t.ok ? t.tag : '';
     const logoKey = o.logoKey === undefined ? entry.logo_key : o.logoKey;
     db.prepare('UPDATE event_entries SET name = ?, tag = ?, logo_key = ? WHERE id = ?').run(name, tag, logoKey, entry.id);
+    syncEventTeam(db, entry.id, at);
     E.logEvent(db, ev.id, o.steamid, 'entry_identity_set', at, {
       entryId: entry.id, staff: o.staff, from: { name: entry.name, tag: entry.tag, logoKey: entry.logo_key }, to: { name, tag, logoKey },
     });
@@ -622,6 +624,7 @@ export function replaceDraftPlayer(db: DB, o: {
       if (boxMissing(onBox, o.boxTook)) return V.fail('replace_in_game', [{ steamid: o.out, problems: [BOX_NOT_ASKED] }]);
       db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id = ?').run(at, place.id);
       addPlace(db, entry.id, o.in, 'starter', at);
+      syncEventTeam(db, entry.id, at);
       swapIntoLineups(db, matches, { out: o.out, in: o.in, actor: o.actor, now: o.now });
       E.logEvent(db, ev.id, o.actor, 'entry_player_replaced', at, {
         entryId: entry.id, out: o.out, in: o.in, reason: o.reason, ...(subbedInMatch !== null ? { matchId: subbedInMatch } : {}),
@@ -660,6 +663,7 @@ export function setDraftCaptain(db: DB, o: { eventId: number; entryId: number; s
       if (o.steamid === entry.captain_steamid) return V.fail('already_captain');
       const from = entry.captain_steamid;
       db.prepare('UPDATE event_entries SET captain_steamid = ? WHERE id = ?').run(o.steamid, entry.id);
+      syncEventTeam(db, entry.id, at);
       // Booking side a is entry_a (series.ts openBooking); only open bookings still have a captain who acts.
       const rows = db.prepare(
         'SELECT entry_a, booking_id FROM event_matches WHERE event_id = ? AND (entry_a = ? OR entry_b = ?) AND booking_id IS NOT NULL ORDER BY id',
@@ -721,6 +725,8 @@ export function swapDraftPlayers(db: DB, o: {
       db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id IN (?, ?)').run(at, sa.place.id, sb.place.id);
       addPlace(db, sa.entry.id, o.b.steamid, 'starter', at);
       addPlace(db, sb.entry.id, o.a.steamid, 'starter', at);
+      syncEventTeam(db, sa.entry.id, at);
+      syncEventTeam(db, sb.entry.id, at);
       // The working teams (draft_signups.draft_team) swap too, so they never
       // disagree with the entries.
       const teamOf = db.prepare('SELECT draft_team FROM draft_signups WHERE event_id = ? AND steamid = ? AND withdrawn_at IS NULL');
@@ -801,6 +807,7 @@ export function placeStandin(db: DB, o: StandinPlaceInput): V.Checked<StandinPla
       if (boxMissing(onBox, o.boxTook)) return V.fail('replace_in_game', [{ steamid: req.out_steamid, problems: [BOX_NOT_ASKED] }]);
       if (req.scope === 'event') db.prepare('UPDATE event_entry_players SET removed_at = ? WHERE id = ?').run(at, place.id);
       addPlace(db, entry.id, o.steamid, req.scope === 'event' ? 'starter' : 'sub', at);
+      if (req.scope === 'event') syncEventTeam(db, entry.id, at);
       // The swap is the asker's (captain or staff), as a sub would be; the stand-in only accepted it.
       swapIntoLineups(db, matches, { out: req.out_steamid, in: o.steamid, actor: req.requested_by, now: o.now });
       S.markPlaced(db, { requestId: req.id, offerId: offer.id, steamid: o.steamid, at });
