@@ -82,7 +82,7 @@ export const MIRROR_CAMPAIGNS: Record<string, { name: string; original: string; 
   },
   // Passifice's chain, mirrored: both Passing maps and the first two river maps.
   the_passing_mirror: {
-    name: 'Ecifircas Eht', original: 'the_passing',
+    name: 'Ecifissap Eht', original: 'the_passing',
     maps: ['mc6m1_riverbank', 'mc6m2_bedlam', 'l4d_mriver01_docks', 'l4d_mriver02_barge', 'l4d_river03_port'],
   },
   cold_stream_mirror: {
