@@ -64,7 +64,8 @@ export function fieldsOf(ev: EventRow): V.EventFields {
   return {
     name: ev.name, startsAt: ev.starts_at, entryKind: ev.entry_kind, official: ev.official === 1, teamCap: ev.entry_kind === 'draft' ? null : ev.team_cap,
     description: ev.description,
-    eligibility: JSON.parse(ev.eligibility_json) as V.Eligibility,
+    // Events made before the season rules have neither key: no rule.
+    eligibility: { minSeasonPugs: 0, requirePlaced: false, ...JSON.parse(ev.eligibility_json) } as V.Eligibility,
     checkin: JSON.parse(ev.checkin_json) as V.Checkin,
     roster: JSON.parse(ev.roster_json) as V.RosterRules,
     draft: draftOf(ev),

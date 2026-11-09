@@ -14,7 +14,7 @@ const { EventFieldsForm } = await import('./EventFieldsForm');
 
 const FIELDS: EventFields = {
   name: 'Riverside Cup', startsAt: '2026-11-01T09:30:00.000Z', entryKind: 'team', official: true, teamCap: null, description: '',
-  eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },
+  eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null, minSeasonPugs: 0, requirePlaced: false },
   checkin: { enabled: true, opensMinutes: 60, closesMinutes: 15 },
   roster: { starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null }, draft: null,
 };

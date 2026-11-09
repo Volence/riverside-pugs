@@ -78,7 +78,7 @@ function Details({ ev }: { ev: AdminEventDetail }) {
     <ul class="admin-list">
       <li>Starts {whenText(f.startsAt)}</li>
       <li>{f.entryKind === 'team' ? 'Teams register' : 'Draft (individual signups)'}{f.official ? ', official' : ''}{f.teamCap !== null ? `, up to ${f.teamCap} teams` : ''}</li>
-      <li>At least {f.eligibility.minPugs} completed PUGs{f.eligibility.requireDiscord ? ', Discord linked' : ''}</li>
+      <li>At least {f.eligibility.minPugs} completed PUGs{f.eligibility.minSeasonPugs > 0 ? `, ${f.eligibility.minSeasonPugs} this season` : ''}{f.eligibility.requirePlaced ? ', placed this season' : ''}{f.eligibility.requireDiscord ? ', Discord linked' : ''}</li>
       <li>{f.checkin.enabled ? `Check-in ${f.checkin.opensMinutes} to ${f.checkin.closesMinutes} minutes before the start` : 'No check-in'}</li>
       {f.description && <li><RichText text={f.description} /></li>}
     </ul>

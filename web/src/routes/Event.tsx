@@ -31,6 +31,8 @@ function useNow(): number {
 function entryLines(ev: EventView): string[] {
   const e = ev.eligibility;
   const lines = [`At least ${e.minPugs} completed PUG${e.minPugs === 1 ? '' : 's'}, account in good standing`];
+  if (e.minSeasonPugs > 0) lines.push(`At least ${e.minSeasonPugs} PUG${e.minSeasonPugs === 1 ? '' : 's'} this season`);
+  if (e.requirePlaced) lines.push('Placed this season');
   if (e.requireDiscord) lines.push('Discord linked to the site');
   if (e.srFloor !== null && e.srCeiling !== null) lines.push(`SR ${e.srFloor} to ${e.srCeiling}`);
   else if (e.srFloor !== null) lines.push(`SR ${e.srFloor} or more`);

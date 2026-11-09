@@ -263,7 +263,12 @@ export const ok = <T>(value: T): Checked<T> => ({ ok: true, value });
 export const fail = (error: EventError, detail?: EntryProblem[]): { ok: false; error: EventError; detail?: EntryProblem[] } =>
   (detail ? { ok: false, error, detail } : { ok: false, error });
 
-export interface Eligibility { minPugs: number; requireDiscord: boolean; srFloor: number | null; srCeiling: number | null }
+export interface Eligibility {
+  minPugs: number; requireDiscord: boolean; srFloor: number | null; srCeiling: number | null;
+  /** Owner 2026-11-09 (Draft Tourney #2): rated games in the current season,
+   *  and past placement in it. 0 and false (no rule) on events made before. */
+  minSeasonPugs: number; requirePlaced: boolean;
+}
 export interface Checkin { enabled: boolean; opensMinutes: number; closesMinutes: number }
 export type RosterLock = { kind: 'none' } | { kind: 'at'; at: string } | { kind: 'after_round'; stage: number; round: number };
 export interface RosterRules { starters: 4; maxSubs: number; lock: RosterLock; maxAdditions: number | null }
@@ -304,7 +309,7 @@ export const SCORE_MAX = 100000;
 /** A match result as an admin enters it (plan T2 Ruling 1). */
 export interface ResultInput { winner: 'a' | 'b'; scoreA: number | null; scoreB: number | null; forfeit: boolean }
 
-export const defaultEligibility = (): Eligibility => ({ minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null });
+export const defaultEligibility = (): Eligibility => ({ minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null, minSeasonPugs: 0, requirePlaced: false });
 export const defaultCheckin = (): Checkin => ({ enabled: true, opensMinutes: 60, closesMinutes: 15 });
 export const defaultRoster = (): RosterRules => ({ starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null });
 
@@ -381,11 +386,14 @@ export function parseEligibility(raw: unknown): Checked<Eligibility> {
   const requireDiscord = raw.requireDiscord ?? d.requireDiscord;
   const srFloor = intOrNull(raw.srFloor, 0, 10000);
   const srCeiling = intOrNull(raw.srCeiling, 0, 10000);
-  if (!isInt(minPugs, 0, 1000) || typeof requireDiscord !== 'boolean' || srFloor === undefined || srCeiling === undefined) {
+  const minSeasonPugs = raw.minSeasonPugs ?? d.minSeasonPugs;
+  const requirePlaced = raw.requirePlaced ?? d.requirePlaced;
+  if (!isInt(minPugs, 0, 1000) || typeof requireDiscord !== 'boolean' || srFloor === undefined || srCeiling === undefined
+    || !isInt(minSeasonPugs, 0, 1000) || typeof requirePlaced !== 'boolean') {
     return fail('bad_eligibility');
   }
   if (srFloor !== null && srCeiling !== null && srFloor >= srCeiling) return fail('bad_eligibility');
-  return ok({ minPugs, requireDiscord, srFloor, srCeiling });
+  return ok({ minPugs, requireDiscord, srFloor, srCeiling, minSeasonPugs, requirePlaced });
 }
 
 export function parseCheckin(raw: unknown): Checked<Checkin> {
