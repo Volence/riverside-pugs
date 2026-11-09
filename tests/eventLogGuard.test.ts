@@ -471,7 +471,7 @@ describe('event_log guard', () => {
       // and the default check-in runs 60 to 15 minutes before it.
       checkInSignup: { action: 'draft_checkin', setup: signed, run: (f) => D.checkInSignup(f.db, { eventId: f.eventId, steamid: DP[0], now: new Date('2026-10-10T18:10:00.000Z') }) },
       openDraftCheckin: { action: 'draft_checkin_opened', setup: signed, run: (f) => D.openDraftCheckin(f.db, { eventId: f.eventId, now: new Date('2026-10-10T18:10:00.000Z') }) },
-      closeDraftCheckin: { action: 'draft_checkin_closed', setup: signed, run: (f) => D.closeDraftCheckin(f.db, { eventId: f.eventId, now: new Date('2026-10-10T18:50:00.000Z') }) },
+      closeDraftCheckin: { action: 'draft_checkin_closed', setup: (f) => { signed(f); must(D.openDraftCheckin(f.db, { eventId: f.eventId, now: new Date('2026-10-10T18:10:00.000Z') })); }, run: (f) => D.closeDraftCheckin(f.db, { eventId: f.eventId, now: new Date('2026-10-10T18:50:00.000Z') }) },
       addLateSignup: { action: 'draft_signup_late', setup: cut, run: (f) => D.addLateSignup(f.db, { eventId: f.eventId, steamid: DP[12], captainPref: 'no', actor: ADMIN, now: NOW }) },
       // Captaincy offers (Task 4). cut gives 12 willing signups, 3 teams and
       // no captains, so the first offer goes to the highest SR, DP[11].

@@ -265,6 +265,8 @@ export function setEntryRoster(
     E.logEvent(db, ev.id, o.by, 'roster_changed', at, {
       entryId: entry.id, added: added.map((p) => p.steamid), removed, moved: moved.map((p) => ({ steamid: p.steamid, role: p.role })), staff,
     });
+    // A draft entry's team follows its starters (draft tourney 2 plan).
+    if (entry.captain_steamid !== null) syncEventTeam(db, entry.id, at);
     return V.ok({ entry: getEntry(db, entry.id)!, added });
   })();
 }
