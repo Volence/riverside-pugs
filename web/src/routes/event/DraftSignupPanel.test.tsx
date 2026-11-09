@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import type { EventDraftView, MyEventView } from '../../api';
 
 const { mockEvents } = vi.hoisted(() => ({
-  mockEvents: { signUp: vi.fn(), withdrawSignup: vi.fn(), answerCaptainOffer: vi.fn() },
+  mockEvents: { signUp: vi.fn(), withdrawSignup: vi.fn(), answerCaptainOffer: vi.fn(), checkInSignup: vi.fn() },
 }));
 vi.mock('../../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api')>();
@@ -16,12 +16,33 @@ const { ApiError } = await import('../../api');
 
 const future = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
 const draft = (over: Partial<EventDraftView> = {}): EventDraftView =>
-  ({ signupsCloseAt: future(60), draftAt: future(120), signups: 4, names: [], cut: null, ...over });
+  ({ signupsCloseAt: future(60), draftAt: future(120), signups: 4, names: [], cut: null, checkin: null, ...over });
 const mine = (over: Partial<MyEventView> = {}): MyEventView =>
   ({ entries: [], register: [], canRegister: false, signup: null, offer: null, ...over });
 const base = { slug: 'night', eventName: 'Draft Night', status: 'registration' as const, lockedAt: null as string | null, onChange: () => {} };
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+describe('draft check-in (owner 2026-11-09)', () => {
+  it('an unchecked signup sees the Check in button while the window is open, and it calls the API', async () => {
+    mockEvents.checkInSignup.mockResolvedValue({ ok: true });
+    render(<DraftSignupPanel {...base} draft={draft({ checkin: { opensAt: future(-10), closesAt: future(50) } })}
+      view={mine({ signup: { captainPref: 'no', note: null, role: null, checkedIn: false } })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Check in' }));
+    await waitFor(() => expect(mockEvents.checkInSignup).toHaveBeenCalledWith('night'));
+  });
+  it('a checked-in signup sees that, with no button', () => {
+    render(<DraftSignupPanel {...base} draft={draft({ checkin: { opensAt: future(-10), closesAt: future(50) } })}
+      view={mine({ signup: { captainPref: 'no', note: null, role: null, checkedIn: true } })} />);
+    expect(screen.getByText('Checked in.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Check in' })).toBeNull();
+  });
+  it('before the window it says when check-in opens', () => {
+    render(<DraftSignupPanel {...base} draft={draft({ checkin: { opensAt: future(10), closesAt: future(50) } })}
+      view={mine({ signup: { captainPref: 'no', note: null, role: null, checkedIn: false } })} />);
+    expect(screen.getByText(/Check-in opens/)).toBeTruthy();
+  });
+});
 
 describe('DraftSignupPanel', () => {
   it('signs up with the chosen preference and note', async () => {
@@ -50,7 +71,7 @@ describe('DraftSignupPanel', () => {
 
   it('a signed-up player sees their own choice and note, and withdraw asks first', async () => {
     mockEvents.withdrawSignup.mockResolvedValue({ ok: true });
-    render(<DraftSignupPanel {...base} draft={draft()} view={mine({ signup: { captainPref: 'want', note: 'prefer infected', role: null } })} />);
+    render(<DraftSignupPanel {...base} draft={draft()} view={mine({ signup: { captainPref: 'want', note: 'prefer infected', role: null, checkedIn: false } })} />);
     expect(screen.getByText('You are signed up')).toBeTruthy();
     expect(screen.getByText(/I want to captain/)).toBeTruthy();
     expect(screen.getByText(/prefer infected/)).toBeTruthy();
@@ -61,20 +82,20 @@ describe('DraftSignupPanel', () => {
 
   it('does not withdraw when the confirm is declined', async () => {
     confirmMock.mockResolvedValueOnce(false);
-    render(<DraftSignupPanel {...base} draft={draft()} view={mine({ signup: { captainPref: 'no', note: null, role: null } })} />);
+    render(<DraftSignupPanel {...base} draft={draft()} view={mine({ signup: { captainPref: 'no', note: null, role: null, checkedIn: false } })} />);
     fireEvent.click(screen.getByRole('button', { name: 'Withdraw' }));
     await waitFor(() => expect(confirmMock).toHaveBeenCalled());
     expect(mockEvents.withdrawSignup).not.toHaveBeenCalled();
   });
 
   it('says signups are closed once they close, before the cut', () => {
-    render(<DraftSignupPanel {...base} lockedAt={future(-5)} draft={draft()} view={mine({ signup: { captainPref: 'no', note: null, role: null } })} />);
+    render(<DraftSignupPanel {...base} lockedAt={future(-5)} draft={draft()} view={mine({ signup: { captainPref: 'no', note: null, role: null, checkedIn: false } })} />);
     expect(screen.getByText('Signups are closed. Staff are making the cut; you will get a DM with your role.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
   });
 
   it('closes on the clock even when the lock is not stamped yet', () => {
-    render(<DraftSignupPanel {...base} draft={draft({ signupsCloseAt: future(-1) })} view={mine({ signup: { captainPref: 'no', note: null, role: null } })} />);
+    render(<DraftSignupPanel {...base} draft={draft({ signupsCloseAt: future(-1) })} view={mine({ signup: { captainPref: 'no', note: null, role: null, checkedIn: false } })} />);
     expect(screen.getByText(/Signups are closed\./)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign up' })).toBeNull();
   });
@@ -85,7 +106,7 @@ describe('DraftSignupPanel', () => {
     ['bench', 'Your role: Bench', /You are on the free-agent bench\. Teams are made .+; captains can call on you as a stand-in/],
   ] as const)('after publish a %s sees their role', (role, head, line) => {
     render(<DraftSignupPanel {...base} lockedAt={future(-5)} draft={draft({ cut: { captains: [], pool: [], bench: [] } })}
-      view={mine({ signup: { captainPref: 'want', note: null, role } })} />);
+      view={mine({ signup: { captainPref: 'want', note: null, role, checkedIn: false } })} />);
     expect(screen.getByText(head)).toBeTruthy();
     expect(screen.getByText(line)).toBeTruthy();
   });
@@ -94,7 +115,7 @@ describe('DraftSignupPanel', () => {
     mockEvents.answerCaptainOffer.mockResolvedValue({ ok: true });
     const onChange = vi.fn();
     render(<DraftSignupPanel {...base} lockedAt={future(-5)} draft={draft()} onChange={onChange}
-      view={mine({ signup: { captainPref: 'willing', note: null, role: null }, offer: { expiresAt: future(20) } })} />);
+      view={mine({ signup: { captainPref: 'willing', note: null, role: null, checkedIn: false }, offer: { expiresAt: future(20) } })} />);
     expect(screen.getByText(/Draft Night needs another captain\. Accept by /)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     await waitFor(() => expect(mockEvents.answerCaptainOffer).toHaveBeenCalledWith('night', true));

@@ -15,7 +15,7 @@ const draftEvent = (over: Partial<EventView> = {}): EventView => ({
   }],
   entries: [], play: [], finishedAt: null, cancelledAt: null, cancelReason: null,
   lockedAt: null, checkinOpensAt: null, checkinClosesAt: null,
-  draft: { signupsCloseAt: '2026-10-23T22:00:00.000Z', draftAt: '2026-10-23T23:00:00.000Z', signups: 31, names: [], cut: null },
+  draft: { signupsCloseAt: '2026-10-23T22:00:00.000Z', draftAt: '2026-10-23T23:00:00.000Z', signups: 31, names: [], cut: null, checkin: null },
   ...over,
 });
 

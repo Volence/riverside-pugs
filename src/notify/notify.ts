@@ -19,7 +19,7 @@ export type NotifyType =
   | 'scrim_result'
   | 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
-  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
+  | 'draft_signup_removed' | 'draft_checkin_open' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
   | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set'
   | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none'
@@ -53,7 +53,8 @@ export const NOTIFY_TYPES: readonly { type: NotifyType; label: string }[] = [
   { type: 'event_match_staff', label: 'Staff act on a tournament match of mine (a freeze, a reopened veto, a replayed chapter, a moved server, more time, a released hold)' },
   { type: 'event_reschedule', label: 'A captain proposes, counters, declines or withdraws a time for a tournament match of mine, or a proposal is about to lock' },
   { type: 'event_match_time', label: 'A tournament match of mine has its time set' },
-  { type: 'draft_signup_removed', label: 'Draft: signup removed by staff' },
+  { type: 'draft_signup_removed', label: 'Draft: signup removed by staff, or for missing check-in' },
+  { type: 'draft_checkin_open', label: 'Draft: check-in opens before the draft' },
   { type: 'draft_cut_role', label: 'Draft: your role after the cut' },
   { type: 'draft_captain_offer', label: 'Draft: captaincy offer' },
   { type: 'draft_team_made', label: 'Draft: your team' },

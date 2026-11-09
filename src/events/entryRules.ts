@@ -104,6 +104,12 @@ export function averageSr(srs: number[]): number {
   return srs.length === 0 ? 0 : Math.round(srs.reduce((a, b) => a + b, 0) / srs.length);
 }
 
+/** A draft event's check-in (owner 2026-11-09): the signups confirm before
+ *  the draft, so its window is measured from draftAt, not the start. */
+export function draftCheckinTimes(draftAt: string, c: Checkin): { opensAt: string; closesAt: string } {
+  return checkinTimes(draftAt, c);
+}
+
 export function checkinTimes(startsAt: string, c: Checkin): { opensAt: string; closesAt: string } {
   const start = Date.parse(startsAt);
   return {

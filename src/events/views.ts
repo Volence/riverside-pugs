@@ -49,6 +49,9 @@ export interface EventDraftView {
   signupsCloseAt: string; draftAt: string; signups: number; names: string[];
   /** The published cut as names in signup order (Ruling 9); null before publish. */
   cut: { captains: string[]; pool: string[]; bench: string[] } | null;
+  /** Owner 2026-11-09: the check-in window before the draft; null with
+   *  check-in off or once the cut is published. */
+  checkin: { opensAt: string; closesAt: string } | null;
 }
 
 const OVER: ReadonlySet<V.EventStatus> = new Set<V.EventStatus>(['finished', 'cancelled']);
@@ -159,14 +162,16 @@ function draftView(db: DB, ev: E.EventRow, f: V.EventFields): EventDraftView | n
   const names = all.map((s) => s.name);
   const of = (r: D.SignupRow['role']) => all.filter((s) => s.role === r).map((s) => s.name);
   const cut = ev.cut_at !== null ? { captains: of('captain'), pool: of('pool'), bench: draftBench(db, ev.id).map((s) => s.name) } : null;
-  return { signupsCloseAt: f.draft.signupsCloseAt, draftAt: f.draft.draftAt, signups: names.length, names, cut };
+  // Owner 2026-11-09: the draft check-in window, while the cut is unpublished.
+  const checkin = ev.cut_at === null ? D.draftCheckin(ev) : null;
+  return { signupsCloseAt: f.draft.signupsCloseAt, draftAt: f.draft.draftAt, signups: names.length, names, cut, checkin };
 }
 
 /** The viewer's own signup (plan D1): their preference and note. The role
  *  shows only once the cut is published. */
-export interface MySignupView { captainPref: D.CaptainPref; note: string | null; role: D.SignupRow['role'] }
+export interface MySignupView { captainPref: D.CaptainPref; note: string | null; role: D.SignupRow['role']; checkedIn: boolean }
 export function signupView(ev: E.EventRow, s: D.SignupRow): MySignupView {
-  return { captainPref: s.captain_pref, note: s.note, role: ev.cut_at !== null ? s.role : null };
+  return { captainPref: s.captain_pref, note: s.note, role: ev.cut_at !== null ? s.role : null, checkedIn: s.checked_in_at !== null };
 }
 
 export interface RosterPlaceView { steamid: string; name: string; avatar: string | null; role: R.Role; problems: string[] }

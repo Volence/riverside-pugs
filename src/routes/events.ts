@@ -222,6 +222,17 @@ export async function eventRoutes(
     return { ok: true, signup: signupView(ev, r.value) };
   });
 
+  /** Owner 2026-11-09: a signup checks in before the draft. */
+  app.post('/api/events/:slug/checkin-signup', async (req, reply) => {
+    const me = allowedActive(req, reply);
+    if (!me) return;
+    const ev = visibleEvent((req.params as { slug: string }).slug, me);
+    if (!ev || ev.status === 'draft') return reply.code(404).send(NOT_FOUND);
+    const r = D.checkInSignup(db, { eventId: ev.id, steamid: me, now: new Date() });
+    if (!r.ok) return refuse(reply, r);
+    return { ok: true };
+  });
+
   app.post('/api/events/:slug/withdraw-signup', async (req, reply) => {
     const me = allowedActive(req, reply);
     if (!me) return;

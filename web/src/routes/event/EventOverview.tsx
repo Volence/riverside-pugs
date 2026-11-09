@@ -35,6 +35,8 @@ export function roundName(round: number, rounds: number | null): string {
 export function milestones(ev: EventView): Milestone[] {
   const out: Milestone[] = [];
   if (ev.entryKind === 'draft' && ev.draft) {
+    // Owner 2026-11-09: a draft's check-in comes before the draft, not the start.
+    if (ev.draft.checkin) out.push({ key: 'checkin', label: 'Check-in opens', at: ev.draft.checkin.opensAt });
     out.push({ key: 'close', label: 'Signups close', at: ev.draft.signupsCloseAt });
     out.push({ key: 'draft', label: 'Draft night', at: ev.draft.draftAt });
   }

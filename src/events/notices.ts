@@ -6,7 +6,7 @@ import { eventMessage, type EventNotifyType, type RescheduleNotice, type SignupR
 import { getProposal } from './schedule.js';
 import type { CutRole } from './draftRules.js';
 import type { ReplaceReason } from './entries.js';
-import { openOffer } from './drafts.js';
+import { activeSignups, openOffer } from './drafts.js';
 import { offerOf, requestOf } from './standins.js';
 import { answersOf, keepOf, playersOf, type SettleOutcome } from './keepTeam.js';
 
@@ -105,6 +105,11 @@ export function tellTimeLocked(d: NoticeDeps, eventId: number, matchId: number, 
 /** Staff removed a draft signup (drafts plan D1 Ruling 11): that player, with why. */
 export function tellSignupRemoved(d: NoticeDeps, eventId: number, steamid: string, reason: SignupRemoval): void {
   tell(d, [steamid], eventId, 'draft_signup_removed', { removal: reason });
+}
+/** A draft's check-in opened (owner 2026-11-09): every signup not yet checked in. */
+export function tellDraftCheckinOpen(d: NoticeDeps, eventId: number): void {
+  const to = activeSignups(d.db, eventId).filter((s) => s.checked_in_at === null).map((s) => s.steamid);
+  tell(d, to, eventId, 'draft_checkin_open', {});
 }
 /** The cut is published (drafts plan D1 Ruling 11): every active signup,
  *  told their role and the draft time. */

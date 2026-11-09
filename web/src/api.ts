@@ -2573,10 +2573,12 @@ export interface EventDraftView {
   signupsCloseAt: string; draftAt: string; signups: number; names: string[];
   /** The published cut, names in signup order; null before publish. */
   cut: { captains: string[]; pool: string[]; bench: string[] } | null;
+  /** Owner 2026-11-09: the check-in window before the draft; null with check-in off or after the cut. */
+  checkin: { opensAt: string; closesAt: string } | null;
 }
 export type CaptainPref = 'want' | 'willing' | 'no';
 /** The viewer's own signup; role is null until the cut is published. */
-export interface MySignupView { captainPref: CaptainPref; note: string | null; role: 'captain' | 'pool' | 'bench' | null }
+export interface MySignupView { captainPref: CaptainPref; note: string | null; role: 'captain' | 'pool' | 'bench' | null; checkedIn: boolean }
 
 export const bannerUrl = (key: string): string => `/api/events/banners/${key}`;
 /** The Events desk's own copy of an event's banner, staff only and not
@@ -2736,6 +2738,7 @@ export const eventsApi = {
   leave: (slug: string, entryId: number) => post(`/api/events/${enc(slug)}/entries/${entryId}/leave`),
   signUp: (slug: string, body: { captainPref: CaptainPref; note: string }) => post<{ ok: true; signup: MySignupView }>(`/api/events/${enc(slug)}/signup`, body),
   withdrawSignup: (slug: string) => post(`/api/events/${enc(slug)}/withdraw-signup`),
+  checkInSignup: (slug: string) => post(`/api/events/${enc(slug)}/checkin-signup`),
   answerCaptainOffer: (slug: string, accept: boolean) => post(`/api/events/${enc(slug)}/captain-offer`, { accept }),
   draftRoom: (slug: string, signal?: AbortSignal) => get<DraftRoomView>(`/api/events/${enc(slug)}/draft`, signal),
   draftPick: (slug: string, player: string, pickNo: number) => post<{ pickNo: number; done: boolean }>(`/api/events/${enc(slug)}/draft/pick`, { player, pickNo }),
@@ -3079,11 +3082,13 @@ export interface AdminEventOptions {
 export interface SignupFacts {
   steamid: string; name: string; sr: number; captainPref: 'want' | 'willing' | 'no'; note: string | null; signedUpAt: string;
   role: 'captain' | 'pool' | 'bench' | null; manual: boolean; abandons30d: number; noShows30d: number; problems: string[];
+  checkedIn: boolean;
 }
 export type CutProblem = 'too_few_teams' | 'too_many_teams' | 'too_few_captains' | 'too_many_captains' | 'pool_size' | 'unassigned' | 'ineligible';
 /** GET /api/admin/events/:id/draft. */
 export interface AdminDraftView {
   lockedAt: string | null; cutAt: string | null; teams: number | null; maxTeams: number; offersOn: boolean;
+  checkin: { opensAt: string; closesAt: string } | null;
   openOffer: { steamid: string; name: string; expiresAt: string } | null;
   problems: CutProblem[]; signups: SignupFacts[];
 }

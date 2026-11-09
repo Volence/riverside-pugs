@@ -3188,6 +3188,9 @@ export function openDb(path: string): DB {
   // follows while the event lasts (src/teams/teams.ts setEventTeam). No
   // REFERENCES, so nothing about the event ever waits on the team.
   ensureColumn(db, 'teams', 'event_entry_id', 'INTEGER');
+  // Draft check-in (draft tourney 2 plan, owner 2026-11-09): when the signup
+  // confirmed before the draft (src/events/drafts.ts checkInSignup).
+  ensureColumn(db, 'draft_signups', 'checked_in_at', 'TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS teams_event_entry_live ON teams (event_entry_id) WHERE event_entry_id IS NOT NULL AND disbanded_at IS NULL');
   // Who was in the lobby a ballot was drawn for (src/ballot.ts weighs the
   // draw by each player's history). Ballots from before it get their
