@@ -30,3 +30,13 @@ describe('RichText', () => {
     expect(container.textContent).toContain('<img src=x onerror="alert(1)"> &amp; [x](javascript:alert(1)) <a href="');
   });
 });
+
+describe('RichText: Discord markup (owner 2026-11-09)', () => {
+  it('renders a timestamp as a time element and quote lines as a blockquote', () => {
+    const { container } = render(<RichText text={'> **Draft**: <t:1794700800:F>'} />);
+    const time = container.querySelector('blockquote time');
+    expect(time?.getAttribute('datetime')).toBe('2026-11-15T00:00:00.000Z');
+    expect(time?.textContent).toMatch(/2026/);
+    expect(container.textContent).not.toContain('<t:');
+  });
+});

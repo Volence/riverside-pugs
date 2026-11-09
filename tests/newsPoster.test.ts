@@ -199,4 +199,9 @@ describe('plainExcerpt', () => {
     expect(long.endsWith('...')).toBe(true);
     expect(long.length).toBeLessThanOrEqual(33);
   });
+
+  it('drops quote markers and never cuts a Discord timestamp in half', () => {
+    expect(plainExcerpt('> **When**: <t:1794700800:F>\n> later')).toBe('When: <t:1794700800:F> later');
+    expect(plainExcerpt(`${'a'.repeat(20)} <t:1794700800:F>`, 30)).toBe(`${'a'.repeat(20)}...`);
+  });
 });

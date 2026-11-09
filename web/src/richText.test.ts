@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { parseInline, parseRichText, safeHref, RICH_TEXT_MAX, type Block, type Inline } from './richText';
+import { formatDiscordTime, localizeDiscordTimes, parseInline, parseRichText, safeHref, RICH_TEXT_MAX, type Block, type Inline } from './richText';
 
 const t = (text: string): Inline => ({ kind: 'text', text });
 const p = (...children: Inline[]): Block => ({ kind: 'paragraph', children });
@@ -81,7 +81,7 @@ describe('hostile input', () => {
 
   it('stops nesting after a few levels and still keeps every character', () => {
     const deep = '*'.repeat(40) + 'x' + '*'.repeat(40);
-    const text = (n: Inline[]): string => n.map((x) => (x.kind === 'text' ? x.text : x.kind === 'br' ? '\n' : text(x.children))).join('');
+    const text = (n: Inline[]): string => n.map((x) => (x.kind === 'text' ? x.text : x.kind === 'br' ? '\n' : x.kind === 'time' ? '' : text(x.children))).join('');
     const out = parseInline(deep);
     expect(text(out).replace(/\*/g, '')).toBe('x');
   });
@@ -109,5 +109,42 @@ describe('hostile input', () => {
       const src = readFileSync(new URL(f, import.meta.url), 'utf8');
       expect(src, f).not.toMatch(/dangerouslySetInnerHTML|innerHTML|outerHTML|insertAdjacentHTML/);
     }
+  });
+});
+
+// Owner 2026-11-09: a news post goes to Discord as written, so the site reads
+// Discord's timestamps and quote lines too.
+describe('discord timestamps and quotes', () => {
+  // Saturday 2026-11-14 19:00 ET.
+  const DRAFT = 1794700800;
+  it('reads a timestamp with or without a style, and leaves anything else as text', () => {
+    expect(parseInline(`at <t:${DRAFT}:F> sharp`)).toEqual([t('at '), { kind: 'time', unix: DRAFT, style: 'F' }, t(' sharp')]);
+    expect(parseInline(`<t:${DRAFT}>`)).toEqual([{ kind: 'time', unix: DRAFT, style: 'f' }]);
+    expect(parseInline('<t:abc:F> <t:1:X> <b>')).toEqual([t('<t:abc:F> <t:1:X> <b>')]);
+    expect(parseInline('<t:9999999999999:F>')).toEqual([t('<t:9999999999999:F>')]);
+    expect(parseInline(`**<t:${DRAFT}:t>**`)).toEqual([{ kind: 'strong', children: [{ kind: 'time', unix: DRAFT, style: 't' }] }]);
+  });
+
+  it('writes each style out as Discord does, in the zone given', () => {
+    const f = (style: Parameters<typeof formatDiscordTime>[1]) => formatDiscordTime(DRAFT, style, 0, 'en-US', 'America/New_York');
+    expect(f('t')).toBe('7:00 PM');
+    expect(f('D')).toBe('November 14, 2026');
+    expect(f('F')).toBe('Saturday, November 14, 2026 at 7:00 PM');
+    expect(formatDiscordTime(DRAFT, 't', 0, 'en-US', 'America/Los_Angeles')).toBe('4:00 PM');
+    expect(formatDiscordTime(DRAFT, 'R', (DRAFT - 5 * 86_400) * 1000, 'en-US')).toBe('in 5 days');
+    expect(formatDiscordTime(DRAFT, 'R', (DRAFT + 2 * 3_600) * 1000, 'en-US')).toBe('2 hours ago');
+  });
+
+  it('writes timestamps out in plain text', () => {
+    expect(localizeDiscordTimes(`Draft <t:${DRAFT}:R>, <t:x>`, (DRAFT - 86_400) * 1000)).toMatch(/^Draft (tomorrow|in 1 day), <t:x>$/);
+  });
+
+  it('reads "> " lines as one quote, and a line without one ends it', () => {
+    expect(parseRichText('> **one**\n> two\nafter')).toEqual([
+      { kind: 'quote', children: [{ kind: 'strong', children: [t('one')] }, { kind: 'br' }, t('two')] },
+      p(t('after')),
+    ]);
+    expect(parseRichText('before\n> q')).toEqual([p(t('before')), { kind: 'quote', children: [t('q')] }]);
+    expect(parseRichText('a > b')).toEqual([p(t('a > b'))]);
   });
 });

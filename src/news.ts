@@ -77,7 +77,7 @@ export function plainExcerpt(body: string, max = 240): string {
   const text = body
     .replace(/\r\n?/g, '\n')
     .split('\n')
-    .map((l) => l.replace(/^\s*#{1,3}\s+/, '').replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+/, ''))
+    .map((l) => l.replace(/^\s*>(?:\s|$)/, '').replace(/^\s*#{1,3}\s+/, '').replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+/, ''))
     .join(' ')
     .replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, '$1')
     .replace(/\*\*([^*]*)\*\*/g, '$1')
@@ -85,7 +85,9 @@ export function plainExcerpt(body: string, max = 240): string {
     .replace(/\s+/g, ' ')
     .trim();
   if (text.length <= max) return text;
-  const cut = text.slice(0, max);
+  // Never half a Discord timestamp (the page writes whole ones out in the
+  // reader's time zone).
+  const cut = text.slice(0, max).replace(/<t:[-\d:A-Za-z]*$/, '');
   const at = cut.lastIndexOf(' ');
   return `${(at > max / 2 ? cut.slice(0, at) : cut).replace(/[\s.,;:]+$/, '')}...`;
 }

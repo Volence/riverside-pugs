@@ -178,7 +178,8 @@ export function AdminNews() {
                       onInput={(e) => setForm({ ...form, body: (e.target as HTMLTextAreaElement).value })} />
             <p class="muted newsadmin__help">
               A blank line starts a paragraph. <code>## Heading</code>, <code>**bold**</code>, <code>*italic*</code>,
-              {' '}<code>- </code> for a bullet, <code>[text](https://...)</code> for a link. No HTML.
+              {' '}<code>- </code> for a bullet, <code>[text](https://...)</code> for a link, <code>&gt; </code> for a quote line.
+              {' '}A Discord timestamp such as <code>&lt;t:1794700800:F&gt;</code> shows in each reader's own time, here and on Discord. No HTML.
             </p>
           </div>
           <div>

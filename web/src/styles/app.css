@@ -4041,6 +4041,9 @@ a.scrimside:hover .teamrow__name, a.scrimside:focus-visible .teamrow__name { tex
 .richtext p, .richtext ul, .richtext ol { margin: 0 0 var(--sp-3); }
 .richtext ul, .richtext ol { padding-left: var(--sp-5); }
 .richtext a { overflow-wrap: anywhere; }
+.richtext blockquote { margin: 0 0 var(--sp-3); padding: 0 0 0 var(--sp-3); border-left: 3px solid var(--border); }
+/* A Discord timestamp in the reader's time zone, marked the way Discord marks it. */
+.richtext__time { padding: 0 0.25em; border-radius: 3px; background: var(--surface-2); white-space: nowrap; }
 .eventstrip { display: flex; flex-wrap: wrap; gap: var(--sp-3); list-style: none; margin: 0; padding: 0; }
 .eventstrip__stage { display: flex; flex-direction: column; gap: var(--sp-1); flex: 1 1 200px; min-width: 0; padding: var(--sp-3); border: 1px solid var(--border); }
 .eventrules { margin: var(--sp-2) 0; padding-left: var(--sp-5); }
