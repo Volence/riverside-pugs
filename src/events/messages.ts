@@ -18,13 +18,14 @@ import type { ReplaceReason } from './entries.js';
 import { keepOf } from './keepTeam.js';
 import { getTeam, membershipCap } from '../teams/teams.js';
 import { offerOf, requestOf, type StandinRow } from './standins.js';
+import { draftCheckin } from './drafts.js';
 
 /** The event DMs (plan T1b Ruling 11, and the two match room DMs of plan
  *  T3a Ruling 2). Every player-chosen name goes through escapeName, as in
  *  src/bookings/messages.ts. */
 export type EventNotifyType = 'event_checkin_open' | 'event_dropped' | 'event_roster_added' | 'event_match_room' | 'event_match_forfeit'
   | 'event_match_connect' | 'event_match_result' | 'event_match_staff' | 'event_reschedule' | 'event_match_time'
-  | 'draft_signup_removed' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
+  | 'draft_signup_removed' | 'draft_checkin_open' | 'draft_cut_role' | 'draft_captain_offer' | 'draft_team_made'
   | 'draft_player_removed' | 'draft_player_added' | 'draft_roster_changed'
   | 'draft_captain_set_new' | 'draft_captain_set_old' | 'draft_room_open' | 'draft_delegate_set'
   | 'draft_standin_offer' | 'draft_standin_placed' | 'draft_standin_filled' | 'draft_standin_none'
@@ -51,8 +52,11 @@ const STAFF_TEXT: Record<StaffAction, string> = {
 const ROLE_TEXT: Record<R.Role, string> = { starter: 'a starter', sub: 'a sub', coach: 'the coach' };
 
 /** Why staff removed a draft signup (drafts plan D1 Ruling 11). */
-export type SignupRemoval = 'removed' | 'ineligible';
-const REMOVAL_TEXT: Record<SignupRemoval, string> = { removed: 'an organizer removed it', ineligible: 'you are not eligible for this event' };
+export type SignupRemoval = 'removed' | 'ineligible' | 'no_checkin';
+const REMOVAL_TEXT: Record<SignupRemoval, string> = {
+  removed: 'an organizer removed it', ineligible: 'you are not eligible for this event',
+  no_checkin: 'you did not check in before the draft. If that is a mistake, ask a mod; staff can still add you to the bench',
+};
 /** Why staff took a player off a draft team (drafts plan D2c Ruling 6), as the removed player reads it. */
 export const REPLACE_TEXT: Record<ReplaceReason, string> = {
   conduct: 'conduct', cheating: 'cheating', no_show: 'did not show', left: 'left the event', other: 'a staff decision',
@@ -98,8 +102,21 @@ export function eventMessage(
       break;
     }
     case 'draft_signup_removed':
-      content = `Staff removed your signup for ${event}: ${REMOVAL_TEXT[extra.removal ?? 'removed']}.`;
+      content = extra.removal === 'no_checkin'
+        ? `Your signup for ${event} was removed: ${REMOVAL_TEXT.no_checkin}.`
+        : `Staff removed your signup for ${event}: ${REMOVAL_TEXT[extra.removal ?? 'removed']}.`;
       break;
+    case 'draft_checkin_open': {
+      // Owner 2026-11-09: signups confirm before the draft or are taken off.
+      const w = draftCheckin(ev);
+      if (!w) return null;
+      return {
+        content: `Check-in is open for ${event}. Check in on the event page before ${discordTime(w.closesAt)}, or your signup is removed before the draft.`,
+        embeds: [],
+        components: [[{ kind: 'link', url: `${publicUrl}/event/${ev.slug}`, label: 'Check in' }]],
+        mentionUserIds: [],
+      };
+    }
     case 'draft_cut_role': {
       const draftAt = E.fieldsOf(ev).draft?.draftAt;
       if (!draftAt || !extra.cutRole) return null;

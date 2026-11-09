@@ -165,14 +165,16 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
         </FormRow>
       </FormGroup>
       <FormGroup title="Check-in">
-        <ToggleRow label="Check-in" help="Entries confirm they are present before the start." ariaLabel="Check-in on" checked={f.checkin.enabled} onChange={() => checkin({ enabled: !f.checkin.enabled })} />
+        <ToggleRow label="Check-in" help={f.entryKind === 'draft'
+          ? 'Signups confirm before the draft. Whoever has not checked in when it closes is removed, before the cut.'
+          : 'Entries confirm they are present before the start.'} ariaLabel="Check-in on" checked={f.checkin.enabled} onChange={() => checkin({ enabled: !f.checkin.enabled })} />
         {f.checkin.enabled && (
           <>
-            <FormRow label="Opens" help="Minutes before the start. (10 to 1440)" for={id('opens')}>
-              <input id={id('opens')} aria-label="Check-in opens" type="number" min={10} max={1440} value={typed.opensMinutes} onInput={typeInto('opensMinutes')} />
+            <FormRow label="Opens" help={`Minutes before the ${f.entryKind === 'draft' ? 'draft' : 'start'}. (10 to 4320)`} for={id('opens')}>
+              <input id={id('opens')} aria-label="Check-in opens" type="number" min={10} max={4320} value={typed.opensMinutes} onInput={typeInto('opensMinutes')} />
             </FormRow>
-            <FormRow label="Closes" help="Minutes before the start. (0 to 1435)" for={id('closes')}>
-              <input id={id('closes')} aria-label="Check-in closes" type="number" min={0} max={1435} value={typed.closesMinutes} onInput={typeInto('closesMinutes')} />
+            <FormRow label="Closes" help={`Minutes before the ${f.entryKind === 'draft' ? 'draft' : 'start'}. (0 to 4315)`} for={id('closes')}>
+              <input id={id('closes')} aria-label="Check-in closes" type="number" min={0} max={4315} value={typed.closesMinutes} onInput={typeInto('closesMinutes')} />
             </FormRow>
           </>
         )}

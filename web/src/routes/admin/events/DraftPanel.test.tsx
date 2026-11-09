@@ -20,10 +20,10 @@ const { CutChangedError } = await import('../../../api');
 
 const su = (over: Partial<SignupFacts> = {}): SignupFacts => ({
   steamid: '1', name: 'Ann', sr: 1500, captainPref: 'want', note: 'late start', signedUpAt: '2026-10-05T00:00:00.000Z',
-  role: 'pool', manual: false, abandons30d: 0, noShows30d: 0, problems: [], ...over,
+  role: 'pool', manual: false, abandons30d: 0, noShows30d: 0, problems: [], checkedIn: false, ...over,
 });
 const view = (over: Partial<AdminDraftView> = {}): AdminDraftView => ({
-  lockedAt: '2026-10-06T00:00:00.000Z', cutAt: null, teams: 2, maxTeams: 2, offersOn: false, openOffer: null, problems: [],
+  lockedAt: '2026-10-06T00:00:00.000Z', cutAt: null, teams: 2, maxTeams: 2, offersOn: false, checkin: null, openOffer: null, problems: [],
   signups: [su({ steamid: '1', name: 'Ann', role: 'captain' }), su({ steamid: '2', name: 'Bob', role: 'pool' }), su({ steamid: '3', name: 'Cy', role: 'bench' })], ...over,
 });
 

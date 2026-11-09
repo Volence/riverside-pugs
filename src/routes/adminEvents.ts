@@ -407,6 +407,7 @@ export async function adminEventRoutes(
     const signups = signupFacts(db, ev.id, now);
     return {
       lockedAt: ev.locked_at, cutAt: ev.cut_at, teams: ev.draft_teams, maxTeams: maxTeams(signups.length), offersOn: ev.offers_on === 1,
+      checkin: D.draftCheckin(ev),
       openOffer: offer ? { steamid: offer.steamid, name: getPlayer(db, offer.steamid)?.name ?? offer.steamid, expiresAt: offer.expires_at } : null,
       problems: D.cutState(db, ev.id, now).problems,
       signups: deskOrder(signups),

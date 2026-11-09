@@ -102,7 +102,7 @@ function SignupRow({ s, canAct, busy, others, onCaptain, onSwap, onRemove }: {
       <td>{s.sr}</td>
       <td>{PREF[s.captainPref]}</td>
       <td>{s.note ?? ''}</td>
-      <td>{fmtTime(s.signedUpAt)}</td>
+      <td>{fmtTime(s.signedUpAt)}{s.checkedIn && <span class="muted"> · checked in</span>}</td>
       <td class={quiet ? 'muted' : ''}>{s.abandons30d} abandons, {s.noShows30d} no-shows (30 d)</td>
       <td>
         {s.role && <span class="teamchip">{ROLE[s.role]}</span>}
@@ -225,6 +225,9 @@ export function DraftPanel({ eventId, canEdit, signupsCloseAt = null, gen = 0, o
           )}
           {data.openOffer && <p>Offered to {data.openOffer.name}, answer by {fmtTime(data.openOffer.expiresAt)}</p>}
         </>
+      )}
+      {data.checkin && !published && (
+        <p class="muted">Check-in {fmtTime(data.checkin.opensAt)} to {fmtTime(data.checkin.closesAt)}: {data.signups.filter((s) => s.checkedIn).length} of {n} checked in. Whoever has not checked in when it closes is removed.</p>
       )}
       {n === 0 ? <Empty>Nobody has signed up yet.</Empty> : (
         <div class="table-wrap">

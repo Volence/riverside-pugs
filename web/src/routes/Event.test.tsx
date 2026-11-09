@@ -86,7 +86,7 @@ describe('EventPage', () => {
   it('a draft-kind event shows the signup count and names before the cut, and never SR, notes or preferences', async () => {
     mockEvents.get.mockResolvedValue(view({
       entryKind: 'draft', status: 'registration',
-      draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 3, names: ['Alice', 'Bob', 'Cy'], cut: null },
+      draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 3, names: ['Alice', 'Bob', 'Cy'], cut: null, checkin: null },
       checkinOpensAt: inMinutes(150), checkinClosesAt: inMinutes(170),
     }));
     const { container } = render(<EventPage slug="riverside-cup" session={session} />);
@@ -107,6 +107,7 @@ describe('EventPage', () => {
       draft: {
         signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 5, names: ['Alice', 'Bob', 'Cy', 'Di', 'Ed'],
         cut: { captains: ['Alice'], pool: ['Bob', 'Cy', 'Di'], bench: ['Ed'] },
+        checkin: null,
       },
     }));
     render(<EventPage slug="riverside-cup" session={session} />);
@@ -121,12 +122,12 @@ describe('EventPage', () => {
   it('links the draft room once the cut is published, and not before', async () => {
     mockEvents.get.mockResolvedValue(view({
       entryKind: 'draft', status: 'registration',
-      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 5, names: [], cut: { captains: ['Alice'], pool: ['Bob', 'Cy', 'Di'], bench: ['Ed'] } },
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 5, names: [], cut: { captains: ['Alice'], pool: ['Bob', 'Cy', 'Di'], bench: ['Ed'] }, checkin: null },
     }));
     render(<EventPage slug="riverside-cup" session={session} />);
     expect((await screen.findByRole('link', { name: 'Draft room' })).getAttribute('href')).toBe('/event/riverside-cup/draft');
     cleanup();
-    mockEvents.get.mockResolvedValue(view({ entryKind: 'draft', status: 'registration', draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 1, names: ['Ann'], cut: null } }));
+    mockEvents.get.mockResolvedValue(view({ entryKind: 'draft', status: 'registration', draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 1, names: ['Ann'], cut: null, checkin: null } }));
     render(<EventPage slug="riverside-cup" session={session} />);
     await screen.findByText('1 signed up');
     expect(screen.queryByRole('link', { name: 'Draft room' })).toBeNull();
@@ -145,6 +146,7 @@ describe('EventPage', () => {
       draft: {
         signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 6, names: ['Ann', 'Bob'],
         cut: { captains: ['Ann', 'Eve'], pool: ['Bob', 'Cy'], bench: ['Di'] },
+        checkin: null,
       },
       entries: [
         { id: 1, name: 'Team Ann', tag: 'ANN', logoKey: 'abc', seed: 1, status: 'checked_in', waitlist: null, placement: null },
@@ -163,7 +165,7 @@ describe('EventPage', () => {
   });
 
   it('a draft event before its teams are made shows no Teams list', async () => {
-    mockEvents.get.mockResolvedValue(view({ entryKind: 'draft', status: 'registration', draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 1, names: ['Ann'], cut: null } }));
+    mockEvents.get.mockResolvedValue(view({ entryKind: 'draft', status: 'registration', draft: { signupsCloseAt: inMinutes(60), draftAt: inMinutes(120), signups: 1, names: ['Ann'], cut: null, checkin: null } }));
     render(<EventPage slug="riverside-cup" session={session} />);
     await screen.findByText('Riverside Cup');
     expect(screen.queryByRole('heading', { name: 'Teams' })).toBeNull();
@@ -172,7 +174,7 @@ describe('EventPage', () => {
   it('shows a draft captain their identity panel', async () => {
     mockEvents.get.mockResolvedValue(view({
       entryKind: 'draft', status: 'registration',
-      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 6, names: [], cut: { captains: ['Ann'], pool: [], bench: [] } },
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 6, names: [], cut: { captains: ['Ann'], pool: [], bench: [] }, checkin: null },
     }));
     mockEvents.mine.mockResolvedValue({ entries: [], register: [], canRegister: false, signup: null, offer: null, captainOf: { entryId: 1, name: 'Team Ann', tag: '', logoKey: null, editable: true } });
     render(<EventPage slug="riverside-cup" session={{ kind: 'active' } as never} />);
@@ -183,7 +185,7 @@ describe('EventPage', () => {
   it('shows a draft captain the match prep panel for the entry they run', async () => {
     mockEvents.get.mockResolvedValue(view({
       entryKind: 'draft', status: 'live',
-      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(-30), signups: 8, names: [], cut: { captains: ['Ann', 'Eve'], pool: [], bench: [] } },
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(-30), signups: 8, names: [], cut: { captains: ['Ann', 'Eve'], pool: [], bench: [] }, checkin: null },
       entries: [{ id: 1, name: 'Team Ann', tag: '', logoKey: null, seed: 1, status: 'registered', waitlist: null, placement: null }],
     }));
     const entry = {
@@ -199,7 +201,7 @@ describe('EventPage', () => {
   it('a draft starter who does not run the entry sees no match prep panel', async () => {
     mockEvents.get.mockResolvedValue(view({
       entryKind: 'draft', status: 'live',
-      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(-30), signups: 8, names: [], cut: { captains: ['Ann', 'Eve'], pool: [], bench: [] } },
+      draft: { signupsCloseAt: inMinutes(-60), draftAt: inMinutes(-30), signups: 8, names: [], cut: { captains: ['Ann', 'Eve'], pool: [], bench: [] }, checkin: null },
       entries: [{ id: 1, name: 'Team Ann', tag: '', logoKey: null, seed: 1, status: 'registered', waitlist: null, placement: null }],
     }));
     const entry = {

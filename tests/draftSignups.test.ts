@@ -147,6 +147,8 @@ describe('closeSignups and removeSignup', () => {
 describe('the runner closes signups on the clock', () => {
   it('closes at signupsCloseAt once, and a second tick is a no-op', () => {
     const f = draftFixture();
+    // Without a check-in, whose opening DM would go out at this tick (tests/draftCheckin.test.ts).
+    must(E.updateEvent(f.db, { eventId: f.eventId, by: ADMIN, fields: { checkin: { enabled: false, opensMinutes: 60, closesMinutes: 15 } }, now: NOW }));
     must(sign(f, P[0]));
     const send = vi.fn(() => 1);
     const r = new EventRunner({ db: f.db, notifier: { send } as unknown as Notifier, publicUrl: 'https://x' });

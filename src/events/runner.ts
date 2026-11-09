@@ -8,7 +8,7 @@ import * as R from './entryRules.js';
 import { settleEvent, startEventFlow } from './flow.js';
 import * as K from './keepTeam.js';
 import { KEEP_OFFER_DAYS } from './draftRules.js';
-import { tellCaptainOffer, tellCheckinOpen, tellDropped, tellKeepCaptainCap, tellKeepLapsed, tellKeepOffer, tellKeepSettled } from './notices.js';
+import { tellCaptainOffer, tellCheckinOpen, tellDraftCheckinOpen, tellDropped, tellSignupRemoved, tellKeepCaptainCap, tellKeepLapsed, tellKeepOffer, tellKeepSettled } from './notices.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { EVENT_ERRORS } from './validate.js';
 
@@ -106,6 +106,27 @@ export class EventRunner {
     // Drafts plan D1 Ruling 2: close signups of draft-kind events at their
     // signupsCloseAt. A late tick closes them late, but signUp checks the
     // time itself, so nobody gets in after it.
+    // Owner 2026-11-09: a draft's check-in, before the cut. Opening tells the
+    // signups once; closing takes off whoever did not check in, before the
+    // signup close below in the same tick, so the team count leaves them out.
+    const checkins = db.prepare(
+      "SELECT * FROM events WHERE entry_kind = 'draft' AND status IN ('registration','checkin') AND cut_at IS NULL ORDER BY id",
+    ).all() as E.EventRow[];
+    for (const ev of checkins) {
+      try {
+        const w = D.draftCheckin(ev);
+        if (!w) continue;
+        const at = now.toISOString();
+        if (at >= w.closesAt) {
+          const r = D.closeDraftCheckin(db, { eventId: ev.id, now });
+          if (r.ok) for (const s of r.value.removed) tellSignupRemoved(this.deps, ev.id, s, 'no_checkin');
+        } else if (at >= w.opensAt && D.openDraftCheckin(db, { eventId: ev.id, now }).ok) {
+          tellDraftCheckinOpen(this.deps, ev.id);
+        }
+      } catch (err) {
+        console.error(`[events] draft check-in of event ${ev.id} failed:`, err instanceof Error ? err.message : err);
+      }
+    }
     const drafts = db.prepare(
       "SELECT * FROM events WHERE entry_kind = 'draft' AND status = 'registration' AND locked_at IS NULL ORDER BY id",
     ).all() as E.EventRow[];

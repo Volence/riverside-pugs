@@ -33,6 +33,8 @@ export interface SignupRow {
   /** Plan D2a: a pool player's team in the working assignment, as the
    *  captain's signup id; NULL for captains, bench and before Make teams. */
   draft_team: number | null;
+  /** Owner 2026-11-09: when the signup checked in before the draft, or null. */
+  checked_in_at: string | null;
 }
 
 /** Active signups in signup order (created_at, then id). */
@@ -60,6 +62,28 @@ function draftEvent(db: DB, eventId: number): V.Checked<E.EventRow> {
   return V.ok(ev);
 }
 
+/**
+ * A draft's check-in window (owner 2026-11-09: signups confirm before the
+ * draft, so a no-show is out before the cut instead of costing a team a
+ * starter): the event's check-in setting measured from draftAt. Null when
+ * the event is not a draft or has check-in off.
+ */
+export function draftCheckin(ev: E.EventRow): { opensAt: string; closesAt: string } | null {
+  const f = E.fieldsOf(ev);
+  if (ev.entry_kind !== 'draft' || !f.checkin.enabled || !f.draft) return null;
+  return R.draftCheckinTimes(f.draft.draftAt, f.checkin);
+}
+
+/** The window is open now and the cut not yet published. */
+function checkinOpen(ev: E.EventRow, now: Date): boolean {
+  const w = draftCheckin(ev);
+  const at = now.toISOString();
+  return !!w && ev.cut_at === null && at >= w.opensAt && at < w.closesAt;
+}
+
+const logged = (db: DB, eventId: number, action: string): boolean =>
+  db.prepare('SELECT 1 FROM event_log WHERE event_id = ? AND action = ? LIMIT 1').get(eventId, action) !== undefined;
+
 /** Ruling 2: open in registration, before the list is locked and before the
  *  signup close time. */
 function signupsOpen(ev: E.EventRow, now: Date): boolean {
@@ -84,9 +108,10 @@ export function signUp(
     const problems = R.problemsOf(elig, facts, 'starter');
     if (problems.length > 0) return V.fail('ineligible', [{ steamid: o.steamid, problems: problems.map((p) => R.problemText(p, elig, facts)) }]);
     if (signupOf(db, ev.id, o.steamid)) return V.fail('already_signed_up');
+    // Signing up while check-in is open is checking in.
     const id = Number(db.prepare(
-      'INSERT INTO draft_signups (event_id, steamid, captain_pref, note, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(ev.id, o.steamid, o.captainPref, note, at).lastInsertRowid);
+      'INSERT INTO draft_signups (event_id, steamid, captain_pref, note, created_at, checked_in_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(ev.id, o.steamid, o.captainPref, note, at, checkinOpen(ev, o.now) ? at : null).lastInsertRowid);
     // The note is private (Ruling 10), so it stays out of the log.
     E.logEvent(db, ev.id, o.steamid, 'draft_signup', at, { steamid: o.steamid, captainPref: o.captainPref });
     return V.ok(db.prepare('SELECT * FROM draft_signups WHERE id = ?').get(id) as SignupRow);
@@ -116,10 +141,79 @@ export function addLateSignup(
     if (problems.length > 0) return V.fail('ineligible', [{ steamid: o.steamid, problems: problems.map((p) => R.problemText(p, elig, facts)) }]);
     if (signupOf(db, ev.id, o.steamid)) return V.fail('already_signed_up');
     const id = Number(db.prepare(
-      "INSERT INTO draft_signups (event_id, steamid, captain_pref, note, created_at, role) VALUES (?, ?, ?, NULL, ?, 'bench')",
-    ).run(ev.id, o.steamid, o.captainPref, at).lastInsertRowid);
+      "INSERT INTO draft_signups (event_id, steamid, captain_pref, note, created_at, role, checked_in_at) VALUES (?, ?, ?, NULL, ?, 'bench', ?)",
+    ).run(ev.id, o.steamid, o.captainPref, at, at).lastInsertRowid);
     E.logEvent(db, ev.id, o.actor, 'draft_signup_late', at, { steamid: o.steamid, captainPref: o.captainPref });
     return V.ok(db.prepare('SELECT * FROM draft_signups WHERE id = ?').get(id) as SignupRow);
+  })();
+}
+
+/** A signup checks in (owner 2026-11-09) while the draft's check-in window
+ *  is open. One 'draft_checkin' row. */
+export function checkInSignup(db: DB, o: { eventId: number; steamid: string; now: Date }): V.Checked<null> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<null> => {
+    const found = draftEvent(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    if (!draftCheckin(ev)) return V.fail('no_checkin');
+    if (!checkinOpen(ev, o.now)) return V.fail('checkin_not_open');
+    const s = signupOf(db, ev.id, o.steamid);
+    if (!s) return V.fail('not_signed_up');
+    if (s.checked_in_at !== null) return V.fail('already_checked_in');
+    db.prepare('UPDATE draft_signups SET checked_in_at = ? WHERE id = ?').run(at, s.id);
+    E.logEvent(db, ev.id, o.steamid, 'draft_checkin', at, { steamid: o.steamid });
+    return V.ok(null);
+  })();
+}
+
+/** The runner marks the window open once (owner 2026-11-09), so the signups
+ *  are told once: from opensAt until closesAt, cut unpublished. One
+ *  'draft_checkin_opened' row; checkin_not_due before, after or again. */
+export function openDraftCheckin(db: DB, o: { eventId: number; now: Date }): V.Checked<null> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<null> => {
+    const found = draftEvent(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    if (!checkinOpen(ev, o.now) || logged(db, ev.id, 'draft_checkin_opened')) return V.fail('checkin_not_due');
+    E.logEvent(db, ev.id, null, 'draft_checkin_opened', at, {});
+    return V.ok(null);
+  })();
+}
+
+/**
+ * Check-in closes (owner 2026-11-09): every active signup not checked in is
+ * taken off, as a staff removal (withdraw_reason 'removed'; the DM says it
+ * was check-in). Once per event, from closesAt while the cut is unpublished.
+ * After the signup close a pool player taken off is replaced from the bench
+ * as removeSignup does. One 'draft_checkin_closed' row naming them.
+ */
+export function closeDraftCheckin(db: DB, o: { eventId: number; now: Date }): V.Checked<{ removed: string[] }> {
+  const at = o.now.toISOString();
+  return db.transaction((): V.Checked<{ removed: string[] }> => {
+    const found = draftEvent(db, o.eventId);
+    if (!found.ok) return found;
+    const ev = found.value;
+    const w = draftCheckin(ev);
+    if (!w || at < w.closesAt || ev.cut_at !== null || !CUT_STATUSES.has(ev.status) || logged(db, ev.id, 'draft_checkin_closed')) return V.fail('checkin_not_due');
+    const removed: string[] = [];
+    const promoted: string[] = [];
+    for (const s of activeSignups(db, ev.id)) {
+      if (s.checked_in_at !== null) continue;
+      db.prepare("UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'removed' WHERE id = ?").run(at, s.id);
+      db.prepare("UPDATE draft_captain_offers SET answer = 'stopped', answered_at = ? WHERE event_id = ? AND steamid = ? AND answer IS NULL").run(at, ev.id, s.steamid);
+      removed.push(s.steamid);
+      if (ev.locked_at !== null && s.role === 'pool') {
+        const next = activeSignups(db, ev.id).find((x) => x.role === 'bench');
+        if (next) {
+          db.prepare("UPDATE draft_signups SET role = 'pool' WHERE id = ?").run(next.id);
+          promoted.push(next.steamid);
+        }
+      }
+    }
+    E.logEvent(db, ev.id, null, 'draft_checkin_closed', at, { removed, promoted });
+    return V.ok({ removed });
   })();
 }
 

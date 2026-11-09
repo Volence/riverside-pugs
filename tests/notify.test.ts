@@ -51,7 +51,8 @@ describe('preferences', () => {
     });
   });
   it('lists the draft signup removal and cut role DMs (plan D1)', () => {
-    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_signup_removed')).toEqual({ type: 'draft_signup_removed', label: 'Draft: signup removed by staff' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_signup_removed')).toEqual({ type: 'draft_signup_removed', label: 'Draft: signup removed by staff, or for missing check-in' });
+    expect(NOTIFY_TYPES.find((t) => t.type === 'draft_checkin_open')).toEqual({ type: 'draft_checkin_open', label: 'Draft: check-in opens before the draft' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_cut_role')).toEqual({ type: 'draft_cut_role', label: 'Draft: your role after the cut' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_captain_offer')).toEqual({ type: 'draft_captain_offer', label: 'Draft: captaincy offer' });
     expect(NOTIFY_TYPES.find((t) => t.type === 'draft_team_made')).toEqual({ type: 'draft_team_made', label: 'Draft: your team' });

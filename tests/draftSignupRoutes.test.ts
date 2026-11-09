@@ -36,12 +36,12 @@ describe('draft signups over HTTP', () => {
   it('signs up and withdraws, and refuses what the writer refuses', async () => {
     const res = await post(`/api/events/${f.slug}/signup`, P[0], { captainPref: 'want', note: 'prefer infected' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: true, signup: { captainPref: 'want', note: 'prefer infected', role: null } });
+    expect(res.json()).toEqual({ ok: true, signup: { captainPref: 'want', note: 'prefer infected', role: null, checkedIn: false } });
     expect((await post(`/api/events/${f.slug}/signup`, P[0], { captainPref: 'want' })).json())
       .toEqual({ error: 'You are already signed up for this draft.' });
     expect((await post(`/api/events/${f.slug}/signup`, P[1], { captainPref: 'maybe' })).statusCode).toBe(400);
     expect((await post(`/api/events/${f.slug}/signup`, P[1], { captainPref: 'no', note: 'x'.repeat(81) })).statusCode).toBe(400);
-    expect((await get(`/api/events/${f.slug}/mine`, P[0])).json().signup).toEqual({ captainPref: 'want', note: 'prefer infected', role: null });
+    expect((await get(`/api/events/${f.slug}/mine`, P[0])).json().signup).toEqual({ captainPref: 'want', note: 'prefer infected', role: null, checkedIn: false });
     expect((await post(`/api/events/${f.slug}/withdraw-signup`, P[0])).statusCode).toBe(200);
     expect((await get(`/api/events/${f.slug}/mine`, P[0])).json().signup).toBeNull();
     expect((await post(`/api/events/${f.slug}/withdraw-signup`, P[0])).statusCode).toBe(409);
@@ -81,12 +81,14 @@ describe('draft signups over HTTP', () => {
     await post(`/api/events/${f.slug}/signup`, P[1], { captainPref: 'willing', note: 'flex' });
     const pub = await get(`/api/events/${f.slug}`, P[2]);
     expect(pub.statusCode).toBe(200);
-    expect(pub.json().draft).toEqual({ signupsCloseAt: f.closeAt, draftAt: f.draftAt, signups: 2, names: ['p900', 'p901'], cut: null });
+    expect(pub.json().draft).toEqual({ signupsCloseAt: f.closeAt, draftAt: f.draftAt, signups: 2, names: ['p900', 'p901'], cut: null,
+      // The default check-in: 60 to 15 minutes before the draft.
+      checkin: { opensAt: new Date(Date.parse(f.draftAt) - 3_600_000).toISOString(), closesAt: new Date(Date.parse(f.draftAt) - 900_000).toISOString() } });
     for (const key of ['"sr"', '"note"', '"captainPref"', 'prefer infected', 'flex']) expect(pub.body).not.toContain(key);
     const anon = await get(`/api/events/${f.slug}`);
     expect(anon.json().draft.names).toEqual(['p900', 'p901']);
     const mine = await get(`/api/events/${f.slug}/mine`, P[1]);
-    expect(mine.json().signup).toEqual({ captainPref: 'willing', note: 'flex', role: null });
+    expect(mine.json().signup).toEqual({ captainPref: 'willing', note: 'flex', role: null, checkedIn: false });
     expect(mine.body).not.toContain('prefer infected');
     expect(mine.body).not.toContain('"sr"');
     const other = await get(`/api/events/${f.slug}/mine`, P[2]);

@@ -19,6 +19,8 @@ const RELIABILITY_DAYS = 30;
 export interface SignupFacts {
   steamid: string; name: string; sr: number; captainPref: D.CaptainPref; note: string | null; signedUpAt: string;
   role: D.SignupRow['role']; manual: boolean; abandons30d: number; noShows30d: number;
+  /** Owner 2026-11-09: checked in before the draft. */
+  checkedIn: boolean;
   /** Eligibility problems as the desk's entries list words them. */
   problems: string[];
 }
@@ -33,7 +35,7 @@ export function signupFacts(db: DB, eventId: number, now: Date): SignupFacts[] {
     const facts = playerFacts(db, s.steamid, now);
     return {
       steamid: s.steamid, name: getPlayer(db, s.steamid)?.name ?? s.steamid, sr: facts.sr, captainPref: s.captain_pref, note: s.note,
-      signedUpAt: s.created_at, role: s.role, manual: s.role_manual === 1,
+      signedUpAt: s.created_at, role: s.role, manual: s.role_manual === 1, checkedIn: s.checked_in_at !== null,
       abandons30d: abandonsSince(db, s.steamid, since), noShows30d: noShowsSince(db, s.steamid, since),
       problems: R.problemsOf(elig, facts, 'starter').map((k) => R.problemText(k, elig, facts)),
     };

@@ -80,6 +80,9 @@ export const EVENT_ERRORS = {
   closed: { status: 409, text: 'Signups for this draft are closed.' },
   already_signed_up: { status: 409, text: 'You are already signed up for this draft.' },
   not_signed_up: { status: 409, text: 'There is no active signup for this draft to change.' },
+  checkin_not_open: { status: 409, text: 'Check-in for this draft is not open right now.' },
+  already_checked_in: { status: 409, text: 'You are already checked in.' },
+  checkin_not_due: { status: 409, text: 'Check-in for this draft has not opened or closed yet, or was already settled.' },
   bad_note: { status: 400, text: `A note is at most ${NOTE_MAX} characters of plain text, on one line.` },
   bad_captain_pref: { status: 400, text: 'Captaincy is want, willing or no.' },
   ineligible: { status: 409, text: 'You do not meet the entry rules for this event.' },
@@ -403,7 +406,7 @@ export function parseCheckin(raw: unknown): Checked<Checkin> {
   const enabled = raw.enabled ?? d.enabled;
   const opensMinutes = raw.opensMinutes ?? d.opensMinutes;
   const closesMinutes = raw.closesMinutes ?? d.closesMinutes;
-  if (typeof enabled !== 'boolean' || !isInt(opensMinutes, 10, 1440) || !isInt(closesMinutes, 0, 1440)) return fail('bad_checkin');
+  if (typeof enabled !== 'boolean' || !isInt(opensMinutes, 10, 4320) || !isInt(closesMinutes, 0, 4320)) return fail('bad_checkin');
   if (closesMinutes > opensMinutes - 5) return fail('bad_checkin');
   return ok({ enabled, opensMinutes, closesMinutes });
 }

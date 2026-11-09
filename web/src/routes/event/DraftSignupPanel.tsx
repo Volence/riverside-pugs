@@ -56,6 +56,26 @@ export function DraftSignupPanel({ slug, eventName, status, lockedAt, draft, vie
 
   if (!signup && !open && !offer && !notOpenYet) return null;
 
+  /** Owner 2026-11-09: the check-in before the draft, for a signup. */
+  const checkinLine = () => {
+    const ci = draft.checkin;
+    if (!ci || !signup) return null;
+    if (signup.checkedIn) return <p class="draftpanel__checkin"><strong>Checked in.</strong> You are in for the draft.</p>;
+    const now = Date.now();
+    if (now < Date.parse(ci.opensAt)) {
+      return <p class="muted">Check-in opens {whenText(ci.opensAt)} and closes {whenText(ci.closesAt)}. Signups that do not check in are removed before the draft.</p>;
+    }
+    if (now >= Date.parse(ci.closesAt)) return null;
+    return (
+      <div class="draftoffer" role="group" aria-label="Check in">
+        <p><strong>Check in before {whenText(ci.closesAt)}, or your signup is removed before the draft.</strong></p>
+        <div class="inlinerow">
+          <button class="btn" disabled={busy} onClick={() => run(() => eventsApi.checkInSignup(slug))}>Check in</button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <Panel class="entrypanel draftpanel">
       {offer && (
@@ -75,6 +95,7 @@ export function DraftSignupPanel({ slug, eventName, status, lockedAt, draft, vie
       )}
       {signup && !(published && signup.role) && (
         <>
+          {checkinLine()}
           {open ? (
             <>
               <h3>You are signed up</h3>
