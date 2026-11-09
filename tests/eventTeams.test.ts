@@ -99,6 +99,20 @@ describe('event teams', () => {
     expect(teamOf(f, e1)).toMatchObject({ name: 'Night Owls', tag: 'OWL' });
   });
 
+  it('follows a staff roster edit on the entry (review 11-09)', () => {
+    const f = published();
+    const e1 = f.entries[0]!;
+    const r = N.rosterOf(f.db, e1);
+    const cap = N.getEntry(f.db, e1)!.captain_steamid!;
+    const out = r.starters.find((s) => s !== cap)!;
+    const placed = new Set(f.entries.flatMap((e) => { const x = N.rosterOf(f.db, e); return [...x.starters, ...x.subs, x.coach]; }));
+    const fresh = P.find((p) => !placed.has(p))!;
+    const starters = r.starters.map((s) => (s === out ? fresh : s));
+    must(N.setEntryRoster(f.db, { entryId: e1, by: ADMIN, staff: true, roster: { ...r, starters }, now: LATER }));
+    expect(members(f, teamOf(f, e1)!.id)).toEqual(expected(f, e1));
+    expect(T.roleOf(f.db, teamOf(f, e1)!.id, out)).toBeNull();
+  });
+
   it('takes the next free name when a site team already has the entry name', () => {
     const f = cutDraft({ balance: true });
     // P[20] is a captain (top SR); a site team called "Team d20" exists before publish.
@@ -222,5 +236,15 @@ describe('late signup', () => {
     expect(err(D.addLateSignup(f.db, { eventId: f.eventId, steamid: P[0]!, captainPref: 'no', actor: ADMIN, now: NOW }))).toBe('already_signed_up');
     const g = cutDraft();
     expect(err(D.addLateSignup(g.db, { eventId: g.eventId, steamid: ADMIN, captainPref: 'no', actor: ADMIN, now: NOW }))).toBe('cut_published');
+  });
+});
+
+describe('event team tags (review 11-09)', () => {
+  it('leave out the leading Team every draft entry name has', async () => {
+    const { tagFromName } = await import('../src/teams/teams.js');
+    expect(tagFromName('Team Volence')).toBe('VOLEN');
+    expect(tagFromName('Team Bo (2)')).toBe('BO2');
+    expect(tagFromName('Teamwork')).toBe('TEAMW');
+    expect(tagFromName('Team x')).toBe('DT');
   });
 });

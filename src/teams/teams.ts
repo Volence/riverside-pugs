@@ -364,9 +364,10 @@ export function addDraftMember(db: DB, o: { teamId: number; steamid: string; now
 }
 
 /** A tag for an event team whose entry has none: the name's letters and
- *  digits, upper-cased, cut to 5 ('DT' when fewer than 2). */
-function tagFromName(name: string): string {
-  const t = name.normalize('NFKD').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 5);
+ *  digits without a leading "Team" (every draft entry is "Team <captain>"),
+ *  upper-cased, cut to 5 ('DT' when fewer than 2). */
+export function tagFromName(name: string): string {
+  const t = name.normalize('NFKD').replace(/^\s*team\s+/i, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 5);
   return t.length >= 2 ? t : 'DT';
 }
 

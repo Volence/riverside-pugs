@@ -183,8 +183,8 @@ export function openDraftCheckin(db: DB, o: { eventId: number; now: Date }): V.C
 }
 
 /**
- * Check-in closes (owner 2026-11-09): every active signup not checked in is
- * taken off, as a staff removal (withdraw_reason 'removed'; the DM says it
+ * Check-in closes (owner 2026-11-09), if it opened: every active signup not
+ * checked in is taken off, as a staff removal (withdraw_reason 'removed'; the DM says it
  * was check-in). Once per event, from closesAt while the cut is unpublished.
  * After the signup close a pool player taken off is replaced from the bench
  * as removeSignup does. One 'draft_checkin_closed' row naming them.
@@ -196,20 +196,25 @@ export function closeDraftCheckin(db: DB, o: { eventId: number; now: Date }): V.
     if (!found.ok) return found;
     const ev = found.value;
     const w = draftCheckin(ev);
-    if (!w || at < w.closesAt || ev.cut_at !== null || !CUT_STATUSES.has(ev.status) || logged(db, ev.id, 'draft_checkin_closed')) return V.fail('checkin_not_due');
-    const removed: string[] = [];
-    const promoted: string[] = [];
-    for (const s of activeSignups(db, ev.id)) {
-      if (s.checked_in_at !== null) continue;
+    // Only a window that opened (and so DMed its signups) closes: a site down
+    // through the whole window, or a draft moved so the window is already
+    // past, removes nobody.
+    if (!w || at < w.closesAt || ev.cut_at !== null || !CUT_STATUSES.has(ev.status)
+      || !logged(db, ev.id, 'draft_checkin_opened') || logged(db, ev.id, 'draft_checkin_closed')) return V.fail('checkin_not_due');
+    // Everyone not checked in comes off first, so a pool spot is only ever
+    // refilled by a bench signup who did check in.
+    const gone = activeSignups(db, ev.id).filter((s) => s.checked_in_at === null);
+    for (const s of gone) {
       db.prepare("UPDATE draft_signups SET withdrawn_at = ?, withdraw_reason = 'removed' WHERE id = ?").run(at, s.id);
       db.prepare("UPDATE draft_captain_offers SET answer = 'stopped', answered_at = ? WHERE event_id = ? AND steamid = ? AND answer IS NULL").run(at, ev.id, s.steamid);
-      removed.push(s.steamid);
-      if (ev.locked_at !== null && s.role === 'pool') {
-        const next = activeSignups(db, ev.id).find((x) => x.role === 'bench');
-        if (next) {
-          db.prepare("UPDATE draft_signups SET role = 'pool' WHERE id = ?").run(next.id);
-          promoted.push(next.steamid);
-        }
+    }
+    const removed = gone.map((s) => s.steamid);
+    const promoted: string[] = [];
+    if (ev.locked_at !== null) {
+      const bench = activeSignups(db, ev.id).filter((x) => x.role === 'bench');
+      for (const next of bench.slice(0, gone.filter((s) => s.role === 'pool').length)) {
+        db.prepare("UPDATE draft_signups SET role = 'pool' WHERE id = ?").run(next.id);
+        promoted.push(next.steamid);
       }
     }
     E.logEvent(db, ev.id, null, 'draft_checkin_closed', at, { removed, promoted });

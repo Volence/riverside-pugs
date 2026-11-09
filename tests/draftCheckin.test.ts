@@ -67,6 +67,9 @@ describe('draft check-in', () => {
     for (const s of P.slice(0, 10)) signUp(f, s, NOW);
     for (const s of P.slice(0, 8)) must(D.checkInSignup(f.db, { eventId: f.eventId, steamid: s, now: IN }));
     expect(err(D.closeDraftCheckin(f.db, { eventId: f.eventId, now: IN }))).toBe('checkin_not_due');
+    // A window that never opened (and so never DMed anyone) removes nobody.
+    expect(err(D.closeDraftCheckin(f.db, { eventId: f.eventId, now: CLOSES }))).toBe('checkin_not_due');
+    must(D.openDraftCheckin(f.db, { eventId: f.eventId, now: IN }));
     expect(must(D.closeDraftCheckin(f.db, { eventId: f.eventId, now: CLOSES })).removed).toEqual([P[8], P[9]]);
     expect(active(f)).toEqual(P.slice(0, 8));
     expect(err(D.closeDraftCheckin(f.db, { eventId: f.eventId, now: CLOSES }))).toBe('checkin_not_due');
@@ -77,13 +80,18 @@ describe('draft check-in', () => {
     // Check-in closing after the signups close: 30 minutes before the draft.
     set(f, { enabled: true, opensMinutes: 1440, closesMinutes: 30 });
     for (const s of P.slice(0, 12)) signUp(f, s, NOW);
-    for (const s of P.slice(0, 12)) if (s !== P[0]) must(D.checkInSignup(f.db, { eventId: f.eventId, steamid: s, now: IN }));
+    must(D.openDraftCheckin(f.db, { eventId: f.eventId, now: IN }));
     must(D.closeSignups(f.db, { eventId: f.eventId, actor: ADMIN, now: CLOSES }));
     const before = D.activeSignups(f.db, f.eventId);
-    expect(before.find((s) => s.steamid === P[0])?.role).toBe('pool');
+    const pool = before.filter((s) => s.role === 'pool').length;
     const bench = before.filter((s) => s.role === 'bench').map((s) => s.steamid);
-    must(D.closeDraftCheckin(f.db, { eventId: f.eventId, now: new Date('2026-10-10T18:30:00.000Z') }));
-    expect(D.signupOf(f.db, f.eventId, bench[0]!)?.role).toBe('pool');
+    // A pool player and the first bench player both miss check-in: the
+    // second bench player, who checked in, takes the spot (review 11-09).
+    for (const s of P.slice(0, 12)) if (s !== P[0] && s !== bench[0]) must(D.checkInSignup(f.db, { eventId: f.eventId, steamid: s, now: IN }));
+    expect(before.find((s) => s.steamid === P[0])?.role).toBe('pool');
+    expect(must(D.closeDraftCheckin(f.db, { eventId: f.eventId, now: new Date('2026-10-10T18:30:00.000Z') })).removed).toEqual([P[0], bench[0]]);
+    expect(D.signupOf(f.db, f.eventId, bench[1]!)?.role).toBe('pool');
+    expect(D.activeSignups(f.db, f.eventId).filter((s) => s.role === 'pool')).toHaveLength(pool);
   });
 
   it('a late signup by staff counts as checked in', () => {
