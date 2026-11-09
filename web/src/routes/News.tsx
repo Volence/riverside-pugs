@@ -5,6 +5,7 @@ import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
 import { SectionTabs, NEWS_SECTION } from '../components/SectionTabs';
 import { RichText } from '../components/RichText';
+import { localizeDiscordTimes } from '../richText';
 
 export const NEWS_KIND_LABEL: Record<NewsKind, string> = { news: 'News', patch: 'Patch notes' };
 
@@ -50,7 +51,7 @@ export function News({ kind }: { kind?: NewsKind } = {}) {
               <Panel class="news__item">
                 <Meta post={p} />
                 <h3 class="news__title"><a href={`/news/${p.id}`}>{p.title}</a></h3>
-                {p.excerpt && <p class="news__excerpt">{p.excerpt}</p>}
+                {p.excerpt && <p class="news__excerpt">{localizeDiscordTimes(p.excerpt)}</p>}
               </Panel>
             </li>
           ))}

@@ -141,7 +141,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
         </FormRow>
       )}
       <FormGroup title="Description">
-        <FormRow wide label="Event page text" help="# heading, **bold**, *italic*, - list, [text](https://...)" for={id('desc')}
+        <FormRow wide label="Event page text" help="# heading, **bold**, *italic*, - list, > quote, [text](https://...), <t:unix:F> for a time in the reader's zone" for={id('desc')}
           aside={<button type="button" class="btn btn--ghost btn--sm" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? 'Edit' : 'Preview'}</button>}>
           {preview
             ? <div class="eventdesc-preview"><RichText text={f.description} /></div>

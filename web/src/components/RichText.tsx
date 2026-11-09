@@ -1,6 +1,6 @@
 import { useMemo } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { parseRichText, type Block, type Inline } from '../richText';
+import { formatDiscordTime, parseRichText, type Block, type Inline } from '../richText';
 
 function inline(nodes: Inline[]): ComponentChildren[] {
   return nodes.map((n, i) => {
@@ -10,6 +10,12 @@ function inline(nodes: Inline[]): ComponentChildren[] {
       case 'strong': return <strong key={i}>{inline(n.children)}</strong>;
       case 'em': return <em key={i}>{inline(n.children)}</em>;
       case 'link': return <a key={i} href={n.href} target="_blank" rel="noopener noreferrer">{inline(n.children)}</a>;
+      // In the reader's own time zone, as Discord shows it; the full date on hover.
+      case 'time': return (
+        <time key={i} class="richtext__time" dateTime={new Date(n.unix * 1000).toISOString()} title={formatDiscordTime(n.unix, 'F')}>
+          {formatDiscordTime(n.unix, n.style)}
+        </time>
+      );
     }
   });
 }
@@ -24,6 +30,7 @@ function block(b: Block, i: number) {
     const items = b.items.map((it, n) => <li key={n}>{inline(it)}</li>);
     return b.ordered ? <ol key={i}>{items}</ol> : <ul key={i}>{items}</ul>;
   }
+  if (b.kind === 'quote') return <blockquote key={i} class="richtext__quote">{inline(b.children)}</blockquote>;
   return <p key={i}>{inline(b.children)}</p>;
 }
 
