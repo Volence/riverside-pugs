@@ -22,8 +22,12 @@ export const DROP_TEXT: Record<DropReason, string> = {
   team_disbanded: 'the team was disbanded',
 };
 
-export type Problem = 'closed' | 'standing' | 'pugs' | 'discord' | 'sr_low' | 'sr_high';
-export interface PlayerFacts { open: boolean; good: boolean; pugs: number; discord: boolean; sr: number }
+export type Problem = 'closed' | 'standing' | 'pugs' | 'season_pugs' | 'unplaced' | 'discord' | 'sr_low' | 'sr_high';
+export interface PlayerFacts {
+  open: boolean; good: boolean; pugs: number; discord: boolean; sr: number;
+  /** Rated games in the current season, and past its placement. */
+  seasonPugs: number; placed: boolean;
+}
 
 /** What keeps a player off a roster in this role. A coach does not play, so
  *  the PUG count and the SR range do not apply to one. */
@@ -32,6 +36,8 @@ export function problemsOf(e: Eligibility, f: PlayerFacts, role: Role): Problem[
   if (!f.good) out.push('standing');
   if (!f.open) out.push('closed');
   if (role !== 'coach' && f.pugs < e.minPugs) out.push('pugs');
+  if (role !== 'coach' && f.seasonPugs < e.minSeasonPugs) out.push('season_pugs');
+  if (role !== 'coach' && e.requirePlaced && !f.placed) out.push('unplaced');
   if (e.requireDiscord && !f.discord) out.push('discord');
   if (role !== 'coach' && e.srFloor !== null && f.sr < e.srFloor) out.push('sr_low');
   if (role !== 'coach' && e.srCeiling !== null && f.sr > e.srCeiling) out.push('sr_high');
@@ -43,6 +49,8 @@ export function problemText(p: Problem, e: Eligibility, f: PlayerFacts): string 
     case 'standing': return 'Account is not in good standing';
     case 'closed': return 'Cannot use competitive features yet';
     case 'pugs': return `${f.pugs} of ${e.minPugs} completed PUGs`;
+    case 'season_pugs': return `${f.seasonPugs} of ${e.minSeasonPugs} PUGs this season`;
+    case 'unplaced': return 'Not placed this season yet';
     case 'discord': return 'Discord is not linked';
     // The player's own SR stays out of the sentence: while they are placing
     // it is hidden, and once placed they can see it on their profile anyway.

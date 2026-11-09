@@ -14,7 +14,7 @@ const OPTIONS: AdminEventOptions = {
   ], defaultRulesetId: 2,
   gameConfigs: [{ key: 'standard', label: 'Standard' }],
   defaults: {
-    eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },
+    eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null, minSeasonPugs: 0, requirePlaced: false },
     checkin: { enabled: true, opensMinutes: 60, closesMinutes: 15 },
     roster: { starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null },
   },

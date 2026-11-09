@@ -14,7 +14,7 @@ const inMinutes = (m: number) => new Date(Date.now() + m * 60_000 + 30_000).toIS
 const view = (over: Partial<EventView> = {}): EventView => ({
   slug: 'riverside-cup', name: 'Riverside Cup', status: 'announced', entryKind: 'team', official: true, organizerName: 'boss',
   bannerKey: null, startsAt: inMinutes((2 * 24 + 3) * 60), description: '', teamCap: 16,
-  eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: 2500 },
+  eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: 2500, minSeasonPugs: 0, requirePlaced: false },
   checkin: { enabled: true, opensMinutes: 60, closesMinutes: 15 },
   roster: { starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null },
   stages: [
@@ -141,7 +141,7 @@ describe('EventPage', () => {
 
   it('a draft event with its teams made lists the teams with logos, keeps the cut lists, and shows no check-in or SR', async () => {
     mockEvents.get.mockResolvedValue(view({
-      entryKind: 'draft', status: 'registration', lockedAt: inMinutes(-60), eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null },
+      entryKind: 'draft', status: 'registration', lockedAt: inMinutes(-60), eligibility: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null, minSeasonPugs: 0, requirePlaced: false },
       draft: {
         signupsCloseAt: inMinutes(-60), draftAt: inMinutes(120), signups: 6, names: ['Ann', 'Bob'],
         cut: { captains: ['Ann', 'Eve'], pool: ['Bob', 'Cy'], bench: ['Di'] },

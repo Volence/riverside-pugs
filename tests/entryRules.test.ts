@@ -3,7 +3,18 @@ import * as R from '../src/events/entryRules.js';
 import { defaultEligibility, defaultRoster, nextStatusAllowed } from '../src/events/validate.js';
 
 const S = (n: number) => `765611990000${String(n).padStart(5, '0')}`;
-const facts = (over: Partial<R.PlayerFacts> = {}): R.PlayerFacts => ({ open: true, good: true, pugs: 10, discord: true, sr: 1500, ...over });
+const facts = (over: Partial<R.PlayerFacts> = {}): R.PlayerFacts => ({ open: true, good: true, pugs: 10, discord: true, sr: 1500, seasonPugs: 10, placed: true, ...over });
+
+describe('season rules (owner 2026-11-09)', () => {
+  const e = { ...defaultEligibility(), minSeasonPugs: 5, requirePlaced: true };
+  it('passes a placed player with enough games this season', () => expect(R.problemsOf(e, facts({ seasonPugs: 5 }), 'starter')).toEqual([]));
+  it('refuses too few games this season, and an unplaced player', () => {
+    expect(R.problemsOf(e, facts({ seasonPugs: 4, placed: false }), 'starter')).toEqual(['season_pugs', 'unplaced']);
+    expect(R.problemText('season_pugs', e, facts({ seasonPugs: 4 }))).toBe('4 of 5 PUGs this season');
+  });
+  it('does not apply to a coach', () => expect(R.problemsOf(e, facts({ seasonPugs: 0, placed: false }), 'coach')).toEqual([]));
+  it('is off by default', () => expect(R.problemsOf(defaultEligibility(), facts({ seasonPugs: 0, placed: false }), 'starter')).toEqual([]));
+});
 
 describe('problemsOf', () => {
   const e = { ...defaultEligibility(), srFloor: 1000, srCeiling: 2000 };

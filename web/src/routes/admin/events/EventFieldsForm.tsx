@@ -9,9 +9,9 @@ const val = (e: Event): string => (e.target as HTMLInputElement).value;
 
 /** The number fields, kept as typed and read only at Save (wholeNumber.ts).
  *  Blank means "not set" for the four whose null means that. */
-type NumKey = 'teamCap' | 'minPugs' | 'srFloor' | 'srCeiling' | 'opensMinutes' | 'closesMinutes' | 'maxSubs' | 'lockStage' | 'lockRound' | 'maxAdditions';
+type NumKey = 'teamCap' | 'minPugs' | 'minSeasonPugs' | 'srFloor' | 'srCeiling' | 'opensMinutes' | 'closesMinutes' | 'maxSubs' | 'lockStage' | 'lockRound' | 'maxAdditions';
 const NUM_LABEL: Record<NumKey, string> = {
-  teamCap: 'Team cap', minPugs: 'Minimum completed PUGs', srFloor: 'SR floor', srCeiling: 'SR ceiling',
+  teamCap: 'Team cap', minPugs: 'Minimum completed PUGs', minSeasonPugs: 'Minimum PUGs this season', srFloor: 'SR floor', srCeiling: 'SR ceiling',
   opensMinutes: 'Check-in opens', closesMinutes: 'Check-in closes', maxSubs: 'Max subs',
   lockStage: 'Lock after stage', lockRound: 'Lock after round', maxAdditions: 'Max roster additions',
 };
@@ -20,7 +20,7 @@ const str = (n: number | null): string => (n === null ? '' : String(n));
 function typedOf(f: EventFields): Record<NumKey, string> {
   const lock = f.roster.lock;
   return {
-    teamCap: str(f.teamCap), minPugs: str(f.eligibility.minPugs), srFloor: str(f.eligibility.srFloor), srCeiling: str(f.eligibility.srCeiling),
+    teamCap: str(f.teamCap), minPugs: str(f.eligibility.minPugs), minSeasonPugs: str(f.eligibility.minSeasonPugs), srFloor: str(f.eligibility.srFloor), srCeiling: str(f.eligibility.srCeiling),
     opensMinutes: str(f.checkin.opensMinutes), closesMinutes: str(f.checkin.closesMinutes), maxSubs: str(f.roster.maxSubs),
     lockStage: lock.kind === 'after_round' ? String(lock.stage) : '1', lockRound: lock.kind === 'after_round' ? String(lock.round) : '1',
     maxAdditions: str(f.roster.maxAdditions),
@@ -81,7 +81,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
       if (!night) { setProblem('Pick the draft night.'); return; }
       draft = { signupsCloseAt: close, draftAt: night };
     }
-    const used: NumKey[] = [...(f.entryKind === 'draft' ? [] : ['teamCap' as const]), 'minPugs', 'srFloor', 'srCeiling', 'maxSubs', 'maxAdditions',
+    const used: NumKey[] = [...(f.entryKind === 'draft' ? [] : ['teamCap' as const]), 'minPugs', 'minSeasonPugs', 'srFloor', 'srCeiling', 'maxSubs', 'maxAdditions',
       ...(f.checkin.enabled ? ['opensMinutes' as const, 'closesMinutes' as const] : []),
       ...(lock.kind === 'after_round' ? ['lockStage' as const, 'lockRound' as const] : [])];
     const n: Partial<Record<NumKey, number | null>> = {};
@@ -103,7 +103,7 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
     setProblem(null);
     onSave({
       ...f, startsAt, draft, teamCap: n.teamCap ?? null,
-      eligibility: { ...f.eligibility, minPugs: whole('minPugs'), srFloor: n.srFloor ?? null, srCeiling: n.srCeiling ?? null },
+      eligibility: { ...f.eligibility, minPugs: whole('minPugs'), minSeasonPugs: whole('minSeasonPugs'), srFloor: n.srFloor ?? null, srCeiling: n.srCeiling ?? null },
       checkin: f.checkin.enabled ? { ...f.checkin, opensMinutes: whole('opensMinutes'), closesMinutes: whole('closesMinutes') } : f.checkin,
       roster: { ...f.roster, maxSubs: whole('maxSubs'), maxAdditions: n.maxAdditions ?? null, lock: rosterLock },
     });
@@ -152,6 +152,10 @@ export function EventFieldsForm({ fields, status, busy, onSave }: {
         <FormRow label="Minimum completed PUGs" help="Ranked PUGs a player must have finished to sign up." for={id('minpugs')}>
           <input id={id('minpugs')} aria-label="Minimum completed PUGs" type="number" min={0} max={1000} value={typed.minPugs} onInput={typeInto('minPugs')} />
         </FormRow>
+        <FormRow label="Minimum PUGs this season" help="Rated PUGs a player must have played in the current season. 0 for none." for={id('seasonpugs')}>
+          <input id={id('seasonpugs')} aria-label="Minimum PUGs this season" type="number" min={0} max={1000} value={typed.minSeasonPugs} onInput={typeInto('minSeasonPugs')} />
+        </FormRow>
+        <ToggleRow label="Placed this season" help="Players need to have finished their placement games this season." checked={f.eligibility.requirePlaced} onChange={() => elig({ requirePlaced: !f.eligibility.requirePlaced })} />
         <ToggleRow label="Discord linked" help="Players need a linked Discord account." checked={f.eligibility.requireDiscord} onChange={() => elig({ requireDiscord: !f.eligibility.requireDiscord })} />
         <FormRow label="SR floor" help="Lowest SR that can sign up. Blank for none." for={id('floor')}>
           <input id={id('floor')} aria-label="SR floor" type="number" min={0} value={typed.srFloor} onInput={typeInto('srFloor')} />

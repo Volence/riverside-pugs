@@ -63,12 +63,15 @@ describe('names, slugs, descriptions, reasons, times', () => {
 
 describe('eligibility, check-in and roster rules', () => {
   it('fills defaults, and holds the SR floor below the ceiling', () => {
-    expect(V.parseEligibility(undefined)).toEqual({ ok: true, value: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null } });
-    expect(V.parseEligibility({ minPugs: 0, srFloor: 1000 })).toEqual({ ok: true, value: { minPugs: 0, requireDiscord: true, srFloor: 1000, srCeiling: null } });
+    expect(V.parseEligibility(undefined)).toEqual({ ok: true, value: { minPugs: 5, requireDiscord: true, srFloor: null, srCeiling: null, minSeasonPugs: 0, requirePlaced: false } });
+    expect(V.parseEligibility({ minPugs: 0, srFloor: 1000 })).toEqual({ ok: true, value: { minPugs: 0, requireDiscord: true, srFloor: 1000, srCeiling: null, minSeasonPugs: 0, requirePlaced: false } });
     expect(bad(V.parseEligibility({ srFloor: 2000, srCeiling: 1500 }))).toBe('bad_eligibility');
     expect(bad(V.parseEligibility({ minPugs: -1 }))).toBe('bad_eligibility');
     expect(bad(V.parseEligibility({ requireDiscord: 'yes' }))).toBe('bad_eligibility');
     expect(bad(V.parseEligibility([]))).toBe('bad_eligibility');
+    expect(V.parseEligibility({ minSeasonPugs: 5, requirePlaced: true })).toMatchObject({ ok: true, value: { minSeasonPugs: 5, requirePlaced: true } });
+    expect(bad(V.parseEligibility({ minSeasonPugs: -1 }))).toBe('bad_eligibility');
+    expect(bad(V.parseEligibility({ requirePlaced: 'yes' }))).toBe('bad_eligibility');
   });
 
   it('check-in is on by default, 60 to 15 minutes before, and closes at least 5 minutes after it opens', () => {

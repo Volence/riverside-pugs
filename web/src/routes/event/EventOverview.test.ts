@@ -5,7 +5,7 @@ import { milestones, roundName, teamInitials } from './EventOverview';
 const draftEvent = (over: Partial<EventView> = {}): EventView => ({
   slug: 'cup', name: 'Cup', status: 'registration', entryKind: 'draft', official: true, organizerName: null,
   bannerKey: null, startsAt: '2026-10-24T00:00:00.000Z', description: '', teamCap: null,
-  eligibility: { minPugs: 1, requireDiscord: true, srFloor: null, srCeiling: null },
+  eligibility: { minPugs: 1, requireDiscord: true, srFloor: null, srCeiling: null, minSeasonPugs: 0, requirePlaced: false },
   checkin: { enabled: false, opensMinutes: 60, closesMinutes: 15 },
   roster: { starters: 4, maxSubs: 2, lock: { kind: 'none' }, maxAdditions: null },
   stages: [{

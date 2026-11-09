@@ -2462,7 +2462,11 @@ export type EntryKind = 'team' | 'draft';
 export type StageType = 'single_elim' | 'double_elim' | 'round_robin' | 'swiss' | 'league';
 export type VetoType = 'ban_to_one' | 'home_away' | 'pick_ban';
 export type Scheduling = 'rolling' | 'window';
-export interface EventEligibility { minPugs: number; requireDiscord: boolean; srFloor: number | null; srCeiling: number | null }
+export interface EventEligibility {
+  minPugs: number; requireDiscord: boolean; srFloor: number | null; srCeiling: number | null;
+  /** Owner 2026-11-09: PUGs this season, and placed this season (0 and false: no rule). */
+  minSeasonPugs: number; requirePlaced: boolean;
+}
 export interface EventCheckin { enabled: boolean; opensMinutes: number; closesMinutes: number }
 export type RosterLock = { kind: 'none' } | { kind: 'at'; at: string } | { kind: 'after_round'; stage: number; round: number };
 export interface EventRoster { starters: 4; maxSubs: number; lock: RosterLock; maxAdditions: number | null }

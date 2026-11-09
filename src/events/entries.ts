@@ -5,6 +5,7 @@ import { completedPug } from '../matchKinds.js';
 import { hasUnsafeChars } from '../profileFields.js';
 import { currentSeasonId, getPlayer } from '../players.js';
 import { seasonSr } from '../rating.js';
+import { playerSeasonState } from '../seasonRules.js';
 import { inGoodStanding } from '../standing.js';
 import { competitiveAccess } from '../teams/access.js';
 import { activeMembers, getTeam, normalizeName, normalizeTag, syncEventTeam } from '../teams/teams.js';
@@ -130,12 +131,16 @@ export function playerFacts(db: DB, steamid: string, now = new Date()): R.Player
     `SELECT COUNT(*) AS n FROM match_players mp JOIN matches m ON m.id = mp.match_id
      WHERE mp.player_id = ? AND ${completedPug('m')} AND m.voided_at IS NULL`,
   ).get(steamid) as { n: number }).n;
+  const season = currentSeasonId(db);
+  const state = playerSeasonState(db, season, steamid);
   return {
     open: competitiveAccess(db, steamid),
     good: inGoodStanding(db, steamid, now),
     pugs,
     discord: !!getPlayer(db, steamid)?.discord_id,
-    sr: seasonSr(db, steamid, currentSeasonId(db)),
+    sr: seasonSr(db, steamid, season),
+    seasonPugs: state?.games ?? 0,
+    placed: state?.placed ?? false,
   };
 }
 
