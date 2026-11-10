@@ -1,5 +1,5 @@
 import { campaignTint, mapName } from '../format';
-import { useRef } from 'preact/hooks';
+import { useLayoutEffect, useRef } from 'preact/hooks';
 import { Backdrop, Countdown, Title } from './pieces';
 import { DraftBoard, DraftRevealStrip, OnTheClock } from './DraftScenes';
 import { wholePercent } from '../components/WinChart';
@@ -1246,9 +1246,45 @@ const fmtAlive = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart
  */
 /** The recap card spot: a tank's beats a witch's when both are up. */
 function Recap({ studio, feed }: { studio: StudioState; feed: OverlayFeed }) {
-  if (studio.elements.tankRecap && feed.tankRecap) return <TankRecapCard r={feed.tankRecap} />;
-  if (studio.elements.witchRecap && feed.witchRecap) return <WitchRecapCard r={feed.witchRecap} />;
-  return null;
+  const spot = useRef<HTMLDivElement>(null);
+  // Every render (the clock ticks 4 times a second), so the card follows the HUD as rows come and go.
+  useLayoutEffect(() => {
+    const card = spot.current?.firstElementChild;
+    if (card instanceof HTMLElement) placeRecap(card);
+  });
+  const card = studio.elements.tankRecap && feed.tankRecap ? <TankRecapCard r={feed.tankRecap} />
+    : studio.elements.witchRecap && feed.witchRecap ? <WitchRecapCard r={feed.witchRecap} /> : null;
+  if (!card) return null;
+  return <div class="ov-recap-spot" ref={spot}>{card}</div>;
+}
+
+/** Top of the recap card in scene pixels: no higher than this, which clears the game's own top band. */
+const RECAP_MIN_TOP = 124;
+const RECAP_GAP = 14;
+
+/**
+ * Put the recap card just under the lowest HUD piece above the middle of the
+ * screen that shares its columns. The looks and their optional rows (tank bar,
+ * infected row, progress) differ in height, so a fixed top covered some of them.
+ * Measured in scene pixels, so the scaled preview in the producer panel agrees.
+ */
+export function placeRecap(card: HTMLElement): void {
+  const game = card.closest('.ov-game');
+  if (!(game instanceof HTMLElement)) return;
+  const g = game.getBoundingClientRect();
+  if (!g.height || !game.offsetHeight) return; // not laid out (tests, hidden preview)
+  const scale = g.height / game.offsetHeight;
+  const c = card.getBoundingClientRect();
+  let bottom = 0;
+  for (const el of game.querySelectorAll<HTMLElement>('*')) {
+    if (el.closest('.ov-recap-spot') || el.closest('.ov-callout')) continue;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || r.right <= c.left || r.left >= c.right) continue;
+    const top = (r.top - g.top) / scale;
+    if (top >= game.offsetHeight / 2) continue; // bottom-of-screen HUDs never push the card down
+    bottom = Math.max(bottom, (r.bottom - g.top) / scale);
+  }
+  card.style.top = `${Math.round(Math.max(RECAP_MIN_TOP, bottom + RECAP_GAP))}px`;
 }
 
 const TANK_END_TITLE: Record<TankRecap['end'], [string, string]> = {
