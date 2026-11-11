@@ -65,6 +65,14 @@ export interface Config {
    *  Dallas the plugin writes its own file into that one, and a pushed copy
    *  beside it must never race it. Created on first push. */
   replayLiveDir: string;
+  /** Where SourceTV demo bytes pushed by the game boxes' sidecar are kept
+   *  while a map is recorded (POST /api/demos/push, src/demoLive.ts). Empty,
+   *  the default, turns the push off. Must not be DEMO_DIR. */
+  demoLiveDir: string;
+  /** Live 3D on Dallas: follow the growing demos in DEMO_DIR directly (the
+   *  site shares the game server's disk there). Off unless DEMO_LIVE_LOCAL=1
+   *  and DEMO_DIR is set. */
+  demoLiveLocal: boolean;
   /** Where scripts/push-manifest.ts drops the fleet view's repo.json and base.json. */
   fleetDir: string;
   /** The deploy repo the site stages releases from (read-only deploy key). */
@@ -133,6 +141,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dlc4MissionsDir: env.DLC4_MISSIONS_DIR ?? '',
     ticketAttachmentsDir: env.TICKET_ATTACHMENTS_DIR?.trim() || join(dirname(dbPath), 'ticket-attachments'),
     replayLiveDir: env.REPLAY_LIVE_DIR?.trim() || join(dirname(dbPath), 'replays-live'),
+    demoLiveDir: env.DEMO_LIVE_DIR?.trim() || '',
+    demoLiveLocal: env.DEMO_LIVE_LOCAL === '1',
     fleetDir: env.FLEET_DIR?.trim() || join(dirname(dbPath), 'fleet'),
     deployRepoUrl: env.DEPLOY_REPO_URL?.trim() || 'git@github.com:Volence/l4d-deploy.git',
     deployRepoKey: env.DEPLOY_REPO_KEY?.trim() || null,
