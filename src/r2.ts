@@ -189,7 +189,11 @@ export async function head(cfg: R2Config, key: string): Promise<{ bytes: number 
   const signed = signRequest(cfg, {
     method: 'HEAD', path: pathFor(cfg, key), headers: {}, payloadHash: EMPTY_SHA256,
   });
-  const res = await fetch(`${cfg.endpoint}${pathFor(cfg, key)}`, { method: 'HEAD', headers: signed });
+  // identity: R2 compresses a HEAD for compressible types (JSON) when fetch offers gzip and then
+  // sends no Content-Length, which read as 0 bytes and failed every JSON upload check.
+  const res = await fetch(`${cfg.endpoint}${pathFor(cfg, key)}`, {
+    method: 'HEAD', headers: { ...signed, 'accept-encoding': 'identity' },
+  });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`R2 HEAD ${key} failed: ${res.status}`);
   return { bytes: Number(res.headers.get('content-length') ?? 0) };
