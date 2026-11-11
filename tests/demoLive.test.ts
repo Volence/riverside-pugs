@@ -531,6 +531,24 @@ describe('GET /api/demos/live/match/:id', () => {
     for (const r of refused) expect(r).toEqual({ error: 'no live demo for that match' });
   }, 15_000);
 
+  it('the status route says ready only once bytes are released, and 404s like the streams otherwise', async () => {
+    const live = seedMatch('live');
+    const done = seedMatch('completed', OTHER);
+    const before = await app.inject({ method: 'GET', url: `/api/demos/live/match/${live}` });
+    expect(before.statusCode).toBe(404);
+    await push(0, demo(3));
+    await tickAt(T0 + DEFAULT_DELAY_MS - 1);
+    const held = await app.inject({ method: 'GET', url: `/api/demos/live/match/${live}` });
+    expect(held.statusCode).toBe(200);
+    expect(held.json()).toEqual({ ready: false });
+    await tickAt(T0 + DEFAULT_DELAY_MS);
+    const ready = await app.inject({ method: 'GET', url: `/api/demos/live/match/${live}` });
+    expect(ready.json()).toEqual({ ready: true });
+    expect(ready.body).not.toContain(TOKEN);
+    const gone = await app.inject({ method: 'GET', url: `/api/demos/live/match/${done}` });
+    expect(gone.statusCode).toBe(404);
+  });
+
   it('a match that leaves live mid-stream still waits out the hold, then ends', async () => {
     const id = seedMatch('live');
     const d = demo(10);

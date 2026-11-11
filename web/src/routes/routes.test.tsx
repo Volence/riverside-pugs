@@ -2535,6 +2535,67 @@ describe('Live with nothing running', () => {
   });
 });
 
+describe('Live 3D', () => {
+  const MANIFEST = {
+    format: 'theatre-manifest/2', version: 'v1', generated: 'x', viewer: { mirrors: false },
+    maps: { l4d_vs_hospital01_apartment: { lit: true, low: true, bytes: 20_000_000 } },
+  };
+  const liveMatch = (id: number, currentMap: string) => ({
+    id, campaign: 'no_mercy', currentMap, teamA: [], teamB: [], maps: [], teamAScore: 0, teamBScore: 0,
+    lastSeen: null, stale: false, demos: [], events: [],
+  });
+  // fetch serves the manifest and the per-match feed status; `ready` per match id.
+  const serve = (ready: Record<number, boolean>) => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('manifest.json')) return new Response(JSON.stringify(MANIFEST));
+    const m = /\/api\/demos\/live\/match\/(\d+)$/.exec(url);
+    if (m && Number(m[1]) in ready) return new Response(JSON.stringify({ ready: ready[Number(m[1])] }));
+    return new Response('{}', { status: 404 });
+  }));
+  beforeEach(() => {
+    resetTheatreCache();
+    mockApi.queue.mockResolvedValue({ count: 0, players: [], phase: null });
+    mockApi.matches.mockResolvedValue({ matches: [] });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    try { localStorage.clear(); } catch { /* none */ }
+  });
+
+  it('offers 3D once the feed is ready on a converted map, and the viewer follows the match feed', async () => {
+    localStorage.setItem('theatre.view', '3d');
+    serve({ 1128: true });
+    mockApi.live.mockResolvedValue({ matches: [liveMatch(1128, 'l4d_vs_hospital01_apartment')] });
+    const { container } = render(<Live me={null} />);
+    await waitFor(() => expect(container.querySelector('iframe.theatre3d__frame')).toBeTruthy());
+    const src = new URL(container.querySelector('iframe')!.getAttribute('src')!, 'https://riversidepug.com');
+    expect(src.searchParams.get('live')).toMatch(/^wss?:\/\/[^/]+\/api\/demos\/live\/match\/1128\/ws$/);
+    expect(src.searchParams.get('view')).toBe('top');
+    fireEvent.click(screen.getByRole('tab', { name: '2D' }));
+    await waitFor(() => expect(container.querySelector('iframe')).toBeNull());
+    expect(localStorage.getItem('theatre.view')).toBe('2d');
+  });
+
+  it('keeps 2D with no switch while the feed is not ready or the map is not converted', async () => {
+    localStorage.setItem('theatre.view', '3d');
+    serve({ 1: false, 2: true });
+    mockApi.live.mockResolvedValue({ matches: [liveMatch(1, 'l4d_vs_hospital01_apartment'), liveMatch(2, 'l4d_vs_farm01_hilltop')] });
+    const { container } = render(<Live me={null} />);
+    await waitFor(() => expect(container.querySelectorAll('[id^="match-"]').length).toBe(2));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('tab', { name: '3D' })).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('starts each card on 2D when several matches run, with the switch offered', async () => {
+    localStorage.setItem('theatre.view', '3d');
+    serve({ 1: true, 2: true });
+    mockApi.live.mockResolvedValue({ matches: [liveMatch(1, 'l4d_vs_hospital01_apartment'), liveMatch(2, 'l4d_vs_hospital01_apartment')] });
+    const { container } = render(<Live me={null} />);
+    await waitFor(() => expect(screen.getAllByRole('tab', { name: '3D' }).length).toBe(2));
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+});
+
 describe('leaderboard stat leaders', () => {
   const board = (rows: unknown[]) => ({ season: { id: 1, name: 'Season 1' }, matchesRated: 9, rows });
   const row = (steamid: string, name: string, stats: Record<string, number>) =>

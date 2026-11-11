@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   deviceView, hashView, loadTheatreManifest, parseManifest, storeView, storedView, theatreAssets, theatreGap,
-  theatreSrc, THEATRE_ASSET_HOST, THEATRE_PAGE,
+  theatreSrc, theatreLiveSrc, LIVE_BUFFER_S, THEATRE_ASSET_HOST, THEATRE_PAGE,
 } from './theatre';
 
 const raw = {
@@ -77,6 +77,26 @@ describe('theatreSrc', () => {
     const url = new URL(theatreSrc({ matchId: 5, ordinal: 2, map: 'l4d_vs_mhospital01_apartment', mirror: true }, assets), 'https://riversidepug.com');
     expect(url.searchParams.has('map')).toBe(false);
     expect(url.searchParams.get('assets')).toBe(assets);
+  });
+});
+
+describe('theatreLiveSrc', () => {
+  const assets = 'https://assets.riversidepug.com/theatre/85b5d89e3f12/';
+  it('points the viewer at the match feed over wss, top-down, with the long buffer and no map=', () => {
+    const url = new URL(theatreLiveSrc({ matchId: 1128 }, assets, { protocol: 'https:', host: 'riversidepug.com' }), 'https://riversidepug.com');
+    expect(url.pathname).toBe(THEATRE_PAGE);
+    expect(url.searchParams.get('embed')).toBe('1');
+    expect(url.searchParams.get('live')).toBe('wss://riversidepug.com/api/demos/live/match/1128/ws');
+    expect(url.searchParams.get('livebuf')).toBe(String(LIVE_BUFFER_S));
+    expect(LIVE_BUFFER_S).toBeGreaterThan(25);
+    expect(url.searchParams.get('view')).toBe('top');
+    expect(url.searchParams.get('assets')).toBe(assets);
+    expect(url.searchParams.has('map')).toBe(false);
+    expect(url.searchParams.has('demo')).toBe(false);
+  });
+  it('uses ws on plain http (development)', () => {
+    const url = new URL(theatreLiveSrc({ matchId: 3 }, assets, { protocol: 'http:', host: 'localhost:5173' }), 'http://localhost:5173');
+    expect(url.searchParams.get('live')).toBe('ws://localhost:5173/api/demos/live/match/3/ws');
   });
 });
 

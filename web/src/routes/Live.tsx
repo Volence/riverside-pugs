@@ -14,6 +14,8 @@ import { PageHeader } from '../components/PageHeader';
 import { VersusHeader } from '../components/VersusHeader';
 import { StatTable, EventFeed } from '../components/StatTable';
 import { Viewer } from '../replay/Viewer';
+import { LiveTheatre3D, useLive3dReady, useTheatreManifest } from '../replay/Theatre3D';
+import { deviceView, storeView, storedView, theatreGap, type TheatreView } from '../theatre';
 import { WinChart, fmtChance } from '../components/WinChart';
 import type { WinLine } from '../api';
 
@@ -78,14 +80,30 @@ export function Live({ me }: { me: string | null }) {
         <NothingLive />
       ) : (
         <div class="stack">
-          {matches.map((m) => <LiveCard key={m.id} m={m} me={me} />)}
+          {matches.map((m) => <LiveCard key={m.id} m={m} me={me} several={matches.length > 1} />)}
         </div>
       )}
     </div>
   );
 }
 
-function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
+function LiveCard({ m, me, several }: { m: LiveMatch; me: string | null; several: boolean }) {
+  // 2D or 3D (docs/theatre-3d.md "Phase 2"): the visitor's own pick, else 3D
+  // where the device suits it (deviceView), except that cards start on 2D
+  // when several matches are running (owner, 2026-11-11). 3D is offered only
+  // once the match's live demo feed has released something and the map being
+  // played is converted; until then the 2D viewer stays, with no switch.
+  const [view, setView] = useState<TheatreView>(() => {
+    if (several) return '2d';
+    return storedView() ?? (typeof document === 'undefined' ? '2d' : deviceView());
+  });
+  const manifest = useTheatreManifest(true);
+  const ready = useLive3dReady(m.id, true);
+  const can3d = ready === true && Boolean(manifest) && Boolean(m.currentMap)
+    && theatreGap(m.currentMap!, true, manifest!) === null;
+  const in3d = can3d && view === '3d';
+  const pick = (v: TheatreView) => { setView(v); storeView(v); };
+
   // Every table on the card shares one column set, derived from the cumulative
   // totals, so the same stat sits in the same place whichever table you read.
   const withDerived = (p: LivePlayer): LivePlayer =>
@@ -138,7 +156,21 @@ function LiveCard({ m, me }: { m: LiveMatch; me: string | null }) {
       />
       {m.winLine && <LiveOdds line={m.winLine} />}
       {m.spectate && <SpectatePanel spectate={m.spectate} />}
-      <Viewer spec={{ kind: 'live-match', matchId: m.id }} live names={namesFor(m)} />
+      {can3d && (
+        <div class="tabs match__views" role="tablist" aria-label="View">
+          <button
+            type="button" role="tab" aria-selected={!in3d}
+            class={`tabs__tab${!in3d ? ' is-active' : ''}`} onClick={() => pick('2d')}
+          >2D</button>
+          <button
+            type="button" role="tab" aria-selected={in3d}
+            class={`tabs__tab${in3d ? ' is-active' : ''}`} onClick={() => pick('3d')}
+          >3D</button>
+        </div>
+      )}
+      {in3d
+        ? <LiveTheatre3D matchId={m.id} manifest={manifest!} />
+        : <Viewer spec={{ kind: 'live-match', matchId: m.id }} live names={namesFor(m)} />}
 
       {cols.length === 0 ? (
         <div class="live__teams">

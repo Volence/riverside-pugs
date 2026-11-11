@@ -113,6 +113,35 @@ export function theatreSrc(
   return `${THEATRE_PAGE}?${q.toString()}`;
 }
 
+/** How far behind the newest released data the live view plays, in seconds.
+ *  srcds writes a growing demo in 688 KiB pieces about every 25 s (measured,
+ *  docs/theatre-3d.md), so the viewer must hold more than one piece in hand or
+ *  it stalls between them; the site's own 10 s hold comes on top. */
+export const LIVE_BUFFER_S = 30;
+
+/** The iframe's URL for a live match: the match's live demo feed
+ *  (src/routes/demoLive.ts) as the viewer's live= relay, over WebSocket on the
+ *  page's own host. No map=: the map changes during a match, and the viewer
+ *  loads the one each recording's header names (a mirror too). Opens on the
+ *  top-down overview (owner, 2026-11-11). */
+export function theatreLiveSrc(
+  { matchId }: { matchId: number },
+  assets: string,
+  origin: { protocol: string; host: string },
+): string {
+  const base = assets.replace(/\/*$/, '/');
+  const ws = `${origin.protocol === 'https:' ? 'wss' : 'ws'}://${origin.host}/api/demos/live/match/${matchId}/ws`;
+  const q = new URLSearchParams({
+    embed: '1',
+    live: ws,
+    livebuf: String(LIVE_BUFFER_S),
+    view: 'top',
+    assets: base,
+    ambbase: `${base}light/`,
+  });
+  return `${THEATRE_PAGE}?${q.toString()}`;
+}
+
 export type TheatreView = '2d' | '3d';
 
 /** The view a link asks for: #map-2-3d is the second map in 3D. A plain #map-2

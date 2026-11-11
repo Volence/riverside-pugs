@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { fmtBytes, mapName } from '../format';
-import { loadTheatreManifest, theatreAssets, theatreGap, theatreSrc, type TheatreManifest } from '../theatre';
+import {
+  loadTheatreManifest, theatreAssets, theatreGap, theatreLiveSrc, theatreSrc, type TheatreManifest,
+} from '../theatre';
 
 /** The synced theatre manifest for this page load: undefined while it loads,
  *  null when there is none (no sync, or a bad file). Only fetched when asked
@@ -62,6 +64,61 @@ export function Theatre3D(
         Both rounds of this map from the SourceTV demo, played in your browser.
         Click a player to follow them, F for first person, M for the event list.
         {total > 0 && <> Downloads about {fmtBytes(total)} for the map and the demo.</>}
+        {' '}<a href={src} target="_blank" rel="noopener">Open in its own tab</a>
+      </p>
+    </div>
+  );
+}
+
+/** How often /live asks whether a match's live 3D feed has anything yet. */
+const LIVE_READY_POLL_MS = 10_000;
+
+/** Whether a live match's 3D feed has released anything (GET
+ *  /api/demos/live/match/:id): null while unknown, then true / false. Asks
+ *  again every 10 s until it is ready, then stops: once a match has a feed it
+ *  keeps one (a new map is a restart inside the same feed). A 404 is "not
+ *  yet" (no recording, the feed off, or a private match), never an error. */
+export function useLive3dReady(matchId: number, wanted: boolean): boolean | null {
+  const [ready, setReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!wanted) return undefined;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = async () => {
+      let ok = false;
+      try {
+        const res = await fetch(`/api/demos/live/match/${matchId}`, { cache: 'no-store' });
+        ok = res.ok && ((await res.json()) as { ready?: unknown }).ready === true;
+      } catch { ok = false; }
+      if (!live) return;
+      setReady(ok);
+      if (!ok) timer = setTimeout(() => { void ask(); }, LIVE_READY_POLL_MS);
+    };
+    void ask();
+    return () => { live = false; if (timer) clearTimeout(timer); };
+  }, [matchId, wanted]);
+  return ready;
+}
+
+/**
+ * A live match in the 3D viewer, following its SourceTV demo as it is
+ * recorded (docs/theatre-3d.md "Phase 2"). The caller only mounts it when
+ * the feed is ready and the current map is converted; the viewer itself
+ * follows map changes (the feed restarts it on the next map's recording).
+ */
+export function LiveTheatre3D({ matchId, manifest }: { matchId: number; manifest: TheatreManifest }) {
+  const src = theatreLiveSrc({ matchId }, theatreAssets(manifest.version), location);
+  return (
+    <div class="theatre3d">
+      <iframe
+        class="theatre3d__frame"
+        src={src}
+        title={`Live 3D view of match ${matchId}`}
+        allow="fullscreen; autoplay"
+      />
+      <p class="theatre3d__note muted">
+        The match from its SourceTV demo, about 40 seconds behind the game (the demo is written in pieces).
+        Click a player to follow them, F for first person.
         {' '}<a href={src} target="_blank" rel="noopener">Open in its own tab</a>
       </p>
     </div>
