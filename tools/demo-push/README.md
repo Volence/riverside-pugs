@@ -17,7 +17,8 @@ Dallas does not run it: the site there reads the growing files itself (`DEMO_LIV
 ## Install on a Riverside box (owner's go-ahead first: it is a change on a game box)
 
 ```sh
-install -D -m 0755 tools/demo-push/demo_push.py root@<box>:/usr/local/lib/pug-demo-push/demo_push.py
+ssh root@<box> 'mkdir -p /usr/local/lib/pug-demo-push'
+scp tools/demo-push/demo_push.py root@<box>:/usr/local/lib/pug-demo-push/demo_push.py
 scp tools/demo-push/pug-demo-push.service root@<box>:/etc/systemd/system/
 ssh root@<box> 'systemctl daemon-reload && systemctl enable --now pug-demo-push && journalctl -u pug-demo-push -n 20'
 ```
