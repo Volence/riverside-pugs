@@ -662,14 +662,17 @@ export class DemoFeed {
         ? JSON.stringify({ type: 'pos', off: rec.frameLen, wall: rec.posWall, demoT: +rec.demoT.toFixed(2) })
         : null;
       for (const c of [...rec.clients]) {
-        if (pos && c.text && c.sent >= rec.frameLen) c.text(pos);
+        // Pump first: its first piece goes out synchronously, so a mark can
+        // follow the bytes it names in the same tick.
         void this.pump(rec, c);
+        if (pos && c.text && rec.clients.has(c) && c.sent >= rec.frameLen) c.text(pos);
       }
     }
     this.dropFinished(now);
     if (now - this.lastPrune >= PRUNE_EVERY_MS) {
       this.lastPrune = now;
-      this.pruneLiveDir(now);
+      // File ages are on the real clock, whatever clock drives the feed.
+      this.pruneLiveDir(Date.now());
     }
   }
 
