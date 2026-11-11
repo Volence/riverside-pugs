@@ -1,0 +1,25 @@
+# Live 3D sidecar (tools/demo-push/README.md). One per Riverside box, covering both instances.
+# Dallas does not need it: the site reads its demos directly (DEMO_LIVE_LOCAL=1).
+[Unit]
+Description=Riverside live 3D: send growing SourceTV demos to the site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=l4d
+ExecStart=/usr/bin/python3 -I /usr/local/lib/pug-demo-push/demo_push.py \
+  --dir /home/l4d/l4d1-a/left4dead --dir /home/l4d/l4d1-b/left4dead \
+  --url https://riversidepug.com/api/demos/push
+Restart=always
+RestartSec=5
+# Reads the demos, writes nothing.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+MemoryMax=128M
+CPUQuota=20%
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
