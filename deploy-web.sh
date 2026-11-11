@@ -25,6 +25,24 @@ HOST=${L4D_HOST:-45.32.199.85}
 REMOTE=/home/pug/app
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The 3D theatre's small set. The site build copies web/public/ into dist, so the
+# viewer page is served same-origin (its module workers must be) and every
+# heavy file comes from https://assets.riversidepug.com/theatre/<version>/. A
+# manifest whose version is not on R2 yet would point every 3D tab at missing
+# files, so that is checked first: upload with scripts/upload-theatre.ts --upload.
+THEATRE="$HERE/web/public/theatre"
+if [ -f "$THEATRE/manifest.json" ]; then
+  TV=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$THEATRE/manifest.json")
+  for d in map models sound/out/a; do
+    [ -e "$THEATRE/$d" ] && { echo "FATAL: $THEATRE/$d is heavy-set content from an old sync; run tools/sync-theatre.sh"; exit 1; }
+  done
+  if [ "${THEATRE_SKIP_R2_CHECK:-}" != 1 ]; then
+    code=$(curl -s -o /dev/null -w '%{http_code}' "https://assets.riversidepug.com/theatre/$TV/manifest.json")
+    [ "$code" = 200 ] || { echo "FATAL: theatre $TV is not on R2 (manifest.json HTTP $code). npx tsx scripts/upload-theatre.ts --upload first."; exit 1; }
+  fi
+  echo "==> theatre $TV (small set, $(du -sh "$THEATRE" | cut -f1))"
+fi
+
 # Two .git excludes on purpose. In a normal checkout .git is a DIRECTORY and
 # '.git/' matches it. In a git worktree .git is a FILE holding a gitdir pointer,
 # which a trailing-slash pattern does not match, so deploying from a worktree
@@ -59,12 +77,21 @@ rsync -az --delete --info=stats1 \
    # in place on the server, which nothing references once the manifest points at
    # assets.riversidepug.com, and which are a free way back if it ever needs to.` \
   --exclude 'web/public/overviews/' \
-  `# The 3D theatre (tools/sync-theatre.sh): about 1.1 GB of maps, models and sounds
-   # copied from the spike, gitignored. Left out until it ships: the heavy part is
-   # meant for R2 like the overviews, and the page needs a Caddy frame rule first.
-   # See docs/theatre-3d.md "Shipping".` \
+  `# The 3D theatre (tools/sync-theatre.sh, docs/theatre-3d.md). The heavy set
+   # (theatre-assets/, ~3.8 GB of maps, models and sounds) lives on R2 and never
+   # goes to the box. The small set (web/public/theatre/: the viewer page, its
+   # vendor scripts, the sound worker, manifest.json) is sent by its own step
+   # below, only from a checkout that has it; excluding it here also keeps this
+   # --delete from removing the box's copy when deploying from a checkout that
+   # never ran the sync.` \
+  --exclude 'theatre-assets/' \
   --exclude 'web/public/theatre/' \
   "$HERE/" "root@$HOST:$REMOTE/"
+
+# The theatre's small set (checked above), after the main sync so the build sees it.
+if [ -f "$THEATRE/manifest.json" ]; then
+  rsync -az --delete --info=stats1 "$THEATRE/" "root@$HOST:$REMOTE/web/public/theatre/"
+fi
 
 ssh "root@$HOST" "set -e
   chown -R pug:pug $REMOTE

@@ -1,8 +1,8 @@
 import { defineConfig, type Plugin } from 'vite';
 import preact from '@preact/preset-vite';
 import { fileURLToPath } from 'node:url';
-import { existsSync, statSync } from 'node:fs';
-import { join, normalize } from 'node:path';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { extname, join, normalize } from 'node:path';
 
 /** The API the dev proxy talks to. :8080 unless API_PORT says otherwise, so a
  *  second checkout can run its own API beside another session's. */
@@ -29,21 +29,48 @@ const overlayPages: Plugin = {
   },
 };
 
-/** The 3D viewer's static folder (web/public/theatre/, tools/sync-theatre.sh):
- *  a missing file there is a 404, as in production (isPageRequest in
- *  src/server.ts), not the app shell Vite's HTML fallback would hand back. The
- *  viewer probes for optional files and reads any 200 as the file. Files that
- *  exist are served by Vite's public-folder middleware before this runs. */
-const theatre404: Plugin = {
-  name: 'theatre-404',
+/** Content types for the theatre's heavy set in dev (the same table as
+ *  scripts/upload-theatre.ts gives R2). */
+const THEATRE_TYPES: Record<string, string> = {
+  '.glb': 'model/gltf-binary', '.json': 'application/json', '.bin': 'application/octet-stream',
+  '.png': 'image/png', '.webp': 'image/webp', '.ogg': 'audio/ogg',
+};
+
+/** The 3D theatre in dev (docs/theatre-3d.md, tools/sync-theatre.sh).
+ *
+ *  - `/theatre/<version>/...` is the heavy set (maps, models, sounds, light),
+ *    which production loads from R2 and which the sync stages in
+ *    theatre-assets/<version>/, outside web/ so a build never copies it. Served
+ *    from there, so dev runs the same URLs as production on its own origin.
+ *  - Anything else under /theatre/ is the small set in web/public/theatre/
+ *    (served by Vite's public-folder middleware before this runs). A missing
+ *    file there is a 404, as in production (isPageRequest in src/server.ts),
+ *    not the app shell Vite's HTML fallback would hand back: the viewer probes
+ *    for optional files and reads any 200 as the file. */
+const theatreDev: Plugin = {
+  name: 'theatre-dev',
   configureServer(server) {
     const root = fileURLToPath(new URL('./web/public/', import.meta.url));
+    const assets = fileURLToPath(new URL('./theatre-assets/', import.meta.url));
     server.middlewares.use((req, res, next) => {
       const path = req.url?.split('?')[0] ?? '';
       if (!path.startsWith('/theatre/')) return next();
-      let file: string;
-      try { file = normalize(join(root, decodeURIComponent(path))); } catch { file = ''; }
-      if (file.startsWith(root) && existsSync(file) && statSync(file).isFile()) return next();
+      let decoded: string;
+      try { decoded = decodeURIComponent(path); } catch { decoded = ''; }
+      const version = /^\/theatre\/([A-Za-z0-9._-]+)\//.exec(decoded)?.[1];
+      if (version && version !== 'viewer' && version !== 'sound' && existsSync(join(assets, version))) {
+        const file = normalize(join(assets, decoded.slice('/theatre/'.length)));
+        if (file.startsWith(join(assets, version)) && existsSync(file) && statSync(file).isFile()) {
+          res.setHeader('Content-Type', THEATRE_TYPES[extname(file)] ?? 'application/octet-stream');
+          res.setHeader('Content-Length', String(statSync(file).size));
+          if (req.method === 'HEAD') { res.end(); return; }
+          createReadStream(file).pipe(res);
+          return;
+        }
+      } else {
+        const file = normalize(join(root, decoded));
+        if (decoded && file.startsWith(root) && existsSync(file) && statSync(file).isFile()) return next();
+      }
       res.statusCode = 404;
       res.end('not found');
     });
@@ -52,7 +79,7 @@ const theatre404: Plugin = {
 
 export default defineConfig({
   root: 'web',
-  plugins: [preact(), overlayPages, theatre404],
+  plugins: [preact(), overlayPages, theatreDev],
   build: {
     outDir: '../dist/public',
     emptyOutDir: true,
