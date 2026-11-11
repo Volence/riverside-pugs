@@ -257,6 +257,29 @@ describe('useReplaySource behind the round being played', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(urls.length).toBeGreaterThan(before);
   });
+
+  // Before the match's first round has pushed anything the site has no
+  // replay row and answers 404. That is "not started", not "couldn't load"
+  // (match 1128, 2026-11-11: the error showed for the whole ready-up).
+  it('reports not started, not an error, while a live match has no replay yet, then picks the round up', async () => {
+    let ready = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/replays/live/match/')) {
+        if (!ready) return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+        return jsonResponse({ ordinal: 0, half: 1, closed: false, current: { ordinal: 0, half: 1, sinceMs: SINCE } });
+      }
+      return fileResponse(chunk(), false);
+    }));
+    const { result } = renderHook(() => useReplaySource({ kind: 'live-match', matchId: 7 }));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(result.current.notStarted).toBe(true);
+    expect(result.current.error).toBeNull();
+    ready = true;
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(result.current.notStarted).toBe(false);
+    expect(result.current.header).not.toBeNull();
+  });
 });
 
 describe('useReplaySource over a closed file while the phase is live', () => {

@@ -165,7 +165,7 @@ export function Viewer(
     theaterTools?: { chips: ComponentChildren; panel: ComponentChildren | null; onClose?: () => void };
   },
 ) {
-  const { header, frames, closed, phase, behindSinceMs = null, tooNew, error } = useReplaySource(spec);
+  const { header, frames, closed, phase, behindSinceMs = null, tooNew, notStarted, error } = useReplaySource(spec);
   const endMs = frames.length ? frames[frames.length - 1].tMs : 0;
   const playback = usePlayback(endMs, { live, closed });
   if (momentRef) momentRef.current = playback.tMs;
@@ -364,7 +364,8 @@ export function Viewer(
     const waiting = live && behindSinceMs !== null
       ? liveStatusText(live, false, 0, 0, phase, Date.now(), names, behindSinceMs)
       : null;
-    return <div class="replay replay--empty">{waiting ?? 'Loading replay...'}</div>;
+    const fallback = notStarted ? 'Waiting for the first round to start...' : 'Loading replay...';
+    return <div class="replay replay--empty">{waiting ?? fallback}</div>;
   }
 
   const railOn = Boolean(timeline) && (toggles.events || toggles.chat);
