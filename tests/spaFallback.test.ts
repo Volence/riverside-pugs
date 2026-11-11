@@ -41,6 +41,15 @@ describe('SPA fallback', () => {
     expect(res.json()).toEqual({ error: 'not found' });
   });
 
+  // The 3D viewer probes for optional files and reads any 200 as the file.
+  it('answers a missing file under /theatre/ with a 404, not the shell', async () => {
+    for (const method of ['GET', 'HEAD'] as const) {
+      const res = await app.inject({ method, url: '/theatre/map/l4d_vs_nope.lit.low.glb' });
+      expect(res.statusCode).toBe(404);
+      expect(res.headers['content-type'] ?? '').not.toContain('text/html');
+    }
+  });
+
   it('does not hand the shell to a non-GET request', async () => {
     const res = await app.inject({ method: 'POST', url: '/some/page' });
     expect(res.statusCode).toBe(404);

@@ -18,6 +18,8 @@ import { sideTotals } from '../matchTotals';
 import { netDamageAsSi } from '../../../src/siDamage';
 import { Viewer } from '../replay/Viewer';
 import { DrillThis } from '../replay/DrillThis';
+import { Theatre3D } from '../replay/Theatre3D';
+import { initialView } from '../theatre';
 import { WinChart } from '../components/WinChart';
 
 /**
@@ -145,11 +147,12 @@ export function sideNote(rounds: MatchDetailData['rounds'], ordinal: number): st
 }
 
 /** The map the page opens on: the one named in the URL hash (#map-2 is the
- *  second map) when it exists, else the first. A link to a specific map's
- *  replay is the whole reason the choice lives in the hash. */
+ *  second map, #map-2-3d the same map in the 3D view) when it exists, else the
+ *  first. A link to a specific map's replay is the whole reason the choice
+ *  lives in the hash. */
 export function initialOrdinal(maps: { ordinal: number }[], hash: string): number | null {
   if (maps.length === 0) return null;
-  const m = /^#map-(\d+)$/.exec(hash);
+  const m = /^#map-(\d+)(?:-3d)?$/.exec(hash);
   const wanted = m ? Number(m[1]) - 1 : NaN;
   return maps.some((mp) => mp.ordinal === wanted) ? wanted : maps[0].ordinal;
 }
@@ -581,10 +584,27 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
   );
   // A moment picked in the viewer, waiting in the report form below.
   const [moment, setMoment] = useState<ReportMoment | null>(null);
+  // The map panel's view: the 2D replay or the SourceTV demo in 3D. Kept across
+  // map switches and in the hash beside the map (#map-2-3d), like the map itself.
+  // A clip's deep link is a moment in the 2D replay, so it always opens there.
+  const [view, setView] = useState<'2d' | '3d'>(
+    () => (deepLink.ordinal !== null || typeof location === 'undefined' ? '2d' : initialView(location.hash)),
+  );
+  const writeHash = (o: number, v: '2d' | '3d') => {
+    if (typeof history !== 'undefined') history.replaceState(null, '', `#map-${o + 1}${v === '3d' ? '-3d' : ''}`);
+  };
   const selectMap = (o: number) => {
     setOrdinal(o);
-    if (typeof history !== 'undefined') history.replaceState(null, '', `#map-${o + 1}`);
+    writeHash(o, view);
   };
+  const selectView = (o: number, v: '2d' | '3d') => {
+    setView(v);
+    writeHash(o, v);
+  };
+  // 3D plays the map's SourceTV demo, so it is offered on finished matches
+  // (completed, or aborted with whatever was recorded) that have one for the map.
+  // Never on a match still being played: a demo shows the infected ghosts.
+  const finished = match.state === 'completed' || match.state === 'aborted';
   const current = maps.find((mp) => mp.ordinal === ordinal) ?? maps[0];
   // The deep link only still applies while its own map is the one on screen;
   // navigating away and never seeing it re-applied (even back on the same
@@ -696,6 +716,8 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
           const mp = current;
           const demo = data.demos?.find((d) => d.ordinal === mp.ordinal);
           const note = sideNote(rounds, mp.ordinal);
+          const can3d = finished && demo !== undefined;
+          const in3d = can3d && view === '3d';
           return (
             <Panel>
               {maps.length > 1 && (
@@ -722,20 +744,38 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
                   demo {fmtBytes(demo.bytes)}
                 </a></>}
               </h3>
+              {can3d && (
+                <div class="tabs match__views" role="tablist" aria-label="View">
+                  <button type="button" role="tab" aria-selected={!in3d}
+                    class={`tabs__tab${!in3d ? ' is-active' : ''}`} onClick={() => selectView(mp.ordinal, '2d')}>
+                    Replay
+                  </button>
+                  <button type="button" role="tab" aria-selected={in3d}
+                    class={`tabs__tab${in3d ? ' is-active' : ''}`} onClick={() => selectView(mp.ordinal, '3d')}
+                    title="The map's SourceTV demo played back in 3D">
+                    3D
+                  </button>
+                </div>
+              )}
               {/* Keyed by map so the round switch inside resets to round 1
-                  when the map changes, instead of carrying round 2 across. */}
-              <MapReplay
-                key={mp.ordinal}
-                matchId={match.id}
-                ordinal={mp.ordinal}
-                names={playerNames}
-                initialHalf={linkedHere ? deepLink.half ?? undefined : undefined}
-                seekMs={linkedHere ? deepLink.seekMs : undefined}
-                onMoment={me ? setMoment : undefined}
-                // The server refuses drills of anything unfinished too: a
-                // frame carries ghost positions.
-                drill={match.state === 'completed' || match.state === 'aborted' ? { signedIn: Boolean(me) } : undefined}
-              />
+                  when the map changes, instead of carrying round 2 across.
+                  Theatre3D too: a new map is a new viewer page. */}
+              {in3d ? (
+                <Theatre3D key={mp.ordinal} matchId={match.id} ordinal={mp.ordinal} map={mp.map} demoBytes={demo?.bytes ?? null} />
+              ) : (
+                <MapReplay
+                  key={mp.ordinal}
+                  matchId={match.id}
+                  ordinal={mp.ordinal}
+                  names={playerNames}
+                  initialHalf={linkedHere ? deepLink.half ?? undefined : undefined}
+                  seekMs={linkedHere ? deepLink.seekMs : undefined}
+                  onMoment={me ? setMoment : undefined}
+                  // The server refuses drills of anything unfinished too: a
+                  // frame carries ghost positions.
+                  drill={finished ? { signedIn: Boolean(me) } : undefined}
+                />
+              )}
               {Object.keys(mp.stats ?? {}).length > 0
                 ? (
                   <StatTable

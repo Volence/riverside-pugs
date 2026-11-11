@@ -451,6 +451,42 @@ describe('MatchDetail', () => {
     expect(screen.queryByText(/Forecast/)).toBeNull();
   });
 
+  it('offers the 3D view only for a map with a demo, and opens the viewer on that demo', async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
+      format: 'theatre-manifest/1', generated: 'x', maps: { l4d_hospital01_apartment: { lit: true, low: true, bytes: 20_000_000 } },
+    })));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      mockApi.match.mockResolvedValue(matchWith({
+        maps: [
+          { ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} },
+          { ordinal: 1, map: 'l4d_hospital02_subway', teamAScore: 400, teamBScore: 300, stats: {} },
+        ],
+        demos: [{ ordinal: 0, map: 'l4d_hospital01_apartment', bytes: 29_000_000 }],
+      }));
+      const { container } = render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(screen.getByRole('tab', { name: '3D' })).toBeTruthy());
+      fireEvent.click(screen.getByRole('tab', { name: '3D' }));
+      await waitFor(() => expect(container.querySelector('iframe.theatre3d__frame')).toBeTruthy());
+      const src = new URL(container.querySelector('iframe')!.getAttribute('src')!, 'https://riversidepug.com');
+      expect(src.searchParams.get('demo')).toBe('/api/matches/7/demos/0');
+      expect(src.searchParams.get('match')).toBe('7');
+      // Map 2 has no demo: no view switch there, and the 2D replay is back.
+      fireEvent.click(screen.getByRole('tab', { name: /Map 2/ }));
+      await waitFor(() => expect(screen.queryByRole('tab', { name: '3D' })).toBeNull());
+      expect(container.querySelector('iframe')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('never offers 3D on a match without demos', async () => {
+    mockApi.match.mockResolvedValue(matchWith({}));
+    render(<MatchDetail id="7" me="1" />);
+    await waitFor(() => expect(screen.getByText('Match totals')).toBeTruthy());
+    expect(screen.queryByRole('tab', { name: '3D' })).toBeNull();
+  });
+
   it('says a forecast built from fewer than eight rated players is exactly that', async () => {
     mockApi.match.mockResolvedValue(matchWith({
       forecast: { ...FORECAST, ratedA: 4, ratedB: 3 },
@@ -1772,6 +1808,8 @@ describe('initialOrdinal', () => {
     expect(initialOrdinal(maps, '')).toBe(0);
     expect(initialOrdinal(maps, '#map-2')).toBe(1);
     expect(initialOrdinal(maps, '#map-4')).toBe(3);
+    // the 3D view's hash names the same map
+    expect(initialOrdinal(maps, '#map-2-3d')).toBe(1);
   });
   it('falls back to the first map for a hash that names no map, and null with no maps', () => {
     expect(initialOrdinal(maps, '#map-3')).toBe(0);

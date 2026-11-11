@@ -23,3 +23,8 @@ web/public/overviews/
 plugin/skypounce/**/*.smx
 plugin/skypounce/**/*.log
 plugin/skypounce/**/__pycache__/
+
+# The 3D theatre: viewer page, models, sounds and converted maps (~1.1 GB), copied
+# from the theatre spike by tools/sync-theatre.sh and never edited or committed here.
+# See docs/theatre-3d.md.
+web/public/theatre/
