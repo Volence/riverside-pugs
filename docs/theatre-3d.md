@@ -228,7 +228,7 @@ click and reload stay 3D; an emulated Android phone opens on 2D. SwiftShader ope
 click loads the `.lit.low.glb`. No console errors from the site's 3D code or the viewer; requests
 went only to the dev origin and the asset host (plus the site's own Google Fonts stylesheet).
 
-## Phase 2: live 3D (site side built on `live-3d`, not deployed)
+## Phase 2: live 3D
 
 **In progress, 2026-11-11 from 19:50Z: session l4d-fb (Claude), worktree `.claude/worktrees/live-3d`, branch
 `live-3d`.** Plan:
@@ -243,6 +243,26 @@ went only to the dev origin and the asset host (plus the site's own Google Fonts
    page.
 4. Remote boxes: a stdlib python sidecar tailing `pug_*.dem` and posting the new bytes once a second.
    Owner's go-ahead before it is installed on any box.
+
+### Status (2026-11-11 ~20:30Z)
+
+- Steps 1 and 2 (feed, hold, routes) and step 3's site part are built: `/live` shows a 2D / 3D switch on a
+  match card once `GET /api/demos/live/match/:id` says `{ready: true}` and the current map is in the theatre
+  manifest. 3D is the remembered pick (`theatre.view`), else `deviceView` (phones and software GL start on
+  2D); every card starts on 2D when several matches run. The iframe is `theatreLiveSrc`: `live=wss://<host>/
+  api/demos/live/match/<id>/ws`, `livebuf=30`, `view=top`, no `map=` (the viewer loads each recording's map
+  from its header and restarts on the next map).
+- **Why livebuf=30:** srcds writes the growing demo in 688 KiB pieces about every 25 s (measured below), so a
+  smaller buffer stalls between pieces. A viewer sits about 40 s behind the game: 10 s hold + 30 s buffer.
+- Step 4, the sidecar, is written (`tools/demo-push/`, README there) and NOT installed: owner's go-ahead.
+- **Checked end to end locally:** dev site + Vite (`/api/demos/live` proxied with `ws: true`), a copy of the
+  DB with match 1081 set live, its demo grown in 688 KiB pieces every 25 s; headless Chrome (GPU) on `/live`:
+  3D opens top-down, map, players, info strip, list; 170 s in Dallas mode and 100 s in push mode through the
+  sidecar: 0 waits, jumps only in the first 45 s of catch-up; a sidecar restart mid-map unnoticed by the
+  viewer. Screenshots in that session's scratchpad only.
+- **To switch on at Dallas (site config):** `DEMO_LIVE_LOCAL=1` and `DEMO_LIVE_DIR=/home/pug/app/data/
+  demos-live` (for the Riverside sidecars later) in `/home/pug/app/.env`, then the usual deploy. Off again:
+  remove both and restart pug-web; /live falls back to 2D by itself.
 
 ### Site side (steps 1 and 2): built, not deployed
 
