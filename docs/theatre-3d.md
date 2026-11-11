@@ -230,6 +230,20 @@ went only to the dev origin and the asset host (plus the site's own Google Fonts
 
 ## Phase 2: live 3D (not built)
 
+**In progress, 2026-11-11 from 19:50Z: session l4d-fb (Claude), worktree `.claude/worktrees/live-3d`, branch
+`live-3d`.** Plan:
+
+1. Site: `POST /api/demos/push` (token from the demo filename is the credential, as for the `.rpl` push;
+   offset-append into a live dir, arrival time per chunk) and a Dallas mode that reads `DEMO_DIR` directly
+   (no box change).
+2. Site: `GET /api/demos/live/match/:id` (WebSocket + HTTP stream, the relay wire format from the spike's
+   `live/README.md`), releasing a byte only 10 s after the site received it (`DEFAULT_DELAY_MS`), fanned out
+   from one buffer per recording. The filename (token) never leaves the server.
+3. Viewer: `live=` with `match=`, follow and the live timeline; site embed on `/live` and the ongoing match
+   page.
+4. Remote boxes: a stdlib python sidecar tailing `pug_*.dem` and posting the new bytes once a second.
+   Owner's go-ahead before it is installed on any box.
+
 Owner decision: anyone can watch live, with the same delay as the existing live viewer (10 s,
 anchored to the replay file's mtime so a pause cannot shrink it; `src/replayTail.ts`). What it
 needs:
