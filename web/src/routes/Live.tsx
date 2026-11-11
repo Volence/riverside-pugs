@@ -98,9 +98,12 @@ function LiveCard({ m, me, several }: { m: LiveMatch; me: string | null; several
     return storedView() ?? (typeof document === 'undefined' ? '2d' : deviceView());
   });
   const manifest = useTheatreManifest(true);
-  const ready = useLive3dReady(m.id, true);
-  const can3d = ready === true && Boolean(manifest) && Boolean(m.currentMap)
-    && theatreGap(m.currentMap!, true, manifest!) === null;
+  const feed = useLive3dReady(m.id, true);
+  // The map being played: the plugin's report, else the recording's own
+  // header (the plugin reports no map during the first ready-up).
+  const map3d = m.currentMap ?? feed?.map ?? null;
+  const can3d = feed?.ready === true && Boolean(manifest) && Boolean(map3d)
+    && theatreGap(map3d!, true, manifest!) === null;
   const in3d = can3d && view === '3d';
   const pick = (v: TheatreView) => { setView(v); storeView(v); };
 

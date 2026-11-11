@@ -129,7 +129,10 @@ export async function demoLiveRoutes(app: FastifyInstance, opts: { db: DB; feed:
     const rec = recordingFor(req);
     if (!rec) return reply.code(404).send(NOT_FOUND);
     reply.header('Cache-Control', 'no-store');
-    return { ready: rec.released > 0 };
+    // The map too, from the released header: /live has no current map during
+    // the ready-up (the plugin reports it later) and needs it to know whether
+    // the map is converted.
+    return rec.released > 0 && rec.map ? { ready: true, map: rec.map } : { ready: rec.released > 0 };
   });
 
   app.get('/api/demos/live/match/:id/live.dem', async (req, reply: FastifyReply) => {

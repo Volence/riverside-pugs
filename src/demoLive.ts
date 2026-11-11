@@ -109,6 +109,10 @@ export class Recording {
   demoT = 0;
   /** The released bytes reached a dem_stop frame. */
   stopped = false;
+  /** The map from the released demo header ('' until the header is out).
+   *  Not secret: /live shows it, and it says nothing a viewer of the
+   *  released bytes does not already have. */
+  map = '';
   private scanner = new FrameScanner();
   private scanBroken = false;
   private tickInterval = 0;
@@ -165,7 +169,10 @@ export class Recording {
     const view = this.buf.subarray(0, r);
     if (!this.tickInterval) {
       const h = readHeader(view);
-      if (h) this.tickInterval = h.tickInterval || FALLBACK_TICK_INTERVAL;
+      if (h) {
+        this.tickInterval = h.tickInterval || FALLBACK_TICK_INTERVAL;
+        if (/^[A-Za-z0-9_.-]{1,64}$/.test(h.mapName)) this.map = h.mapName;
+      }
     }
     if (!this.scanBroken) {
       try {

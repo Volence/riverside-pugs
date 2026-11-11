@@ -602,7 +602,7 @@ describe('GET /api/demos/live/match/:id', () => {
     expect(held.json()).toEqual({ ready: false });
     await tickAt(T0 + DEFAULT_DELAY_MS);
     const ready = await app.inject({ method: 'GET', url: `/api/demos/live/match/${live}` });
-    expect(ready.json()).toEqual({ ready: true });
+    expect(ready.json()).toEqual({ ready: true, map: 'l4d_vs_hospital01_apartment' });
     expect(ready.body).not.toContain(TOKEN);
     const gone = await app.inject({ method: 'GET', url: `/api/demos/live/match/${done}` });
     expect(gone.statusCode).toBe(404);
