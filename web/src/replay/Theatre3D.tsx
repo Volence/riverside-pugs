@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'preact/hooks';
 import { fmtBytes, mapName } from '../format';
-import { loadTheatreManifest, theatreGap, theatreSrc, type TheatreManifest } from '../theatre';
+import { loadTheatreManifest, theatreAssets, theatreGap, theatreSrc, type TheatreManifest } from '../theatre';
+
+/** The synced theatre manifest for this page load: undefined while it loads,
+ *  null when there is none (no sync, or a bad file). Only fetched when asked
+ *  for, so a match without demos never requests it. */
+export function useTheatreManifest(wanted: boolean): TheatreManifest | null | undefined {
+  const [manifest, setManifest] = useState<TheatreManifest | null | undefined>(undefined);
+  useEffect(() => {
+    if (!wanted) return undefined;
+    let live = true;
+    void loadTheatreManifest().then((m) => { if (live) setManifest(m); });
+    return () => { live = false; };
+  }, [wanted]);
+  return manifest;
+}
 
 /**
  * One map's SourceTV demo in the 3D viewer (docs/theatre-3d.md).
@@ -12,19 +26,13 @@ import { loadTheatreManifest, theatreGap, theatreSrc, type TheatreManifest } fro
  * it on a tab or map switch is what frees the GPU memory a map takes.
  */
 export function Theatre3D(
-  { matchId, ordinal, map, demoBytes }: {
+  { matchId, ordinal, map, demoBytes, manifest }: {
     matchId: number; ordinal: number; map: string;
     /** The map's demo size, or null when no demo was recorded for it. */
     demoBytes: number | null;
+    manifest: TheatreManifest | null | undefined;
   },
 ) {
-  const [manifest, setManifest] = useState<TheatreManifest | null | undefined>(undefined);
-  useEffect(() => {
-    let live = true;
-    void loadTheatreManifest().then((m) => { if (live) setManifest(m); });
-    return () => { live = false; };
-  }, []);
-
   if (manifest === undefined) return <div class="theatre3d theatre3d--empty">Loading the 3D viewer...</div>;
   if (manifest === null) {
     return <div class="theatre3d theatre3d--empty">The 3D viewer is not available right now. The 2D replay still works.</div>;
@@ -39,8 +47,9 @@ export function Theatre3D(
     return <div class="theatre3d theatre3d--empty">{why} The 2D replay still works.</div>;
   }
 
-  const src = theatreSrc({ matchId, ordinal, map });
-  const total = (manifest.maps[map]?.bytes ?? 0) + (demoBytes ?? 0);
+  const entry = manifest.maps[map];
+  const src = theatreSrc({ matchId, ordinal, map, mirror: Boolean(entry?.mirrorOf) }, theatreAssets(manifest.version));
+  const total = (entry?.bytes ?? 0) + (demoBytes ?? 0);
   return (
     <div class="theatre3d">
       <iframe
