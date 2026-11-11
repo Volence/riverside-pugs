@@ -18,8 +18,8 @@ import { sideTotals } from '../matchTotals';
 import { netDamageAsSi } from '../../../src/siDamage';
 import { Viewer } from '../replay/Viewer';
 import { DrillThis } from '../replay/DrillThis';
-import { Theatre3D } from '../replay/Theatre3D';
-import { initialView } from '../theatre';
+import { Theatre3D, useTheatreManifest } from '../replay/Theatre3D';
+import { deviceView, hashView, storeView, storedView, theatreGap, type TheatreView } from '../theatre';
 import { WinChart } from '../components/WinChart';
 
 /**
@@ -144,6 +144,19 @@ export function sideNote(rounds: MatchDetailData['rounds'], ordinal: number): st
     .sort((a, b) => a.half - b.half)
     .map((r) => `Half ${r.half}: Team ${r.survTeam.toUpperCase()} survivors`);
   return parts.length === 0 ? null : parts.join(' · ');
+}
+
+/** The match's maps for the map panel: the recorded maps, plus one entry per
+ *  demo whose ordinal has no map row (an aborted match that never reached a map
+ *  result still recorded its demo), marked not recorded and without stats. */
+export function withDemoMaps<M extends { ordinal: number; map: string; teamAScore: number; teamBScore: number; stats: Record<string, Record<string, number>>; recorded?: boolean }>(
+  maps: M[], demos: { ordinal: number; map: string }[] | undefined,
+): M[] {
+  const extra = (demos ?? []).filter((d) => !maps.some((m) => m.ordinal === d.ordinal));
+  if (extra.length === 0) return maps;
+  return [...maps, ...extra.map((d) => ({
+    ordinal: d.ordinal, map: d.map, teamAScore: 0, teamBScore: 0, stats: {}, recorded: false,
+  }) as M)].sort((a, b) => a.ordinal - b.ordinal);
 }
 
 /** The map the page opens on: the one named in the URL hash (#map-2 is the
@@ -411,7 +424,11 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
 
   if (data.ongoing) return <OngoingMatch data={data} />;
 
-  const { match, maps, players } = data;
+  const { match, players } = data;
+  // The map panel's maps: the recorded ones, plus (on a finished match) any map
+  // that has a demo but no map row, which is how an aborted match that never
+  // reached a map result looks. Its demo still plays in 3D.
+  const maps = withDemoMaps(data.maps, (match.state === 'completed' || match.state === 'aborted') ? data.demos : undefined);
   // Roster names for the viewer's follow row and timeline rail, keyed by
   // steamid the same way the replay frames' slots and the timeline's actors
   // are.
@@ -584,27 +601,45 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
   );
   // A moment picked in the viewer, waiting in the report form below.
   const [moment, setMoment] = useState<ReportMoment | null>(null);
-  // The map panel's view: the 2D replay or the SourceTV demo in 3D. Kept across
-  // map switches and in the hash beside the map (#map-2-3d), like the map itself.
-  // A clip's deep link is a moment in the 2D replay, so it always opens there.
-  const [view, setView] = useState<'2d' | '3d'>(
-    () => (deepLink.ordinal !== null || typeof location === 'undefined' ? '2d' : initialView(location.hash)),
+  // The map panel's view: the 2D replay or the SourceTV demo in 3D (owner
+  // 2026-11-11: 3D first). `picked` is an explicit choice: a #map-N-3d link, a
+  // clip's deep link (a moment in the 2D replay), or a click on the switch.
+  // Without one the visitor's default applies: what this browser picked last,
+  // else 3D, except on a phone or without hardware WebGL (deviceView).
+  const [picked, setPicked] = useState<TheatreView | null>(
+    () => (deepLink.ordinal !== null ? '2d' : typeof location === 'undefined' ? null : hashView(location.hash)),
   );
-  const writeHash = (o: number, v: '2d' | '3d') => {
+  const [defaultView] = useState<TheatreView>(() => storedView() ?? (typeof document === 'undefined' ? '2d' : deviceView()));
+  const writeHash = (o: number, v: TheatreView) => {
     if (typeof history !== 'undefined') history.replaceState(null, '', `#map-${o + 1}${v === '3d' ? '-3d' : ''}`);
-  };
-  const selectMap = (o: number) => {
-    setOrdinal(o);
-    writeHash(o, view);
-  };
-  const selectView = (o: number, v: '2d' | '3d') => {
-    setView(v);
-    writeHash(o, v);
   };
   // 3D plays the map's SourceTV demo, so it is offered on finished matches
   // (completed, or aborted with whatever was recorded) that have one for the map.
   // Never on a match still being played: a demo shows the infected ghosts.
   const finished = match.state === 'completed' || match.state === 'aborted';
+  const manifest = useTheatreManifest(finished && (data.demos?.length ?? 0) > 0);
+  // What a map shows: 2D without a demo; the pick when there is one; else the
+  // default, where a 3D default falls back to 2D for a map 3D cannot show (not
+  // converted yet), so a visitor never lands on an explanation instead of a
+  // replay. While the manifest loads a 3D default waits in the 3D frame.
+  const viewFor = (o: number, map: string): TheatreView => {
+    const demo = data.demos?.find((d) => d.ordinal === o);
+    if (!finished || !demo) return '2d';
+    if (picked) return picked;
+    if (defaultView === '2d') return '2d';
+    if (manifest === undefined) return '3d';
+    return manifest && theatreGap(map, true, manifest) === null ? '3d' : '2d';
+  };
+  const selectMap = (o: number) => {
+    setOrdinal(o);
+    // a plain #map-N when nothing was picked: that map in the visitor's default
+    writeHash(o, picked ?? '2d');
+  };
+  const selectView = (o: number, v: TheatreView) => {
+    setPicked(v);
+    storeView(v);
+    writeHash(o, v);
+  };
   const current = maps.find((mp) => mp.ordinal === ordinal) ?? maps[0];
   // The deep link only still applies while its own map is the one on screen;
   // navigating away and never seeing it re-applied (even back on the same
@@ -717,7 +752,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
           const demo = data.demos?.find((d) => d.ordinal === mp.ordinal);
           const note = sideNote(rounds, mp.ordinal);
           const can3d = finished && demo !== undefined;
-          const in3d = can3d && view === '3d';
+          const in3d = can3d && viewFor(mp.ordinal, mp.map) === '3d';
           return (
             <Panel>
               {maps.length > 1 && (
@@ -747,8 +782,9 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
               {can3d && (
                 <div class="tabs match__views" role="tablist" aria-label="View">
                   <button type="button" role="tab" aria-selected={!in3d}
-                    class={`tabs__tab${!in3d ? ' is-active' : ''}`} onClick={() => selectView(mp.ordinal, '2d')}>
-                    Replay
+                    class={`tabs__tab${!in3d ? ' is-active' : ''}`} onClick={() => selectView(mp.ordinal, '2d')}
+                    title="The 2D replay: the map from above, both rounds">
+                    2D
                   </button>
                   <button type="button" role="tab" aria-selected={in3d}
                     class={`tabs__tab${in3d ? ' is-active' : ''}`} onClick={() => selectView(mp.ordinal, '3d')}
@@ -761,7 +797,7 @@ export function MatchDetail({ id, me, staff = false }: { id: string; me: string 
                   when the map changes, instead of carrying round 2 across.
                   Theatre3D too: a new map is a new viewer page. */}
               {in3d ? (
-                <Theatre3D key={mp.ordinal} matchId={match.id} ordinal={mp.ordinal} map={mp.map} demoBytes={demo?.bytes ?? null} />
+                <Theatre3D key={mp.ordinal} matchId={match.id} ordinal={mp.ordinal} map={mp.map} demoBytes={demo?.bytes ?? null} manifest={manifest} />
               ) : (
                 <MapReplay
                   key={mp.ordinal}

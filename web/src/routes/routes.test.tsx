@@ -5,6 +5,7 @@ import type { StatDef } from '../api';
 import { statGroupStarts } from '../format';
 import { deepLinkFromQuery, initialOrdinal, sideNote } from './MatchDetail';
 import type { MatchDetail } from '../api';
+import { resetTheatreCache } from '../theatre';
 
 /* Deliberately shallow. These assert that each route reaches its loaded state
  * and puts the right data on screen, not how it is marked up, so a design
@@ -451,40 +452,108 @@ describe('MatchDetail', () => {
     expect(screen.queryByText(/Forecast/)).toBeNull();
   });
 
-  it('offers the 3D view only for a map with a demo, and opens the viewer on that demo', async () => {
-    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
-      format: 'theatre-manifest/1', generated: 'x', maps: { l4d_hospital01_apartment: { lit: true, low: true, bytes: 20_000_000 } },
-    })));
-    vi.stubGlobal('fetch', fetchSpy);
-    try {
-      mockApi.match.mockResolvedValue(matchWith({
-        maps: [
-          { ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} },
-          { ordinal: 1, map: 'l4d_hospital02_subway', teamAScore: 400, teamBScore: 300, stats: {} },
-        ],
-        demos: [{ ordinal: 0, map: 'l4d_hospital01_apartment', bytes: 29_000_000 }],
-      }));
+  describe('3D view', () => {
+    const MANIFEST = {
+      format: 'theatre-manifest/2', version: 'v1', generated: 'x', viewer: { mirrors: false },
+      maps: { l4d_hospital01_apartment: { lit: true, low: true, bytes: 20_000_000 } },
+    };
+    const twoMaps = {
+      maps: [
+        { ordinal: 0, map: 'l4d_hospital01_apartment', teamAScore: 400, teamBScore: 300, stats: {} },
+        { ordinal: 1, map: 'l4d_hospital02_subway', teamAScore: 400, teamBScore: 300, stats: {} },
+      ],
+      demos: [{ ordinal: 0, map: 'l4d_hospital01_apartment', bytes: 29_000_000 }],
+    };
+    beforeEach(() => {
+      resetTheatreCache();
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(MANIFEST))));
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      try { localStorage.clear(); } catch { /* none */ }
+      history.replaceState(null, '', '/');
+    });
+    const frameSrc = (c: Element) => new URL(c.querySelector('iframe')!.getAttribute('src')!, 'https://riversidepug.com');
+
+    it('offers 3D only for a map with a demo, and opens the viewer on that demo', async () => {
+      mockApi.match.mockResolvedValue(matchWith(twoMaps));
       const { container } = render(<MatchDetail id="7" me="1" />);
       await waitFor(() => expect(screen.getByRole('tab', { name: '3D' })).toBeTruthy());
       fireEvent.click(screen.getByRole('tab', { name: '3D' }));
       await waitFor(() => expect(container.querySelector('iframe.theatre3d__frame')).toBeTruthy());
-      const src = new URL(container.querySelector('iframe')!.getAttribute('src')!, 'https://riversidepug.com');
+      const src = frameSrc(container);
       expect(src.searchParams.get('demo')).toBe('/api/matches/7/demos/0');
       expect(src.searchParams.get('match')).toBe('7');
+      expect(src.searchParams.get('embed')).toBe('1');
+      expect(src.searchParams.get('assets')).toBe('/theatre/v1/');
+      expect(location.hash).toBe('#map-1-3d');
+      // the pick is remembered for this browser
+      expect(localStorage.getItem('theatre.view')).toBe('3d');
       // Map 2 has no demo: no view switch there, and the 2D replay is back.
       fireEvent.click(screen.getByRole('tab', { name: /Map 2/ }));
       await waitFor(() => expect(screen.queryByRole('tab', { name: '3D' })).toBeNull());
       expect(container.querySelector('iframe')).toBeNull();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
+    });
 
-  it('never offers 3D on a match without demos', async () => {
-    mockApi.match.mockResolvedValue(matchWith({}));
-    render(<MatchDetail id="7" me="1" />);
-    await waitFor(() => expect(screen.getByText('Match totals')).toBeTruthy());
-    expect(screen.queryByRole('tab', { name: '3D' })).toBeNull();
+    it('opens on 3D when this browser picked 3D last, and the 2D switch goes back', async () => {
+      localStorage.setItem('theatre.view', '3d');
+      mockApi.match.mockResolvedValue(matchWith(twoMaps));
+      const { container } = render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(container.querySelector('iframe.theatre3d__frame')).toBeTruthy());
+      fireEvent.click(screen.getByRole('tab', { name: '2D' }));
+      await waitFor(() => expect(container.querySelector('iframe')).toBeNull());
+      expect(localStorage.getItem('theatre.view')).toBe('2d');
+      expect(location.hash).toBe('#map-1');
+    });
+
+    it('falls back to 2D by default for a map not converted yet, but still explains it on a 3D click', async () => {
+      localStorage.setItem('theatre.view', '3d');
+      mockApi.match.mockResolvedValue(matchWith({
+        maps: [{ ordinal: 0, map: 'l4d_vs_farm05_cornfield', teamAScore: 1, teamBScore: 2, stats: {} }],
+        demos: [{ ordinal: 0, map: 'l4d_vs_farm05_cornfield', bytes: 1 }],
+      }));
+      const { container } = render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(screen.getByRole('tab', { name: '3D' })).toBeTruthy());
+      await waitFor(() => expect(screen.getByRole('tab', { name: '2D' }).getAttribute('aria-selected')).toBe('true'));
+      expect(container.querySelector('iframe')).toBeNull();
+      fireEvent.click(screen.getByRole('tab', { name: '3D' }));
+      await waitFor(() => expect(screen.getByText(/has not been converted to 3D yet/)).toBeTruthy());
+    });
+
+    it('starts on 2D where WebGL2 is missing (the test browser has none) with nothing picked', async () => {
+      mockApi.match.mockResolvedValue(matchWith(twoMaps));
+      const { container } = render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(screen.getByRole('tab', { name: '2D' }).getAttribute('aria-selected')).toBe('true'));
+      expect(container.querySelector('iframe')).toBeNull();
+    });
+
+    it('a #map-N-3d link wins over a stored 2D pick', async () => {
+      localStorage.setItem('theatre.view', '2d');
+      history.replaceState(null, '', '#map-1-3d');
+      mockApi.match.mockResolvedValue(matchWith(twoMaps));
+      const { container } = render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(container.querySelector('iframe.theatre3d__frame')).toBeTruthy());
+    });
+
+    it('gives an aborted match with a demo but no map result a map panel and the 3D view', async () => {
+      localStorage.setItem('theatre.view', '3d');
+      mockApi.match.mockResolvedValue(matchWith({
+        match: { id: 7, campaign: 'no_mercy', state: 'aborted', endedAt: '2026-09-06T04:00:00', teamAScore: 0, teamBScore: 0, winner: null },
+        maps: [],
+        demos: [{ ordinal: 0, map: 'l4d_hospital01_apartment', bytes: 29_000_000 }],
+      }));
+      const { container } = render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(container.querySelector('iframe.theatre3d__frame')).toBeTruthy());
+      expect(screen.getByText(/not recorded/)).toBeTruthy();
+      expect(frameSrc(container).searchParams.get('demo')).toBe('/api/matches/7/demos/0');
+    });
+
+    it('never offers 3D on a match without demos', async () => {
+      mockApi.match.mockResolvedValue(matchWith({}));
+      render(<MatchDetail id="7" me="1" />);
+      await waitFor(() => expect(screen.getByText('Match totals')).toBeTruthy());
+      expect(screen.queryByRole('tab', { name: '3D' })).toBeNull();
+    });
   });
 
   it('says a forecast built from fewer than eight rated players is exactly that', async () => {
