@@ -151,6 +151,9 @@ export function useReplaySource(spec: ReplaySpec | null): {
   behindSinceMs: number | null;
   /** The file's format version is newer than this page understands. */
   tooNew: boolean;
+  /** A live match the site holds no replay for yet: before the first round
+   *  of the match has pushed anything. Not an error; polling goes on. */
+  notStarted: boolean;
   error: Error | null;
 } {
   const [state, setState] = useState<ReplayState>({ header: null, frames: [], cursor: 0 });
@@ -160,6 +163,7 @@ export function useReplaySource(spec: ReplaySpec | null): {
   const [phase, setPhase] = useState<LivePhase | null>(null);
   const [behindSinceMs, setBehindSinceMs] = useState<number | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [notStarted, setNotStarted] = useState(false);
   // The cursor used to build the next request. Updated synchronously the
   // moment it changes (a fresh chunk, or a live round change resetting it to
   // 0), unlike `state`, which only reflects a `setState` call once Preact
@@ -193,6 +197,7 @@ export function useReplaySource(spec: ReplaySpec | null): {
     setPhase(null);
     setBehindSinceMs(null);
     setError(null);
+    setNotStarted(false);
 
     async function tick(): Promise<void> {
       try {
@@ -201,7 +206,18 @@ export function useReplaySource(spec: ReplaySpec | null): {
         // and the cursor resets with it.
         if (isLive(spec!)) {
           const res = await fetch(replayUrl(spec!, 0));
+          if (res.status === 404 && spec!.kind === 'live-match' && !round) {
+            // The match has recorded nothing yet (ready-up before the first
+            // round's first push). Say so instead of "couldn't load", and
+            // ask again next second. Only before any round was read: a 404
+            // later still counts as an error, as before.
+            setNotStarted(true);
+            setError(null);
+            if (!cancelled) timer = setTimeout(tick, POLL_MS);
+            return;
+          }
           if (!res.ok) throw new Error('no live replay');
+          setNotStarted(false);
           const live = spec!;
           // A standalone session answers with a filename, because its token
           // is in the URL already and is nobody's password. A ranked match
@@ -310,6 +326,6 @@ export function useReplaySource(spec: ReplaySpec | null): {
 
   return {
     header: state.header, frames: state.frames, closed, phase, behindSinceMs,
-    tooNew: state.tooNew === true, error,
+    tooNew: state.tooNew === true, notStarted, error,
   };
 }
