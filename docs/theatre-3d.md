@@ -228,7 +228,7 @@ click and reload stay 3D; an emulated Android phone opens on 2D. SwiftShader ope
 click loads the `.lit.low.glb`. No console errors from the site's 3D code or the viewer; requests
 went only to the dev origin and the asset host (plus the site's own Google Fonts stylesheet).
 
-## Phase 2: live 3D (not built)
+## Phase 2: live 3D (site side built on `live-3d`, not deployed)
 
 **In progress, 2026-11-11 from 19:50Z: session l4d-fb (Claude), worktree `.claude/worktrees/live-3d`, branch
 `live-3d`.** Plan:
@@ -243,6 +243,112 @@ went only to the dev origin and the asset host (plus the site's own Google Fonts
    page.
 4. Remote boxes: a stdlib python sidecar tailing `pug_*.dem` and posting the new bytes once a second.
    Owner's go-ahead before it is installed on any box.
+
+### Site side (steps 1 and 2): built, not deployed
+
+Commits on `live-3d`: the feed (`src/demoLive.ts`, `src/demoFrames.ts`), the routes
+(`src/routes/demoLive.ts`, registered in `src/server.ts`), tests (`tests/demoLive.test.ts`). Not deployed;
+no game box touched.
+
+**Config.**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `DEMO_LIVE_DIR` | empty (push off) | where pushed demo copies are kept, `live_<token>_<ordinal>_<started>.dem`; must not be `DEMO_DIR` |
+| `DEMO_LIVE_LOCAL` | off | `1`: Dallas mode, follow the growing `pug_<token>_<ordinal>_<map>.dem` in `DEMO_DIR` itself (needs `DEMO_DIR`) |
+
+With neither on, every route below answers 404. Dallas mode is an explicit opt-in rather than "on whenever
+`DEMO_DIR` is set", so merging this changes nothing on Dallas until the flag is set.
+
+**`POST /api/demos/push`** (the box sidecar, step 4). Body: the raw new bytes,
+`Content-Type: application/octet-stream`, at most 1 MiB per request. Fields are headers (never the URL,
+which gets logged):
+
+| Header | Value |
+|---|---|
+| `X-Demo-Token` | the 32-hex token from the file name `pug_<token>_<ordinal>_<map>.dem` |
+| `X-Demo-Ordinal` | the ordinal from the file name (0 to 999) |
+| `X-Demo-Map` | the map from the file name (`[A-Za-z0-9_.-]`, up to 96) |
+| `X-Demo-Offset` | where in the file these bytes start |
+| `X-Demo-Started` | the box's id for this recording, a positive integer that grows for a new recording at the same name (unix seconds the sidecar first saw this file, or its birth time) |
+
+Rules (as `/api/replays/push`): only a match in state `live` accepts; an unknown, finished or aborted token
+gets the same 404. The first batch (offset 0) must carry the whole 1072-byte demo header (`HL2DEMO`). A batch
+must start where the copy ends; otherwise 409 `{ length }` and the sidecar resumes from `length` (an exact
+retry of bytes already there is 200, an empty body asks for the length). Offset 0 with a larger `Started`
+is a new recording at that name: the copy is replaced and viewers get `restart`. A smaller `Started` at
+offset 0, or a different `Started` at any other offset, is 409 `{ length, error: 'stale recording' }`. A
+brand new copy is refused with 507 while the directory holds over 2 GiB or its filesystem has under 2 GiB
+free. A file over 256 MiB is 413. A write failure is 503 with a fixed body; logs carry the errno code and
+the match id only. Replies never name the token or a file. Copies of matches no longer live (or untouched
+for a day) are deleted every minute.
+
+**`GET /api/demos/live/match/:id/ws`** (WebSocket) and **`GET /api/demos/live/match/:id/live.dem`**
+(HTTP stream, gzip with a sync flush when accepted). The spike relay's wire format unchanged
+(`research/theatre-spike/live/README.md` "Wire format"), so the viewer's `live=` takes these URLs as they
+are: text `hello { id, offset, size, complete, demoT, wall }`, binary demo bytes, `pos { off, wall, demoT }`
+every tick (250 ms), `end { size }`, `restart`; HTTP headers `X-Demo-Id`, `X-Demo-Size`, `X-Demo-Offset`;
+resume with `?offset=N&id=X`. No CORS headers (the viewer is same-origin). Differences from the spike:
+`size` and `X-Demo-Size` are the bytes released so far, not received; `wall` in `pos` is when that frame
+was released; `id` is 16 random hex per recording (never derived from the token). Served only for a match in
+state `live` the viewer may see (`canViewMatch`, the same rule as the 2D live viewer) that has a recording;
+everything else is the same 404 `{ error: 'no live demo for that match' }` (WebSocket: refused before the
+upgrade).
+
+**The hold.** Every appended range is stamped with the time the site had it (push: when the batch was
+applied; Dallas: when a size poll first saw the bytes). A byte is released only once that stamp is at
+least `DEFAULT_DELAY_MS` (10 s) old; the site's stamp is never earlier than srcds wrote the byte, so the hold
+is at least 10 s behind the recording. Every failure mode releases less: bytes reloaded from disk after a
+site restart are stamped at the reload, a clock stepping back cannot date new bytes before older ones, a
+delay of zero or less releases nothing.
+
+**Which recording, and when it ends.** One in-memory buffer per recording (token, ordinal), shared by every
+viewer. A match serves its highest ordinal that has released anything, so the next map takes over only
+once its own first bytes are out; the old map's viewers get its last bytes, then `restart`. `end` goes
+out once every byte is released and the recording reached `dem_stop`, its match left `live`, or it has
+not grown for 150 s (`IN_PROGRESS_MS`). A late joiner gets everything released so far (256 KiB pieces,
+waiting for the socket), then live bytes. Memory is dropped once a recording has no viewers and is over or
+replaced.
+
+**Dallas mode.** Lists `DEMO_DIR` every 2 s for `pug_<token>_*.dem` of live matches written within the
+last 150 s (pulled demos from other boxes arrive finished, with old mtimes, and are skipped), then polls
+known files by size every tick. A file that shrank, got another inode or whose fixed header part (the
+first 1056 bytes: magic, protocols, server, client, map, game dir) changed is a new recording. The last 16
+header bytes are excluded on purpose: srcds rewrites playback time, ticks, frames and signon length when
+it stops recording. A push for a (token, ordinal) the Dallas mode already follows is 409 `recorded locally`.
+
+**Verified** (`tests/demoLive.test.ts`, 29 tests; `npm run typecheck`): randomised arrivals never release a
+byte before its stamp is 10 s old and always release everything that old; to the millisecond; zero and
+negative delays; a clock stepping back; a reload after a site restart is held 10 s again. The token is in
+no push reply, header, WebSocket message or log line (including a failing write). Offset gaps, overlapping
+and changed bytes, stale recordings, a header-less first batch, a token in the query instead of the header
+are refused; 507 under the floor and over the cap; 413 over the body cap. Restart at the same name (old
+viewers get `restart`, the new recording is held again, an old id resumes at 0), next-map handover, idle
+end, match-over end after the hold, HTTP stream bytes and gzip, resume by offset and id. Non-live,
+completed, private, unknown, non-numeric and not-yet-recording matches all get the same 404 on both routes.
+Dallas mode: dating by first sight, a rewritten file restarting viewers, old files, non-live matches and
+non-demo files ignored. Against a real demo (`hospital02.dem`, 25 MB, pushed in random pieces): the frame
+scanner reaches the end, sees `dem_stop`, demo time 758.7 s.
+
+**Open.**
+
+- The box sidecar (step 4) is not written. It must: tail the newest `pug_<token>_<ordinal>_<map>.dem`
+  read-only (no lock, nothing written beside it, not inside srcds); wait until the file has 1072 bytes
+  before the first push; POST new bytes about once a second in pieces of at most 1 MiB with the five
+  headers above over HTTPS; pick `X-Demo-Started` once per file (and a larger one when the file shrinks or
+  is replaced at the same path); on 409 resume from `length`, on 409 `stale recording` stop pushing that
+  file, on 404 (match not live) stop, on 507 / 503 back off and retry; never log the token. Also push the
+  previous map's last bytes when a new map's file appears.
+- srcds' write and flush pattern while recording is still unmeasured (the spike only saw finished files):
+  if srcds buffers a lot, live lags by that much on top of the 10 s.
+- `demoT` during a recording uses a 100 tick fallback: the header's ticks and playback time are only
+  filled in when the recording stops.
+- Dallas mode cannot tell a same-map re-recording that reuses the file (same inode, same header) and grows
+  past the old size within one 250 ms poll from a continuation. Unlikely (the signon data alone is written
+  first), not handled.
+- No per-viewer or total viewer limit, and no per-IP rate limit on the stream routes yet. The join burst
+  (up to ~30 MB per late viewer) is the load to watch.
+- Viewer and site embed (step 3) not started.
 
 Owner decision: anyone can watch live, with the same delay as the existing live viewer (10 s,
 anchored to the replay file's mtime so a pause cannot shrink it; `src/replayTail.ts`). What it
