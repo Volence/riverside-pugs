@@ -59,6 +59,11 @@ rsync -az --delete --info=stats1 \
    # in place on the server, which nothing references once the manifest points at
    # assets.riversidepug.com, and which are a free way back if it ever needs to.` \
   --exclude 'web/public/overviews/' \
+  `# The 3D theatre (tools/sync-theatre.sh): about 1.1 GB of maps, models and sounds
+   # copied from the spike, gitignored. Left out until it ships: the heavy part is
+   # meant for R2 like the overviews, and the page needs a Caddy frame rule first.
+   # See docs/theatre-3d.md "Shipping".` \
+  --exclude 'web/public/theatre/' \
   "$HERE/" "root@$HOST:$REMOTE/"
 
 ssh "root@$HOST" "set -e

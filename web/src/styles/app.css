@@ -1768,6 +1768,26 @@ body[data-urgent='true'] .countdown__digits { animation: blink 1s steps(2, start
 .box__none { margin: 0; font-size: 11px; }
 
 .replay--empty { padding: 2rem; text-align: center; color: var(--text-muted); }
+
+/* The map panel's Replay / 3D switch, under the map title. */
+.match__views { margin: var(--sp-3) 0; }
+/* The 3D theatre: the viewer page in a frame (replay/Theatre3D.tsx). Black like
+   the 2D replay's film frame; tall enough for the viewer's bottom bar and its
+   player list, short enough that the map stats below stay a scroll away. */
+.theatre3d { display: flex; flex-direction: column; gap: var(--sp-2); }
+.theatre3d__frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 420px;
+  max-height: 78vh;
+  border: 0;
+  border-top: 3px solid #1a1512;
+  border-bottom: 3px solid #1a1512;
+  background: #050403;
+}
+.theatre3d__note { margin: 0; font-size: var(--fs-dense); }
+.theatre3d--empty { padding: 2rem; text-align: center; color: var(--text-muted); background: #050403; }
 .replay__controls, .replay__toolbar, .replay__rounds { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 
 /* ---------- replay drills ("Drill this", src/drillSpec.ts) ---------- */

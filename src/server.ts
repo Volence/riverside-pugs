@@ -478,7 +478,11 @@ function readShell(): Buffer | null {
  */
 function isPageRequest(method: string, url: string): boolean {
   if (method !== 'GET' && method !== 'HEAD') return false;
-  return !['/api/', '/auth/', '/ws'].some((prefix) => url.startsWith(prefix));
+  // /theatre/ is the 3D viewer's static folder (docs/theatre-3d.md). The viewer
+  // probes for optional files (a map's .lit.low.glb, its ladders.json, a local
+  // bookmark file) and takes any 200 as "there": the app shell for a missing
+  // one would be parsed as a glb or as JSON. A missing file there is a 404.
+  return !['/api/', '/auth/', '/ws', '/theatre/'].some((prefix) => url.startsWith(prefix));
 }
 
 /**

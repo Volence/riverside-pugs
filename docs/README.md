@@ -7,6 +7,7 @@ What is here, and which of it is still current. Updated 2026-11-05.
 | File | What it is | State |
 |---|---|---|
 | [CUSTOM_CAMPAIGNS.md](CUSTOM_CAMPAIGNS.md) | Setting up and checking custom campaign installs (env, per-server transport rows, verify steps, stop points) | Current. Server section rewritten 2026-11-05 for Dallas + Riverside #3 to #6 |
+| [theatre-3d.md](theatre-3d.md) | The match page's 3D tab: syncing the viewer from the theatre spike, how assets and demos are served (R2 CORS, Caddy frame rule), viewer changes needed, live (phase 2) | Built 2026-11-11 on branch theatre-3d, not shipped |
 | [season-wrapped.md](season-wrapped.md) | What `src/seasonWrapped.ts` computes at season close, and the data study behind it | Current |
 | [season1-launch-runbook.md](season1-launch-runbook.md) | Season 1 launch checklist | Done (Season 1 started 2026-11-03); the template for Season 2 |
 | [data-feeds-2026-10-10.md](data-feeds-2026-10-10.md) | The connection funnel, flow and cause, and SI life feeds | Shipped 2026-10-10; still the field reference (code cites it) |
