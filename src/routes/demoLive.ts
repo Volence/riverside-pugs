@@ -85,6 +85,17 @@ export async function demoLiveRoutes(app: FastifyInstance, opts: { db: DB; feed:
     return feed.current(row.token);
   }
 
+  /** Whether this match has a live 3D feed to watch: the /live page offers
+   *  3D only once there is something released. 404 like the streams for a
+   *  match with no recording; `ready` false while the first bytes are still
+   *  held back. Says nothing else (no size, no id). */
+  app.get('/api/demos/live/match/:id', async (req, reply) => {
+    const rec = recordingFor(req);
+    if (!rec) return reply.code(404).send(NOT_FOUND);
+    reply.header('Cache-Control', 'no-store');
+    return { ready: rec.released > 0 };
+  });
+
   app.get('/api/demos/live/match/:id/live.dem', async (req, reply: FastifyReply) => {
     const rec = recordingFor(req);
     if (!rec) return reply.code(404).send(NOT_FOUND);
