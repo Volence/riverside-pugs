@@ -72,7 +72,7 @@ const PIECE_BYTES = 256 * 1024;
 /** Demo time per tick while the header is still unwritten (srcds fills in
  *  ticks and playback time only when the recording stops). Only `demoT` in
  *  hello and pos uses it. */
-const FALLBACK_TICK_INTERVAL = 1 / 100;
+const FALLBACK_TICK_INTERVAL = 1 / 128; // every pool box runs 128 tick since 2026-10-20
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 const MAP_RE = /^[A-Za-z0-9_.-]{1,96}$/;

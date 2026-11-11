@@ -339,10 +339,15 @@ scanner reaches the end, sees `dem_stop`, demo time 758.7 s.
   is replaced at the same path); on 409 resume from `length`, on 409 `stale recording` stop pushing that
   file, on 404 (match not live) stop, on 507 / 503 back off and retry; never log the token. Also push the
   previous map's last bytes when a new map's file appears.
-- srcds' write and flush pattern while recording is still unmeasured (the spike only saw finished files):
-  if srcds buffers a lot, live lags by that much on top of the 10 s.
-- `demoT` during a recording uses a 100 tick fallback: the header's ticks and playback time are only
-  filled in when the recording stops.
+- **srcds writes the demo in 688 KiB pieces, about every 25 s** (measured 2026-11-11 ~20:10Z on Riverside #5,
+  match 1128 hospital03, read-only `stat` every 250 ms for 110 s: +704,512 bytes at 26.1, 25.8, 25.0 s
+  intervals, nothing in between). So the newest byte a viewer can have is 0 to ~26 s old when it lands, plus
+  the 10 s hold: the viewer must buffer about 30 s (the spike's `livebuf` default of 2 s would stall every
+  25 s), and live 3D sits roughly 35 to 40 s behind the game. l4dpug's theatre targets a 20 s buffer, which
+  fits the same pattern. Smaller pieces would need srcds to flush earlier (no known cvar) or a sidecar that
+  is a SourceTV client instead of a file tail.
+- `demoT` during a recording uses a 128 tick fallback (every pool box runs 128 tick): the header's ticks
+  and playback time are only filled in when the recording stops.
 - Dallas mode cannot tell a same-map re-recording that reuses the file (same inode, same header) and grows
   past the old size within one 250 ms poll from a continuation. Unlikely (the signon data alone is written
   first), not handled.
