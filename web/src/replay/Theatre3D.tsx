@@ -74,24 +74,28 @@ export function Theatre3D(
 const LIVE_READY_POLL_MS = 10_000;
 
 /** Whether a live match's 3D feed has released anything (GET
- *  /api/demos/live/match/:id): null while unknown, then true / false. Asks
+ *  /api/demos/live/match/:id), and the map its recording names: null while
+ *  unknown. Asks
  *  again every 10 s until it is ready, then stops: once a match has a feed it
  *  keeps one (a new map is a restart inside the same feed). A 404 is "not
  *  yet" (no recording, the feed off, or a private match), never an error. */
-export function useLive3dReady(matchId: number, wanted: boolean): boolean | null {
-  const [ready, setReady] = useState<boolean | null>(null);
+export function useLive3dReady(matchId: number, wanted: boolean): { ready: boolean; map: string | null } | null {
+  const [ready, setReady] = useState<{ ready: boolean; map: string | null } | null>(null);
   useEffect(() => {
     if (!wanted) return undefined;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const ask = async () => {
       let ok = false;
+      let map: string | null = null;
       try {
         const res = await fetch(`/api/demos/live/match/${matchId}`, { cache: 'no-store' });
-        ok = res.ok && ((await res.json()) as { ready?: unknown }).ready === true;
+        const body = res.ok ? (await res.json()) as { ready?: unknown; map?: unknown } : {};
+        ok = body.ready === true;
+        if (typeof body.map === 'string' && body.map) map = body.map;
       } catch { ok = false; }
       if (!live) return;
-      setReady(ok);
+      setReady({ ready: ok, map });
       if (!ok) timer = setTimeout(() => { void ask(); }, LIVE_READY_POLL_MS);
     };
     void ask();

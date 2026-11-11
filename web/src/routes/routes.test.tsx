@@ -2586,6 +2586,18 @@ describe('Live 3D', () => {
     expect(container.querySelector('iframe')).toBeNull();
   });
 
+  it('takes the map from the feed while the match reports none yet (first ready-up)', async () => {
+    localStorage.setItem('theatre.view', '3d');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('manifest.json')) return new Response(JSON.stringify(MANIFEST));
+      if (url.endsWith('/api/demos/live/match/7')) return new Response(JSON.stringify({ ready: true, map: 'l4d_vs_hospital01_apartment' }));
+      return new Response('{}', { status: 404 });
+    }));
+    mockApi.live.mockResolvedValue({ matches: [{ ...liveMatch(7, 'x'), currentMap: null }] });
+    const { container } = render(<Live me={null} />);
+    await waitFor(() => expect(container.querySelector('iframe.theatre3d__frame')).toBeTruthy());
+  });
+
   it('starts each card on 2D when several matches run, with the switch offered', async () => {
     localStorage.setItem('theatre.view', '3d');
     serve({ 1: true, 2: true });
