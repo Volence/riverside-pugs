@@ -7,8 +7,8 @@ import websocket from '@fastify/websocket';
 import cookie from '@fastify/cookie';
 import type { WebSocket } from 'ws';
 import { openDb, type DB } from '../src/db.js';
-import { DemoFeed, Recording, liveDemoFileName } from '../src/demoLive.js';
-import { demoLiveRoutes } from '../src/routes/demoLive.js';
+import { CLIENT_STALL_MS, DemoFeed, Recording, liveDemoFileName, steadyNow } from '../src/demoLive.js';
+import { MAX_STREAMS_PER_IP, demoLiveRoutes } from '../src/routes/demoLive.js';
 import { HEADER_BYTES } from '../src/demoFrames.js';
 import { DEFAULT_DELAY_MS } from '../src/replayTail.js';
 import { buildServer } from '../src/server.js';
@@ -491,7 +491,7 @@ describe('GET /api/demos/live/match/:id', () => {
     next.ws.terminate();
   });
 
-  it('a recording that stops growing ends after the idle time', async () => {
+  it('a quiet recording does not end while its match is live; it ends when the match does', async () => {
     const id = seedMatch('live');
     feed.stop(); await app.close();
     await makeApp({ idleEndMs: 30_000 });
@@ -501,10 +501,69 @@ describe('GET /api/demos/live/match/:id', () => {
     const v = await openWs(id);
     await settle();
     expect(v.bytes().equals(d)).toBe(true);
-    await tickAt(T0 + 29_999);
+    // The box's sender down for ten minutes: the viewer waits, it is not ended.
+    await tickAt(T0 + 600_000);
     expect(v.closed()).toBe(false);
-    await tickAt(T0 + 30_000);
+    expect(v.texts().some((t) => (t as { type: string }).type === 'end')).toBe(false);
+    setState(id, 'completed');
+    await tickAt(T0 + 600_250);
     expect(v.texts().pop()).toEqual({ type: 'end', size: d.length });
+  });
+
+  it('a push at offset 0 with different bytes is refused as content differs, not resumed onto', async () => {
+    seedMatch('live');
+    const d = demo(5);
+    expect((await push(0, d)).statusCode).toBe(200);
+    const other = demo(5, 0x42);
+    const r = await push(0, other.subarray(0, 2000));
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toEqual({ length: d.length, error: 'content differs' });
+    // the same bytes again are an exact retry, not a mismatch
+    expect((await push(0, d.subarray(0, 2000))).statusCode).toBe(200);
+  });
+
+  it('caps open live streams per address, behind the proxy by the last forwarded entry', async () => {
+    const id = seedMatch('live');
+    await push(0, demo(3));
+    await tickAt(T0 + DEFAULT_DELAY_MS);
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (app.server.address() as { port: number }).port;
+    const url = `http://127.0.0.1:${port}/api/demos/live/match/${id}/live.dem`;
+    const ctl: AbortController[] = [];
+    const openOne = async (ip: string) => {
+      const a = new AbortController(); ctl.push(a);
+      return fetch(url, { signal: a.signal, headers: { 'x-forwarded-for': `10.0.0.9, ${ip}`, 'accept-encoding': 'identity' } });
+    };
+    for (let i = 0; i < MAX_STREAMS_PER_IP; i++) expect((await openOne('203.0.113.7')).status).toBe(200);
+    expect((await openOne('203.0.113.7')).status).toBe(429);
+    expect((await openOne('203.0.113.8')).status).toBe(200);
+    ctl[0].abort();
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await openOne('203.0.113.7')).status).toBe(200);
+    for (const a of ctl) a.abort();
+  });
+
+  it('drops a viewer whose connection takes nothing for a minute', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      seedMatch('live');
+      await push(0, demo(3));
+      feed.tick(T0 + DEFAULT_DELAY_MS);
+      const rec = feed.current(TOKEN)!;
+      let ended = false;
+      const c = { sent: 0, busy: false, send: () => new Promise<void>(() => { /* never drains */ }), end: () => { ended = true; } };
+      feed.subscribe(rec, c);
+      await vi.advanceTimersByTimeAsync(CLIENT_STALL_MS + 10);
+      expect(ended).toBe(true);
+      expect(rec.clients.has(c)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('turns the push off when DEMO_LIVE_DIR is DEMO_DIR', () => {
+    const f = new DemoFeed({ db, liveDir: demoDir, demoDir });
+    expect(f.liveDir).toBe('');
   });
 
   it('answers 404, the same for each, for a non-live, unknown, private or not-yet-recording match', async () => {
@@ -650,5 +709,18 @@ describe('wiring', () => {
     const c = loadConfig({ DEMO_LIVE_DIR: '/x/live-demos', DEMO_LIVE_LOCAL: '1' });
     expect(c.demoLiveDir).toBe('/x/live-demos');
     expect(c.demoLiveLocal).toBe(true);
+  });
+});
+
+describe('the hold clock', () => {
+  it('is wall time that does not follow a stepped system clock', () => {
+    const before = steadyNow();
+    expect(Math.abs(before - Date.now())).toBeLessThan(60_000);
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3_600_000);
+    try {
+      expect(steadyNow() - before).toBeLessThan(1_000);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

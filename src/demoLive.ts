@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, statfsSync, unlinkSync, writeSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { DB } from './db.js';
 import { DEFAULT_DELAY_MS } from './replayTail.js';
 import { IN_PROGRESS_MS } from './demos.js';
@@ -67,6 +67,8 @@ const LOCAL_DISCOVER_MS = 2000;
 const PRUNE_EVERY_MS = 60_000;
 /** A copy untouched this long goes whatever its match is doing. */
 export const DEMO_LIVE_FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** A viewer whose transport accepts nothing for this long is dropped. */
+export const CLIENT_STALL_MS = 60_000;
 /** Bytes per send to one viewer while it catches up (as the spike relay). */
 const PIECE_BYTES = 256 * 1024;
 /** Demo time per tick while the header is still unwritten (srcds fills in
@@ -268,6 +270,17 @@ export interface DemoFeedOptions {
   /** Free bytes on the live directory's filesystem. Injectable for tests. */
   freeBytes?: (dir: string) => number;
   now?: () => number;
+  /** Wall clock, only for comparing with file mtimes. Defaults to `now` when
+   *  that is injected (tests), else Date.now. */
+  wall?: () => number;
+}
+
+/** The hold's clock: wall-clock milliseconds that never jump. Date.now can
+ *  step forward (an NTP step, a VM resume) and would then make bytes that
+ *  arrived a moment ago look 10 s old; this one only moves at the rate time
+ *  passes, from the wall time the process started. */
+export function steadyNow(): number {
+  return performance.timeOrigin + performance.now();
 }
 
 interface LocalTail { path: string; ino: number; pos: number; head: Buffer | null; rec: Recording }
@@ -288,6 +301,7 @@ export class DemoFeed {
   private readonly freeFloorBytes: number;
   private readonly freeBytes: (dir: string) => number;
   readonly now: () => number;
+  readonly wall: () => number;
   /** token/ordinal -> recording. */
   private readonly recordings = new Map<string, Recording>();
   private readonly tails = new Map<string, LocalTail>();
@@ -301,15 +315,23 @@ export class DemoFeed {
 
   constructor(o: DemoFeedOptions) {
     this.db = o.db;
-    this.liveDir = o.liveDir ?? '';
     this.demoDir = o.demoDir ?? '';
+    // The pushed copies (named with the token) must never sit in DEMO_DIR,
+    // where the site lists and serves finished demos and srcds writes its
+    // own: the same directory turns the push off rather than mixing them.
+    const liveDir = o.liveDir ?? '';
+    if (liveDir && this.demoDir && resolve(liveDir) === resolve(this.demoDir)) {
+      console.error('[demos] DEMO_LIVE_DIR is DEMO_DIR: live demo push turned off');
+      this.liveDir = '';
+    } else this.liveDir = liveDir;
     this.local = Boolean(o.local && this.demoDir);
     this.delayMs = o.delayMs ?? DEFAULT_DELAY_MS;
     this.idleEndMs = o.idleEndMs ?? DEMO_IDLE_END_MS;
     this.maxStoreBytes = o.maxStoreBytes ?? DEMO_LIVE_STORE_MAX_BYTES;
     this.freeFloorBytes = o.freeFloorBytes ?? DEMO_LIVE_FREE_FLOOR_BYTES;
     this.freeBytes = o.freeBytes ?? defaultFreeBytes;
-    this.now = o.now ?? Date.now;
+    this.now = o.now ?? steadyNow;
+    this.wall = o.wall ?? o.now ?? Date.now;
   }
 
   /** Whether any source is on. Off, the live routes answer 404. */
@@ -390,7 +412,15 @@ export class DemoFeed {
     const end = m.offset + data.length;
     if (m.offset < rec.len) {
       if (end > rec.len) return { status: 409, length: rec.len };
-      if (!rec.buf.subarray(m.offset, end).equals(data)) return { status: 409, length: rec.len };
+      if (!rec.buf.subarray(m.offset, end).equals(data)) {
+        // Different bytes from the very start: srcds re-recorded over the same
+        // name without the box noticing a new file. Resuming at our length
+        // would glue two recordings together, so say so: the sidecar then
+        // sends it as a new recording (a larger started).
+        return m.offset === 0
+          ? { status: 409, length: rec.len, error: 'content differs' }
+          : { status: 409, length: rec.len };
+      }
       return { status: 200, length: rec.len };
     }
     if (m.offset !== rec.len) return { status: 409, length: rec.len };
@@ -399,7 +429,7 @@ export class DemoFeed {
 
     // Disk first: a failed write leaves memory as it was, so the copy and the
     // buffer stay the same bytes and the sidecar resumes from the length.
-    mkdirSync(this.liveDir, { recursive: true });
+    mkdirSync(this.liveDir, { recursive: true, mode: 0o700 });
     const fd = openSync(join(this.liveDir, liveDemoFileName(rec.token, rec.ordinal, rec.started)), 'a');
     try {
       writeSync(fd, data);
@@ -421,7 +451,7 @@ export class DemoFeed {
     if (total > this.maxStoreBytes) return { status: 507, error: 'live store is full' };
     let free: number;
     try {
-      mkdirSync(this.liveDir, { recursive: true });
+      mkdirSync(this.liveDir, { recursive: true, mode: 0o700 });
       free = this.freeBytes(this.liveDir);
     } catch {
       // Free space unknown: refuse a new copy rather than guess.
@@ -515,7 +545,7 @@ export class DemoFeed {
       const path = join(this.demoDir, name);
       let st;
       try { st = statSync(path); } catch { continue; }
-      if (!st.isFile() || now - st.mtimeMs > IN_PROGRESS_MS) continue;
+      if (!st.isFile() || this.wall() - st.mtimeMs > IN_PROGRESS_MS) continue;
       if (this.retired.get(key) === st.ino) continue;
       const rec = new Recording(mm[1], Number(mm[2]), 'local', now);
       this.recordings.set(key, rec);
@@ -581,7 +611,12 @@ export class DemoFeed {
 
   isComplete(rec: Recording, now = this.now()): boolean {
     if (rec.released < rec.len) return false;
-    return rec.stopped || !this.matchLive(rec) || (rec.len > 0 && now - rec.lastArrival >= this.idleEndMs);
+    // No end for a quiet recording while its match is live: the box's sender
+    // may be down for a while, and an ended viewer would stay ended. It waits
+    // (the viewer says "waiting for data") until bytes come, the next map
+    // replaces it, or the match is over.
+    void now;
+    return rec.stopped || !this.matchLive(rec);
   }
 
   private superseded(rec: Recording): boolean {
@@ -635,11 +670,21 @@ export class DemoFeed {
         const n = Math.min(PIECE_BYTES, rec.released - c.sent);
         const piece = rec.buf.subarray(c.sent, c.sent + n);
         c.sent += n;
+        let stuck: ReturnType<typeof setTimeout> | undefined;
         try {
-          await c.send(piece);
+          // A viewer whose connection takes nothing for a minute is dropped:
+          // a socket that never reads would otherwise hold this recording
+          // (and its buffer) in memory for as long as it stays open.
+          await Promise.race([
+            c.send(piece),
+            new Promise<never>((_, reject) => { stuck = setTimeout(() => reject(new Error('stalled')), CLIENT_STALL_MS); }),
+          ]);
         } catch {
           rec.clients.delete(c);
+          try { c.end(); } catch { /* already gone */ }
           break;
+        } finally {
+          if (stuck) clearTimeout(stuck);
         }
       }
     } finally {
