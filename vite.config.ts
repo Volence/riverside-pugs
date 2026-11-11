@@ -94,6 +94,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // The live 3D feed's WebSocket (src/routes/demoLive.ts): listed before
+      // '/api' because the first matching prefix wins, and '/api' itself does
+      // not proxy upgrades.
+      '/api/demos/live': { target: `http://localhost:${apiPort}`, ws: true },
       '/api': `http://localhost:${apiPort}`,
       '/auth': `http://localhost:${apiPort}`,
       '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
