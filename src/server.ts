@@ -158,6 +158,8 @@ import { weeklyRoutes } from './routes/weekly.js';
 import { wrappedRoutes } from './routes/wrapped.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
+import { demoLiveRoutes } from './routes/demoLive.js';
+import { DemoFeed } from './demoLive.js';
 import { practiceRoutes } from './routes/practice.js';
 import { PracticeLeases, TICK_MS as PRACTICE_TICK_MS, type LeaseRcon } from './practiceLeases.js';
 import { devRoutes } from './routes/dev.js';
@@ -205,6 +207,8 @@ import { opsReportRoutes } from './opsReport.js';
 export interface ServerDeps {
   config: Config;
   db: DB;
+  /** The live demo feed; tests pass their own and drive its clock. */
+  demoFeed?: DemoFeed;
   verifyLogin?: typeof realVerifyLogin;
   fetchPersona?: typeof realFetchPersona;
   hub?: Hub;
@@ -2295,6 +2299,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(replayRoutes, {
     db: deps.db, replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir, r2,
   });
+  // Live 3D: the growing SourceTV demo of a live match, 10 s behind.
+  const demoFeed = deps.demoFeed ?? new DemoFeed({
+    db: deps.db, liveDir: deps.config.demoLiveDir, demoDir: deps.config.demoDir, local: deps.config.demoLiveLocal,
+  });
+  await app.register(demoLiveRoutes, { db: deps.db, feed: demoFeed });
+  if (!deps.demoFeed) {
+    demoFeed.start();
+    app.addHook('onClose', async () => { demoFeed.stop(); });
+  }
   // The live win chance reads the half in progress from the same files.
   configureLiveWin({ replayDir: deps.config.replayDir, liveDir: deps.config.replayLiveDir });
   // Replay drills read rounds through the same local-then-R2 path as the
