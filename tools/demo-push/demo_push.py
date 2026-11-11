@@ -75,6 +75,16 @@ class Tail:
         self.backoff = 1.0
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: urllib would carry X-Demo-Token to wherever it points,
+    another host or plain http included. A redirect is an error here."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f'redirect refused ({code})', headers, fp)
+
+
+OPENER = urllib.request.build_opener(NoRedirect)
+
+
 def post(url, t, offset, body, timeout):
     req = urllib.request.Request(url, data=body, method='POST', headers={
         'Content-Type': 'application/octet-stream',
@@ -86,7 +96,7 @@ def post(url, t, offset, body, timeout):
         'User-Agent': 'riverside-demo-push/1',
     })
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as res:
+        with OPENER.open(req, timeout=timeout) as res:
             return res.status, json.loads(res.read() or b'{}')
     except urllib.error.HTTPError as e:
         try:
@@ -120,6 +130,12 @@ def pump(url, t, size, now, timeout):
                 sent += len(body)
             elif status == 409:
                 err = data.get('error')
+                if err == 'content differs':
+                    # srcds re-recorded over the same name and we missed the shrink: the
+                    # site's copy is a different recording. Send this one as new.
+                    t.restart(t.inode, now)
+                    log(label(t.token, t.ordinal, t.map), 'site has other bytes at the start: sending as a new recording')
+                    return
                 if err in ('stale recording', 'recorded locally'):
                     log(label(t.token, t.ordinal, t.map), f'site says {err}: not sending this recording')
                     t.dead = True

@@ -9,6 +9,26 @@ import { canViewMatch, viewerFor } from '../matchVisibility.js';
 import { makeOptionalViewer } from './guards.js';
 
 const NOT_FOUND = { error: 'no live demo for that match' };
+const TOO_MANY = { error: 'too many live streams from this address' };
+
+/** Open live streams (WebSocket or HTTP) one address may hold at once. A
+ *  viewer needs one; a late join sends the whole map so far (up to ~30 MB), so
+ *  a loop of new connections is the cost to bound. */
+export const MAX_STREAMS_PER_IP = 4;
+
+/** Who is asking, for the per-address cap. Behind Caddy on the same box the
+ *  socket is loopback and the client is the last X-Forwarded-For entry (the
+ *  one Caddy appended); anything else is the socket's own address. */
+export function clientAddress(req: FastifyRequest): string {
+  const ra = req.socket?.remoteAddress ?? '';
+  if (ra === '127.0.0.1' || ra === '::1' || ra === '::ffff:127.0.0.1') {
+    const xff = req.headers['x-forwarded-for'];
+    const raw = Array.isArray(xff) ? xff.join(',') : xff ?? '';
+    const last = raw.split(',').map((x) => x.trim()).filter(Boolean).at(-1);
+    if (last) return last;
+  }
+  return ra;
+}
 
 /**
  * The live SourceTV demo of a match, 10 s behind (src/demoLive.ts), in the
@@ -27,6 +47,22 @@ const NOT_FOUND = { error: 'no live demo for that match' };
 export async function demoLiveRoutes(app: FastifyInstance, opts: { db: DB; feed: DemoFeed }): Promise<void> {
   const { db, feed } = opts;
   const viewerOf = makeOptionalViewer(db);
+  const open = new Map<string, number>();
+  /** Take a stream slot for this address, or false at the cap. The release
+   *  function is safe to call more than once. */
+  const takeSlot = (req: FastifyRequest): (() => void) | null => {
+    const ip = clientAddress(req);
+    const n = open.get(ip) ?? 0;
+    if (n >= MAX_STREAMS_PER_IP) return null;
+    open.set(ip, n + 1);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const left = (open.get(ip) ?? 1) - 1;
+      if (left > 0) open.set(ip, left); else open.delete(ip);
+    };
+  };
 
   app.addContentTypeParser(
     'application/octet-stream', { parseAs: 'buffer', bodyLimit: DEMO_PUSH_BODY_LIMIT },
@@ -99,6 +135,8 @@ export async function demoLiveRoutes(app: FastifyInstance, opts: { db: DB; feed:
   app.get('/api/demos/live/match/:id/live.dem', async (req, reply: FastifyReply) => {
     const rec = recordingFor(req);
     if (!rec) return reply.code(404).send(NOT_FOUND);
+    const release = takeSlot(req);
+    if (!release) return reply.code(429).send(TOO_MANY);
     const q = req.query as { offset?: string; id?: string };
     const off = feed.startOffset(rec, q.offset ?? 0, q.id);
     const gz = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
@@ -128,7 +166,7 @@ export async function demoLiveRoutes(app: FastifyInstance, opts: { db: DB; feed:
       }),
       end: () => { if (!closed) { closed = true; out.end(); } },
     };
-    res.on('close', () => { closed = true; feed.unsubscribe(rec, c); });
+    res.on('close', () => { closed = true; release(); feed.unsubscribe(rec, c); });
     feed.subscribe(rec, c);
   });
 
@@ -138,10 +176,13 @@ export async function demoLiveRoutes(app: FastifyInstance, opts: { db: DB; feed:
     // 404 like the HTTP route rather than an open socket that never speaks.
     preValidation: async (req, reply) => {
       if (!recordingFor(req)) return reply.code(404).send(NOT_FOUND);
+      if ((open.get(clientAddress(req)) ?? 0) >= MAX_STREAMS_PER_IP) return reply.code(429).send(TOO_MANY);
     },
   }, (socket, req) => {
     const rec = recordingFor(req);
     if (!rec) { socket.close(1011); return; }
+    const release = takeSlot(req);
+    if (!release) { socket.close(1013); return; }
     const q = req.query as { offset?: string; id?: string };
     const off = feed.startOffset(rec, q.offset ?? 0, q.id);
     let closed = false;
@@ -154,8 +195,8 @@ export async function demoLiveRoutes(app: FastifyInstance, opts: { db: DB; feed:
       text: (s) => { if (!closed) socket.send(s); },
       end: () => { if (!closed) { closed = true; socket.close(1000); } },
     };
-    socket.on('close', () => { closed = true; feed.unsubscribe(rec, c); });
-    socket.on('error', () => { closed = true; feed.unsubscribe(rec, c); });
+    socket.on('close', () => { closed = true; release(); feed.unsubscribe(rec, c); });
+    socket.on('error', () => { closed = true; release(); feed.unsubscribe(rec, c); });
     // Anything the browser sends is ignored (ws answers pings itself).
     socket.send(feed.hello(rec, off));
     feed.subscribe(rec, c);
