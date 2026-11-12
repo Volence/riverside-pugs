@@ -15,7 +15,9 @@
 #     theatre-assets/<version>/            one immutable snapshot per content version (hard links
 #                                          into stage, so an unchanged file costs no disk twice):
 #       map/          per map: .lit.glb, .lit.low.glb, .lighting.json, atlas png, .proplight.bin,
-#                     .dynamic.json, .ladders.json; per mirror: .mirror.json, .dynamic.json, .ladders.json
+#                     .dynamic.json, .ladders.json, and the sky files its .sky.json names (.sky.json,
+#                     .sky.webp, .sky.low.webp, .sky.glb, .sky.low.glb, .sky.lightmap.png);
+#                     per mirror: .mirror.json, .dynamic.json, .ladders.json (its sky is the original's)
 #       models/out/   player, common, weapon, view model, item, prop glbs and the fx textures
 #       sound/        out/manifest.json, out/a/*.ogg, map.json
 #       light/        character light (index.json, <map>.ambient.bin), the viewer's ambbase=
@@ -55,7 +57,7 @@ while [ $# -gt 0 ]; do
     --maps) MAPS_GLOB="$2"; shift 2 ;;
     --no-maps) DO_MAPS=0; shift ;;
     --allow-stale) ALLOW_STALE=1; shift ;;
-    -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,43p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -131,6 +133,11 @@ fi
 #    Mirror maps (map/README.md "Mirror maps at load") are not converted: the viewer loads the
 #    original's files and reflects them, plus the mirror's own <m>.mirror.json, .dynamic.json and
 #    .ladders.json. A mirror is copied when its original is.
+#    Sky (map/README.md "Sky and portal fade", viewer/sky.js): the viewer fetches <map>.sky.json, then
+#    the files it names: sky2d.file / sky2d.low (2D sky, full / low tier), sky3d.glb / sky3d.low (3D
+#    skybox) and sky3d.lightmap. A mirror has no sky files: the viewer loads its original's. The
+#    sky is optional: a map without sky.json, or whose sky.json names a missing file, ships without
+#    a sky (plain background) rather than being held back. <map>.sky.stats.json is never copied.
 if [ "$DO_MAPS" = 1 ]; then
   python3 -I - "$SPIKE/map" "$STAGE/map" "$MAPS_GLOB" <<'PY'
 import fnmatch, json, os, shutil, sys, time
@@ -139,13 +146,13 @@ src, out, glob = sys.argv[1], sys.argv[2], sys.argv[3]
 now = time.time()
 listing = os.listdir(src)
 names = sorted({f[:-len(ext)] for f in listing for ext in ('.lit.glb', '.glb')
-                if f.endswith(ext) and 'before' not in f and not f.endswith('.low.glb')
+                if f.endswith(ext) and 'before' not in f and not f.endswith(('.low.glb', '.sky.glb'))
                 and (ext == '.lit.glb' or not f.endswith('.lit.glb'))})
 mirrors = sorted(f[:-len('.mirror.json')] for f in listing if f.endswith('.mirror.json') and 'before' not in f)
 p = lambda name, suffix: os.path.join(src, name + suffix)
 young = lambda files: [f for f in files if now - os.path.getmtime(os.path.join(src, f)) < 120]
 
-wanted, skipped = {}, []
+wanted, skipped, notes = {}, [], []
 for name in names:
     if not fnmatch.fnmatch(name, glob):
         continue
@@ -165,6 +172,19 @@ for name in names:
     else:
         continue
     files += [name + s for s in ('.dynamic.json', '.ladders.json') if os.path.exists(p(name, s))]
+    if os.path.exists(p(name, '.sky.json')):
+        try:
+            sky = json.load(open(p(name, '.sky.json')))
+            s2, s3 = sky.get('sky2d') or {}, sky.get('sky3d') or {}
+            named = [x for x in (s2.get('file'), s2.get('low'), s3.get('glb'), s3.get('low'), s3.get('lightmap')) if x]
+        except Exception as e:
+            named = None; notes.append(f'{name} (no sky: sky.json unreadable: {e})')
+        if named is not None:
+            gone = [x for x in named if '/' in x or not os.path.exists(os.path.join(src, x))]
+            if gone:
+                notes.append(f'{name} (no sky: sky.json names missing {", ".join(gone)})')
+            else:
+                files += [name + '.sky.json', *named]
     missing = [f for f in files if not os.path.exists(os.path.join(src, f))]
     if missing:
         skipped.append(f'{name} (missing {", ".join(missing)})'); continue
@@ -204,6 +224,8 @@ for f in os.listdir(out):
         os.remove(os.path.join(out, f))
 for s in skipped:
     print('  skipped map', s)
+for s in notes:
+    print('  map without sky', s)
 PY
 fi
 
@@ -253,16 +275,18 @@ own = lambda n: [f for f in os.listdir(mapdir) if f.startswith(n + '.')]
 maps = {}
 for f in sorted(os.listdir(mapdir)):
     for ext, lit in (('.lit.glb', True), ('.glb', False)):
-        if f.endswith(ext) and not f.endswith('.low.glb') and (lit or not f.endswith('.lit.glb')):
+        if f.endswith(ext) and not f.endswith(('.low.glb', '.sky.glb')) and (lit or not f.endswith('.lit.glb')):
             n = f[:-len(ext)]
             m = maps.setdefault(n, {'lit': False, 'low': False, 'bytes': 0})
             m['lit'] = m['lit'] or lit
+# the low tier's sky files (viewer/sky.js): a GPU viewer never fetches them
+SKY_LOW = ('.sky.low.webp', '.sky.low.glb')
 for n, m in maps.items():
-    m['low'] = any(f.endswith('.low.glb') for f in own(n))
-    # what a viewer on a GPU downloads: the full glb and the side files (the software
-    # tier takes the .low.glb instead, which is smaller)
+    m['low'] = os.path.exists(os.path.join(mapdir, n + ('.lit.low.glb' if m['lit'] else '.low.glb')))
+    # what a viewer on a GPU downloads: the full glb, the side files and the full sky files
+    # (the software tier takes the .low.glb and the low sky files instead, which are smaller)
     m['bytes'] = sum(os.path.getsize(os.path.join(mapdir, f)) for f in own(n)
-                     if not (f.endswith('.low.glb') and m['low']))
+                     if not f.endswith(SKY_LOW) and not (f.endswith('.low.glb') and m['low']))
 for f in sorted(os.listdir(mapdir)):
     if f.endswith('.mirror.json'):
         n = f[:-len('.mirror.json')]

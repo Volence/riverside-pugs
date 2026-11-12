@@ -18,6 +18,14 @@ describe('theatreContentType', () => {
     expect(theatreContentType('map/a.proplight.bin')).toBe('application/octet-stream');
     expect(theatreContentType('manifest.json')).toBe('application/json');
   });
+  it('takes every sky file the viewer fetches (viewer/sky.js)', () => {
+    expect(theatreContentType('map/a.sky.json')).toBe('application/json');
+    expect(theatreContentType('map/a.sky.webp')).toBe('image/webp');
+    expect(theatreContentType('map/a.sky.low.webp')).toBe('image/webp');
+    expect(theatreContentType('map/a.sky.glb')).toBe('model/gltf-binary');
+    expect(theatreContentType('map/a.sky.low.glb')).toBe('model/gltf-binary');
+    expect(theatreContentType('map/a.sky.lightmap.png')).toBe('image/png');
+  });
   it('refuses anything else', () => {
     expect(theatreContentType('viewer/index.html')).toBeNull();
     expect(theatreContentType('a.dem')).toBeNull();
@@ -33,6 +41,8 @@ describe('theatreForbidden', () => {
     expect(theatreForbidden('sample-hospital01.json')).toBe(true);
     expect(theatreForbidden('map/a.lit.log')).toBe(true);
     expect(theatreForbidden('map/a.lit.stats.json')).toBe(true);
+    expect(theatreForbidden('map/a.sky.stats.json')).toBe(true);
+    expect(theatreForbidden('map/a.sky.json')).toBe(false);
     expect(theatreForbidden('map/a.lit.glb')).toBe(false);
     expect(theatreForbidden('map/a.dynamic.json')).toBe(false);
   });
