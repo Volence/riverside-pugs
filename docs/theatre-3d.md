@@ -80,11 +80,22 @@ The viewer page and its workers must be same-origin (module workers), everything
 `tools/sync-theatre.sh` copies the spike (read-only; other sessions own it) into two places, both
 gitignored, nothing committed:
 
-| Set | Where | Content | Size 2026-11-11 (version `85b5d89e3f12`) |
+| Set | Where | Content | Size 2026-11-12 (version `bab9fb22bf2b`) |
 |---|---|---|---|
-| small, ships with the site | `web/public/theatre/` | `viewer/` (index.html, the ES modules, `demo-worker.js`, `vendor/`: three.js 0.160.0, Draco, meshoptimizer), `sound/sound-worker.js`, `sound/sounddecode.js`, `sound/out/js/`, `manifest.json` | 3.5 MB, 43 files |
-| heavy, R2 | `theatre-assets/<version>/` | `map/` (143 maps: `.lit.glb`, `.lit.low.glb`, `.lighting.json`, atlas png, `.proplight.bin`, `.dynamic.json`, `.ladders.json`; 42 mirrors: `.mirror.json`, `.dynamic.json`, `.ladders.json`), `models/out/`, `sound/out/manifest.json`, `sound/out/a/*.ogg`, `sound/map.json`, `light/`, `manifest.json` | 3,791.5 MB, 2,879 files (maps 3,701, models 51.6, sound 13.9, light 25.0) |
+| small, ships with the site | `web/public/theatre/` | `viewer/` (index.html, the ES modules, `demo-worker.js`, `vendor/`: three.js 0.160.0, Draco, meshoptimizer), `sound/sound-worker.js`, `sound/sounddecode.js`, `sound/out/js/`, `manifest.json` | 3.5 MB, 44 files |
+| heavy, R2 | `theatre-assets/<version>/` | `map/` (142 maps: `.lit.glb`, `.lit.low.glb`, `.lighting.json`, atlas png, `.proplight.bin`, `.dynamic.json`, `.ladders.json`, and the sky files below; 43 mirrors: `.mirror.json`, `.dynamic.json`, `.ladders.json`), `models/out/`, `sound/out/manifest.json`, `sound/out/a/*.ogg`, `sound/map.json`, `light/`, `manifest.json` | 3,918.8 MB, 3,661 files (maps 3,802.2, models 77.7, sound 13.9, light 25.0) |
 
+- **Sky** (spike map/README.md "Sky and portal fade (11-12)", viewer/sky.js). The viewer fetches
+  `<map>.sky.json`, then the files it names: `sky2d.file` / `sky2d.low` (`<map>.sky.webp`,
+  `<map>.sky.low.webp`: the 2D sky, full and low tier), `sky3d.glb` / `sky3d.low` (`<map>.sky.glb`,
+  `<map>.sky.low.glb`: the 3D skybox) and `sky3d.lightmap` (`<map>.sky.lightmap.png`). The sync
+  copies `.sky.json` and exactly the files it names (2026-11-12: 142 sky.json, 139 with a 2D sky,
+  119 with a 3D skybox; mc2m1_highway has none). A mirror has no sky files of its own: the viewer
+  loads the original's, reflected. The sky is optional, so a map whose sky.json is unreadable or
+  names a missing file ships without a sky (listed as "map without sky") instead of being held
+  back; a map without sky.json just gets a 404 on it and the plain background.
+  `<map>.sky.stats.json` is never copied (and the upload refuses `*.stats.json`). A map's manifest
+  `bytes` counts the full-tier sky files, not the low ones.
 - `theatre-assets/` is outside `web/`, so a Vite build never copies it; `dist/public/` stays small
   (58 MB in this worktree, of which `theatre/` 3.5 MB and the old 1x overviews 49 MB).
 - The **version** is the first 12 hex digits of a SHA-256 over every heavy file's path and content
@@ -128,7 +139,7 @@ version every other URL is built from) and also in the R2 folder. `version`, `ge
 `viewer.mirrors`, `bytes` per folder, and `maps`: `{lit, low, bytes}` per map (`bytes`: what a GPU
 viewer downloads), plus `mirror_of` for a mirror.
 
-**Missing files are 404s.** The viewer probes optional files (`.lit.low.glb`, `.ladders.json`) and
+**Missing files are 404s.** The viewer probes optional files (`.lit.low.glb`, `.ladders.json`, `.sky.json`) and
 takes any 200 as the file, so `/theatre/` is excluded from the SPA fallback (`src/server.ts`) and
 from Vite's (dev).
 
