@@ -37,4 +37,20 @@ describe('Autoexec builder', () => {
     fireEvent.click(screen.getByText('Ghost teammate', { selector: '.ax__name span' }));
     expect(screen.getByText('Ghost teammate', { selector: '.ax__tag' })).toBeTruthy();
   });
+
+  it('shows the item under the crosshair with the picked item glow', () => {
+    render(<Autoexec />);
+    expect(screen.getByText('In reach', { selector: '.ax__tag' })).toBeTruthy();
+    fireEvent.click(screen.getByText('Item out of reach', { selector: '.ax__name span' }));
+    expect(screen.getByText('Out of reach', { selector: '.ax__tag' })).toBeTruthy();
+  });
+
+  it('switches the infected preview between the ghost and spawned views', () => {
+    render(<Autoexec />);
+    expect(screen.getByText('As infected: ghost')).toBeTruthy();
+    expect(screen.queryByText('As infected: spawned')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Spawned' }));
+    expect(screen.getByText('As infected: spawned')).toBeTruthy();
+    expect(screen.queryByText('As infected: ghost')).toBeNull();
+  });
 });
