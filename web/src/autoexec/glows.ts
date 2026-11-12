@@ -33,9 +33,9 @@ export const GLOWS: readonly GlowCvar[] = [
   { id: 'survivor', side: 'survivor', label: 'Teammate', hint: 'A teammate out of sight, through walls.', def: [0.3, 0.4, 1.0] },
   { id: 'survivor_hurt', side: 'survivor', label: 'Incapped teammate', hint: 'A teammate who is down or hanging.', def: [1.0, 0.4, 0.0] },
   { id: 'survivor_vomit', side: 'survivor', label: 'Boomed teammate', hint: 'A teammate covered in Boomer bile.', def: [1.0, 0.4, 0.0] },
-  { id: 'item', side: 'survivor', label: 'Item, close', hint: 'Weapons and items you are near enough to pick up.', def: [0.7, 0.7, 1.0] },
-  { id: 'item_far', side: 'survivor', label: 'Item, far', hint: 'Weapons and items further away.', def: [0.3, 0.4, 1.0] },
-  { id: 'thirdstrike_item', side: 'survivor', label: 'Health item on last life', hint: 'Health items while you are black and white.', def: [1.0, 0.0, 0.0] },
+  { id: 'item', side: 'survivor', label: 'Item in reach', hint: 'The item under your crosshair, close enough to pick up.', def: [0.7, 0.7, 1.0] },
+  { id: 'item_far', side: 'survivor', label: 'Item out of reach', hint: 'The item under your crosshair, too far away to pick up yet.', def: [0.3, 0.4, 1.0] },
+  { id: 'thirdstrike_item', side: 'survivor', label: 'Item on last life', hint: 'Replaces the item colours while you are black and white.', def: [1.0, 0.0, 0.0] },
   { id: 'survivor_health_high', side: 'infected', label: 'Survivor, high health', hint: 'How you see survivors as infected.', def: [0.039, 0.69, 0.196] },
   { id: 'survivor_health_med', side: 'infected', label: 'Survivor, medium health', hint: 'How you see survivors as infected.', def: [0.59, 0.4, 0.032] },
   { id: 'survivor_health_low', side: 'infected', label: 'Survivor, low health', hint: 'How you see survivors as infected.', def: [0.63, 0.098, 0.098] },
@@ -48,7 +48,7 @@ export const GLOWS: readonly GlowCvar[] = [
   { id: 'survivor_health_med_colorblind', side: 'infected', colorblind: true, label: 'Survivor, medium health', hint: 'Colour-blind set.', def: [0.694, 0.573, 0.098] },
   { id: 'survivor_health_low_colorblind', side: 'infected', colorblind: true, label: 'Survivor, low health', hint: 'Colour-blind set.', def: [0.047, 0.807, 0.807] },
   { id: 'ability_colorblind', side: 'infected', colorblind: true, label: 'Ability', hint: 'Colour-blind set.', def: [0.3, 1.0, 1.0] },
-  { id: 'thirdstrike_item_colorblind', side: 'survivor', colorblind: true, label: 'Health item on last life', hint: 'Colour-blind set.', def: [0.3, 1.0, 1.0] },
+  { id: 'thirdstrike_item_colorblind', side: 'survivor', colorblind: true, label: 'Item on last life', hint: 'Colour-blind set.', def: [0.3, 1.0, 1.0] },
 ];
 
 const BY_ID = new Map(GLOWS.map((g) => [g.id, g]));

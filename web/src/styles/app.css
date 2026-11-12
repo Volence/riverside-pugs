@@ -6658,12 +6658,15 @@ a.mapch__name:hover { color: var(--accent); }
 .ax__previews { position: sticky; top: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
 .ax__scene { margin: 0; }
 .ax__scene figcaption { margin-bottom: var(--sp-2); }
+.ax__cap { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+.ax__views { display: flex; gap: var(--sp-1); }
 .ax__frame { position: relative; }
 .ax__canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--border); background: #000; }
 .ax__tag {
   position: absolute; transform: translate(-50%, 4px); padding: 1px 6px; font-size: var(--fs-label);
   color: #fff; background: rgba(0, 0, 0, 0.6); border: 1px solid transparent; white-space: nowrap; pointer-events: none;
 }
+.ax__tag.is-above { transform: translate(-50%, calc(-100% - 4px)); }
 .ax__tag.is-picked { border-color: var(--accent); }
 .ax__note { font-size: var(--fs-dense); margin: 0; }
 .ax__row {

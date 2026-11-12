@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '../components/bits';
 import { HudTabs } from '../components/HudTabs';
@@ -29,25 +30,32 @@ const HAS_CB = new Set(GLOWS.filter((g) => g.colorblind).map((g) => g.id.replace
 /** The cvar a row edits: its colour-blind variant while that set is being edited. */
 const rowId = (id: string, cb: boolean) => (cb && HAS_CB.has(id) ? `${id}_colorblind` : id);
 
+type Group = 'survivor' | 'items' | 'infected';
+const GROUP_OF: Record<Scene['id'], Group> = { survivor: 'survivor', items: 'items', ghost: 'infected', spawned: 'infected' };
+
 /** Which preview outline shows a glow, and what that outline is called while it does. */
-const SHOWN_ON: Record<string, { scene: Scene['id']; slot: string; label: string }> = {
-  survivor: { scene: 'survivor', slot: 'teammate', label: 'Teammate' },
-  survivor_hurt: { scene: 'survivor', slot: 'incap', label: 'Incapped' },
-  survivor_vomit: { scene: 'survivor', slot: 'boomed', label: 'Boomed' },
-  infected: { scene: 'infected', slot: 'teammate', label: 'Infected teammate' },
-  ghost_infected: { scene: 'infected', slot: 'teammate', label: 'Ghost teammate' },
-  survivor_health_high: { scene: 'infected', slot: 'high', label: 'High health' },
-  survivor_health_med: { scene: 'infected', slot: 'med', label: 'Medium health' },
-  survivor_health_low: { scene: 'infected', slot: 'low', label: 'Low health' },
-  infected_vomit: { scene: 'infected', slot: 'med', label: 'Boomed' },
-  ability: { scene: 'infected', slot: 'low', label: 'Ability' },
+const SHOWN_ON: Record<string, { group: Group; slot: string; label: string }> = {
+  survivor: { group: 'survivor', slot: 'teammate', label: 'Teammate' },
+  survivor_hurt: { group: 'survivor', slot: 'incap', label: 'Incapped' },
+  survivor_vomit: { group: 'survivor', slot: 'boomed', label: 'Boomed' },
+  item: { group: 'items', slot: 'item', label: 'In reach' },
+  item_far: { group: 'items', slot: 'item', label: 'Out of reach' },
+  thirdstrike_item: { group: 'items', slot: 'item', label: 'Black and white' },
+  infected: { group: 'infected', slot: 'teammate', label: 'Infected teammate' },
+  ghost_infected: { group: 'infected', slot: 'teammate', label: 'Ghost teammate' },
+  survivor_health_high: { group: 'infected', slot: 'high', label: 'High health' },
+  survivor_health_med: { group: 'infected', slot: 'med', label: 'Medium health' },
+  survivor_health_low: { group: 'infected', slot: 'low', label: 'Low health' },
+  infected_vomit: { group: 'infected', slot: 'boomed', label: 'Boomed' },
+  ability: { group: 'infected', slot: 'low', label: 'Ability' },
 };
 
 /** The glow each outline shows when nothing that shares it is picked. */
 const SLOT_DEFAULT: Record<string, string> = {
   'survivor/teammate': 'survivor', 'survivor/incap': 'survivor_hurt', 'survivor/boomed': 'survivor_vomit',
+  'items/item': 'item',
   'infected/teammate': 'infected', 'infected/high': 'survivor_health_high',
-  'infected/med': 'survivor_health_med', 'infected/low': 'survivor_health_low',
+  'infected/med': 'survivor_health_med', 'infected/low': 'survivor_health_low', 'infected/boomed': 'infected_vomit',
 };
 
 const PLAIN = GLOWS.filter((g) => !g.colorblind);
@@ -58,6 +66,7 @@ export function Autoexec() {
   const [focus, setFocus] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [paste, setPaste] = useState('');
+  const [infView, setInfView] = useState<'ghost' | 'spawned'>('ghost');
 
   const set = (next: AutoexecState) => { setState(next); saveState(next); };
   const setGlow = (id: string, c: Rgb) => set({ ...state, glows: { ...state.glows, [id]: c } });
@@ -66,7 +75,7 @@ export function Autoexec() {
   const slotGlow = useMemo(() => {
     const out: Record<string, string> = { ...SLOT_DEFAULT };
     const at = focus ? SHOWN_ON[focus] : undefined;
-    if (at) out[`${at.scene}/${at.slot}`] = focus!;
+    if (at) out[`${at.group}/${at.slot}`] = focus!;
     return out;
   }, [focus]);
 
@@ -191,21 +200,33 @@ export function Autoexec() {
         </Panel>
 
         <div class="ax__previews">
-          {SCENES.map((scene) => (
-            <ScenePreview
-              key={scene.id} scene={scene} focus={focus}
-              colours={Object.fromEntries(scene.slots.map((s) => [s.key, colourOf(slotGlow[`${scene.id}/${s.key}`])]))}
-              labels={Object.fromEntries(scene.slots.map((s) => {
-                const id = slotGlow[`${scene.id}/${s.key}`];
-                return [s.key, SHOWN_ON[id].label];
-              }))}
-              picked={Object.fromEntries(scene.slots.map((s) => [s.key, slotGlow[`${scene.id}/${s.key}`] === focus]))}
-            />
-          ))}
+          {SCENES.filter((sc) => sc.id !== (infView === 'ghost' ? 'spawned' : 'ghost')).map((scene) => {
+            const g = GROUP_OF[scene.id];
+            const glowAt = (key: string) => slotGlow[`${g}/${key}`];
+            return (
+              <ScenePreview
+                key={scene.id} scene={scene} focus={focus}
+                switcher={g === 'infected' ? (
+                  <div class="ax__views" role="group" aria-label="Infected view">
+                    {(['ghost', 'spawned'] as const).map((v) => (
+                      <button key={v} type="button" class={`chip${infView === v ? ' is-on' : ''}`} aria-pressed={infView === v}
+                        onClick={() => setInfView(v)}>{v === 'ghost' ? 'Ghost' : 'Spawned'}</button>
+                    ))}
+                  </div>
+                ) : undefined}
+                colours={Object.fromEntries(scene.slots.map((s) => [s.key, colourOf(glowAt(s.key))]))}
+                labels={Object.fromEntries(scene.slots.map((s) => [s.key, SHOWN_ON[glowAt(s.key)].label]))}
+                picked={Object.fromEntries(scene.slots.map((s) => [s.key, glowAt(s.key) === focus]))}
+              />
+            );
+          })}
           <p class="muted ax__note">
-            Shots from the game at 1920 x 1080 with the outlines it draws through walls; the colours are laid on the
-            way the game adds them. Pick a row to see it here. Items have no picture yet: their outline is the same
-            kind, around the item.
+            Shots from the game at 1920 x 1080, with the outlines it draws; your colours are added the way the game adds
+            them, checked against shots of the default colours. Pick a row to see it here. The game draws the glow the
+            same way in every view: the infected views tint everything else, which is why the same colour looks
+            different there. Outlines are the game's own from that shot, except the teammate in the ghost view and the
+            survivors in the spawned view, which come from other shots. As infected, survivors' glows fade with how much
+            noise they make, so a quiet survivor can look dimmer than shown.
           </p>
         </div>
       </div>
@@ -243,25 +264,25 @@ function GlowRow({ glow, cvar, colour, def, active, onFocus, onChange }: {
   );
 }
 
-function ScenePreview({ scene, colours, labels, picked, focus }: {
+function ScenePreview({ scene, colours, labels, picked, focus, switcher }: {
   scene: Scene; colours: Record<string, Rgb>; labels: Record<string, string>;
-  picked: Record<string, boolean>; focus: string | null;
+  picked: Record<string, boolean>; focus: string | null; switcher?: ComponentChildren;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const key = JSON.stringify(colours);
   useEffect(() => {
     if (canvas.current) paintScene(canvas.current, scene, colours).catch(() => {});
-  }, [key]);
+  }, [key, scene.id]);
   return (
     <figure class="ax__scene">
-      <figcaption class="eyebrow">{scene.title}</figcaption>
+      <figcaption class="ax__cap"><span class="eyebrow">{scene.title}</span>{switcher}</figcaption>
       <div class="ax__frame">
         <canvas ref={canvas} class="ax__canvas" role="img"
           aria-label={`${scene.title}: ${scene.slots.map((s) => `${labels[s.key]} ${toHex(colours[s.key])}`).join(', ')}`} />
         {scene.slots.map((s) => {
           const at = slotAnchor(s, MASK_SIZE);
           return (
-            <span key={s.key} class={`ax__tag${picked[s.key] && focus ? ' is-picked' : ''}`}
+            <span key={s.key} class={`ax__tag${at.above ? ' is-above' : ''}${picked[s.key] && focus ? ' is-picked' : ''}`}
               style={{ left: `${at.left}%`, top: `${at.top}%` }}>
               {labels[s.key]}
             </span>

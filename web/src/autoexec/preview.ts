@@ -5,23 +5,42 @@
  * Every asset under /autoexec/ came from the owner's L4D1 client through the
  * in-game harness (~/l4d/hud/probe-autoexec-glow, NOTES.md there): a shot with
  * every glow off, then the same view with one glow set to white. The glow-*.png
- * masks hold, per pixel, how much the white glow brightened the shot (red
- * channel, square-root coded) and the black body fill the game draws inside
- * the outline (green channel). Comparing against shots taken with other
- * colours, the game's result is matched best by adding colour^0.75 * k in
- * plain sRGB values: within ~6/255 of the real capture on average.
+ * masks hold, per pixel, how much light the glow adds at full colour (red
+ * channel, square-root coded, solved from every unclipped channel of eight
+ * colour shots so a bright background does not weaken it) and the black body
+ * fill the game draws inside the outline (green channel). The game adds
+ * colour^0.75 * k in plain sRGB values, the same in every view: the infected
+ * views only look different because of their background grading. Checked
+ * against held-out shots at the default colours (NOTES.md).
  */
 import { type Rgb } from './glows';
 
 export const SCENE_W = 960;
 export const SCENE_H = 540;
 
-export type MaskName = 'standing' | 'incap' | 'smoker';
-const MASK_AT: Record<MaskName, { x: number; y: number }> = {
-  standing: { x: 615, y: 155 },
-  incap: { x: 279, y: 197 },
-  smoker: { x: 360, y: 344 },
+export type MaskName =
+  | 'standing' | 'standing2' | 'incap' | 'ghost1' | 'ghost2' | 'ghost3' | 'ghost4' | 'smoker' | 'ammo';
+
+/** Where each outline was captured (half-size coordinates) and its PNG size; masks.json in the probe folder. */
+export const MASK_AT: Record<MaskName, { x: number; y: number; w: number; h: number }> = {
+  standing: { x: 515, y: 158, w: 53, h: 122 },
+  standing2: { x: 569, y: 158, w: 54, h: 122 },
+  incap: { x: 402, y: 223, w: 79, h: 63 },
+  ghost1: { x: 340, y: 163, w: 54, h: 120 },
+  ghost2: { x: 569, y: 156, w: 70, h: 129 },
+  ghost3: { x: 639, y: 180, w: 61, h: 96 },
+  ghost4: { x: 750, y: 176, w: 73, h: 102 },
+  smoker: { x: 362, y: 346, w: 65, h: 160 },
+  ammo: { x: 398, y: 192, w: 158, h: 69 },
 };
+
+/** Mask sizes at full scale, so labels can be placed before images load. */
+export const MASK_SIZE: Record<MaskName, { w: number; h: number }> = Object.fromEntries(
+  Object.entries(MASK_AT).map(([k, v]) => [k, { w: v.w, h: v.h }]),
+) as Record<MaskName, { w: number; h: number }>;
+
+/** The mask's red channel is sqrt(K / K_MAX): K can pass 1 where the game's outline core clips to white. */
+const K_MAX = 3;
 
 export interface Slot {
   key: string;
@@ -29,32 +48,50 @@ export interface Slot {
   x: number;
   y: number;
   scale: number;
+  /** Put the label above the outline (when a neighbour's label would collide). */
+  above?: boolean;
+  /** Not captured in this shot: the outline is the game's, taken from another shot. */
+  pasted?: boolean;
 }
 
+export type SceneId = 'survivor' | 'items' | 'ghost' | 'spawned';
 export interface Scene {
-  id: 'survivor' | 'infected';
+  id: SceneId;
   title: string;
   src: string;
   slots: Slot[];
 }
 
-/** Where each outline sits. The first slot of each mask is where it was captured; the rest are copies. */
+const at = (key: string, mask: MaskName): Slot => ({ key, mask, x: MASK_AT[mask].x, y: MASK_AT[mask].y, scale: 1 });
+
+/**
+ * Where each outline sits. Every slot without `pasted` is the game's own outline in that very shot.
+ * The two infected scenes share slot keys, so a glow shows in whichever of them is on screen.
+ */
 export const SCENES: Scene[] = [
   {
     id: 'survivor', title: 'As a survivor', src: '/autoexec/scene-survivor.jpg',
+    slots: [at('teammate', 'standing'), { ...at('boomed', 'standing2'), above: true }, { ...at('incap', 'incap'), above: true }],
+  },
+  {
+    id: 'items', title: 'Item under your crosshair', src: '/autoexec/scene-items.jpg',
+    slots: [at('item', 'ammo')],
+  },
+  {
+    id: 'ghost', title: 'As infected: ghost', src: '/autoexec/scene-ghost.jpg',
     slots: [
-      { key: 'teammate', mask: 'standing', ...MASK_AT.standing, scale: 1 },
-      { key: 'incap', mask: 'incap', ...MASK_AT.incap, scale: 1 },
-      { key: 'boomed', mask: 'standing', x: 800, y: 172, scale: 0.88 },
+      at('high', 'ghost1'), at('med', 'ghost2'), { ...at('low', 'ghost3'), above: true }, at('boomed', 'ghost4'),
+      { key: 'teammate', mask: 'smoker', x: 150, y: 250, scale: 0.95, pasted: true },
     ],
   },
   {
-    id: 'infected', title: 'As infected', src: '/autoexec/scene-infected.jpg',
+    id: 'spawned', title: 'As infected: spawned', src: '/autoexec/scene-spawned.jpg',
     slots: [
-      { key: 'teammate', mask: 'smoker', ...MASK_AT.smoker, scale: 1 },
-      { key: 'high', mask: 'standing', x: 40, y: 150, scale: 0.95 },
-      { key: 'med', mask: 'standing', x: 790, y: 140, scale: 0.95 },
-      { key: 'low', mask: 'standing', x: 190, y: 168, scale: 0.8 },
+      at('teammate', 'smoker'),
+      { key: 'high', mask: 'standing', x: 40, y: 150, scale: 1.05, pasted: true },
+      { key: 'med', mask: 'standing2', x: 800, y: 140, scale: 1.05, pasted: true },
+      { key: 'low', mask: 'standing', x: 190, y: 172, scale: 0.85, pasted: true },
+      { key: 'boomed', mask: 'standing2', x: 560, y: 160, scale: 0.9, pasted: true },
     ],
   },
 ];
@@ -93,7 +130,7 @@ function maskData(img: HTMLImageElement, name: string, scale: number): MaskData 
   const fill = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) {
     const r = px[i * 4] / 255;
-    k[i] = r * r;
+    k[i] = r * r * K_MAX;
     fill[i] = px[i * 4 + 1] / 255;
   }
   const out = { w, h, k, fill };
@@ -148,13 +185,7 @@ export function slotAnchor(slot: Slot, maskSize: Record<MaskName, { w: number; h
   const s = maskSize[slot.mask];
   return {
     left: ((slot.x + (s.w * slot.scale) / 2) / SCENE_W) * 100,
-    top: ((slot.y + s.h * slot.scale) / SCENE_H) * 100,
+    top: ((slot.above ? slot.y : slot.y + s.h * slot.scale) / SCENE_H) * 100,
+    above: !!slot.above,
   };
 }
-
-/** Mask sizes at full scale (the PNGs' own sizes), so labels can be placed before images load. */
-export const MASK_SIZE: Record<MaskName, { w: number; h: number }> = {
-  standing: { w: 70, h: 130 },
-  incap: { w: 157, h: 100 },
-  smoker: { w: 68, h: 162 },
-};
