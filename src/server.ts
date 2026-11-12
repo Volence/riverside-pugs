@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { pruneDemos } from './demoPrune.js';
 import { sweepDemos } from './demoOffload.js';
 import { sweepReplays } from './replayOffload.js';
@@ -202,6 +203,7 @@ import { notifyDiscord } from './discord.js';
 import { setMissionsDirs } from './campaignRegistry.js';
 import { a2sInfo } from './a2s.js';
 import { ServerLostWatch } from './serverLost.js';
+import { EndWatch } from './endWatch.js';
 import { opsReportRoutes } from './opsReport.js';
 
 export interface ServerDeps {
@@ -298,6 +300,9 @@ export interface ServerDeps {
   /** How long a HUD share may take to upload. Injected in tests; two minutes otherwise. */
   communityUploadTimeoutMs?: number;
 }
+
+/** A minute whose worst event-loop stall reaches this is logged (see the reaper). */
+const LOOP_STALL_LOG_MS = 250;
 
 /** Delays between attempts to collect a finished match, in ms.
  *
@@ -868,6 +873,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   let orchestrator = deps.orchestrator;
   let logListener: LogListener | null = null;
+  /** Collects a match whose MATCH_END datagram was lost (src/endWatch.ts).
+   *  Built with the real orchestrator; the minute reaper drives its sweep. */
+  let endWatch: EndWatch | null = null;
   // Assigned further down, once the bot variable it reads exists: the same
   // forward reference selfStarted uses, null-safe for the same reason.
   let signonDrops: SignonDropNotifier | null = null;
@@ -963,6 +971,35 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       };
       // Per listener, so tests that build several servers do not share it.
       const noTankWatch = new NoTankWatch();
+      // One collection per match at a time, whoever asks: the MATCH_END line
+      // or endWatch noticing the plugin ended a match whose line was lost.
+      const collecting = new Set<number>();
+      const collectMatch = (matchId: number): void => {
+        if (collecting.has(matchId)) return;
+        collecting.add(matchId);
+        forgetLiveWin(matchId);
+        void finishWithRetry(deps.db, orchestrator as RealOrchestrator, matchId, releaser)
+          .finally(() => { collecting.delete(matchId); hub.broadcast('refresh'); });
+      };
+      endWatch = deps.config.devMode ? null : new EndWatch({
+        db: deps.db,
+        status: async (server) => {
+          const exec = deps.serverExec ?? (async (s: ServerRow, commands: string[]) => {
+            const rcon = new RealRcon({ host: s.host, port: s.rcon_port, password: s.rcon_password });
+            const replies: string[] = [];
+            try {
+              await rcon.connect();
+              for (const c of commands) replies.push(await rcon.exec(c));
+            } finally {
+              rcon.close();
+            }
+            return replies;
+          });
+          const replies = await exec(server, ['sm_pug_status']);
+          return Array.isArray(replies) ? (replies[0] ?? '') : '';
+        },
+        collect: collectMatch,
+      });
       logListener = new LogListener((raw, source, meta) => {
         // One rewrite at the door, before anything reads a SteamID off this
         // event. A player who connects on a second account that has been
@@ -1278,11 +1315,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // 'refresh' once collection settles: browsers no longer refetch the
           // queue state on 'live' (web/src/hooks/useLiveState.ts), and the
           // match leaving 'live' changes what /api/state shows its roster.
-          if (row) {
-            forgetLiveWin(row.id);
-            void finishWithRetry(deps.db, orchestrator as RealOrchestrator, row.id, releaser)
-              .finally(() => hub.broadcast('refresh'));
-          }
+          if (row) collectMatch(row.id);
           return;
         }
         if (ev.kind === 'abandon') {
@@ -1299,9 +1332,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               endDecided: (serverId, token, steamid) => orch.endDecidedAbandon(serverId, token, steamid),
               // 'refresh' once collection settles, like the MATCH_END path:
               // the decided match leaving 'live' changes its roster's state.
-              finish: (matchId) => {
-                void finishWithRetry(deps.db, orch, matchId, releaser).finally(() => hub.broadcast('refresh'));
-              },
+              // Through collectMatch, so endWatch seeing the same ended
+              // match cannot start a second collection beside this one.
+              finish: (matchId) => collectMatch(matchId),
             },
             ev.token, ev.steamid,
           ).then((id) => { if (id !== null) hub.broadcast('refresh'); })
@@ -1467,7 +1500,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
             noTankWatch.event(ev.token, ev.event);
           }
           else if (ev.kind === 'chat') recordChat(deps.db, ev.token, ev);
-          else if (ev.kind === 'phase') recordPhase(deps.db, ev.token, ev.phase);
+          else if (ev.kind === 'phase') {
+            recordPhase(deps.db, ev.token, ev.phase);
+            // A map load is the line right after a lost MATCH_END (the plugin
+            // moves on to the next map): ask whether the match is over.
+            if (ev.phase.state === 'loading') endWatch?.nudge(ev.token);
+          }
           else if (ev.kind === 'round_start') {
             recordRoundStart(deps.db, ev.token, ev);
             noTankWatch.roundStart(ev.token, ev.map, ev.half);
@@ -1556,6 +1594,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           }
           else if (ev.kind === 'map_result') {
             recordMapResult(deps.db, ev.token, ev.map, ev.a, ev.b);
+            // MATCH_END rides in the same burst as the last map's result;
+            // if it was lost, this is how the match still gets collected.
+            endWatch?.nudge(ev.token);
             // A map just ended, so its demo is finished (or about to be, when
             // the next map's tv_record replaces it). Scan now so demos are
             // linkable during the match instead of only at the very end.
@@ -1814,7 +1855,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   /** A win points pass is still running (see the reaper below). */
   let winPointsBusy = false;
+  // How long the event loop stalls. While it is stalled nothing drains the
+  // log socket, and a stall long enough to overrun its buffer is how log lines
+  // were lost (match 1143, 2026-11-12). Logged once a minute, and only when
+  // the worst stall is long enough to matter, so the journal names the culprit
+  // window instead of leaving it to guesswork.
+  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  loopDelay.enable();
   const reaper = setInterval(() => {
+    const worstMs = loopDelay.max / 1e6;
+    if (worstMs >= LOOP_STALL_LOG_MS) {
+      console.warn(`[eventloop] worst stall ${Math.round(worstMs)} ms in the last minute (p99 ${Math.round(loopDelay.percentile(99) / 1e6)} ms)`);
+    }
+    loopDelay.reset();
     // Before the orphan reaper, so a match is alerted on while still live.
     if (serverLostWatch) void serverLostWatch.tick();
     try {
@@ -1854,6 +1907,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } catch (err) {
       console.error('[integrity] newcomer post failed:', err);
     }
+    // Every live match, every few minutes: has its server ended it unseen?
+    if (endWatch) void endWatch.sweep();
     try {
       reapOrphanedMatches(deps.db, releaser);
     } catch (err) {
@@ -2186,6 +2241,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     scrimPoster?.stop();
     await bot?.stop();
     clearInterval(reaper);
+    loopDelay.disable();
+    endWatch?.stop();
     clearInterval(practiceTick);
     practiceLeases.stop();
     clearInterval(bookingTick);
