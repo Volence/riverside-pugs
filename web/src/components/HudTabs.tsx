@@ -2,14 +2,15 @@ import { api } from '../api';
 import { useFetch } from '../hooks/useFetch';
 
 /** The HUD section's routes, in tab order. The nav shows the section as one
- *  item; this strip, at the top of each of the three pages, moves between
+ *  item; this strip, at the top of each of its pages, moves between
  *  them. Each tab is a real link to its route, so deep links, share links and
  *  the back button all keep working. */
-export type HudTab = 'hud' | 'crosshair' | 'community';
+export type HudTab = 'hud' | 'crosshair' | 'autoexec' | 'community';
 
 const TABS: readonly (readonly [HudTab, string, string])[] = [
   ['hud', '/hud', 'HUD editor'],
   ['crosshair', '/crosshair', 'Crosshair'],
+  ['autoexec', '/autoexec', 'Autoexec'],
   ['community', '/community', 'Community'],
 ];
 

@@ -198,7 +198,7 @@ describe('Nav current page', () => {
   };
   afterEach(() => history.replaceState(null, '', '/'));
 
-  it.each(['/hud', '/crosshair', '/community', '/community/7'])('marks HUD current on %s', (path) => {
+  it.each(['/hud', '/crosshair', '/autoexec', '/community', '/community/7'])('marks HUD current on %s', (path) => {
     expect(at(path)).toEqual(['HUD']);
   });
 

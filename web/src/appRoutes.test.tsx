@@ -83,6 +83,7 @@ describe('the site route table', () => {
   it.each([
     ['/hud', 'HUD editor'],
     ['/crosshair', 'Crosshair'],
+    ['/autoexec', 'Autoexec'],
     ['/community', 'Community'],
     ['/community/5', 'Community'],
   ])('keeps %s working, under the HUD tab strip with %s current', async (path, tab) => {

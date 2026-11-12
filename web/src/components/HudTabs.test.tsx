@@ -14,6 +14,7 @@ describe('HudTabs', () => {
     expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
       ['HUD editor', '/hud'],
       ['Crosshair', '/crosshair'],
+      ['Autoexec', '/autoexec'],
       ['Community', '/community'],
     ]);
   });
@@ -48,6 +49,7 @@ describe('hudTabFor', () => {
   it('maps every route of the section to its tab', () => {
     expect(hudTabFor('/hud')).toBe('hud');
     expect(hudTabFor('/crosshair')).toBe('crosshair');
+    expect(hudTabFor('/autoexec')).toBe('autoexec');
     expect(hudTabFor('/community')).toBe('community');
     expect(hudTabFor('/community/12')).toBe('community');
   });
