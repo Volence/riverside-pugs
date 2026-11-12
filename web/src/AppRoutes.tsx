@@ -30,6 +30,7 @@ const Hud = lazy(() => import('./routes/Hud'));
 // The community pages draw crosshairs and fetch on mount; lazy like the editor so
 // neither weighs on the first load of the pages people land on most.
 const Community = lazy(() => import('./routes/Community'));
+const Autoexec = lazy(() => import('./routes/Autoexec'));
 const CommunityEntry = lazy(() => import('./routes/CommunityEntry'));
 // Teams: behind the competitive switch, so most viewers never load it.
 const Teams = lazy(() => import('./routes/Teams'));
@@ -135,6 +136,7 @@ export function AppRoutes(
       <Route path="/maps" component={Maps} />
       <Route path="/custom-campaigns" component={CustomCampaigns} />
       <Route path="/crosshair" component={Crosshair} session={session} />
+      <Route path="/autoexec" component={Autoexec} />
       <Route path="/hud" component={Hud} session={session} />
       <Route path="/community" component={Community} session={session} />
       <Route path="/community/:id" component={CommunityEntry} session={session} />
