@@ -26,4 +26,7 @@ echo "backed up to $DEST/pug-$STAMP.db.gz"
 # snapshots above cover the same dates, so keep these one day only (3 days until
 # 2026-10-25, when 21 copies from two deploy-heavy days held 10 GB). 'pug.db.*'
 # needs the dot, so it never matches pug.db, pug.db-wal or pug.db-shm.
-find "$(dirname "$SRC")" -maxdepth 1 -type f -name 'pug.db.*' -mmin +1440 -print -delete
+# 'pug-*.db' catches the other naming sessions use (pug-predeploy-<what>-<when>.db):
+# five of those, 4 GB, had piled up unmatched by 2026-11-12. Nothing live in
+# data/ is named that way (the live file is pug.db).
+find "$(dirname "$SRC")" -maxdepth 1 -type f \( -name 'pug.db.*' -o -name 'pug-*.db' \) -mmin +1440 -print -delete
