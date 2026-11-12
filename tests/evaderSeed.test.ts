@@ -69,20 +69,29 @@ describe('scripts/seed-evader-people.ts', () => {
     spawnSync(join(root, 'node_modules/.bin/tsx'), [join(root, 'scripts/seed-evader-people.ts'), ...args],
       { encoding: 'utf8', cwd: root, env: { ...process.env, ...env } });
 
-  it('a --db with no value, an unknown flag and a repeated --db exit 2 and never fall back to the configured database', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'seed-'));
-    const configured = join(dir, 'configured.db');
-    openDb(configured).close();
-    const env = { DB_PATH: configured };
-    for (const args of [['--db'], ['--db', '--commit'], ['--commit', '--db'], ['--comit'], ['--db', 'a.db', '--db', 'b.db']]) {
-      const r = run(env, ...args);
+  // Each case starts the script in a fresh tsx (~0.3 s idle). Five of them in
+  // one test used to share the default 5 s budget and timed out whenever the
+  // full suite had the machine busy, so each case is its own test, and every
+  // test here that spawns gets SPAWN_TIMEOUT_MS: room for a loaded box, still
+  // far short of hiding a script that hangs.
+  const SPAWN_TIMEOUT_MS = 20_000;
+
+  const BAD_ARGS = [['--db'], ['--db', '--commit'], ['--commit', '--db'], ['--comit'], ['--db', 'a.db', '--db', 'b.db']];
+  it.each(BAD_ARGS.map((args) => ({ args, shown: args.join(' ') })))(
+    '$shown exits 2 and never falls back to the configured database',
+    ({ args }) => {
+      const dir = mkdtempSync(join(tmpdir(), 'seed-'));
+      const configured = join(dir, 'configured.db');
+      openDb(configured).close();
+      const r = run({ DB_PATH: configured }, ...args);
       expect(r.status, args.join(' ')).toBe(2);
       expect(r.stderr).toMatch(/usage: seed-evader-people\.ts/);
-    }
-    const c = openDb(configured);
-    expect(personByLabel(c, 'dethisa')).toBeNull();
-    c.close();
-  });
+      const c = openDb(configured);
+      expect(personByLabel(c, 'dethisa')).toBeNull();
+      c.close();
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
   it('a missing --db file is refused and not created; a real one gets a dry run', () => {
     const dir = mkdtempSync(join(tmpdir(), 'seed-'));
@@ -97,5 +106,5 @@ describe('scripts/seed-evader-people.ts', () => {
     const c = openDb(real);
     expect(personByLabel(c, 'dethisa')).toBeNull();
     c.close();
-  });
+  }, SPAWN_TIMEOUT_MS);
 });
