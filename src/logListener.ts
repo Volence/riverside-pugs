@@ -20,6 +20,10 @@ import { parseLogDatagram, readLogAuthTrailer, type LogAuthTrailer, type LogEven
  *  a score. */
 const SELF_START_KINDS = new Set(['match_create', 'match_roster', 'match_create_end']);
 
+/** Requested SO_RCVBUF for the log socket: room for tens of thousands of lines,
+ *  so a burst arriving while node is busy waits instead of being dropped. */
+export const LOG_RECV_BUFFER_BYTES = 16 * 1024 * 1024;
+
 /** What the listener knows about a datagram beyond the address it came from. */
 export interface LogMeta {
   /** The sender's UDP port. srcds sends from its game socket, so this is what
@@ -49,9 +53,19 @@ export class LogListener {
    *  to tell which game server they are on; `meta` carries the rest. */
   constructor(private onEvent: (ev: LogEvent, source: string, meta: LogMeta) => void) {}
 
-  listen(port: number, address = '0.0.0.0'): Promise<number> {
+  /** The receive buffer the kernel actually granted, in bytes (Linux reports
+   *  double what was asked, its bookkeeping included); 0 before listen. */
+  recvBufferBytes = 0;
+
+  listen(port: number, address = '0.0.0.0', recvBufferSize = LOG_RECV_BUFFER_BYTES): Promise<number> {
     return new Promise((resolve, reject) => {
-      const sock = dgram.createSocket('udp4');
+      // The kernel default (208 KB on Dallas) held about 150 datagrams. One
+      // map change sends ~600 lines in a second, and a round end ~80, while
+      // node may be busy for a moment; on 2026-11-12 the socket had dropped
+      // 874 lines in under seven hours, one of them match 1143's MATCH_END.
+      // The kernel caps the request at net.core.rmem_max, so the box must
+      // allow it too (deploy/pug: /etc/sysctl.d/60-pug-log-udp.conf).
+      const sock = dgram.createSocket({ type: 'udp4', recvBufferSize });
       this.sock = sock;
       sock.on('error', reject);
       sock.on('message', (msg, rinfo) => {
@@ -100,6 +114,13 @@ export class LogListener {
         }
       });
       sock.bind(port, address, () => {
+        try { this.recvBufferBytes = sock.getRecvBufferSize(); } catch { /* unknown */ }
+        if (this.recvBufferBytes > 0 && this.recvBufferBytes < recvBufferSize) {
+          console.warn(
+            `[logListener] asked for a ${recvBufferSize}-byte receive buffer and got ${this.recvBufferBytes}: ` +
+            'raise net.core.rmem_max on this box, or bursts of log lines will be dropped',
+          );
+        }
         resolve((sock.address() as AddressInfo).port);
       });
     });

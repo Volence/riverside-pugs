@@ -35,3 +35,12 @@ Uploading and installing custom campaign VPKs reuses this same write access,
 but needs `ADDONS_DIR` and per-server addons columns configured before any of
 it works. See `docs/CUSTOM_CAMPAIGNS.md` for the environment variable, the
 exact SQL for both servers' rows, deploy order, and how to verify an install.
+
+## Log listener receive buffer
+
+`60-pug-log-udp.conf` raises `net.core.rmem_max` on Dallas to 16 MB so pug-web's
+log socket (UDP :27500) gets the receive buffer it asks for. Without it the
+kernel caps the socket at 208 KB and bursts of log lines (a map change, a round
+end) are dropped; pug-web warns at startup when it got less than it asked for.
+Install with `cp ops/60-pug-log-udp.conf /etc/sysctl.d/ && sysctl --system`,
+then restart pug-web. Drops so far: `ss -uamn 'sport = :27500'`, the `d` value.

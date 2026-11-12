@@ -22,6 +22,36 @@ let listener: LogListener | null = null;
 afterEach(async () => { if (listener) await listener.close(); listener = null; });
 
 describe('LogListener', () => {
+  it('asks the kernel for a receive buffer and reports what it got', async () => {
+    listener = new LogListener(() => {});
+    await listener.listen(0, '127.0.0.1', 64 * 1024);
+    // Linux reports double the request; any kernel grants at least this much.
+    expect(listener.recvBufferBytes).toBeGreaterThanOrEqual(64 * 1024);
+  });
+
+  it('keeps a burst that arrives while the event loop is busy', async () => {
+    const got: LogEvent[] = [];
+    listener = new LogListener((ev) => got.push(ev));
+    const port = await listener.listen(0, '127.0.0.1');
+    listener.register(TOKEN);
+    const c = dgram.createSocket('udp4');
+    const N = 300;
+    // Sent back to back with no awaits in between, so all of it lands in the
+    // socket buffer before the listener's handler can run once.
+    await new Promise<void>((resolve, reject) => {
+      let left = N;
+      for (let i = 0; i < N; i++) {
+        const text = Buffer.from(`L 07/30/2026 - 14:23:01: PUG ${TOKEN} HEARTBEAT pad=${'x'.repeat(300)}\n`, 'utf8');
+        const pkt = Buffer.concat([Buffer.from([0xff, 0xff, 0xff, 0xff, 0x52]), text]);
+        c.send(pkt, port, '127.0.0.1', (err) => { if (err) reject(err); else if (--left === 0) resolve(); });
+      }
+    });
+    c.close();
+    const until = Date.now() + 2000;
+    while (got.length < N && Date.now() < until) await new Promise((r) => setTimeout(r, 20));
+    expect(got.length).toBe(N);
+  });
+
   it('delivers events for a registered token and drops others', async () => {
     const got: LogEvent[] = [];
     listener = new LogListener((ev) => got.push(ev));
