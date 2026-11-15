@@ -149,6 +149,22 @@ export class AdminFeedPoster {
           color: COLOR.problem,
         };
       }
+      case 'slow_readyup': {
+        // Pings the mod call role: the point is that someone nudges the
+        // player now, and an unpinged line in a busy channel is read later.
+        const match = `match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})`;
+        const where = [e.serverName ? `on ${escapeName(e.serverName)}` : '', e.map ? `\`${e.map}\`` : '']
+          .filter(Boolean).join(', ');
+        const who = joinNames(e.unready.map((id) => this.name(id)));
+        const waited = `${Math.floor(e.waitedS / 60)}:${String(e.waitedS % 60).padStart(2, '0')}`;
+        return {
+          text: `Slow ready-up in ${match}${where ? ` ${where}` : ''}, map ${e.mapOrdinal + 1} half ${e.half}: `
+            + `${waited} with everyone on the server. Still not ready: ${who}. `
+            + `[Live board](${this.deps.publicUrl}/admin/live?live=${e.matchId})`,
+          color: COLOR.action,
+          ping: true,
+        };
+      }
       case 'lilac_flag': {
         const match = e.matchId ? ` in match [#${e.matchId}](${this.deps.publicUrl}/match/${e.matchId})` : '';
         // Rule B. Stated with the numbers it was calibrated on, and still as

@@ -1714,6 +1714,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // of a dropped player's allowance is left when the admin feed says so.
   clock_hold_max_minutes: '30',
   abandon_low_alert_seconds: '90',
+  // Minutes a ready-up may run with the whole roster on the server before the
+  // mod channel is pinged once (src/slowReadyup.ts). 0 is off.
+  slow_readyup_ping_minutes: '5',
   penalties_enabled: '1',
   penalty_window_days: '7',
   penalty_minutes: JSON.stringify([5, 15, 60, 1440]),
@@ -2584,6 +2587,8 @@ export function openDb(path: string): DB {
   ensureColumn(db, 'match_rounds', 'demo_shifts', 'TEXT');
   ensureColumn(db, 'matches', 'origin', "TEXT CHECK (origin IN ('queue','in_game'))");
   db.prepare(ORIGIN_BACKFILL_SQL).run();
+  // When staff were pinged about this ready-up running long (src/slowReadyup.ts).
+  ensureColumn(db, 'match_readyups', 'staff_pinged_at', 'TEXT');
 
   // Balance analytics piece 2: per-round metrics, one row per metric per phase.
   // docs/superpowers/specs/2026-09-23-balance-analytics-design.md

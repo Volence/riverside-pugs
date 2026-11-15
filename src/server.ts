@@ -140,6 +140,7 @@ import { recordPing } from './serverPick.js';
 import { recordPlayerConnect, reapNoShowMatches } from './noShow.js';
 import { noteMatchAborted, subscribeMatchAborts } from './matchAborts.js';
 import { recordPresenceLine, sweepPresence } from './presence.js';
+import { sweepSlowReadyups } from './slowReadyup.js';
 import { recordMatchDemos } from './demos.js';
 import { recordMatchReplays } from './replays.js';
 import { pruneReplays } from './replayPrune.js';
@@ -1978,6 +1979,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   }, 5_000);
   presenceSweep.unref();
 
+  // A ready-up held up past slow_readyup_ping_minutes with everyone on the
+  // server: told to the mod channel once (src/slowReadyup.ts). Fifteen
+  // seconds is plenty against a threshold measured in minutes.
+  const slowReadyupSweep = setInterval(() => {
+    try {
+      for (const e of sweepSlowReadyups(deps.db)) {
+        const { serverId: _s, ...rest } = e;
+        console.log(`[readyup] match ${e.matchId} map ${e.mapOrdinal + 1} half ${e.half}: ${e.waitedS} s with everyone in, pinging staff (not ready: ${e.unready.join(',')})`);
+        publishAdminEvent({ kind: 'slow_readyup', ...rest });
+      }
+    } catch (err) {
+      console.error('[readyup] slow ready-up sweep failed:', err);
+    }
+  }, 15_000);
+  slowReadyupSweep.unref();
+
   // The staff rename digest. Hourly, and takeRenameDigest itself holds it to
   // once a day, so a restart neither skips a day nor posts twice: the last
   // post's time is in the database, not in this timer.
@@ -2256,6 +2273,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     clearInterval(scrimTick);
     clearInterval(eventTick);
     clearInterval(presenceSweep);
+    clearInterval(slowReadyupSweep);
     clearInterval(renameDigestTimer);
     clearInterval(pruneTimer);
     clearInterval(livePruneTimer);

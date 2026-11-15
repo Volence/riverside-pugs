@@ -21,6 +21,8 @@ export const FEED_DESTINATION: Record<AdminEvent['kind'], 'mod' | 'admin'> = {
   problem: 'admin',
   abandon: 'admin',
   clock: 'admin',
+  // A moderator nudges the player holding it up.
+  slow_readyup: 'mod',
   signon_drop: 'admin',
   input_flag: 'admin',
   // Mods act on cheating reports, and the case this exists for was theirs.
