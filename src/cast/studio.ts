@@ -153,6 +153,7 @@ export function cleanState(v: unknown): StudioState {
         survivor: cleanRect(f.survivor, fd.survivor),
         // Off unless the producer added one (a caster HUD that shows an infected panel).
         infected: f.infected && typeof f.infected === 'object' ? cleanRect(f.infected, DEFAULT_INFECTED_RECT) : null,
+        hud: f.hud === 'cast' ? 'cast' : 'stock',
       };
     })(),
     callout: cleanCallout(o.callout),

@@ -117,7 +117,10 @@ describe('studio state', () => {
     expect(f.survivor).toEqual({ x: 1800, y: 0, w: 120, h: 20 });
     // An infected hole only when one was saved, with defaults for missing fields.
     expect(f.infected).toEqual({ x: 1340, y: 20, w: 560, h: 150 });
-    expect(cleanState({}).frame).toEqual({ survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: null });
+    expect(cleanState({}).frame).toEqual({ survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: null, hud: 'stock' });
+    // The cast HUD switch: only 'cast' turns it on.
+    expect(cleanState({ frame: { hud: 'cast' } }).frame.hud).toBe('cast');
+    expect(cleanState({ frame: { hud: 'nope' } }).frame.hud).toBe('stock');
     expect(cleanState({}).elements).toMatchObject({ survivors: false, infected: true, tank: true, bosses: true, progress: true });
   });
 
