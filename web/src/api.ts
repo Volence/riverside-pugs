@@ -1750,6 +1750,9 @@ export interface IntegrityFlag {
   severity: 'suspected' | 'banned' | 'high';
   detail: string;
   at: string;
+  /** An aimlock kept for the record but not counted as a cheat signal:
+   *  raised in a ready-up, or while the player was infected. */
+  ignored?: 'readyup' | 'infected' | null;
 }
 
 export interface IntegrityClip {

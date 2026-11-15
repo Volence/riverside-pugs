@@ -34,7 +34,9 @@ const DISCORD_EPOCH = 1420070400000n;
 /** The aimbot and wallhack kinds in integrity_flags. hs_share, flick_return
  *  and aimbot_multi come from the aimbot rules
  *  (docs/superpowers/specs/2026-10-17-aimbot-rules-design.md); listing them
- *  before they exist matches nothing and costs nothing. */
+ *  before they exist matches nothing and costs nothing. A row marked ignored
+ *  (an aimlock in a ready-up or on an infected player, src/lilacIgnore.ts)
+ *  never counts. */
 export const CHEAT_FLAG_KINDS = ['aimbot', 'aimlock', 'newcomer_esp', 'hs_share', 'flick_return', 'aimbot_multi'] as const;
 
 export function dbTimeMs(s: string | null): number | null {
@@ -128,7 +130,7 @@ export function secondSigns(db: DB, steamid: string, ctx: SignContext, at: Date)
   if (freshIdentity(db, steamid, at.getTime())) found.add('fresh_identity');
   const cheat = db.prepare(
     `SELECT 1 FROM integrity_flags WHERE steamid = ? AND match_id IS NOT NULL AND at <= ?
-       AND kind IN (${CHEAT_FLAG_KINDS.map(() => '?').join(', ')}) LIMIT 1`,
+       AND ignored IS NULL AND kind IN (${CHEAT_FLAG_KINDS.map(() => '?').join(', ')}) LIMIT 1`,
   ).get(steamid, iso, ...CHEAT_FLAG_KINDS);
   if (cheat) found.add('cheat_flag');
   if (ctx.membersInTop10 >= 2) found.add('two_members');

@@ -16,7 +16,7 @@ import { SIGN_ORDER, SIGN_TEXT, type SecondSign } from '../../../../src/fingerpr
 const SIGN_HELP: Record<SecondSign, string> = {
   vpn: 'One of their connections comes from a VPN or hosting provider (Datacamp, M247, Vultr and the like). Evaders hide behind these; so do some honest players.',
   fresh_identity: 'The Steam account is under a year old or private, the Discord account is under 90 days old, or the Discord is new to us on a site account under a week old. Private profiles are common: this counts only next to a fingerprint.',
-  cheat_flag: 'They have an aimbot-type flag (LilAC aimbot or aimlock, or one of the aim rules: headshot share, flick return, or aimbot multi) or a newcomer wallhack flag from a match they played.',
+  cheat_flag: 'They have an aimbot-type flag (LilAC aimbot or aimlock, or one of the aim rules: headshot share, flick return, or aimbot multi) or a newcomer wallhack flag from a match they played. An aimlock in a ready-up or while infected does not count.',
   two_members: 'Two or more of the known evader\'s own accounts are among their 10 nearest fingerprints, not just the pooled record.',
   shared_connection: 'They have used a connection one of the evader\'s accounts used. This also posts its own watch-list alert.',
 };
@@ -150,9 +150,11 @@ export function StaffGuide() {
               within 5 degrees of it for over a tenth of a second. Only checked with no enemy within 300 units,
               and it takes two of these within 3 minutes to make one flag (they can be on different targets).
               Good flicks at range trip it. LilAC does not check walls, and <strong>infected see survivors
-              through walls</strong>, so an infected player locking onto a survivor is usually legitimate; the
-              file says so when that was the case. A survivor locking onto a spawned infected, more than once,
-              is the version worth a closer look.
+              through walls</strong>, so an aimlock while the player was infected means nothing. Neither does one
+              in a ready-up, where ghost infected float in front of the saferoom. Both are kept on the file as{' '}
+              <strong>ignored (infected)</strong> or <strong>ignored (ready-up)</strong> and never count: no
+              alert, no Needs a look, no cheat flag sign. A survivor locking onto a spawned infected during
+              play, more than once, is the version worth a closer look.
             </dd>
             <dt><code>bhop</code></dt>
             <dd>
