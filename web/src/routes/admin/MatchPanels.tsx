@@ -171,6 +171,12 @@ export function leaveOutChoices(players: { steamid: string; name: string }[]): L
 }
 export const ticked = (choices: LeaveOutChoice[]): string[] => choices.filter((c) => c.checked).map((c) => c.steamid);
 
+/** One "X abandoned the match" box per player, for Abort: whoever staff tick
+ *  takes the abandon rules, as if their reconnect time had run out. */
+export function abandonedByChoices(players: { steamid: string; name: string }[]): LeaveOutChoice[] {
+  return players.map((p) => ({ steamid: p.steamid, label: `${p.name} abandoned the match (abandon ban and rating loss)`, checked: false }));
+}
+
 /** Abort a match, asked the same way from the live card and the Open matches
  *  table. The leave-out boxes are Cancel pop's: eight back at the front of
  *  the queue re-pop at once, so the player staff are about to ban would be
@@ -182,14 +188,20 @@ export const ticked = (choices: LeaveOutChoice[]): string[] => choices.filter((c
  *  `onMessage`, when given, is handed the abort route's own `message` once it
  *  answers; a booking game's route says in its own words that the booking
  *  carries on, and that is what the caller should show, not a canned line
- *  written here ahead of time. */
+ *  written here ahead of time.
+ *
+ *  The "abandoned the match" boxes (not on a booking game, which is never
+ *  ended as an abandon) charge whoever left with the abandon rules: their
+ *  ban and rating loss, and in a match the !gg rule already decided, the
+ *  result stands instead of an abort. The route's message says which. */
 export function abortMatchAsked(
   run: Run, matchId: number, roster: { steamid: string; name: string }[],
   bookingId?: number | null, onMessage?: (message: string) => void,
 ): void {
   const booking = bookingId != null;
   const leaveOut = leaveOutChoices(roster);
-  void run(() => adminApi.abortMatch(matchId, booking ? [] : ticked(leaveOut)).then((r) => {
+  const abandoned = abandonedByChoices(roster);
+  void run(() => adminApi.abortMatch(matchId, booking ? [] : ticked(leaveOut), booking ? [] : ticked(abandoned)).then((r) => {
     if (r.message) onMessage?.(r.message);
   }), {
     title: `Abort match #${matchId}?`,
@@ -197,10 +209,12 @@ export function abortMatchAsked(
       ? 'The game is dropped; the booking keeps its server and carries on. Nothing is rated. '
         + 'The roster and how far it got stay on the match page. Everyone on it is told why.'
       : 'The server is freed and nothing is rated. The roster and how far it got stay on the match page. '
-        + 'Everyone on it is told why, and those who may queue go back to the front of the queue, except anyone ticked below.',
+        + 'Everyone on it is told why, and those who may queue go back to the front of the queue, except anyone ticked below. '
+        + 'Tick who abandoned it to give them the abandon ban and rating loss; if the match was already decided, '
+        + 'the result stands for the leading team instead.',
     confirmLabel: 'Abort match',
     danger: true,
-    choices: booking ? undefined : leaveOut,
+    choices: booking ? undefined : [...leaveOut, ...abandoned],
   });
 }
 

@@ -29,6 +29,7 @@ import { integrityBoard, integrityPlayer } from '../admin/integrity.js';
 import { captureHealth, recentFlagFeed } from '../integrityFlags.js';
 import { setReview, unanalysableCounts } from '../integrity/store.js';
 import { removeAlias, resolveAlias } from '../aliases.js';
+import { parseStaffAbandonStatus, type StaffAbandonStatus } from '../abandon.js';
 import { MergeError, mergePlayers } from '../mergePlayers.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { publishBanChange } from '../banEvents.js';
@@ -421,21 +422,123 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOpts): P
   });
 
   /** `leaveOut` is the dialog's ticked "Leave X out of the queue" boxes, as
-   *  for Cancel pop: told, but not put back at the front. */
+   *  for Cancel pop: told, but not put back at the front.
+   *
+   *  `abandonedBy` is its "abandoned the match" boxes: the players staff say
+   *  left. Without them an abort skipped the abandon rules entirely (match
+   *  642, 2026-10-11: staff aborted inside the reconnect window, so no ban and
+   *  no loss). With them, the same rules as a real abandon (owner rulings
+   *  2026-10-10, src/abandon.ts), judged from sm_pug_status read now:
+   *   - Not decided by the !gg rule, a booked box aside, or a box that could
+   *     not be read: aborted as before, and each quitter gets a match_abandons
+   *     row, an abandon ban on their ladder and the quitter's rating loss.
+   *   - Decided: the result stands for the leading team, so the match is NOT
+   *     aborted here. The server ends their reconnect clocks (sm_pug_leave
+   *     end), its ABANDON lines then take the ordinary path (handleAbandon:
+   *     bans, losses, the decided end, collected and rated). Every quitter
+   *     must be dropped for that; a connected one is refused, with nothing
+   *     changed, so staff can untick them. */
   app.post('/api/admin/matches/:id/abort', async (req, reply) => {
     const adminId = requireStaff(req, reply);
     if (!adminId) return reply;
     const id = Number((req.params as { id: string }).id);
-    const { leaveOut = [] } = (req.body ?? {}) as { leaveOut?: unknown };
+    const { leaveOut = [], abandonedBy = [] } = (req.body ?? {}) as { leaveOut?: unknown; abandonedBy?: unknown };
     if (!Array.isArray(leaveOut) || leaveOut.length > 8 || !leaveOut.every((x) => typeof x === 'string')) {
       return reply.code(400).send({ error: 'leaveOut must be a list of up to 8 steamids' });
     }
-    const r = abortMatch(db, releaser, id, leaveOut, opts.abortBookingGame);
+    if (!Array.isArray(abandonedBy) || abandonedBy.length > 8 || !abandonedBy.every((x) => typeof x === 'string' && /^\d{17}$/.test(x))) {
+      return reply.code(400).send({ error: 'abandonedBy must be a list of up to 8 steamids' });
+    }
+    const quitters = [...new Set(abandonedBy as string[])];
+    if (quitters.length === 0) {
+      const r = abortMatch(db, releaser, id, leaveOut, opts.abortBookingGame);
+      if (!r.ok) return reply.code(r.status).send({ error: r.error });
+      logAdmin(db, adminId, 'abort_match', id, { leftOut: leaveOut, booking: r.bookingContinues === true });
+      broadcast('refresh');
+      if (r.bookingContinues) return { ok: true, message: 'This was a booking game: it is aborted and the booking continues on its server.' };
+      return { ok: true };
+    }
+
+    const m = db.prepare('SELECT state, server_id, booking_id, token, kind FROM matches WHERE id = ?').get(id) as
+      | { state: string; server_id: number | null; booking_id: number | null; token: string | null; kind: string } | undefined;
+    if (!m) return reply.code(404).send({ error: 'no such match' });
+    if (m.state !== 'configuring' && m.state !== 'live') return reply.code(409).send({ error: `match is ${m.state}` });
+    if (m.booking_id !== null) return reply.code(409).send({ error: 'a booked game is never ended as an abandon; abort it without ticking anyone' });
+    const nameOf = (sid: string) => (db.prepare('SELECT COALESCE(p.name, mp.player_id) AS name FROM match_players mp LEFT JOIN players p ON p.steamid = mp.player_id WHERE mp.match_id = ? AND mp.player_id = ?')
+      .get(id, sid) as { name: string } | undefined)?.name;
+    const stranger = quitters.find((q) => nameOf(q) === undefined);
+    if (stranger) return reply.code(400).send({ error: `${stranger} is not on that match's roster` });
+    const names = quitters.map((q) => nameOf(q)!).join(', ');
+
+    // The box's own view, read now: the !gg judgement, and who it has dropped.
+    const server = m.server_id !== null ? getServer(db, m.server_id) : undefined;
+    let status: StaffAbandonStatus | null = null;
+    let statusError: string | null = null;
+    if (server && m.token && serverQuery) {
+      try {
+        status = parseStaffAbandonStatus(await serverQuery(server, 'sm_pug_status'));
+        status = {
+          ...status,
+          abandoners: status.abandoners.map((x) => resolveAlias(db, x)),
+          absent: status.absent.map((x) => resolveAlias(db, x)),
+        };
+      } catch (err) {
+        statusError = redactSecrets(err instanceof Error ? err.message : String(err), [m.token]);
+      }
+    }
+    const decided = m.kind === 'pug' && m.state === 'live' ? status?.gg?.decided ?? null : null;
+    const gg = status?.gg && status.gg.known ? { gap: status.gg.gap, ceiling: status.gg.ceiling } : null;
+
+    if (decided && server && m.token && serverQuery) {
+      const team = decided.toUpperCase();
+      const connected = quitters.filter((q) => !status!.absent.includes(q) && !status!.abandoners.includes(q));
+      if (connected.length > 0) {
+        return reply.code(409).send({
+          error: `Team ${team} leads and the match is already decided, so the result stands and the server has to end it. `
+            + `${connected.map((q) => nameOf(q)).join(', ')} ${connected.length === 1 ? 'is' : 'are'} still connected, so the server cannot count `
+            + `${connected.length === 1 ? 'that' : 'those'} as an abandon. Untick ${connected.length === 1 ? 'them' : 'those players'}, or wait until they drop.`,
+        });
+      }
+      // Ending a quitter's clock makes the plugin record them and send ABANDON,
+      // which handleAbandon confirms, records, and ends as decided. Ones the
+      // plugin already records are on that path already.
+      const ended: string[] = [];
+      const refused: { steamid: string; error: string }[] = [];
+      for (const q of quitters) {
+        if (status!.abandoners.includes(q)) { ended.push(q); continue; }
+        try {
+          const ans = parseLeaveReply(await serverQuery(server, leaveCommand(m.token, q, 'end')));
+          if (ans.ok) ended.push(q);
+          else refused.push({ steamid: q, error: redactSecrets(ans.error, [m.token]) });
+        } catch (err) {
+          refused.push({ steamid: q, error: redactSecrets(err instanceof Error ? err.message : String(err), [m.token]) });
+        }
+      }
+      logAdmin(db, adminId, 'abort_match', id, {
+        leftOut: leaveOut, abandonedBy: quitters, decided, ended, refused, outcome: ended.length > 0 ? 'decided_end' : 'refused',
+      });
+      if (ended.length === 0) {
+        return reply.code(502).send({ error: `Team ${team} leads and the match is already decided, but ${server.name} would not end it: ${refused.map((r) => r.error).join('; ')}` });
+      }
+      broadcast('refresh');
+      const endedNames = ended.map((q) => nameOf(q)).join(', ');
+      return {
+        ok: true, decided,
+        message: `Not aborted: Team ${team} leads and the match was already decided, so the result stands. ${server.name} is ending it now; `
+          + `Team ${team} wins and it is rated. ${endedNames} ${ended.length === 1 ? 'takes' : 'take'} an abandon ban and a rating loss.`
+          + (refused.length > 0 ? ` ${server.name} refused ${refused.map((r) => `${nameOf(r.steamid)} (${r.error})`).join(', ')}.` : ''),
+      };
+    }
+
+    const r = abortMatch(db, releaser, id, leaveOut, opts.abortBookingGame, { quitters, gg });
     if (!r.ok) return reply.code(r.status).send({ error: r.error });
-    logAdmin(db, adminId, 'abort_match', id, { leftOut: leaveOut, booking: r.bookingContinues === true });
+    logAdmin(db, adminId, 'abort_match', id, {
+      leftOut: leaveOut, abandonedBy: quitters, decided: null, outcome: 'aborted',
+      recorded: (r.recorded ?? []).map((x) => ({ steamid: x.steamid, banMinutes: x.minutes })),
+      ...(statusError ? { statusError } : {}),
+    });
     broadcast('refresh');
-    if (r.bookingContinues) return { ok: true, message: 'This was a booking game: it is aborted and the booking continues on its server.' };
-    return { ok: true };
+    return { ok: true, message: `Aborted as an abandon by ${names}: abandon ban and rating loss for each, nobody else rated.` };
   });
 
   /** Clear every no-show one match handed out, after the fact: the no-show

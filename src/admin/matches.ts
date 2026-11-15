@@ -4,7 +4,8 @@ import type { ServerReleaser } from '../serverRelease.js';
 import { pausesFor, readyupsFor, slowToReady } from '../liveView.js';
 import { bookedSidesFor } from '../matchSides.js';
 import { archiveAborted } from '../matchArchive.js';
-import { matchForecast, recomputeSeasonRatings } from '../rating.js';
+import { applyAbandonPenalty, matchForecast, recomputeSeasonRatings } from '../rating.js';
+import { publishRecorded, recordAbandons, type RecordedAbandon } from '../abandon.js';
 import { getServer, PICK_ORDER_SQL } from '../serverPool.js';
 import type { LogAuth } from '../logAuth.js';
 import { serverPasswordFor } from '../matchToken.js';
@@ -124,6 +125,13 @@ export type AbortResult = { ok: true; bookingContinues?: true } | { ok: false; s
 /** Tells a booked box to drop one of its games (BookingRunner.abortGame). */
 export type BookingGameAborter = (matchId: number, token: string) => Promise<void> | void;
 
+/** Who staff said left a match they abort, and the !gg numbers the box gave
+ *  for it, if any (match_abandons keeps them). */
+export interface StaffAbandon {
+  quitters: string[];
+  gg: { gap: number; ceiling: number } | null;
+}
+
 /** End a configuring or live match now: aborted, server freed through the
  *  releaser (which also tells the plugin; a booking game instead goes through
  *  `abortBookingGame` and its box stays with the booking), and what the live feed captured
@@ -132,15 +140,33 @@ export type BookingGameAborter = (matchId: number, token: string) => Promise<voi
  *  front of the queue if they may queue: staff pulling the plug is nobody's
  *  fault on the roster. `leaveOut` is who staff ticked to keep out: a ban
  *  keeps a player out only once it exists, and eight back at the front
- *  re-pop at once, before staff have filed it. */
+ *  re-pop at once, before staff have filed it.
+ *
+ *  `abandon` is the dialog's "abandoned by" ticks on a match that was NOT
+ *  decided (a decided one is ended by the server instead; see the abort
+ *  route): each quitter goes on record exactly as an undecided abandon puts
+ *  them (src/abandon.ts), a match_abandons row and an abandon ban on their
+ *  own ladder, written with the abort in one transaction, and takes the
+ *  quitter's rating loss once the archive has written the maps. They are
+ *  the abort's culprits, so nobody puts them back in the queue. A booked
+ *  game never takes one (handleAbandon's rule); the route refuses it. */
 export function abortMatch(
   db: DB, releaser: ServerReleaser, matchId: number, leaveOut: string[] = [], abortBookingGame?: BookingGameAborter,
-): AbortResult {
+  abandon?: StaffAbandon,
+): AbortResult & { recorded?: RecordedAbandon[] } {
   const m = db.prepare('SELECT state, server_id, booking_id, token FROM matches WHERE id = ?').get(matchId) as
     | { state: string; server_id: number | null; booking_id: number | null; token: string | null } | undefined;
   if (!m) return { ok: false, status: 404, error: 'no such match' };
   if (m.state !== 'configuring' && m.state !== 'live') return { ok: false, status: 409, error: `match is ${m.state}` };
-  db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'admin', ended_at = datetime('now') WHERE id = ?").run(matchId);
+  const quitters = m.booking_id === null ? abandon?.quitters ?? [] : [];
+  const recorded = db.transaction(() => {
+    db.prepare("UPDATE matches SET state = 'aborted', abort_cause = 'admin', ended_at = datetime('now') WHERE id = ?").run(matchId);
+    if (quitters.length === 0) return [];
+    // An abort is never a decided end, whatever an earlier abandon on this
+    // match was about to make it.
+    db.prepare('UPDATE match_abandons SET decided = NULL WHERE match_id = ?').run(matchId);
+    return recordAbandons(db, matchId, quitters, null, abandon?.gg ?? null);
+  })();
   if (m.booking_id !== null) {
     // A game inside a booked block: the box stays with the booking (the
     // releaser would refuse it anyway), so the plugin is told to drop the
@@ -157,9 +183,18 @@ export function abortMatch(
   // Archive BEFORE releasing: the release tells the plugin to change level, and
   // a heartbeat naming the reset map must not land before the record is taken.
   archiveAborted(db, matchId);
+  if (quitters.length > 0) {
+    publishRecorded(matchId, recorded, null);
+    // After the archive, which writes the match_maps the lineup is judged on.
+    try {
+      applyAbandonPenalty(db, matchId);
+    } catch (err) {
+      console.error(`[admin] could not apply the abandon losses on match ${matchId}; a season recompute will:`, err);
+    }
+  }
   if (m.server_id !== null) releaser.release(m.server_id, { teardown: true, restart: true });
-  noteMatchAborted(db, { matchId, cause: 'admin', requeue: true, leaveOut });
-  return { ok: true };
+  noteMatchAborted(db, { matchId, cause: 'admin', requeue: true, leaveOut, culprits: quitters });
+  return quitters.length > 0 ? { ok: true, recorded } : { ok: true };
 }
 
 /**

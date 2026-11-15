@@ -312,7 +312,7 @@ describe('the live board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, []));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, [], []));
   });
 
   it('keeps the board up when the panels below fail', async () => {
@@ -334,7 +334,7 @@ describe('the live board', () => {
     fireEvent.click(within(panel).getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, []));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, [], []));
   });
 
   it('renders the servers, queue and recent results underneath', async () => {
@@ -461,10 +461,25 @@ describe('the match-lifecycle controls', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Abort' }));
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     expect(within(dialog).queryByText(/no-show penalties/)).toBeNull();
-    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(4);
+    // A leave-out box and an "abandoned the match" box per player.
+    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(8);
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /Leave bob out/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, ['2']));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, ['2'], []));
+  });
+
+  it('aborts from the card charging whoever is ticked as having abandoned it, and shows the route\'s message', async () => {
+    const message = 'Aborted as an abandon by bob: abandon ban and rating loss for each, nobody else rated.';
+    mockAdmin.abortMatch.mockResolvedValue({ ok: true, message });
+    render(<><AdminLive isAdmin /><ConfirmHost /></>);
+    const card = (await screen.findByText(/#81/)).closest('section') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Abort' }));
+    const dialog = await waitFor(() => screen.getByRole('alertdialog'));
+    expect(dialog.textContent).toContain('the result stands for the leading team');
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'bob abandoned the match (abandon ban and rating loss)' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, [], ['2']));
+    expect(await screen.findByText(`#81: ${message}`)).toBeTruthy();
   });
 
   it('aborts a booking game from the card as one: no leave-out boxes, and the route\'s message stays up after the card goes', async () => {
@@ -482,7 +497,7 @@ describe('the match-lifecycle controls', () => {
     expect(dialog.textContent).toContain('the booking keeps its server and carries on');
     expect(within(dialog).queryAllByRole('checkbox')).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, []));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, [], []));
     expect(await screen.findByText('No match is running.')).toBeTruthy();
     expect(screen.getByText(`#81: ${message}`)).toBeTruthy();
   });
@@ -495,7 +510,7 @@ describe('the match-lifecycle controls', () => {
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /Leave alice out/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, ['1']));
+    await waitFor(() => expect(mockAdmin.abortMatch).toHaveBeenCalledWith(81, ['1'], []));
   });
 
   it('cancels a pop from the queue panel, leaving out whoever is ticked', async () => {

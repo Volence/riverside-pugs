@@ -3232,8 +3232,10 @@ export const adminApi = {
   /** `leaveOut`: rostered players to tell but not put back in the queue.
    *  `message`, when present, is read out to the admin after the abort: a
    *  booking game's route says the booking carries on. */
-  abortMatch: (id: number, leaveOut: string[]) =>
-    post<{ ok: true; message?: string }>(`/api/admin/matches/${id}/abort`, { leaveOut }),
+  /** `abandonedBy`: who staff say left; each takes the abandon rules (ban
+   *  and rating loss; a decided match is ended by the server instead). */
+  abortMatch: (id: number, leaveOut: string[], abandonedBy: string[] = []) =>
+    post<{ ok: true; message?: string; decided?: 'a' | 'b' }>(`/api/admin/matches/${id}/abort`, { leaveOut, abandonedBy }),
   clearMatchNoShows: (id: number) => post<{ ok: true; cleared: string[] }>(`/api/admin/matches/${id}/clear-noshows`),
   /** Five more minutes on this match's no-show deadline, for everyone missing. */
   noShowExtend: (matchId: number) => post<{ ok: true; extraMinutes: number }>(`/api/admin/live/${matchId}/noshow-extend`),

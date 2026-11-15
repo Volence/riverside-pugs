@@ -111,6 +111,40 @@ export function parseAbandonStatus(body: string, steamid: string): AbandonConfir
   return { abandoner, abandoners, gg: { decided, gap: num(kv.gap), ceiling: num(kv.ceiling), known } };
 }
 
+/** What staff aborting a match with "abandoned by" ticks need from
+ *  sm_pug_status: who the plugin already records as abandoners, who is
+ *  dropped right now (STATUS leave absent=1), and the !gg judgement, the one
+ *  made at the first abandon (at=abandon) or, with no abandoner yet, what the
+ *  rule says now (at=now). Ids are as the plugin names them; the caller
+ *  resolves aliases. */
+export interface StaffAbandonStatus {
+  abandoners: string[];
+  absent: string[];
+  gg: { decided: 'a' | 'b' | null; gap: number; ceiling: number; known: boolean } | null;
+}
+
+export function parseStaffAbandonStatus(body: string): StaffAbandonStatus {
+  const absent: string[] = [];
+  for (const raw of body.split('\n')) {
+    const m = /^STATUS leave slot=\d+ steamid=(\d{17}) absent=1(\s|$)/.exec(raw.trim());
+    if (m && !absent.includes(m[1])) absent.push(m[1]);
+  }
+  const line = body.split('\n').map((l) => l.trim()).find((l) => l.startsWith('STATUS gg '));
+  let gg: StaffAbandonStatus['gg'] = null;
+  if (line) {
+    const kv: Record<string, string> = {};
+    for (const part of line.split(/\s+/).slice(2)) {
+      const eq = part.indexOf('=');
+      if (eq > 0) kv[part.slice(0, eq)] = part.slice(eq + 1);
+    }
+    const known = kv.known === '1' && (kv.at === 'abandon' || kv.at === 'now');
+    const decided = known && (kv.decided === 'a' || kv.decided === 'b') ? kv.decided : null;
+    const num = (v: string | undefined) => (v !== undefined && /^-?\d+$/.test(v) ? Number(v) : -1);
+    gg = { decided, gap: num(kv.gap), ceiling: num(kv.ceiling), known };
+  }
+  return { abandoners: statusAbandoners(body), absent, gg };
+}
+
 function asConfirm(r: boolean | AbandonConfirm, steamid: string): AbandonConfirm {
   return typeof r === 'boolean' ? { abandoner: r, abandoners: r ? [steamid] : [], gg: null } : r;
 }
