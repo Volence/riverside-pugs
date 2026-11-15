@@ -258,7 +258,7 @@ viewmodel_fov_override 70`}</code></pre>
             <dt><code>!pause</code> / <code>!unpause</code></dt>
             <dd>Pause the game. Each team gets 3 pauses per campaign, and a pause ends by itself after 2 minutes. Both teams type <code>!unpause</code> (or <code>!ready</code>) to resume sooner.</dd>
             <dt><code>!gg</code> / <code>!ff</code></dt>
-            <dd>Forfeit, once your team is too far behind to come back. Everyone on the team has 30 seconds to agree. It counts as a normal loss.</dd>
+            <dd>Forfeit, once your team is too far behind to come back. Three of the four players on the team must agree within 30 seconds (all of them when three or fewer are in game). It counts as a normal loss.</dd>
             <dt><code>!boss</code></dt>
             <dd>Where the tank and witch spawn this map, as a percentage of the way through, and who gets the tank.</dd>
             <dt><code>!scores</code> / <code>!bonus</code></dt>
