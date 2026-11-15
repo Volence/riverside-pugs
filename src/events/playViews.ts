@@ -71,7 +71,10 @@ export interface PlayStanding {
   points: number; buchholz: number; scoreDiff: number;
 }
 export interface StagePlayView {
-  ordinal: number; type: V.StageType; status: 'live' | 'finished'; layout: 'bracket' | 'table';
+  ordinal: number; type: V.StageType;
+  /** projected: the bracket the current seeds would give, before the event
+   *  starts (bracketPreview.ts); nothing in it is a real match yet. */
+  status: 'live' | 'finished' | 'projected'; layout: 'bracket' | 'table';
   groups: { number: number; label: string }[]; rounds: PlayRound[]; standings: PlayStanding[]; advanceCount: number | null;
   /** Swiss, or a league paired Swiss: a later round's existence locks a
    *  table match's result (play.ts recordResult). */
@@ -142,38 +145,43 @@ function deskOf(db: DB, m: P.MatchRow): PlayMatchDesk {
 /** opts.staff (plan T3c Ruling 16): each match also carries its desk block. */
 export function stagePlayViews(db: DB, ev: E.EventRow, opts: { staff?: boolean } = {}): StagePlayView[] {
   const entries = playEntriesOf(db, ev);
+  return E.stagesOf(db, ev.id).filter((s) => s.status !== 'pending').map((s) => stageView(db, ev, s, P.matchesOf(db, s.id), entries, opts));
+}
+
+/** One stage as the event page shows it, from its match rows: the stage's
+ *  own rows once it started, or the projected rows of bracketPreview.ts. */
+export function stageView(
+  db: DB, ev: E.EventRow, s: E.StageRow, ms: P.MatchRow[], entries: Map<number, PlayEntry>, opts: { staff?: boolean; projected?: boolean } = {},
+): StagePlayView {
   const entry = (id: number | null) => (id === null ? null : entries.get(id) ?? null);
-  return E.stagesOf(db, ev.id).filter((s) => s.status !== 'pending').map((s) => {
-    const st = E.stageSettingsOf(s);
-    const elim = st.type === 'single_elim' || st.type === 'double_elim';
-    const ms = P.matchesOf(db, s.id);
-    const { labelType, label, dates, times } = stageLabels(ev, s, ms);
-    const rounds: PlayRound[] = [];
-    for (const m of ms) {
-      let r = rounds.find((x) => x.group === m.grp && x.round === m.round);
-      if (!r) {
-        r = { group: m.grp, round: m.round, label: label(m.grp, m.round), dates: dates(m.round), ...times(m.round, m.grp), matches: [] };
-        rounds.push(r);
-      }
-      const resolved = P.RESOLVED.has(m.status);
-      const row: PlayMatch = {
-        id: m.id, group: m.grp, round: m.round, slot: m.slot, a: entry(m.entry_a), b: entry(m.entry_b), status: m.status,
-        winner: !resolved || m.winner_entry === null ? null : m.winner_entry === m.entry_a ? 'a' : 'b',
-        scoreA: m.score_a, scoreB: m.score_b, forfeit: m.status === 'forfeit', bye: m.status === 'bye', phase: phaseOf(m),
-        scheduledAt: m.scheduled_at, scheduleSource: m.schedule_source,
-      };
-      if (opts.staff) row.desk = deskOf(db, m);
-      r.matches.push(row);
+  const st = E.stageSettingsOf(s);
+  const elim = st.type === 'single_elim' || st.type === 'double_elim';
+  const { labelType, label, dates, times } = stageLabels(ev, s, ms);
+  const rounds: PlayRound[] = [];
+  for (const m of ms) {
+    let r = rounds.find((x) => x.group === m.grp && x.round === m.round);
+    if (!r) {
+      r = { group: m.grp, round: m.round, label: label(m.grp, m.round), dates: dates(m.round), ...times(m.round, m.grp), matches: [] };
+      rounds.push(r);
     }
-    const groups = [...new Set(ms.map((m) => m.grp))].sort((x, y) => x - y).map((n) => ({ number: n, label: groupLabel(labelType, n) }));
-    const standings = elim ? [] : stageTable(db, s).map((t): PlayStanding => ({
-      entry: entry(t.entryId)!, group: t.group, rank: t.rank, groupRank: t.groupRank, played: t.played, wins: t.wins, losses: t.losses,
-      points: t.points, buchholz: t.buchholz, scoreDiff: t.scoreDiff,
-    }));
-    return {
-      ordinal: s.ordinal, type: st.type, status: s.status as 'live' | 'finished', layout: elim ? 'bracket' : 'table',
-      groups, rounds, standings, advanceCount: st.advanceCount, pairsAsItGoes: P.totalRounds(s) !== null,
-      series: { bestOf: st.veto.games, totalScore: st.veto.games === 2 },
+    const resolved = P.RESOLVED.has(m.status);
+    const row: PlayMatch = {
+      id: m.id, group: m.grp, round: m.round, slot: m.slot, a: entry(m.entry_a), b: entry(m.entry_b), status: m.status,
+      winner: !resolved || m.winner_entry === null ? null : m.winner_entry === m.entry_a ? 'a' : 'b',
+      scoreA: m.score_a, scoreB: m.score_b, forfeit: m.status === 'forfeit', bye: m.status === 'bye', phase: phaseOf(m),
+      scheduledAt: m.scheduled_at, scheduleSource: m.schedule_source,
     };
-  });
+    if (opts.staff && !opts.projected) row.desk = deskOf(db, m);
+    r.matches.push(row);
+  }
+  const groups = [...new Set(ms.map((m) => m.grp))].sort((x, y) => x - y).map((n) => ({ number: n, label: groupLabel(labelType, n) }));
+  const standings = elim ? [] : stageTable(db, s).map((t): PlayStanding => ({
+    entry: entry(t.entryId)!, group: t.group, rank: t.rank, groupRank: t.groupRank, played: t.played, wins: t.wins, losses: t.losses,
+    points: t.points, buchholz: t.buchholz, scoreDiff: t.scoreDiff,
+  }));
+  return {
+    ordinal: s.ordinal, type: st.type, status: opts.projected ? 'projected' : s.status as 'live' | 'finished', layout: elim ? 'bracket' : 'table',
+    groups, rounds, standings, advanceCount: st.advanceCount, pairsAsItGoes: P.totalRounds(s) !== null,
+    series: { bestOf: st.veto.games, totalScore: st.veto.games === 2 },
+  };
 }

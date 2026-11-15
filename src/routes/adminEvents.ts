@@ -18,6 +18,7 @@ import { recordResultFlow, settleEvent, startEventFlow } from '../events/flow.js
 import { eventStatusLabel, stageSummary } from '../events/format.js';
 import { adminEntryViews, draftBench } from '../events/views.js';
 import { stagePlayViews, type StagePlayView } from '../events/playViews.js';
+import { bracketPreview } from '../events/bracketPreview.js';
 import { rulesetOptions } from '../rulesetStore.js';
 import type { Notifier } from '../notify/notify.js';
 import { tellCaptainOffer, tellCaptainSet, tellCheckinOpen, tellCutRole, tellDropped, tellPlayerReplaced, tellPlayersSwapped, tellRoomOpen, tellRosterAdded, tellSignupRemoved, tellStaffAction, tellTeamMade, tellTimeLocked } from '../events/notices.js';
@@ -53,7 +54,7 @@ export interface AdminEventDetail {
   stages: AdminEventStage[];
   log: { at: string; actorName: string | null; action: string; detail: Record<string, unknown> }[];
 }
-export interface AdminEventPlay { status: V.EventStatus; lockedAt: string | null; startsAt: string; seeded: number; stages: StagePlayView[] }
+export interface AdminEventPlay { status: V.EventStatus; lockedAt: string | null; startsAt: string; seeded: number; stages: StagePlayView[]; preview: StagePlayView | null }
 export interface AdminEventOptions {
   campaigns: { slug: string; name: string }[]; defaultPool: string[];
   rulesets: { id: number; name: string; summary: string }[]; defaultRulesetId: number | null;
@@ -736,6 +737,7 @@ export async function adminEventRoutes(
     if (!ev) return refuse(reply, 'not_found');
     const out: AdminEventPlay = {
       status: ev.status, lockedAt: ev.locked_at, startsAt: ev.starts_at, seeded: P.activeSeeded(db, ev.id).length, stages: stagePlayViews(db, ev, { staff: true }),
+      preview: await bracketPreview(db, ev),
     };
     return out;
   });

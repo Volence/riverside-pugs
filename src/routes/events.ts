@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { bracketPreview } from '../events/bracketPreview.js';
 import type { DB } from '../db.js';
 import type { CommunityStore } from '../community/store.js';
 import { bannerType, checkLogo, LOGO_MAX_BYTES } from '../community/validate.js';
@@ -112,7 +113,7 @@ export async function eventRoutes(
     if (!v) return;
     const ev = getEventBySlug(db, (req.params as { slug: string }).slug);
     if (!ev || (ev.status === 'draft' && !isStaff(v.viewer))) return reply.code(404).send(NOT_FOUND);
-    return eventView(db, ev);
+    return { ...eventView(db, ev), preview: await bracketPreview(db, ev) };
   });
 
   app.get('/api/events/:slug/mine', async (req, reply) => {

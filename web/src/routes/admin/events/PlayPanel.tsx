@@ -5,6 +5,7 @@ import { Empty, Panel } from '../../../components/bits';
 import { useAction, type Run } from '../useAction';
 import { fromLocalInput, groupPrefix, playByText, whenText } from '../../../eventFormat';
 import { PHASE_TEXT, holdText } from '../../event/room/roomText';
+import { Bracket } from '../../event/Bracket';
 
 /** The real match.status values (src/events/play.ts MatchStatus) where a
  *  result may still be entered as a first result: before the room opens,
@@ -514,6 +515,13 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
             <button class="btn btn--ghost" disabled={busy} onClick={() => run(async () => { await adminApi.startEvent(eventId); onChange?.(); }, {
               title: 'Start the event now?', body: 'Stage 1 is drawn from the current seeds, seeds can no longer change, and every first-round room opens now with its ready clock running.',
             })}>Start the event now</button>
+          )}
+          {data.preview && (
+            <section class="playpanel__preview">
+              <h4>Projected bracket</h4>
+              <p class="muted">What the current seeds give. Reordering seeds changes it; starting the event draws the real one.</p>
+              <Bracket stage={data.preview} slug="" />
+            </section>
           )}
         </>
       )}
