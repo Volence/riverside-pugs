@@ -77,7 +77,13 @@ export interface IntegrityFlagInput {
   detail: string;
 }
 
-export interface IntegrityFlagRow extends IntegrityFlagInput { id: number; at: string }
+export interface IntegrityFlagRow extends IntegrityFlagInput {
+  id: number;
+  at: string;
+  /** Kept for the record but not a cheat signal (src/lilacIgnore.ts); absent
+   *  on a row just recorded, null when it counts. */
+  ignored?: 'readyup' | 'infected' | null;
+}
 
 /** Store one flag. Returns null when it was collapsed into a recent identical
  *  one, so the caller knows whether to announce it. */
@@ -102,7 +108,7 @@ export function recordIntegrityFlag(
 }
 
 const SELECT = `SELECT id, match_id AS matchId, server_id AS serverId, steamid, source,
-                       kind, severity, detail, at FROM integrity_flags`;
+                       kind, severity, detail, at, ignored FROM integrity_flags`;
 
 export function flagsForPlayer(db: DB, steamid: string, limit = 50): IntegrityFlagRow[] {
   return db.prepare(`${SELECT} WHERE steamid = ? ORDER BY at DESC, id DESC LIMIT ?`)

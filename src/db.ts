@@ -12,6 +12,7 @@ import { ensureIpWatchSchema } from './ipWatch.js';
 import { ensureEvaderSchema } from './evaderPeople.js';
 import { ensureNewcomerSchema } from './integrity/newcomer.js';
 import { ensureDataFeedsSchema } from './dataFeeds.js';
+import { markIgnoredLilac } from './lilacIgnore.js';
 
 export type DB = Database.Database;
 
@@ -3239,6 +3240,12 @@ export function openDb(path: string): DB {
       players_json    TEXT NOT NULL
     );
   `);
+
+  // A LilAC aimlock flag kept for the record but not counted as a cheat
+  // signal: 'readyup' or 'infected' (src/lilacIgnore.ts), NULL when it
+  // counts. The backfill marks older rows; it only ever sets a mark.
+  ensureColumn(db, 'integrity_flags', 'ignored', 'TEXT');
+  markIgnoredLilac(db);
 
   seed(db);
   return db;

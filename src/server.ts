@@ -97,6 +97,7 @@ import { ServerReleaser, reconcileServers, recoverOfflineServers, type IdleProbe
 import { lilacSeverity, recordSiKill, scanAimMatches } from './aimRules.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
+import { ignoredOf, markIgnoredLilac } from './lilacIgnore.js';
 import { inputThresholds, recordInputBurst, recordInputCap, scanEndedMatches } from './inputBursts.js';
 import { runFingerprintCheck } from './fingerprintCheck.js';
 import { getServer, resolveServerBySource, isKnownServerAddress, type ServerRow } from './serverPool.js';
@@ -1064,7 +1065,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               kind, severity,
               detail: ev.reason ? lilacReasonDetail(ev.reason) : '',
             });
-            if (stored) {
+            // An aimlock in a ready-up or on an infected player is kept but
+            // is not a cheat signal (src/lilacIgnore.ts): no admin alert.
+            if (stored && kind === 'aimlock') markIgnoredLilac(deps.db, stored.id);
+            if (stored && ignoredOf(deps.db, stored.id) === null) {
               publishAdminEvent({
                 kind: 'lilac_flag', steamid: ev.steamid, cheat: kind,
                 banned: ev.banned, matchId,

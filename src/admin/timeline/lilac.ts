@@ -1,9 +1,10 @@
 import type { DB } from '../../db.js';
 import { BIG_SNAP_DEG } from '../../aimRules.js';
 import { ZOMBIE_CLASSES } from '../../replayFormat.js';
+import { IGNORED_LABEL, type LilacIgnored } from '../../lilacIgnore.js';
 import { ROW_LIMIT, marks, toIso, type TimelineAdapter, type TimelineItem } from './types.js';
 
-interface Row { id: number; match_id: number | null; kind: string; severity: string; detail: string; at: string }
+interface Row { id: number; match_id: number | null; kind: string; severity: string; detail: string; at: string; ignored: string | null }
 
 /** integrity_flags.detail parsed back into numbers, the reverse of
  *  logParse.ts's lilacReasonDetail. Never throws: a key that is not a finite
@@ -110,6 +111,15 @@ function reasonSentences(kind: string, detail: string): string {
   return sentences.length ? ` ${sentences.join(' ')}` : '';
 }
 
+/** The lead sentence on an aimlock that is kept but not counted. */
+function ignoredSentence(why: LilacIgnored): string {
+  const label = IGNORED_LABEL[why];
+  return `${label[0].toUpperCase()}${label.slice(1)}: `
+    + (why === 'readyup'
+      ? 'an aimlock during a ready-up, where ghost infected float in front of the saferoom, is not a cheat signal.'
+      : 'an aimlock while infected is not a cheat signal, since infected see survivors through walls.');
+}
+
 /** Flags Little Anti-Cheat raised during play. No replay behind them, so
  *  there is nothing to watch: the value is the pattern, not the single hit.
  *  "suspected" is LilAC's own word and its own documentation says few and
@@ -120,7 +130,7 @@ export const lilacAdapter: TimelineAdapter = {
   source: 'lilac',
   items({ db, ids }): TimelineItem[] {
     const rows = db.prepare(
-      `SELECT id, match_id, kind, severity, detail, at FROM integrity_flags
+      `SELECT id, match_id, kind, severity, detail, at, ignored FROM integrity_flags
        WHERE source = 'lilac' AND steamid IN (${marks(ids)})
        ORDER BY at DESC, id DESC LIMIT ?`,
     ).all(...ids, ROW_LIMIT) as Row[];
@@ -128,7 +138,8 @@ export const lilacAdapter: TimelineAdapter = {
       at: toIso(r.at),
       source: 'lilac' as const,
       kind: r.kind,
-      summary: (r.severity === 'banned'
+      summary: (r.ignored ? `${ignoredSentence(r.ignored as LilacIgnored)} ` : '')
+        + (r.severity === 'banned'
         ? `Little Anti-Cheat banned this account on the game server for ${r.kind}.`
         // Rule B (src/aimRules.ts): the one LilAC flag that is not "few and
         // rare", because it was calibrated on the confirmed aimbot.
@@ -140,11 +151,12 @@ export const lilacAdapter: TimelineAdapter = {
       matchId: r.match_id,
       replay: null,
       ref: { type: 'integrity_flag', id: r.id },
+      ...(r.ignored ? { allowed: true as const } : {}),
     }));
   },
   evidence(db: DB) {
     return db.prepare(
-      "SELECT steamid, MAX(at) AS at FROM integrity_flags WHERE source = 'lilac' GROUP BY steamid",
+      "SELECT steamid, MAX(at) AS at FROM integrity_flags WHERE source = 'lilac' AND ignored IS NULL GROUP BY steamid",
     ).all() as { steamid: string; at: string }[];
   },
 };

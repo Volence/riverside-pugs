@@ -219,6 +219,7 @@ export function EvidenceDetail(
                   {f.severity === 'banned' ? <strong class="admin-warn"> · banned by LilAC</strong>
                     : f.severity === 'high' ? <strong class="admin-warn"> · high severity</strong>
                     : <span class="muted"> · suspected</span>}
+                  {f.ignored ? <span class="muted"> · ignored ({f.ignored === 'readyup' ? 'ready-up' : 'infected'})</span> : null}
                   {f.matchId ? <> · <a href={`/match/${f.matchId}`}>#{f.matchId}</a></> : null}
                 </li>
               ))}
