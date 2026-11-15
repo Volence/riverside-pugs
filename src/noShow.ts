@@ -61,6 +61,17 @@ export function recordPlayerConnect(db: DB, token: string, steamid: string): voi
 }
 
 /**
+ * SQL for "this roster row has been on the match server": a stamped connect,
+ * or a place in any of the match's ready-up ledgers. The connect stamp comes
+ * only from the lossy UDP PLAYER line, and a web restart can drop it (match
+ * 168, 2026-09-24); the ready-up ledger is written from the plugin's PHASE
+ * roster reports, so anyone it names was in the game. `mp` is the
+ * match_players alias.
+ */
+export const SEEN_SQL = `(mp.connected_at IS NOT NULL OR EXISTS (
+  SELECT 1 FROM match_readyup_players rp WHERE rp.match_id = mp.match_id AND rp.player_id = mp.player_id))`;
+
+/**
  * Abort live matches that never actually got going, and free their box.
  *
  * The orphan reaper cannot see these. Timer_Heartbeat fires whenever the
@@ -72,7 +83,9 @@ export function recordPlayerConnect(db: DB, token: string, steamid: string): voi
  * Two rules:
  *   1. Past noshow_minutes, plus whatever staff added to this match from the
  *      live board (matches.noshow_extra_minutes), with fewer than
- *      noshow_min_connected of the roster ever connected: nobody turned up.
+ *      noshow_min_connected of the roster ever seen (SEEN_SQL) and no round
+ *      recorded: nobody turned up. A match with rounds is being played, and
+ *      rule 1 never ends it (match 168 was aborted two rounds in).
  *   2. Past no_round_minutes, plus the same extra minutes, with no round
  *      ever recorded: everyone turned up and then nobody readied.
  */
@@ -88,14 +101,15 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
       `SELECT m.id, m.server_id, m.noshow_extra_minutes AS extra,
               (julianday('now') - julianday(m.went_live_at)) * 24 * 60 AS age_min,
               (SELECT COUNT(*) FROM match_players mp
-                WHERE mp.match_id = m.id AND mp.connected_at IS NOT NULL) AS connected,
+                WHERE mp.match_id = m.id AND ${SEEN_SQL}) AS connected,
               (SELECT COUNT(*) FROM match_rounds r WHERE r.match_id = m.id) AS rounds
          FROM matches m
         WHERE m.state = 'live' AND m.went_live_at IS NOT NULL`,
     )
     .all() as { id: number; server_id: number | null; extra: number; age_min: number; connected: number; rounds: number }[];
 
-  const noShows = (r: (typeof rows)[number]) => r.age_min >= noShowMin + r.extra && r.connected < minConnected;
+  const noShows = (r: (typeof rows)[number]) =>
+    r.rounds === 0 && r.age_min >= noShowMin + r.extra && r.connected < minConnected;
   // The extension moves this rule too. Otherwise extending past the no-round
   // deadline buys nothing: the players staff are waiting for connect, nobody
   // can have readied yet, and the backstop ends the match on the old clock.
@@ -121,7 +135,7 @@ export function reapNoShowMatches(db: DB, releaser: ServerReleaser): number[] {
     let rejected: string[] = [];
     if (noShowRule) {
       rejected = fileCheckRejects(db, r.id);
-      const absent = (db.prepare('SELECT player_id FROM match_players WHERE match_id = ? AND connected_at IS NULL')
+      const absent = (db.prepare(`SELECT mp.player_id FROM match_players mp WHERE mp.match_id = ? AND NOT ${SEEN_SQL}`)
         .all(r.id) as { player_id: string }[]).map((a) => a.player_id);
       culprits = absent.filter((p) => !rejected.includes(p));
       for (const p of culprits) recordPenalty(db, p, 'no_show', r.id);
@@ -179,8 +193,8 @@ export interface NoShowClock {
 export function noShowClock(db: DB, matchId: number, now = new Date()): NoShowClock | null {
   const m = db.prepare(
     `SELECT m.state, m.went_live_at, m.noshow_extra_minutes AS extra,
-            (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND mp.connected_at IS NOT NULL) AS connected,
-            (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND mp.connected_at IS NULL) AS absent,
+            (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND ${SEEN_SQL}) AS connected,
+            (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND NOT ${SEEN_SQL}) AS absent,
             (SELECT COUNT(*) FROM match_rounds r WHERE r.match_id = m.id) AS rounds
      FROM matches m WHERE m.id = ?`,
   ).get(matchId) as { state: string; went_live_at: string | null; extra: number; connected: number; absent: number; rounds: number } | undefined;

@@ -87,6 +87,52 @@ describe('no-show reaper', () => {
     expect(reapNoShowMatches(db, new ServerReleaser(db, async () => {}))).toEqual([]);
   });
 
+  it('never applies the no-show rule once the match has recorded rounds (match 168)', () => {
+    const db = openDb(':memory:');
+    setSetting(db, 'noshow_minutes', '7');
+    setSetting(db, 'noshow_min_connected', '8');
+    const { id } = liveMatch(db, 11);
+    // Five connect stamps survived; three were lost to a web restart.
+    for (const sid of IDS.slice(0, 5)) recordPlayerConnect(db, 'tok', sid);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (?, 0, 1, 'a')").run(id);
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team) VALUES (?, 0, 2, 'b')").run(id);
+
+    expect(reapNoShowMatches(db, new ServerReleaser(db, async () => {}))).toEqual([]);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(id) as any).state).toBe('live');
+    expect(db.prepare("SELECT COUNT(*) AS n FROM penalties WHERE kind = 'no_show'").get()).toEqual({ n: 0 });
+  });
+
+  it('counts anyone in a ready-up ledger of the match as connected', () => {
+    const db = openDb(':memory:');
+    setSetting(db, 'noshow_minutes', '7');
+    setSetting(db, 'noshow_min_connected', '8');
+    const { id } = liveMatch(db, 11);
+    for (const sid of IDS.slice(0, 5)) recordPlayerConnect(db, 'tok', sid);
+    const ru = Number(db.prepare(
+      "INSERT INTO match_readyups (match_id, map_ordinal, half, started_at) VALUES (?, 0, 1, datetime('now'))",
+    ).run(id).lastInsertRowid);
+    for (const sid of IDS.slice(5)) {
+      db.prepare('INSERT INTO match_readyup_players (readyup_id, match_id, player_id, seconds) VALUES (?, ?, ?, 4)').run(ru, id, sid);
+    }
+
+    expect(reapNoShowMatches(db, new ServerReleaser(db, async () => {}))).toEqual([]);
+    expect((db.prepare('SELECT state FROM matches WHERE id = ?').get(id) as any).state).toBe('live');
+  });
+
+  it('a ready-up row still leaves the truly missing as the no-shows', () => {
+    const db = openDb(':memory:');
+    const { id } = liveMatch(db, 11);
+    for (const sid of IDS.slice(0, 3)) recordPlayerConnect(db, 'tok', sid);
+    const ru = Number(db.prepare(
+      "INSERT INTO match_readyups (match_id, map_ordinal, half, started_at) VALUES (?, 0, 1, datetime('now'))",
+    ).run(id).lastInsertRowid);
+    db.prepare('INSERT INTO match_readyup_players (readyup_id, match_id, player_id, seconds) VALUES (?, ?, ?, 4)').run(ru, id, IDS[3]);
+
+    expect(reapNoShowMatches(db, new ServerReleaser(db, async () => {}))).toEqual([id]);
+    const pen = (db.prepare("SELECT player_id FROM penalties WHERE kind = 'no_show' ORDER BY player_id").all() as { player_id: string }[]).map((r) => r.player_id);
+    expect(pen).toEqual(IDS.slice(4));
+  });
+
   it('aborts on the backstop when everyone connected but no round was ever recorded', () => {
     const db = openDb(':memory:');
     const { id } = liveMatch(db, 31);
