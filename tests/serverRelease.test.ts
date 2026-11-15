@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
 import { addServer, getServer, markLive, markOffline } from '../src/serverPool.js';
-import { ServerReleaser, reconcileServers, type ServerCleaner } from '../src/serverRelease.js';
+import { ServerReleaser, reconcileServers, recoverOfflineServers, type ServerCleaner } from '../src/serverRelease.js';
 import type { ServerRestarter } from '../src/serverRestart.js';
 
 function seedServer(db: ReturnType<typeof openDb>): number {
@@ -332,5 +332,113 @@ describe('reconcileServers', () => {
 
     expect(reconcileServers(db, releaser)).toEqual([]);
     expect(getServer(db, id)!.status).toBe('offline');
+  });
+});
+
+describe('recoverOfflineServers (a web restart lost the after-match flip)', () => {
+  /** A box a release took offline for its after-match restart: restart set,
+   *  enabled, offline, its last match over. */
+  function stranded(db: ReturnType<typeof openDb>): number {
+    const id = seedServer(db);
+    db.prepare('UPDATE servers SET restart_after_match = 1, enabled = 1 WHERE id = ?').run(id);
+    const m = seedMatchOn(db, id, 'completed', 'tok-done');
+    db.prepare("UPDATE matches SET ended_at = datetime('now', '-1 minute') WHERE id = ?").run(m);
+    markOffline(db, id);
+    return id;
+  }
+  const free = async () => ({ idle: true, humans: 0 });
+
+  it('sets a stranded box idle once it answers free, and wakes the waiters', async () => {
+    const db = openDb(':memory:');
+    const id = stranded(db);
+    const releaser = new ServerReleaser(db, async () => {});
+    let woke = 0;
+    releaser.onFreed(() => { woke++; });
+    const asked: string[] = [];
+    expect(await recoverOfflineServers(db, releaser, async (s) => { asked.push(s.name); return free(); })).toEqual([id]);
+    expect(asked).toEqual(['test']);
+    expect(getServer(db, id)!.status).toBe('idle');
+    expect(woke).toBe(1);
+  });
+
+  it('leaves it offline when it does not answer, has humans, or holds a match', async () => {
+    for (const answer of [null, { idle: true, humans: 2 }, { idle: false, humans: 0 }]) {
+      const db = openDb(':memory:');
+      const id = stranded(db);
+      expect(await recoverOfflineServers(db, new ServerReleaser(db, async () => {}), async () => answer)).toEqual([]);
+      expect(getServer(db, id)!.status).toBe('offline');
+    }
+    const db = openDb(':memory:');
+    const id = stranded(db);
+    expect(await recoverOfflineServers(db, new ServerReleaser(db, async () => {}), async () => { throw new Error('rcon connect timeout'); })).toEqual([]);
+    expect(getServer(db, id)!.status).toBe('offline');
+  });
+
+  it('never asks a box that is not this strand', async () => {
+    const cases: Array<(db: ReturnType<typeof openDb>, id: number) => void> = [
+      (db, id) => db.prepare('UPDATE servers SET enabled = 0 WHERE id = ?').run(id),
+      (db, id) => db.prepare('UPDATE servers SET retired = 1 WHERE id = ?').run(id),
+      (db, id) => db.prepare('UPDATE servers SET restart_after_match = 0 WHERE id = ?').run(id),
+      (db, id) => db.prepare("UPDATE servers SET gone_since = datetime('now') WHERE id = ?").run(id),
+      (db, id) => { seedMatchOn(db, id, 'live', 'tok-live'); },
+      (db, id) => { seedMatchOn(db, id, 'configuring', 'tok-conf'); },
+      (db, id) => db.prepare("INSERT INTO side_games (server_id, token, password) VALUES (?, 't', 'p')").run(id),
+      (db, id) => {
+        db.prepare("INSERT INTO players (steamid, name) VALUES ('76561199000000009', 'o')").run();
+        db.prepare(`INSERT INTO practice_leases (server_id, kind, owner_player_id, password, ends_at)
+          VALUES (?, 'park', '76561199000000009', 'pw', datetime('now', '+1 hour'))`).run(id);
+      },
+      // Parked by the release engine after the match: offline on purpose.
+      (db, id) => {
+        const r = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at) VALUES ('deploy', '[]', 'deploying', '1', datetime('now'))").run().lastInsertRowid);
+        db.prepare("INSERT INTO release_boxes (release_id, server_id, state, error, plan_json, shipped_json, updated_at) VALUES (?, ?, 'written', 'written, restart pending: x', NULL, '{}', datetime('now'))").run(r, id);
+      },
+    ];
+    for (const setup of cases) {
+      const db = openDb(':memory:');
+      const id = stranded(db);
+      setup(db, id);
+      const asked: number[] = [];
+      expect(await recoverOfflineServers(db, new ServerReleaser(db, async () => {}), async (s) => { asked.push(s.id); return free(); })).toEqual([]);
+      expect(asked).toEqual([]);
+      expect(getServer(db, id)!.status).toBe('offline');
+    }
+    // A never-used row: 'offline' is the schema default for an unverified box.
+    const db = openDb(':memory:');
+    const id = seedServer(db);
+    db.prepare("UPDATE servers SET restart_after_match = 1, status = 'offline' WHERE id = ?").run(id);
+    expect(await recoverOfflineServers(db, new ServerReleaser(db, async () => {}), free)).toEqual([]);
+  });
+
+  it('an older release park does not block a later strand', async () => {
+    const db = openDb(':memory:');
+    const id = stranded(db);
+    const r = Number(db.prepare("INSERT INTO releases (kind, sources_json, state, created_by, created_at) VALUES ('deploy', '[]', 'deploying', '1', datetime('now'))").run().lastInsertRowid);
+    db.prepare("INSERT INTO release_boxes (release_id, server_id, state, error, plan_json, shipped_json, updated_at) VALUES (?, ?, 'written', 'old', NULL, '{}', datetime('now', '-1 day'))").run(r, id);
+    expect(await recoverOfflineServers(db, new ServerReleaser(db, async () => {}), free)).toEqual([id]);
+  });
+
+  it('skips a box this process is restarting, and one a match took while it was being asked', async () => {
+    const db = openDb(':memory:');
+    const id = stranded(db);
+    let finish!: (v: boolean) => void;
+    const restarter: ServerRestarter = { restart: () => new Promise<boolean>((r) => { finish = r; }) };
+    const releaser = new ServerReleaser(db, async () => {}, restarter);
+    markLive(db, id);
+    releaser.release(id, { restart: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releaser.isRestarting(id)).toBe(true);
+    const asked: number[] = [];
+    expect(await recoverOfflineServers(db, releaser, async (s) => { asked.push(s.id); return free(); })).toEqual([]);
+    expect(asked).toEqual([]);
+    finish(true);
+
+    const db2 = openDb(':memory:');
+    const id2 = stranded(db2);
+    expect(await recoverOfflineServers(db2, new ServerReleaser(db2, async () => {}), async () => {
+      seedMatchOn(db2, id2, 'configuring', 'tok-new');
+      return free();
+    })).toEqual([]);
+    expect(getServer(db2, id2)!.status).toBe('offline');
   });
 });

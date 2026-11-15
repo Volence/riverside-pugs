@@ -93,7 +93,7 @@ import { Matchmaker } from './matchmaker.js';
 import { requeueMatchFor, setRequeue, type RequeueResult } from './matchRequeue.js';
 import { seasonOneLive } from './seasonThemes.js';
 import { DevOrchestrator, RealOrchestrator, type Orchestrator } from './orchestrator.js';
-import { ServerReleaser, reconcileServers, type ServerCleaner } from './serverRelease.js';
+import { ServerReleaser, reconcileServers, recoverOfflineServers, type IdleProbe, type ServerCleaner } from './serverRelease.js';
 import { lilacSeverity, recordSiKill, scanAimMatches } from './aimRules.js';
 import { cheatName, cvarActOf, liveMatchOf, recordIntegrityFlag } from './integrityFlags.js';
 import { lilacReasonDetail } from './logParse.js';
@@ -246,6 +246,9 @@ export interface ServerDeps {
   releaseHumans?: (s: ServerRow) => Promise<number>;
   /** Tests inject the player count the balance writer checks before a write. */
   balanceHumans?: (s: ServerRow) => Promise<number>;
+  /** Tests inject the probe that decides whether a box left offline by a lost
+   *  after-match restart flip may go back in the pool (recoverOfflineServers). */
+  idleProbe?: IdleProbe;
   /** Free bytes on the addons filesystem, for the campaign upload disk-floor
    *  check. Injected in tests; built from a real statfs on config.addonsDir
    *  otherwise, same as orchestrator and serverCleaner. */
@@ -770,6 +773,28 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } finally {
       rcon.close();
     }
+  };
+  // One rcon session per box: pug-match holds no match, and nobody is on it.
+  // Only for recoverOfflineServers, which asks boxes with no match on them.
+  const idleProbe: IdleProbe = deps.idleProbe ?? (async (server) => {
+    const rcon = new RealRcon({ host: server.host, port: server.rcon_port, password: server.rcon_password });
+    try {
+      await rcon.connect();
+      const st = await rcon.exec('sm_pug_status');
+      if (!st.includes('STATUS state=')) return null;
+      return { idle: /STATUS state=none\b/.test(st), humans: parseHumans(await rcon.exec('status')) };
+    } finally {
+      rcon.close();
+    }
+  });
+  let offlineSweepBusy = false;
+  const sweepOffline = (): void => {
+    if (offlineSweepBusy) return;
+    offlineSweepBusy = true;
+    void recoverOfflineServers(deps.db, releaser, idleProbe)
+      .then((freed) => { if (freed.length > 0) hub.broadcast('refresh'); })
+      .catch((err) => console.error('[serverRelease] offline recovery failed:', err))
+      .finally(() => { offlineSweepBusy = false; });
   };
   const releaseEngine = new ReleaseEngine({
     db: deps.db, blob: (id) => deployRepo.blob(id), writer: deps.releaseWriter, restarter, humans: deps.releaseHumans ?? humansOn,
@@ -1689,6 +1714,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       if (stranded.length > 0) {
         console.log(`[server] reconciled ${stranded.length} stranded server(s) at boot`);
       }
+      // A box this process's predecessor took offline for its after-match
+      // restart and never got to flip back (the reaper sweep repeats this).
+      // Behind the releases above, so it never probes a box they are cleaning.
+      if (!deps.config.devMode) void releaser.settled().then(sweepOffline);
 
       // Rebuilt from state='configuring' rather than trusted to survive in
       // memory: the same class of bug already deafened in-flight matches once
@@ -1943,6 +1972,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     } catch (err) {
       console.error('[noShow] reaper failed:', err);
     }
+    // A box left offline by a lost after-match restart flip, back in the pool
+    // once it answers free (src/serverRelease.ts recoverOfflineServers).
+    if (!deps.config.devMode) sweepOffline();
     // Balance metrics: a few rounds per minute, one while a match runs
     // (decoding a replay blocks the event loop). History is filled by
     // scripts/backfill-round-metrics.ts.
