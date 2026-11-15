@@ -425,3 +425,154 @@ describe('re-enabling a server wakes a match waiting for one', () => {
     }
   });
 });
+
+describe('admin abort: abandoned by (staff charge the leavers)', () => {
+  const TOKEN = 'abcdef0123456789abcdef0123456789';
+  const QUIT = IDS[5];
+  let app2: FastifyInstance;
+  let cookie: Record<string, string>;
+  let sent: string[];
+  /** What the box answers to sm_pug_status, or an Error to throw. */
+  let statusBody: string | Error;
+  let leaveBody: (cmd: string) => string;
+
+  const status = (gg: string, leave: string[] = []) => [
+    `STATUS state=live match=1 token=${TOKEN} campaign=dead_air map=m1 stopAfterMap=0`,
+    ...leave,
+    `STATUS gg ${gg}`,
+  ].join('\n');
+
+  function liveOn(): { id: number; serverId: number } {
+    const serverId = addServer(db, { name: 'Dallas', host: '1.2.3.4', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    const id = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token, went_live_at) VALUES (1, 'live', 'dead_air', ?, ?, datetime('now'))",
+    ).run(serverId, TOKEN).lastInsertRowid);
+    const ins = db.prepare('INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, ?)');
+    IDS.forEach((p, i) => ins.run(id, p, i < 4 ? 'a' : 'b'));
+    return { id, serverId };
+  }
+  const abort = (id: number, payload: object) =>
+    app2.inject({ method: 'POST', url: `/api/admin/matches/${id}/abort`, cookies: cookie, payload });
+  const actions = () => (db.prepare("SELECT action, target, detail FROM admin_actions WHERE action = 'abort_match'").all() as
+    { action: string; target: string; detail: string }[]).map((r) => ({ ...r, detail: JSON.parse(r.detail) }));
+
+  beforeEach(async () => {
+    sent = [];
+    statusBody = status('decided=none gap=120 ceiling=550 known=1 at=now ended=0');
+    leaveBody = (cmd) => `PUGOK leave steamid=${cmd.split(' ')[2]} absent=1 remaining=0 held=0`;
+    app2 = await buildServer({
+      config: loadConfig({}), db, orchestrator: stubOrchestrator(), serverCleaner: async () => {}, serverExec: async () => {},
+      serverQuery: async (_server, cmd) => {
+        sent.push(cmd);
+        if (cmd === 'sm_pug_status') {
+          if (statusBody instanceof Error) throw statusBody;
+          return statusBody;
+        }
+        return leaveBody(cmd);
+      },
+    });
+    cookie = authedCookie(app2, db, ADMIN);
+  });
+  afterEach(async () => { await app2.close(); });
+
+  it('an undecided match: aborted, and the leaver gets the abandon row, the ban, the rating loss and an audit row', async () => {
+    const { id } = liveOn();
+    const res = await abort(id, { leaveOut: [IDS[1]], abandonedBy: [QUIT] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().message).toContain('abandon ban and rating loss');
+    expect(sent).toEqual(['sm_pug_status']);
+    expect(db.prepare('SELECT state, abort_cause FROM matches WHERE id = ?').get(id)).toEqual({ state: 'aborted', abort_cause: 'admin' });
+    expect(db.prepare('SELECT player_id, team, decided, gap, ceiling FROM match_abandons WHERE match_id = ?').all(id))
+      .toEqual([{ player_id: QUIT, team: 'b', decided: null, gap: 120, ceiling: 550 }]);
+    const ban = db.prepare('SELECT player_id, reason, created_at, expires_at FROM bans WHERE player_id = ?').get(QUIT) as
+      { reason: string; created_at: string; expires_at: string };
+    expect(ban.reason).toBe(`Abandoned match #${id}`);
+    expect(Math.round((Date.parse(ban.expires_at) - Date.parse(ban.created_at)) / 60_000)).toBe(1440);
+    // Only the quitter is rated: a loss.
+    const hist = db.prepare('SELECT player_id, mu_before, mu_after FROM rating_history WHERE match_id = ?').all(id) as
+      { player_id: string; mu_before: number; mu_after: number }[];
+    expect(hist.map((h) => h.player_id)).toEqual([QUIT]);
+    expect(hist[0].mu_after).toBeLessThan(hist[0].mu_before);
+    expect(db.prepare('SELECT losses FROM player_ratings WHERE player_id = ?').get(QUIT)).toEqual({ losses: 1 });
+    expect(actions()).toEqual([{ action: 'abort_match', target: String(id), detail: expect.objectContaining({
+      leftOut: [IDS[1]], abandonedBy: [QUIT], decided: null, outcome: 'aborted', recorded: [{ steamid: QUIT, banMinutes: 1440 }],
+    }) }]);
+    // The aborted list names them, with Restore rating, and nobody puts them back in the queue.
+    const o = (await app2.inject({ method: 'GET', url: '/api/admin/overview', cookies: cookie })).json();
+    const row = o.aborted.find((m: { id: number }) => m.id === id);
+    expect(row.abandons.map((a: { steamid: string }) => a.steamid)).toEqual([QUIT]);
+    expect(db.prepare('SELECT role FROM match_abort_notices WHERE match_id = ? AND player_id = ?').get(id, QUIT)).toEqual({ role: 'culprit' });
+
+    // Restore rating works on it, and survives a recompute.
+    const r = await app2.inject({ method: 'POST', url: `/api/admin/matches/${id}/restore-abandon-rating`, cookies: cookie, payload: { steamid: QUIT, reason: 'his power went out' } });
+    expect(r.statusCode).toBe(200);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM rating_history WHERE match_id = ?').get(id)).toEqual({ n: 0 });
+    expect(db.prepare('SELECT losses FROM player_ratings WHERE player_id = ?').get(QUIT)).toEqual({ losses: 0 });
+    recomputeSeasonRatings(db, 1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM rating_history WHERE match_id = ?').get(id)).toEqual({ n: 0 });
+  });
+
+  it('a second abandon in 30 days climbs the ladder, and two leavers each get their own', async () => {
+    const { id: first } = liveOn();
+    expect((await abort(first, { abandonedBy: [QUIT] })).statusCode).toBe(200);
+    const { id } = liveOn();
+    expect((await abort(id, { abandonedBy: [QUIT, IDS[2]] })).statusCode).toBe(200);
+    const mins = (sid: string) => {
+      const b = db.prepare('SELECT created_at, expires_at FROM bans WHERE player_id = ? AND reason = ?').get(sid, `Abandoned match #${id}`) as { created_at: string; expires_at: string };
+      return Math.round((Date.parse(b.expires_at) - Date.parse(b.created_at)) / 60_000);
+    };
+    expect(mins(QUIT)).toBe(4320);
+    expect(mins(IDS[2])).toBe(1440);
+    expect((db.prepare('SELECT player_id FROM rating_history WHERE match_id = ? ORDER BY player_id').all(id) as { player_id: string }[])
+      .map((r) => r.player_id)).toEqual([IDS[2], QUIT]);
+  });
+
+  it('a box that cannot be read is aborted as an undecided abandon', async () => {
+    statusBody = new Error('rcon connect timeout');
+    const { id } = liveOn();
+    expect((await abort(id, { abandonedBy: [QUIT] })).statusCode).toBe(200);
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(id)).toEqual({ state: 'aborted' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM match_abandons WHERE match_id = ?').get(id)).toEqual({ n: 1 });
+    expect(actions()[0].detail).toMatchObject({ outcome: 'aborted', statusError: 'rcon connect timeout' });
+  });
+
+  it('a decided match is not aborted: the server ends the leaver\'s clock and the result stands', async () => {
+    statusBody = status('decided=a gap=700 ceiling=550 known=1 at=now ended=0',
+      [`STATUS leave slot=5 steamid=${QUIT} absent=1 remaining=200 held=0 hold_left=0`]);
+    const { id, serverId } = liveOn();
+    const res = await abort(id, { abandonedBy: [QUIT] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true, decided: 'a' });
+    expect(res.json().message).toContain('Team A wins and it is rated');
+    expect(sent).toEqual(['sm_pug_status', `sm_pug_leave ${TOKEN} ${QUIT} end`]);
+    // Still live: the plugin's ABANDON line takes the ordinary decided path.
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(id)).toEqual({ state: 'live' });
+    expect(db.prepare('SELECT status FROM servers WHERE id = ?').get(serverId)).toEqual({ status: 'live' });
+    expect(actions()[0].detail).toMatchObject({ abandonedBy: [QUIT], decided: 'a', ended: [QUIT], outcome: 'decided_end' });
+  });
+
+  it('a decided match with the ticked leaver still connected is refused, with nothing changed', async () => {
+    statusBody = status('decided=b gap=700 ceiling=550 known=1 at=now ended=0');
+    const { id } = liveOn();
+    const res = await abort(id, { abandonedBy: [QUIT] });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain('still connected');
+    expect(sent).toEqual(['sm_pug_status']);
+    expect(db.prepare('SELECT state FROM matches WHERE id = ?').get(id)).toEqual({ state: 'live' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bans').get()).toEqual({ n: 0 });
+  });
+
+  it('refuses someone off the roster, and any leaver on a booked game', async () => {
+    const { id } = liveOn();
+    expect((await abort(id, { abandonedBy: ['76561199999999999'] })).statusCode).toBe(400);
+    expect((await abort(id, { abandonedBy: ['nope'] })).statusCode).toBe(400);
+    const serverId = addServer(db, { name: 's9', host: '1.2.3.9', port: 27015, rconPort: 27015, rconPassword: 'x', status: 'live' });
+    const booking = holdForBooking(db, serverId);
+    const booked = Number(db.prepare(
+      "INSERT INTO matches (season_id, state, campaign, server_id, token, origin, kind, visibility, booking_id) VALUES (1, 'live', 'dead_air', ?, 'tok-b', 'in_game', 'scrim', 'participants', ?)",
+    ).run(serverId, booking).lastInsertRowid);
+    db.prepare("INSERT INTO match_players (match_id, player_id, team) VALUES (?, ?, 'b')").run(booked, QUIT);
+    expect((await abort(booked, { abandonedBy: [QUIT] })).statusCode).toBe(409);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bans').get()).toEqual({ n: 0 });
+  });
+});

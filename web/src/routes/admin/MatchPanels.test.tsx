@@ -48,10 +48,11 @@ describe('the abort dialog for an ordinary match', () => {
     const dialog = await waitFor(() => screen.getByRole('alertdialog'));
     expect(dialog.textContent).toContain('The server is freed');
     expect(dialog.textContent).not.toContain('booking');
-    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(2);
+    // A leave-out box and an "abandoned the match" box per player.
+    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(4);
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /Leave bob out/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAbort).toHaveBeenCalledWith(10, ['2']));
+    await waitFor(() => expect(mockAbort).toHaveBeenCalledWith(10, ['2'], []));
   });
 
   it('shows nothing extra after the abort, since the route sends no message', async () => {
@@ -77,7 +78,7 @@ describe('the abort dialog for a booking game', () => {
     expect(within(dialog).queryAllByRole('checkbox')).toHaveLength(0);
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abort match' }));
-    await waitFor(() => expect(mockAbort).toHaveBeenCalledWith(10, []));
+    await waitFor(() => expect(mockAbort).toHaveBeenCalledWith(10, [], []));
     expect(await screen.findByText(message)).toBeTruthy();
   });
 });
