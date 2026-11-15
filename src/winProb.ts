@@ -633,6 +633,51 @@ export function liveWinLine(db: DB, matchId: number, campaign: string, model: Wi
   return withInHalf(line, extra.finished, extra.current);
 }
 
+/** How long a low during a half must hold to count as the winner's low. */
+export const LOW_HOLD_MS = 20_000;
+/** Points during a half are 5 s apart; a wider gap is missing data, and a
+ *  window across it is not trusted to have held. */
+export const LOW_MAX_GAP_MS = 10_000;
+
+/**
+ * The winner's lowest chance that actually held: a point during a half
+ * counts at the highest chance the line reached in the LOW_HOLD_MS from it
+ * (a step line, so each point's value stands until the next), and the low is
+ * the least of those. A one-point dip to 0.4% that is back at 30% five
+ * seconds later is noise of the in-half model, not a comeback from 0.4%.
+ *
+ * A window that runs off the end of its half takes in the half-end point
+ * after it, and one across a gap wider than LOW_MAX_GAP_MS counts for
+ * nothing, so a half whose points are sparse falls back to its half-end
+ * point. Half-end points (and the opening one) count as they are. The index
+ * is where the line sat at the held value. Exported for its test.
+ */
+export function sustainedLow(points: readonly WinPoint[], w: 'a' | 'b'): { index: number; p: number } | null {
+  const pw = (pt: WinPoint) => (w === 'a' ? pt.pA : 1 - pt.pA);
+  let low: { index: number; p: number } | null = null;
+  for (let i = 0; i < points.length; i++) {
+    const start = points[i];
+    let held: { index: number; p: number } | null = { index: i, p: pw(start) };
+    if (start.tMs !== undefined) {
+      const until = start.tMs + LOW_HOLD_MS;
+      let prevT = start.tMs;
+      for (let j = i + 1; j < points.length; j++) {
+        const pt = points[j];
+        const sameHalf = pt.tMs !== undefined && pt.ordinal === start.ordinal && pt.half === start.half;
+        if (sameHalf && pt.tMs! - prevT > LOW_MAX_GAP_MS) { held = null; break; }
+        if (sameHalf && pt.tMs! >= until) break;
+        // In the window: a later point of this half, or the point that ends
+        // it (the half-end point, or the next half's first).
+        if (pw(pt) > held.p) held = { index: j, p: pw(pt) };
+        if (!sameHalf) break;
+        prevT = pt.tMs!;
+      }
+    }
+    if (held && (!low || held.p < low.p - 1e-9)) low = held;
+  }
+  return low;
+}
+
 /** `line` with each played half's in-half points just before its half-end
  *  point and the half in progress's after the last. The swing (biggestSwing)
  *  and the winner's low are taken again over every point, so either can land
@@ -652,11 +697,7 @@ function withInHalf(line: WinLine, finished: Map<string, WinPoint[]>, current: W
   let winnerLow: WinLine['winnerLow'] = null;
   if (line.winnerLow) {
     const end = line.points[line.points.length - 1];
-    const w = end.scoreA > end.scoreB ? 'a' : 'b';
-    points.forEach((pt, index) => {
-      const p = w === 'a' ? pt.pA : 1 - pt.pA;
-      if (!winnerLow || p < winnerLow.p - 1e-9) winnerLow = { index, p };
-    });
+    winnerLow = sustainedLow(points, end.scoreA > end.scoreB ? 'a' : 'b');
   }
   return {
     ...line,

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openDb, type DB } from '../../src/db.js';
 import { encodeFrame, encodeHeader, STATE, VERSION, type Frame, type PlayerSample } from '../../src/replayFormat.js';
 import { LiveHudStore } from '../../src/cast/liveHud.js';
-import { buildWinModel, liveWinLine, matchWinLine, type HalfRow, type WinLine } from '../../src/winProb.js';
+import { buildWinModel, liveWinLine, matchWinLine, sustainedLow, type HalfRow, type WinLine, type WinPoint } from '../../src/winProb.js';
 import { FORM_PARAMS } from '../../src/winForm.js';
 import { insertDraft, publishCampaign } from '../../src/customCampaigns.js';
 import { invalidateCampaignCache, setMissionsDirs } from '../../src/campaignRegistry.js';
@@ -126,21 +126,38 @@ describe('matchWinLine with stored points', () => {
     expect(l.points[1]!.moment).toBeUndefined();
   });
 
-  it('takes the swing and the winner\'s low over the points during halves too', () => {
+  it('takes the swing over the points during halves too', () => {
     const id = seed(FOUR);
-    // B wins: a moment where A looked all but home is B's low.
     writeFinishedPoints(db, id, [point(0, 1, 0, 0.5), point(0, 1, 5000, 0.55), point(0, 1, 20_000, 0.97, 'tank_death')]);
     const l = matchWinLine(db, id, model, { live: true })!;
-    expect(l.winnerLow).toEqual({ index: 3, p: expect.closeTo(0.03, 9) });
     // 0.5 at the half's start to 0.97 at the tank kill, 20 s on.
     expect({ from: l.turningFrom, to: l.turning }).toEqual({ from: 1, to: 3 });
     // A line without points during halves carries no turningFrom.
     expect(matchWinLine(db, id, model)!.turningFrom).toBeUndefined();
+    // The 15 s gap before the tank kill is missing data and the kill is the
+    // half's last point, so the low is not the 3% it touched: that window
+    // runs into the half-end point.
+    expect(l.winnerLow!.p).toBeGreaterThan(0.03 + 1e-6);
   });
 
-  it('gives the Discord comeback line the low during a half only once win_chance_live is on', () => {
+  it('takes the winner\'s low during a half where it held 20 s', () => {
     const id = seed(FOUR);
-    writeFinishedPoints(db, id, [point(0, 1, 0, 0.5), point(0, 1, 20_000, 0.97, 'tank_death')]);
+    // B wins: A looked all but home for 25 s mid-half, then it fell away.
+    writeFinishedPoints(db, id, [
+      point(0, 1, 0, 0.5), point(0, 1, 5000, 0.55),
+      ...[10_000, 15_000, 20_000, 25_000, 30_000].map((t) => point(0, 1, t, 0.97)),
+      point(0, 1, 35_000, 0.6), point(0, 1, 40_000, 0.6),
+    ]);
+    const l = matchWinLine(db, id, model, { live: true })!;
+    expect(l.winnerLow).toEqual({ index: 3, p: expect.closeTo(0.03, 9) });
+  });
+
+  it('gives the Discord comeback line the held low during a half only once win_chance_live is on', () => {
+    const id = seed(FOUR);
+    writeFinishedPoints(db, id, [
+      point(0, 1, 0, 0.5), ...[5000, 10_000, 15_000, 20_000, 25_000].map((t) => point(0, 1, t, 0.97, t === 5000 ? 'tank_death' : null)),
+      point(0, 1, 30_000, 0.5),
+    ]);
     const halfEndLow = matchWinLine(db, id)!.winnerLow!.p;
     expect(comebackFrom(db, id)).toBe(halfEndLow < 0.25 ? halfEndLow : null);
     setSetting(db, 'win_chance_live', '1');
@@ -161,6 +178,43 @@ describe('matchWinLine with stored points', () => {
     expect(matchWinLine(db, id, model, { live: true })).toEqual(plain);
     writeFinishedPoints(db, id, [point(0, 2, 0, 0.6)]);
     expect(inHalf(matchWinLine(db, id, model, { live: true })!).map((p) => [p.half, p.pA])).toEqual([[2, 0.6]]);
+  });
+});
+
+describe('sustainedLow', () => {
+  const end = (pA: number): WinPoint => ({ ordinal: 0, half: 1, survTeam: 'a', map: 'm1', scoreA: 0, scoreB: 0, pA });
+  const at = (tMs: number, pA: number, half = 1): WinPoint => ({ ...end(pA), half, tMs });
+  const open: WinPoint = { ordinal: null, half: null, survTeam: null, map: null, scoreA: 0, scoreB: 0, pA: 0.5 };
+  const every5 = (from: number, ps: number[]) => ps.map((p, i) => at(from + i * 5000, p));
+
+  it('ignores a dip that is back within 20 s and keeps one that held', () => {
+    // Match 1098's shape: one point at 0.4%, then 30% again.
+    const brief = [open, ...every5(0, [0.4, 0.3, 0.004, 0.3, 0.3, 0.3, 0.3, 0.32]), end(0.32)];
+    expect(sustainedLow(brief, 'a')).toEqual({ index: 2, p: 0.3 });
+    // The same dip held four points (20 s) counts at its worst holding value.
+    const held = [open, ...every5(0, [0.3, 0.02, 0.01, 0.015, 0.02, 0.3, 0.32]), end(0.32)];
+    expect(sustainedLow(held, 'a')).toEqual({ index: 2, p: 0.02 });
+  });
+
+  it('reads the winner\'s side', () => {
+    const brief = [open, ...every5(0, [0.7, 0.996, 0.7, 0.7, 0.7, 0.7]), end(0.7)];
+    expect(sustainedLow(brief, 'b')!.p).toBeCloseTo(0.3, 9);
+  });
+
+  it('takes in the half-end point when a window runs off the end of its half', () => {
+    const pts = [open, ...every5(0, [0.5, 0.5, 0.5, 0.5, 0.5, 0.01]), end(0.4)];
+    expect(sustainedLow(pts, 'a')).toEqual({ index: 7, p: 0.4 });
+  });
+
+  it('falls back to the half-end points across a gap in the data', () => {
+    const pts = [open, at(0, 0.3), at(30_000, 0.01), at(35_000, 0.01), at(40_000, 0.01), end(0.25)];
+    // 0.3 stood 30 s by the step reading, but a gap that wide is missing
+    // data; the 0.01 run reaches the half end inside 20 s.
+    expect(sustainedLow(pts, 'a')).toEqual({ index: 5, p: 0.25 });
+  });
+
+  it('is the half-end low on a line with no points during halves', () => {
+    expect(sustainedLow([open, end(0.2), end(0.6)], 'a')).toEqual({ index: 1, p: 0.2 });
   });
 });
 
