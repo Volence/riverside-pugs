@@ -6,6 +6,7 @@ import { openDb, type DB } from '../src/db.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/server.js';
 import { Hub } from '../src/ws.js';
+import { setSetting } from '../src/settings.js';
 import { upsertPlayer, activatePlayer } from '../src/players.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import {
@@ -136,5 +137,26 @@ describe('a chat line from the UDP socket to the table', () => {
     expect(listLines(db, local, 0, 10)[0]).toMatchObject({ kind: 'say', steamid: P, team: 2, scope: 'team', message: 'rush the tank' });
     expect(listLines(db, s1, 0, 10)).toHaveLength(0);
     expect(heard).toContain('server_chat');
+  });
+
+  it('a slur over the socket tells staff and whispers the player once, through the staff chat path', async () => {
+    const local = Number(db.prepare(
+      "INSERT INTO servers (name, host, port, rcon_port, rcon_password, tv_port, tv_enabled) VALUES ('Local', '127.0.0.1', 27015, 27015, 'x', 27020, 1)",
+    ).run().lastInsertRowid);
+    setSetting(db, 'discord_admin_channel_id', 'admins');
+    const sent: string[] = [];
+    const port = await freeUdpPort();
+    app = await buildServer({
+      config: { ...loadConfig({}), devMode: false, logListenPort: port }, db, hub: new Hub(),
+      serverExec: async () => {}, serverCleaner: async () => {},
+      chatRcon: async (_s, commands) => { sent.push(...commands); return ['staffsay delivered=1']; },
+    });
+    await sendLine(port, `PUGSAY steamid=${P} team=2 msg=nigger`);
+    await sendLine(port, `PUGSAY steamid=${P} team=2 msg=nigger again`);
+    await vi.waitFor(() => expect(sent).toHaveLength(1), { timeout: 2000 });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(sent).toEqual([`sm_pug_staffsay ${P} "PUG" "Staff were notified about your chat message." 1`]);
+    expect(events.filter((e) => e.kind === 'conduct_flag')).toHaveLength(1);
+    expect(listLines(db, local, 0, 10).filter((l) => l.kind === 'staff_out')).toHaveLength(1);
   });
 });
