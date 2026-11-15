@@ -36,10 +36,18 @@ describe('caster studio plugin lines', () => {
   it('LIVEHUD as the plugin formats it parses into every field', () => {
     const fmt = format('LIVEHUD');
     expect(fmt).not.toBe('');
-    const line = fill(fmt, [62, 74, 31, '76561198030413993:62:3:212']);
+    // Without l4dscores' native the sc part is empty.
+    const line = fill(fmt, [62, 74, 31, '76561198030413993:62:3:212', '']);
     expect(parseLogDatagram(datagram(line))).toEqual({
       kind: 'live_hud', token: TOKEN,
-      line: { prog: 62, tank: 74, witch: 31, players: [{ steamid: '76561198030413993', flow: 62, items: 3, dmg: 212 }] },
+      line: { prog: 62, tank: 74, witch: 31, players: [{ steamid: '76561198030413993', flow: 62, items: 3, dmg: 212 }], scores: null },
+    });
+    // With it (0.3.43): the sc part as the plugin formats it.
+    const scFmt = src.match(/FormatEx\(sc, sizeof\(sc\), "([^"]*)"/)?.[1] ?? '';
+    expect(scFmt).not.toBe('');
+    const withSc = fill(fmt, [62, 74, 31, '76561198030413993:62:3:212', fill(scFmt, [2, 58, 131, 4, 125, 47, 50, 73, 1155, -40])]);
+    expect(parseLogDatagram(datagram(withSc))).toMatchObject({
+      line: { scores: { round: 2, distance: 58, bonus: 131, alive: 4, mult: 1.25, hbPct: 47, pillsPct: 50, wiped: 73, made: 1155, gap: -40 } },
     });
   });
 

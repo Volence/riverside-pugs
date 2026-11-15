@@ -26,8 +26,13 @@ native int Score_GetTeamCampaignScore(int team);
 // survivor flow. Optional, marked in AskPluginLoad2; read only by LIVEHUD.
 native int GetTankPercent();
 native int GetWitchPercent();
+// l4dscores.smx 8.5.9-riverside8: the numbers !health prints (distance, bonus,
+// alive, map multiplier, HB % and pills %, wipe-now and make-it-now scores, and
+// in round 2 the campaign gap). Returns 0 while the round ends, else the round.
+// Optional, marked in AskPluginLoad2; read only by LIVEHUD.
+native int Score_GetLiveScores(int &distance, int &bonus, int &alive, float &mult, float &hbPct, float &pillsPct, int &wiped, int &made, int &gap);
 
-#define PLUGIN_VERSION "0.3.42"
+#define PLUGIN_VERSION "0.3.43"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -3679,6 +3684,7 @@ int LiveHudFlow(int client, float maxFlow)
  *  replay frames do not carry.
  *
  *    LIVEHUD prog=<team %> tank=<%> witch=<%> p=<steamid>:<flow %>:<items>:<dmg>,...
+ *            [sc=<round>:<distance>:<bonus>:<alive>:<mult x100>:<hb %>:<pills %>:<wiped>:<made>:<gap>]
  *
  *  prog is the furthest alive survivor's flow %, rounded to nearest and
  *  capped at 100 like !cur, from the same calls (last known nav area flow
@@ -3689,6 +3695,12 @@ int LiveHudFlow(int client, float maxFlow)
  *  -1 for infected and the dead, items is LiveHudItems (0 for infected), and
  *  dmg is this half's damage (SI damage dealt as a survivor, damage dealt as
  *  SI as an infected), from the go-live snapshot in RoundStatsBegin.
+ *
+ *  sc (0.3.43) is !health from l4dscores (Score_GetLiveScores), absent
+ *  when that native is missing or the round is ending: round 1 or 2, AD
+ *  distance %, health + pill bonus, survivors alive, map multiplier x100,
+ *  HB % and pills % (whole), the score if wiped now and if they made it now,
+ *  and in round 2 the infected team's campaign total minus the survivors'.
  *
  *  Undelayed game state. The site keeps it in memory for the caster studio
  *  only, behind the overlay key, and never on the public live page. Cosmetic
@@ -3724,7 +3736,19 @@ public Action Timer_LiveHud(Handle timer)
 	if (GetFeatureStatus(FeatureType_Native, "GetTankPercent") == FeatureStatus_Available) tank = GetTankPercent();
 	if (GetFeatureStatus(FeatureType_Native, "GetWitchPercent") == FeatureStatus_Available) witch = GetWitchPercent();
 
-	EmitPug("LIVEHUD prog=%d tank=%d witch=%d p=%s", prog, tank, witch, list);
+	char sc[96];
+	sc[0] = '\0';
+	if (GetFeatureStatus(FeatureType_Native, "Score_GetLiveScores") == FeatureStatus_Available)
+	{
+		int dist, bonus, alive, wiped, made, gap;
+		float mult, hbPct, pillsPct;
+		int round = Score_GetLiveScores(dist, bonus, alive, mult, hbPct, pillsPct, wiped, made, gap);
+		if (round > 0)
+			FormatEx(sc, sizeof(sc), " sc=%d:%d:%d:%d:%d:%d:%d:%d:%d:%d", round, dist, bonus, alive,
+				RoundToNearest(mult * 100.0), RoundToNearest(hbPct), RoundToNearest(pillsPct), wiped, made, gap);
+	}
+
+	EmitPug("LIVEHUD prog=%d tank=%d witch=%d p=%s%s", prog, tank, witch, list, sc);
 	return Plugin_Continue;
 }
 

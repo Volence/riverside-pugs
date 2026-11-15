@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/preact';
+import { cleanup, render } from '@testing-library/preact';
 import { Overlay } from './Scenes';
 import { defaultStudioState, type CastMatchView, type CastPlayer, type CastTeam, type OverlayFeed } from '../../../src/cast/types';
 
@@ -28,7 +28,7 @@ const feed = (patch: Partial<ReturnType<typeof defaultStudioState>> = {}): Overl
   rev: 1, serverNow: Date.now(), studio: { ...defaultStudioState(), ...patch }, match, live, tankRecap: null, witchRecap: null, casterAvatars: [], draft: null,
 });
 
-const allOn = { survivors: true, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };
+const allOn = { survivors: true, infected: true, tank: true, bosses: true, bonus: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };
 
 describe('gameplay overlay: the broadcast looks', () => {
   it('by default (plate) shows only what a spectator never sees: infected yes, survivors no', () => {
@@ -95,6 +95,25 @@ describe('gameplay overlay: the broadcast looks', () => {
     expect(container.querySelector('.ov-band')).toBeNull();
     expect(container.querySelector('.ov-plate')).toBeNull();
     expect(container.querySelector('.ov-game--casthud')).not.toBeNull();
+  });
+
+  it('shows the !health line in every look while the switch is on, with what round 2 needs', () => {
+    const scores = { round: 2 as const, distance: 58, bonus: 131, alive: 4, mult: 1.25, hbPct: 47, pillsPct: 50, wiped: 73, made: 1155, gap: 120 };
+    const withScores = (patch: Parameters<typeof feed>[0]) => {
+      const f = feed(patch);
+      return { ...f, live: { ...f.live!, hud: { progress: 40, tank: 70, witch: 30, rivalReach: null, ...f.live!.hud, scores } } };
+    };
+    for (const hudStyle of ['plate', 'corners', 'rail', 'frame', 'scorebug'] as const) {
+      const { container } = render(<Overlay which="gameplay" feed={withScores({ hudStyle, elements: allOn })} now={Date.now()} />);
+      const line = container.querySelector('.ov-bonus');
+      expect(line, hudStyle).not.toBeNull();
+      expect(line!.textContent).toContain('47%');
+      expect(line!.textContent).toContain('1,155');
+      expect(line!.textContent).toContain('Need 120 to tie');
+      cleanup();
+    }
+    const off = render(<Overlay which="gameplay" feed={withScores({ elements: { ...allOn, bonus: false } })} now={Date.now()} />).container;
+    expect(off.querySelector('.ov-bonus')).toBeNull();
   });
 
   it("marks the opponent's reach and each survivor's own progress on the strip", () => {

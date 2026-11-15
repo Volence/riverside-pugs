@@ -8,6 +8,7 @@ import { connectObs, type ObsClient, type ObsStatus } from '../cast/obs';
 import { Overlay, setOverlayKey } from '../overlay/Scenes';
 import { sampleFeed } from '../overlay/sample';
 import { CALLOUT_KINDS, sideOfEvent } from '../overlay/callouts';
+import { DeskBody } from './DeskBody';
 import '../overlay/overlay.css';
 import {
   CALLOUT_KIND_LABELS, DEFAULT_INFECTED_RECT, HUD_STYLES, LAYERS, MAX_CASTERS, SCENE_HOTKEYS, SCENES, SCENE_LABELS, THEMES,
@@ -46,6 +47,7 @@ const ELEMENT_INFO: { key: keyof LiveElements; label: string; help: string }[] =
   { key: 'rival', label: "Opponent's mark", help: 'Second half: how far the other team got on this map, marked on the strip.' },
   { key: 'dots', label: 'Survivor dots', help: "Each survivor's own progress on the strip: who is rushing or lagging." },
   { key: 'bosses', label: 'Tank and witch %', help: 'On the progress strip (bar) or under the scorebug.' },
+  { key: 'bonus', label: '!health line', help: "What !health prints: health bonus and pills %, survivors alive, map multiplier, the score if they wiped now or made it now, and in round 2 what they need to tie. Needs pug-match 0.3.43 and l4dscores riverside8 on the server." },
   { key: 'tank', label: 'Tank health', help: 'On by default: a spectator never sees the tank\'s health.' },
   { key: 'tankRecap', label: 'Tank damage card', help: "After a tank dies, or the round ends with it up (a wipe, or the survivors made it): each survivor's damage to it and their share, who played it, how long it lived." },
   { key: 'witchRecap', label: 'Witch card', help: "After a witch dies: crowned or not, who startled her and who killed her, each survivor's damage to her." },
@@ -61,24 +63,28 @@ function useInterval(fn: () => void, ms: number) {
 }
 
 /** The overlays' stencil face, which the site itself never loads. */
-function useStencilFont() {
+function useStencilFont(on = true) {
   useEffect(() => {
-    if (document.getElementById('studio-stencil-font')) return;
+    if (!on || document.getElementById('studio-stencil-font')) return;
     const l = document.createElement('link');
     l.id = 'studio-stencil-font';
     l.rel = 'stylesheet';
     l.href = 'https://fonts.googleapis.com/css2?family=Saira+Stencil+One&display=swap';
     document.head.appendChild(l);
-  }, []);
+  }, [on]);
 }
 
-export default function CastStudio() {
-  useStencilFont();
+/** The studio, or with `desk` its desk view (/cast/desk): the same state,
+ *  saves, number-key scene cuts and OBS link, laid out for a caster's second
+ *  monitor around the live stats instead of the producer's boxes. */
+export default function CastStudio({ desk = false }: { desk?: boolean }) {
+  useStencilFont(!desk); // the desk draws no overlay preview
   const [panel, setPanel] = useState<StudioPanel | null>(null);
   const [state, setState] = useState<StudioState | null>(null);
   const [denied, setDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feed, setFeed] = useState<OverlayFeed | null>(null);
+  const [feedStale, setFeedStale] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<StudioState | null>(null);
   /** The draft on air as the server last saved it: where a refused draft
@@ -100,7 +106,7 @@ export default function CastStudio() {
   useEffect(() => { void load(); }, [load]);
   useInterval(() => { void load(); }, PANEL_POLL_MS);
   useInterval(async () => {
-    try { setFeed(await studioApi.feed()); } catch { /* keep the last */ }
+    try { setFeed(await studioApi.feed()); setFeedStale(false); } catch { setFeedStale(true); /* keep the last */ }
   }, FEED_POLL_MS);
   useEffect(() => { void studioApi.feed().then(setFeed).catch(() => {}); }, []);
 
@@ -228,7 +234,7 @@ export default function CastStudio() {
   if (denied) {
     return (
       <div class="page page--list">
-        <PageHeader eyebrow="Casting" title="Caster studio" />
+        <PageHeader eyebrow="Casting" title={desk ? 'Caster desk' : 'Caster studio'} />
         <GatePanel
           title="For casters"
           lead="This page is for casters. Ask an admin if you should have it."
@@ -241,11 +247,39 @@ export default function CastStudio() {
       </div>
     );
   }
-  if (!panel || !state) return <div class="page page--editor" />;
+  if (!panel || !state) return <div class={desk ? 'desk' : 'page page--editor'} />;
 
   const match = feed?.match ?? null;
   const origin = location.origin;
   const url = (scene: string) => `${origin}/overlay/${scene}?k=${encodeURIComponent(panel.key)}`;
+
+  if (desk) {
+    const onAir = match ? `#${match.id} ${match.teams.a.tag} ${match.teams.a.score} - ${match.teams.b.score} ${match.teams.b.tag}` : 'nothing on air';
+    return (
+      <div class="desk">
+        {error && <p class="studio__error" role="alert">{error}</p>}
+        <div class="desk__controls studio">
+          <ScenePad state={state} goScene={goScene} obsProgram={obsProgram} obsScenes={panel.obsScenes} />
+          <details class="desk__drawer" open={!match}>
+            <summary>Match: {onAir} <span class="muted">(change)</span></summary>
+            <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
+            <DraftOnAir drafts={panel.drafts ?? []} state={state} update={update} />
+          </details>
+          <details class="desk__drawer">
+            <summary>OBS: {obsStatus === 'connected' ? `connected${obsProgram ? `, on ${obsProgram}` : ''}` : 'not connected'} <span class="muted">(settings)</span></summary>
+            <ObsBox
+              status={obsStatus} error={obsError} url={obsUrl} setUrl={setObsUrl} password={obsPassword} setPassword={setObsPassword}
+              remember={obsRemember} setRemember={setObsRemember}
+              connect={obsConnect} disconnect={() => { obs?.close(); setObs(null); setObsStatus('idle'); }}
+              scenes={obsScenes} program={obsProgram} wanted={panel.obsScenes} switchOn={obsSwitch} setSwitch={setObsSwitch}
+            />
+          </details>
+          <a class="btn btn--ghost btn--sm desk__studio" href="/cast/studio" target="_blank" rel="noopener">Full studio</a>
+        </div>
+        <DeskBody feed={feed} stale={feedStale} />
+      </div>
+    );
+  }
 
   return (
     <div class="page page--editor studio">

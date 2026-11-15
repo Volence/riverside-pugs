@@ -8,7 +8,7 @@ import { camSlots } from '../../../src/cast/layout';
 import { emptyQueue, stepAuto, type AutoCard } from './callouts';
 import {
   boomerRate, CALLOUT_MS, CAST_HUD_WINGS, DRAFT_SCENES, type CastDraftView, ITEM, soloSkeets, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
-  type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
+  type CastSurvivor, type CastTeam, type LiveScores, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
 /**
@@ -746,6 +746,7 @@ function RoundHud({ studio, match, live, force = false }: {
   const infTeam = survTeam ? (survTeam.key === 'a' ? match.teams.b : match.teams.a) : null;
   return (
     <div class="ov-round">
+      {(force || studio.elements.bonus) && live.hud?.scores && <Bonus s={live.hud.scores} team={survTeam} />}
       {el.tank && live.tank && <TankBar tank={live.tank} team={infTeam} />}
       {el.survivors && live.survivors.length > 0 && (
         <div class="ov-round__row" style={{ '--c': survTeam ? `var(--team-${survTeam.key})` : 'var(--win)' } as Record<string, string>}>
@@ -900,7 +901,8 @@ function hudData({ studio, match, live }: HudProps) {
   const reach = live?.hud?.rivalReach ?? null;
   const rival = el.rival && reach !== null && infTeam ? { team: infTeam, reach } : null;
   const dots = el.dots && live ? live.survivors.filter((s) => s.flow !== null && s.alive) : [];
-  return { a, b, el, bosses, progress, strip, survTeam, infTeam, mapLabel, paused, meta, tank, rival, dots };
+  const scores = el.bonus ? live?.hud?.scores ?? null : null;
+  return { a, b, el, bosses, progress, strip, survTeam, infTeam, mapLabel, paused, meta, tank, rival, dots, scores };
 }
 
 const teamVar = (t: CastTeam | null, fallback: string) =>
@@ -993,6 +995,30 @@ function TeamMedallions({ team, live, el, layout, tankMax }: {
   return <>{live.infected.slice(0, 4).map((i) => <InfectedRow key={i.slot} i={i} tankMax={tankMax} layout={layout} />)}</>;
 }
 
+/** What !health prints (l4dscores, via pug-match's LIVEHUD): the health
+ *  and pill bonus, the round's score if the survivors wiped now or made it
+ *  now, and in round 2 what they need to tie. Players can type !health;
+ *  viewers never see it, so every look carries it as one slim line. */
+export function bonusParts(s: LiveScores): { need: string | null } {
+  if (s.gap === null) return { need: null };
+  return { need: s.gap >= 0 ? `Need ${s.gap.toLocaleString('en-US')} to tie` : `Ahead by ${(-s.gap).toLocaleString('en-US')}` };
+}
+function Bonus({ s, team }: { s: LiveScores; team: CastTeam | null }) {
+  const { need } = bonusParts(s);
+  return (
+    <div class="ov-bonus" style={teamVar(team, 'var(--win)')}>
+      <span class="ov-bonus__item"><em>Health</em>{s.hbPct}%</span>
+      <span class="ov-bonus__item"><em>Pills</em>{s.pillsPct}%</span>
+      <span class="ov-bonus__item"><em>Alive</em>{s.alive}</span>
+      <span class="ov-bonus__item"><em>Map</em>x{s.mult.toFixed(2)}</span>
+      <span class="ov-bonus__sep" />
+      <span class="ov-bonus__item"><em>Wipe now</em>{s.wiped.toLocaleString('en-US')}</span>
+      <span class="ov-bonus__item ov-bonus__item--made"><em>Make it</em>{s.made.toLocaleString('en-US')}</span>
+      {need && <span class={`ov-bonus__need${s.gap !== null && s.gap < 0 ? ' is-ahead' : ''}`}>{need}</span>}
+    </div>
+  );
+}
+
 /** Map progress: the furthest survivor's flow, ten ticks, and the tank and
  *  witch spawn points pinned on it as the game's own icons. Every look keeps
  *  it (owner, 2026-10-02). */
@@ -1081,6 +1107,7 @@ function PlateHud(props: HudProps & { noStacks?: boolean }) {
           {side(d.b, true)}
         </div>
         {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+        {d.scores && <Bonus s={d.scores} team={d.survTeam} />}
         {d.tank && <div class="ov-plate__tank"><TankCard tank={d.tank} team={d.infTeam} /></div>}
       </div>
       {!props.noStacks && <div class="ov-stack ov-stack--l" style={teamVar(d.a, '')}><TeamMedallions team={d.a} live={props.live} el={d.el} layout="row" tankMax={tankMax} /></div>}
@@ -1118,6 +1145,7 @@ function CornersHud(props: HudProps) {
         <span class="ov-ctag__map">{d.mapLabel}</span>
         <span class="ov-ctag__meta">{d.paused ? <b class="ov-paused">Paused</b> : null}{d.meta}</span>
         {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+        {d.scores && <Bonus s={d.scores} team={d.survTeam} />}
         {d.tank && <TankCard tank={d.tank} team={d.infTeam} />}
       </div>
       {corner(d.b, true)}
@@ -1156,6 +1184,7 @@ function RailHud(props: HudProps) {
           <span class="ov-rail__meta">{d.paused ? <b class="ov-paused">Paused</b> : null}{d.meta}</span>
         </div>
         {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+        {d.scores && <Bonus s={d.scores} team={d.survTeam} />}
         {team(d.a)}
         {team(d.b)}
         {d.tank && <TankCard tank={d.tank} team={d.infTeam} />}
@@ -1250,9 +1279,10 @@ function CastFrameHud(props: HudProps) {
         {live && live.infected.slice(0, 4).map((i) => <CastInfectedRow key={i.slot} i={i} tankMax={tankMax} />)}
         {tab(d.infTeam, 'infected')}
       </div>
-      {(d.strip || d.tank) && (
+      {(d.strip || d.tank || d.scores) && (
         <div class="ov-cmid" style={{ left: `${W.centre.x}px`, top: `${W.centre.y + W.centre.h + 8}px`, width: `${W.centre.w}px` }}>
           {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+        {d.scores && <Bonus s={d.scores} team={d.survTeam} />}
           {d.tank && <TankCard tank={d.tank} team={d.infTeam} />}
         </div>
       )}

@@ -52,7 +52,7 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     ],
     tank: { health: 4200, maxHealth: 6000, controller: b.players[1]!.name },
     witches: 1,
-    hud: { progress: 52, tank: 74, witch: 31, rivalReach: 61 },
+    hud: { progress: 52, tank: 74, witch: 31, rivalReach: 61, scores: { round: 1, distance: 48, bonus: 131, alive: 4, mult: 1.25, hbPct: 47, pillsPct: 50, wiped: 60, made: 1155, gap: null } },
   };
   match.lastRound = {
     mapNumber: 2, map: 'l4d_vs_airport02_offices', half: 1,

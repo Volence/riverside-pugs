@@ -99,7 +99,7 @@ function cleanElements(v: unknown): LiveElements {
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
   const pick = (k: keyof LiveElements): boolean => (typeof o[k] === 'boolean' ? o[k] as boolean : d[k]);
   return {
-    survivors: pick('survivors'), infected: pick('infected'), tank: pick('tank'), bosses: pick('bosses'), progress: pick('progress'),
+    survivors: pick('survivors'), infected: pick('infected'), tank: pick('tank'), bosses: pick('bosses'), bonus: pick('bonus'), progress: pick('progress'),
     tankRecap: pick('tankRecap'), witchRecap: pick('witchRecap'), rival: pick('rival'), dots: pick('dots'),
   };
 }

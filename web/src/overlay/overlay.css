@@ -790,3 +790,15 @@
 .ov-cmid { position: absolute; display: flex; flex-direction: column; gap: 6px; animation: ov-fade 400ms both; }
 .ov-cmid .ov-pg { background: rgba(3, 2, 2, 0.9); }
 .ov-game--frame.ov-game--casthud .ov-callout { top: 250px; }
+
+/* The !health line (Bonus): under the progress strip in every look. */
+.ov-bonus { display: flex; align-items: center; justify-content: center; gap: 4px 11px; flex-wrap: wrap; padding: 6px 16px; background: rgba(11, 9, 8, 0.88);
+  font: 400 18px/1 var(--font-display); color: var(--bone); font-variant-numeric: tabular-nums; animation: ov-fade 400ms both; }
+.ov-bonus__item { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.ov-bonus__item em { font: 600 10px var(--font-label); font-style: normal; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+.ov-bonus__item--made { color: var(--c); }
+.ov-bonus__sep { width: 1px; align-self: stretch; background: rgba(255, 255, 255, 0.14); }
+.ov-bonus__need { font: 600 15px var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+.ov-bonus__need.is-ahead { color: var(--win); }
+.ov-plate .ov-bonus { width: 560px; margin: 0 auto; box-sizing: border-box; padding: 6px 20px; clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%); }
+.ov-round .ov-bonus { justify-content: flex-start; }

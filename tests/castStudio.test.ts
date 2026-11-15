@@ -387,7 +387,7 @@ describe('LIVEHUD', () => {
     liveHudStore.record(TOKEN, line());
     await new Promise((r) => setTimeout(r, 950)); // past the feed cache
     const after = (await feed(key)).json();
-    expect(after.live.hud).toEqual({ progress: 40, tank: 70, witch: -2, rivalReach: null });
+    expect(after.live.hud).toEqual({ progress: 40, tank: 70, witch: -2, rivalReach: null, scores: null });
     expect(after.live.survivors[0]).toMatchObject({ flow: 40, items: 3, dmg: 120 });
     expect(after.live.survivors[1]).toMatchObject({ flow: null, items: null, dmg: null });
     expect(after.live.infected[0]).toMatchObject({ steamid: IDS[4], dmg: 57 });

@@ -85,3 +85,27 @@
 .desk__maptable .is-playing th { color: var(--accent); }
 .desk__maptable .is-next th, .desk__maptable .is-next td { color: var(--text-muted); }
 .desk__boxtable th, .desk__boxtable td { padding: 4px 6px; }
+
+/* Desk view of the studio: its controls in one bar over the stats. */
+.desk__controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.desk__controls > .panel { margin: 0; padding: 8px 12px; flex: 1 1 520px; }
+.desk__controls > .panel h3 { display: none; }
+.desk__controls .studio__scenes { display: flex; flex-wrap: wrap; gap: 6px; }
+.desk__drawer { flex: 0 1 auto; background: var(--surface); padding: 8px 12px; min-width: 260px; max-width: 100%; }
+.desk__drawer[open] { flex: 1 1 100%; }
+.desk__drawer summary { cursor: pointer; font: 500 15px var(--font-label); color: var(--text-bright); white-space: nowrap; }
+.desk__drawer > .panel { margin-top: 8px; }
+.desk__studio { align-self: center; }
+.desk__nothing { padding: 40px; text-align: center; color: var(--text-muted); background: var(--surface); }
+
+/* !health */
+.desk__now { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid var(--c); }
+.desk__nowgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px 10px; margin: 0; }
+.desk__nowgrid div { background: var(--surface-2); padding: 6px 8px; min-width: 0; }
+.desk__nowgrid dt { font: 600 11px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
+.desk__nowgrid dd { margin: 2px 0 0; font: 400 24px/1.1 var(--font-display); color: var(--text-bright); font-variant-numeric: tabular-nums; }
+.desk__nowbig { grid-column: span 3; }
+.desk__nowbig dd { font-size: 34px; }
+.desk__nowmade dd { color: var(--c); }
+.desk__need { margin: 8px 0 0; font: 600 18px var(--font-label); text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); }
+.desk__need.is-ahead { color: var(--win); }

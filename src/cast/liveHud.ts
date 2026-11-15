@@ -1,4 +1,4 @@
-import type { CastLiveRound, LiveHud } from './types.js';
+import type { CastLiveRound, LiveHud, LiveScores } from './types.js';
 
 /**
  * The plugin's LIVEHUD line (pug-match 0.3.20, Timer_LiveHud): survivor map
@@ -33,7 +33,10 @@ export interface LiveHudLine {
   tank: number;
   witch: number;
   players: LiveHudPlayer[];
+  /** !health from l4dscores (pug-match 0.3.43 `sc=`), null without it. */
+  scores?: LiveScores | null;
 }
+
 
 /** A tank's recap (TANKDONE): each survivor's damage to it. */
 export interface TankDone {
@@ -206,6 +209,7 @@ export function applyLiveHud(live: CastLiveRound, line: LiveHudLine | null, riva
     tank: line.tank >= 0 && line.tank <= 100 ? line.tank : null,
     witch: (line.witch >= 0 && line.witch <= 100) || line.witch === -2 ? line.witch : null,
     rivalReach: live.half === 2 ? rivalReach : null,
+    scores: line.scores ?? null,
   };
   return {
     ...live,
