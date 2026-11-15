@@ -57,8 +57,8 @@ const EVENT_TEAM_SQL = `SELECT 1 FROM teams t JOIN event_entries e ON e.id = t.e
 function onScrimEventTeam(db: DB, steamid: string): boolean {
   const eventId = scrimEventId(db);
   if (eventId === null) return false;
-  return db.prepare(`${EVENT_TEAM_SQL} AND t.id IN (SELECT team_id FROM team_members WHERE steamid = ? AND left_at IS NULL) LIMIT 1`)
-    .get(eventId, steamid) !== undefined;
+  const mine = (db.prepare('SELECT team_id FROM team_members WHERE steamid = ? AND left_at IS NULL').all(steamid) as { team_id: number }[]);
+  return mine.some((m) => scrimSideAllowed(db, { teamId: m.team_id }));
 }
 
 /** Whether a scrim side (posting, accepting, challenged, or either side of a
@@ -68,7 +68,18 @@ export function scrimSideAllowed(db: DB, side: { teamId: number } | { captain: s
   if ((getSetting(db, 'scrims_enabled') ?? 'admins') !== 'event') return true;
   const eventId = scrimEventId(db);
   if (eventId === null || !('teamId' in side)) return false;
+  if (scrimExtraTeams(db).includes(side.teamId)
+    && db.prepare('SELECT 1 FROM teams WHERE id = ? AND disbanded_at IS NULL').get(side.teamId) !== undefined) return true;
   return db.prepare(`${EVENT_TEAM_SQL} AND t.id = ? LIMIT 1`).get(eventId, side.teamId) !== undefined;
+}
+
+/** scrims_extra_teams: site teams staff let scrim under `scrims_enabled =
+ *  event`, read defensively ([] on anything malformed). */
+export function scrimExtraTeams(db: DB): number[] {
+  try {
+    const v: unknown = JSON.parse(getSetting(db, 'scrims_extra_teams') ?? '[]');
+    return Array.isArray(v) ? v.filter((n): n is number => Number.isInteger(n)) : [];
+  } catch { return []; }
 }
 
 /** Whether scrims are public (the Discord scrim cards and night reminder):
