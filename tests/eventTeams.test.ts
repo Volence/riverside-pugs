@@ -194,6 +194,24 @@ describe('scrims for one event', () => {
     expect(err(book({ teamId: t2.id }))).not.toBe('event_only');
   });
 
+  it('scrims_extra_teams lets a staff test team scrim the event teams (owner 2026-11-14)', () => {
+    const f = setup();
+    const t1 = teamOf(f, f.entries[0]!)!;
+    const site = must(T.createTeam(f.db, { creator: P[15]!, name: 'Site Team', tag: 'SITE', now: NOW })).id;
+    expect(scrimsAccess(f.db, P[15]!)).toBe(false);
+    setSetting(f.db, 'scrims_extra_teams', JSON.stringify([site]));
+    expect(scrimSideAllowed(f.db, { teamId: site })).toBe(true);
+    expect(scrimsAccess(f.db, P[15]!)).toBe(true);
+    const id = must(post(f, P[15]!, site)).id;
+    expect(err(acceptPost(f.db, { postId: id, by: t1.captain_steamid, teamId: t1.id, now: NOW }))).toBe('ok');
+    // Still no pickup side, and a disbanded extra team is out.
+    expect(scrimSideAllowed(f.db, { captain: P[15]! })).toBe(false);
+    f.db.prepare('UPDATE teams SET disbanded_at = ? WHERE id = ?').run(NOW.toISOString(), site);
+    expect(scrimSideAllowed(f.db, { teamId: site })).toBe(false);
+    setSetting(f.db, 'scrims_extra_teams', 'not json');
+    expect(scrimSideAllowed(f.db, { teamId: t1.id })).toBe(true);
+  });
+
   it('every other mode lets any side through, as before', () => {
     const f = setup();
     setSetting(f.db, 'scrims_enabled', 'everyone');

@@ -1776,6 +1776,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // admins. 'event' opens it to scrims_event_id's draft teams only.
   scrims_enabled: 'admins',
   scrims_event_id: '0',
+  // Site teams also allowed under scrims_enabled = event (staff test teams).
+  scrims_extra_teams: '[]',
   team_membership_cap: '3',
   // Server bookings (plan 4a). Every number in spec section 3 is a setting.
   booking_max_upcoming: '4',
