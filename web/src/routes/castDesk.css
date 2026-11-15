@@ -9,7 +9,7 @@
 .desk__dim { color: var(--text-muted); }
 .desk__note { color: var(--text-muted); font-size: 14px; margin: 8px 0 0; }
 
-.desk__top { display: grid; grid-template-columns: 1fr minmax(320px, auto) 1fr; gap: 12px; align-items: stretch; }
+.desk__top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr); gap: 12px; align-items: stretch; }
 .desk__team { display: flex; align-items: center; gap: 14px; padding: 8px 18px; background: var(--surface); border-left: 6px solid var(--c); min-width: 0; }
 .desk__team--r { flex-direction: row-reverse; border-left: 0; border-right: 6px solid var(--c); }
 .desk__teamname { font: 400 30px/1.1 var(--font-display); text-transform: uppercase; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -21,34 +21,56 @@
 .desk__mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 14px; background: var(--surface); }
 .desk__map { font: 400 24px/1.1 var(--font-display); text-transform: uppercase; color: var(--accent); }
 .desk__meta { font: 500 14px var(--font-label); letter-spacing: 0.08em; color: var(--text); }
-.desk__chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.desk__chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; min-height: 22px; }
 .desk__chip { font: 500 13px var(--font-label); padding: 2px 8px; background: var(--surface-2); color: var(--text); white-space: nowrap; }
 .desk__chip--on { color: var(--win); }
 .desk__chip--warn { color: var(--bg); background: var(--accent); }
 
-.desk__grid { flex: 1; display: grid; gap: 12px; grid-template-columns: minmax(0, 700px) minmax(0, 1fr);
-  grid-template-rows: auto 1fr; grid-template-areas: "live box" "maps feed"; align-items: start; }
-.desk__panel { background: var(--surface); padding: 12px 14px; min-width: 0; }
+/* Fixed places. Wide (1920): this round and the box score side by side on
+ * top, !health, play by play and maps in a row under them. Every panel in a
+ * row is as tall as the row, so the bottoms line up. */
+.desk__grid { flex: 1; display: grid; gap: 12px; align-items: stretch;
+  grid-template-columns: minmax(0, 760px) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "live box box" "now feed maps"; }
+.desk__panel { background: var(--surface); padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; }
 .desk__live { grid-area: live; }
-.desk__feed { grid-area: feed; align-self: stretch; }
+.desk__now-panel { grid-area: now; }
 .desk__box { grid-area: box; }
-.desk__maps { grid-area: maps; align-self: stretch; }
+.desk__feed { grid-area: feed; }
+.desk__maps { grid-area: maps; }
 @media (max-width: 1500px) {
-  .desk__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "live feed" "box box" "maps maps"; }
+  .desk__grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-rows: none;
+    grid-template-areas: "live now" "live feed" "box box" "maps maps"; }
 }
 @media (max-width: 900px) {
-  .desk__grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "live" "feed" "box" "maps"; }
+  .desk__grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "live" "now" "feed" "box" "maps"; }
   .desk__top { grid-template-columns: 1fr; }
 }
 
 .desk__table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.desk__table th, .desk__table td { padding: 4px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); height: auto; }
+.desk__table th, .desk__table td { padding: 4px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
 .desk__table thead th { font: 500 12px var(--font-label); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); border-bottom: 2px solid var(--c, var(--border)); }
-.desk__table tbody th { text-align: left; font: 500 17px var(--font-label); text-transform: none; letter-spacing: 0.01em; color: var(--text-bright); max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.desk__table tbody th { text-align: left; font: 500 17px var(--font-label); text-transform: none; letter-spacing: 0.01em; color: var(--text-bright); overflow: hidden; text-overflow: ellipsis; }
 .desk__table thead th:first-child { text-align: left; color: var(--c, var(--text-muted)); }
 .desk__table td { font-size: 15px; }
+.desk__table .is-text { text-align: left; }
+
+/* This round: both tables share one column plan, so they line up. */
+.desk__live-table { table-layout: fixed; }
+.desk__live-table tr { height: 36px; }
+.desk__live-table td, .desk__live-table th { overflow: hidden; text-overflow: ellipsis; }
+.desk__c-name { width: auto; }
+.desk__c-hp { width: 66px; }
+.desk__c-sub { width: 66px; }
+.desk__c-state { width: 78px; }
+.desk__c-gun { width: 66px; }
+.desk__c-items { width: 112px; }
+.desk__c-flow { width: 54px; }
+.desk__c-dmg { width: 66px; }
 .desk__surv, .desk__inf { margin-bottom: 10px; }
 .desk__hp { font: 400 26px/1 var(--font-display); color: var(--text-bright); }
+.desk__temp { color: var(--text-muted); }
 .desk__state { font: 600 14px var(--font-label); text-transform: uppercase; text-align: left !important; }
 .desk__surv .is-hi .desk__hp { color: #3fbf5c; }
 .desk__surv .is-mid .desk__hp { color: #f0aa46; }
@@ -56,16 +78,26 @@
 .desk__table .is-dead th, .desk__table .is-dead td { color: var(--text-muted); }
 .desk__inf .is-tank .desk__state, .desk__inf .is-tank .desk__hp { color: var(--accent); }
 .desk__inf .is-ghost .desk__state { color: var(--text-muted); }
+.desk__empty td { text-align: left; color: var(--text-muted); font-size: 14px; }
 
-.desk__tank { display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--surface-2); border-left: 4px solid var(--accent); }
+.desk__tank { display: grid; grid-template-columns: 64px minmax(0, 150px) minmax(0, 1fr) 90px 120px; gap: 10px; align-items: center;
+  height: 48px; padding: 0 10px; background: var(--surface-2); border-left: 4px solid var(--accent); }
 .desk__tank b { font: 400 20px var(--font-display); text-transform: uppercase; color: var(--accent); }
+.desk__tankwho { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk__tank.is-none { border-left-color: var(--border); }
+.desk__tank.is-none b, .desk__tank.is-none .desk__tankwho, .desk__tank.is-none .desk__big { color: var(--text-muted); }
+.desk__tankmax { white-space: nowrap; }
 .desk__bar { height: 10px; background: rgba(255, 255, 255, 0.08); position: relative; }
 .desk__bar span { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
-.desk__big { font: 400 28px/1 var(--font-display); color: var(--text-bright); }
+.desk__big { font: 400 28px/1 var(--font-display); color: var(--text-bright); text-align: right; }
 
-.desk__events { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 4px; max-height: 420px; overflow: auto; }
-.desk__ev { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 5px 8px; background: var(--surface-2); border-left: 4px solid var(--c); font-size: 15px; }
-.desk__ev b { font: 600 13px var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-bright); }
+/* Play by play: a fixed-height list, newest on top, one line each. */
+.desk__feedscroll { flex: 1; min-height: 220px; max-height: 340px; overflow-y: auto; }
+.desk__events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.desk__ev { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; height: 30px; padding: 0 8px;
+  background: var(--surface-2); border-left: 4px solid var(--c); font-size: 15px; }
+.desk__ev span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk__ev b { font: 600 13px var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-bright); white-space: nowrap; }
 .desk__ev--infected b { color: var(--loss); }
 .desk__recap { padding: 8px 10px; margin-bottom: 8px; background: var(--surface-2); border-left: 4px solid var(--accent); }
 .desk__recap b { font: 400 18px var(--font-display); text-transform: uppercase; color: var(--accent); }
@@ -86,26 +118,45 @@
 .desk__maptable .is-next th, .desk__maptable .is-next td { color: var(--text-muted); }
 .desk__boxtable th, .desk__boxtable td { padding: 4px 6px; }
 
-/* Desk view of the studio: its controls in one bar over the stats. */
-.desk__controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
-.desk__controls > .panel { margin: 0; padding: 8px 12px; flex: 1 1 520px; }
-.desk__controls > .panel h3 { display: none; }
-.desk__controls .studio__scenes { display: flex; flex-wrap: wrap; gap: 6px; }
-.desk__drawer { flex: 0 1 auto; background: var(--surface); padding: 8px 12px; min-width: 260px; max-width: 100%; }
-.desk__drawer[open] { flex: 1 1 100%; }
-.desk__drawer summary { cursor: pointer; font: 500 15px var(--font-label); color: var(--text-bright); white-space: nowrap; }
-.desk__drawer > .panel { margin-top: 8px; }
-.desk__studio { align-self: center; }
-.desk__nothing { padding: 40px; text-align: center; color: var(--text-muted); background: var(--surface); }
+/* Desk view of the studio: one bar of controls over the stats. Match and
+ * OBS open as a panel that floats over the stats, so nothing moves. */
+.desk__ctl { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 10px; background: var(--surface); }
+.desk__ctl .studio__scenes { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; flex: 1; min-width: 0; }
+.desk__ctl .studio__scene { flex-direction: row; align-items: center; gap: 7px; min-height: 0; height: 36px; padding: 0 8px 0 6px; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.desk__ctl .studio__scene span { overflow: hidden; text-overflow: ellipsis; }
+.desk__ctl .studio__scene kbd { font-size: 14px; padding: 1px 5px; }
+.desk__ctl .studio__scene em { position: static; }
+.desk__barbtns { display: flex; gap: 6px; flex: 0 0 auto; align-self: stretch; }
+.desk__barbtn { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 150px; max-width: 260px; padding: 2px 12px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text); text-align: left; cursor: pointer; text-decoration: none; }
+.desk__barbtn:hover, .desk__barbtn.is-open { border-color: var(--accent); }
+.desk__barbtn span { font: 600 11px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
+.desk__barbtn b { font: 500 14px var(--font-label); color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk__barbtn.is-warn b { color: var(--rating); }
+.desk__barbtn.is-ok b { color: var(--win); }
+.desk__barlink { min-width: 0; }
+.desk__pop { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; width: min(760px, 100%); max-height: calc(100vh - 160px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; padding: 10px; background: var(--bg); border: 1px solid var(--border-strong); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6); }
+.desk__pop > .panel { margin: 0; }
+@media (max-width: 1300px) {
+  .desk__ctl { flex-wrap: wrap; }
+  .desk__barbtns { width: 100%; }
+  .desk__barbtn { flex: 1; max-width: none; }
+}
+.desk__nothing { margin: 0; padding: 40px; text-align: center; color: var(--text-muted); background: var(--surface); }
 
 /* !health */
-.desk__now { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid var(--c); }
-.desk__nowgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px 10px; margin: 0; }
-.desk__nowgrid div { background: var(--surface-2); padding: 6px 8px; min-width: 0; }
-.desk__nowgrid dt { font: 600 11px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
+.desk__now { display: flex; flex-direction: column; }
+.desk__nowgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.desk__nowgrid div { background: var(--surface-2); padding: 6px 10px; min-width: 0; }
+.desk__nowgrid dt { font: 600 11px var(--font-label); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
 .desk__nowgrid dd { margin: 2px 0 0; font: 400 24px/1.1 var(--font-display); color: var(--text-bright); font-variant-numeric: tabular-nums; }
-.desk__nowbig { grid-column: span 3; }
-.desk__nowbig dd { font-size: 34px; }
+.desk__nowbig { grid-column: span 3; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid var(--border); }
+.desk__nowbig dd { font-size: 34px; margin: 0; }
+.desk__nowmade { border-left-color: var(--c); }
 .desk__nowmade dd { color: var(--c); }
-.desk__need { margin: 8px 0 0; font: 600 18px var(--font-label); text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); }
+.desk__now.is-idle dd { color: var(--text-muted); }
+.desk__need { margin: 8px 0 0; min-height: 22px; font: 600 17px var(--font-label); text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); }
 .desk__need.is-ahead { color: var(--win); }
+.desk__maptable thead th:nth-child(2) { text-align: left; }
+.desk__need.is-none { color: var(--text-muted); font-weight: 500; }

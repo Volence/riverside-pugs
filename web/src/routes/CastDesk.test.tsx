@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/preact';
 import CastDesk from './CastDesk';
+import { DeskBody } from './DeskBody';
 import { sampleFeed } from '../overlay/sample';
 import { defaultStudioState, SCENE_HOTKEYS } from '../../../src/cast/types';
 
@@ -26,6 +27,15 @@ describe('caster desk', () => {
     expect(now).toContain('1,155');
   });
 
+  it('keeps every panel in place between rounds: no live round still draws the tables, tank strip and !health', () => {
+    const feed = { ...sampleFeed(defaultStudioState(), Date.now()), live: null };
+    const { container } = render(<DeskBody feed={feed} />);
+    expect(container.querySelectorAll('.desk__live-table tbody tr').length).toBe(8);
+    expect(container.querySelector('.desk__tank.is-none')?.textContent).toContain('Not up');
+    expect(container.querySelector('.desk__now.is-idle')).not.toBeNull();
+    expect(container.querySelector('.desk__feed')).not.toBeNull();
+  });
+
   it('is the studio for a caster: number keys cut scenes and save, the match picker is there', async () => {
     const studio = defaultStudioState();
     const feed = sampleFeed(studio, Date.now());
@@ -45,9 +55,15 @@ describe('caster desk', () => {
     }));
     history.replaceState(null, '', '/cast/desk');
     const { container } = render(<CastDesk />);
-    await waitFor(() => expect(container.querySelector('.desk__controls')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('.desk__ctl')).not.toBeNull());
     await waitFor(() => expect(container.querySelector('.desk__surv')).not.toBeNull());
-    expect(screen.getByText(/^Match:/)).toBeTruthy();
+    // The match picker opens over the stats (it does not push them down) and closes with Escape.
+    const matchBtn = screen.getByRole('button', { name: /^Match/ });
+    expect(container.querySelector('.desk__pop')).toBeNull();
+    fireEvent.click(matchBtn);
+    expect(container.querySelector('.desk__pop')?.textContent).toContain('On air');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(container.querySelector('.desk__pop')).toBeNull();
     const scene = (Object.keys(SCENE_HOTKEYS) as (keyof typeof SCENE_HOTKEYS)[]).find((s) => s !== studio.scene)!;
     fireEvent.keyDown(window, { key: SCENE_HOTKEYS[scene] });
     await waitFor(() => expect(saves.some((s) => (s as { scene: string }).scene === scene)).toBe(true));
