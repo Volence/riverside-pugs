@@ -23,27 +23,34 @@ export function DeskBody({ feed, stale = false }: { feed: OverlayFeed | null; st
   if (!feed || !match) {
     return (
       <div class="desk__nothing">
-        <p>{feed ? 'Nothing on air. Pick a match above and it shows up here.' : 'Loading...'}</p>
+        <p>{feed ? 'Nothing on air. Pick a match with the Match button above.' : 'Loading...'}</p>
       </div>
     );
   }
   return (
     <>
       <Scoreline match={match} live={feed.live} stale={stale} />
+      {/* Every panel is always drawn, in a fixed place: a section with
+          nothing to show says so instead of disappearing, so nothing moves
+          between rounds or when a tank or a recap comes and goes. */}
       <div class="desk__grid">
         <section class="desk__panel desk__live">
           <LiveRound match={match} live={feed.live} />
         </section>
-        <section class="desk__panel desk__feed">
-          <h2>Play by play</h2>
-          <Recaps feed={feed} />
-          <PlayFeed match={match} />
+        <section class="desk__panel desk__now-panel">
+          <ScoreNow match={match} live={feed.live} />
         </section>
         <section class="desk__panel desk__box">
           <BoxScore match={match} />
         </section>
+        <section class="desk__panel desk__feed">
+          <h2>Play by play</h2>
+          <div class="desk__feedscroll">
+            <Recaps feed={feed} />
+            <PlayFeed match={match} />
+          </div>
+        </section>
         <section class="desk__panel desk__maps">
-          <ScoreNow match={match} live={feed.live} />
           <Maps match={match} />
         </section>
       </div>
@@ -105,39 +112,54 @@ function LiveRound({ match, live }: { match: CastMatchView; live: CastLiveRound 
   const { a, b } = match.teams;
   const surv = a.side === 'survivor' ? a : b.side === 'survivor' ? b : null;
   const inf = surv ? (surv.key === 'a' ? b : a) : null;
-  if (!live) {
-    return (
-      <>
-        <h2>This round</h2>
-        <p class="desk__note">No round running right now. Live HP, items and flow show here once a round is under way.</p>
-      </>
-    );
-  }
-  const teamHp = live.survivors.reduce((n, s) => n + (s.alive ? s.health + (s.incap || s.ledge ? 0 : s.temp) : 0), 0);
+  const teamHp = live ? live.survivors.reduce((n, s) => n + (s.alive ? s.health + (s.incap || s.ledge ? 0 : s.temp) : 0), 0) : null;
+  const tank = live?.tank ?? null;
+  const pct = tank && tank.maxHealth ? Math.min(100, Math.round((tank.health / tank.maxHealth) * 100)) : 0;
+  const witches = live?.witches ?? 0;
+  // One column plan for both tables so HP, state and damage line up.
+  const cols = (
+    <colgroup>
+      <col class="desk__c-name" /><col class="desk__c-hp" /><col class="desk__c-sub" /><col class="desk__c-state" />
+      <col class="desk__c-gun" /><col class="desk__c-items" /><col class="desk__c-flow" /><col class="desk__c-dmg" />
+    </colgroup>
+  );
   return (
     <>
-      <h2>This round <span class="desk__h2note">survivors {teamHp} HP total</span></h2>
-      <table class="desk__table desk__surv" style={teamStyle(surv)}>
-        <thead><tr><th>{surv?.name ?? 'Survivors'}</th><th>HP</th><th>Temp</th><th>State</th><th>Gun</th><th>Items</th><th>Flow</th><th title="SI damage this half">SI dmg</th></tr></thead>
-        <tbody>{live.survivors.map((s, k) => <SurvivorLine key={`${s.slot}:${k}`} s={s} />)}</tbody>
-      </table>
-      <table class="desk__table desk__inf" style={teamStyle(inf)}>
-        <thead><tr><th>{inf?.name ?? 'Infected'}</th><th>HP</th><th>Max</th><th>State</th><th colSpan={3} /><th title="Damage as SI this half, including to incapped survivors">Dmg</th></tr></thead>
+      <h2>This round <span class="desk__h2note">{teamHp === null ? 'between rounds' : `survivors ${teamHp} HP total`}</span></h2>
+      <table class="desk__table desk__live-table desk__surv" style={teamStyle(surv)}>
+        {cols}
+        <thead><tr><th>{surv?.name ?? 'Survivors'}</th><th>HP</th><th>Temp</th><th class="is-text">State</th><th class="is-text">Gun</th><th class="is-text">Items</th><th>Flow</th><th title="SI damage this half">SI dmg</th></tr></thead>
         <tbody>
-          {live.infected.length === 0 && <tr><td colSpan={8} class="desk__dim">No human infected</td></tr>}
-          {live.infected.map((i) => <InfectedLine key={i.slot} i={i} tankMax={live.tank?.maxHealth ?? 0} />)}
+          {live ? live.survivors.map((s, k) => <SurvivorLine key={`${s.slot}:${k}`} s={s} />) : <EmptyRows text="Live HP, items and flow show here once a round is under way." />}
         </tbody>
       </table>
-      {live.tank && (
-        <div class="desk__tank">
-          <b>Tank</b>
-          <span>{live.tank.controller ?? 'AI'}</span>
-          <span class="desk__bar"><span style={{ width: `${live.tank.maxHealth ? Math.min(100, (live.tank.health / live.tank.maxHealth) * 100) : 0}%` }} /></span>
-          <span class="desk__big">{num(live.tank.health)}</span>
-          <span class="desk__dim">/ {num(live.tank.maxHealth)} ({live.tank.maxHealth ? Math.round((live.tank.health / live.tank.maxHealth) * 100) : 0}%)</span>
-        </div>
-      )}
-      {live.witches > 0 && <p class="desk__note">{live.witches === 1 ? '1 witch' : `${live.witches} witches`} on the map</p>}
+      <table class="desk__table desk__live-table desk__inf" style={teamStyle(inf)}>
+        {cols}
+        <thead><tr><th>{inf?.name ?? 'Infected'}</th><th>HP</th><th>Max</th><th class="is-text" colSpan={3}>Class</th><th /><th title="Damage as SI this half, including to incapped survivors">Dmg</th></tr></thead>
+        <tbody>
+          {!live ? <EmptyRows text="" /> : live.infected.length === 0
+            ? <EmptyRows text="No human infected" />
+            : live.infected.map((i) => <InfectedLine key={i.slot} i={i} tankMax={tank?.maxHealth ?? 0} />)}
+        </tbody>
+      </table>
+      <div class={`desk__tank${tank ? '' : ' is-none'}`}>
+        <b>Tank</b>
+        <span class="desk__tankwho">{tank ? tank.controller ?? 'AI' : 'Not up'}</span>
+        <span class="desk__bar"><span style={{ width: `${pct}%` }} /></span>
+        <span class="desk__big">{tank ? num(tank.health) : '-'}</span>
+        <span class="desk__dim desk__tankmax">{tank ? `/ ${num(tank.maxHealth)} (${pct}%)` : ''}</span>
+      </div>
+      <p class="desk__note">{witches === 0 ? 'No witch up' : witches === 1 ? '1 witch on the map' : `${witches} witches on the map`}</p>
+    </>
+  );
+}
+
+/** Four rows' worth of space, so the table keeps its height between rounds. */
+function EmptyRows({ text }: { text: string }) {
+  return (
+    <>
+      <tr class="desk__empty"><td colSpan={8}>{text}</td></tr>
+      {[0, 1, 2].map((k) => <tr key={k} class="desk__empty"><td colSpan={8} /></tr>)}
     </>
   );
 }
@@ -153,10 +175,10 @@ function SurvivorLine({ s }: { s: CastSurvivor }) {
     <tr class={`is-${tone}`}>
       <th>{s.name}</th>
       <td class="desk__hp">{s.alive ? (down ? hp : total) : '-'}</td>
-      <td>{s.alive && !down && s.temp > 0 ? `+${s.temp}` : ''}</td>
+      <td class="desk__temp">{s.alive && !down && s.temp > 0 ? `+${s.temp}` : ''}</td>
       <td class="desk__state">{state}</td>
-      <td>{s.alive ? SHORT_WEAPON[s.weapon] ?? s.weapon : ''}</td>
-      <td>{items}</td>
+      <td class="is-text">{s.alive ? SHORT_WEAPON[s.weapon] ?? s.weapon : ''}</td>
+      <td class="is-text">{items}</td>
       <td>{s.flow !== null ? `${s.flow}%` : ''}</td>
       <td>{s.dmg !== null ? num(s.dmg) : ''}</td>
     </tr>
@@ -173,8 +195,8 @@ function InfectedLine({ i, tankMax }: { i: CastInfected; tankMax: number }) {
       <th>{i.name}</th>
       <td class="desk__hp">{up ? num(i.health) : '-'}</td>
       <td class="desk__dim">{up && max ? num(max) : ''}</td>
-      <td class="desk__state">{state}</td>
-      <td colSpan={3} />
+      <td class="desk__state" colSpan={3}>{state}</td>
+      <td />
       <td>{i.dmg !== null ? num(i.dmg) : ''}</td>
     </tr>
   );
@@ -210,10 +232,11 @@ function PlayFeed({ match }: { match: CastMatchView }) {
       {events.map((e) => {
         const card = CALLOUT_KINDS[e.kind]?.(e);
         const team = e.actorTeam ? match.teams[e.actorTeam] : null;
+        const text = card?.text ?? `${e.actor}${e.target ? ` on ${e.target}` : ''}`;
         return (
           <li key={e.seq} class={`desk__ev desk__ev--${sideOfEvent(e.kind)}`} style={teamStyle(team)}>
             <b>{card?.title ?? e.kind}</b>
-            <span>{card?.text ?? `${e.actor}${e.target ? ` on ${e.target}` : ''}`}</span>
+            <span title={text}>{text}</span>
           </li>
         );
       })}
@@ -284,23 +307,25 @@ function BoxScore({ match }: { match: CastMatchView }) {
 /** !health, as l4dscores prints it (pug-match LIVEHUD sc=). */
 function ScoreNow({ match, live }: { match: CastMatchView; live: CastLiveRound | null }) {
   const s = live?.hud?.scores ?? null;
-  if (!s) return null;
   const surv = match.teams.a.side === 'survivor' ? match.teams.a : match.teams.b.side === 'survivor' ? match.teams.b : null;
-  const { need } = bonusParts(s);
+  const need = s ? bonusParts(s).need : null;
+  const d = (f: (x: NonNullable<typeof s>) => string) => (s ? f(s) : '-');
   return (
-    <div class="desk__now" style={teamStyle(surv)}>
-      <h2>!health <span class="desk__h2note">{surv ? surv.name : 'survivors'}, round {s.round}</span></h2>
+    <div class={`desk__now${s ? '' : ' is-idle'}`} style={teamStyle(surv)}>
+      <h2>!health <span class="desk__h2note">{s ? `${surv ? surv.name : 'survivors'}, round ${s.round}` : 'shows while a round is live'}</span></h2>
       <dl class="desk__nowgrid">
-        <div><dt>Distance</dt><dd>{s.distance}%</dd></div>
-        <div><dt>Health bonus</dt><dd>{s.hbPct}%</dd></div>
-        <div><dt>Pills</dt><dd>{s.pillsPct}%</dd></div>
-        <div><dt>Alive</dt><dd>{s.alive}</dd></div>
-        <div><dt>Map</dt><dd>x{s.mult.toFixed(2)}</dd></div>
-        <div><dt>Bonus pts</dt><dd>{num(s.bonus)}</dd></div>
-        <div class="desk__nowbig"><dt>Wipe now</dt><dd>{num(s.wiped)}</dd></div>
-        <div class="desk__nowbig desk__nowmade"><dt>Make it now</dt><dd>{num(s.made)}</dd></div>
+        <div><dt>Distance</dt><dd>{d((x) => `${x.distance}%`)}</dd></div>
+        <div><dt>Health bonus</dt><dd>{d((x) => `${x.hbPct}%`)}</dd></div>
+        <div><dt>Pills</dt><dd>{d((x) => `${x.pillsPct}%`)}</dd></div>
+        <div><dt>Alive</dt><dd>{d((x) => String(x.alive))}</dd></div>
+        <div><dt>Map</dt><dd>{d((x) => `x${x.mult.toFixed(2)}`)}</dd></div>
+        <div><dt>Bonus pts</dt><dd>{d((x) => num(x.bonus))}</dd></div>
+        <div class="desk__nowbig"><dt>Wipe now</dt><dd>{d((x) => num(x.wiped))}</dd></div>
+        <div class="desk__nowbig desk__nowmade"><dt>Make it now</dt><dd>{d((x) => num(x.made))}</dd></div>
       </dl>
-      {need && <p class={`desk__need${s.gap !== null && s.gap < 0 ? ' is-ahead' : ''}`}>{need}{s.gap !== null && s.gap >= 0 ? `, ${num(s.gap + 1)} to win` : ''}</p>}
+      <p class={`desk__need${!need ? ' is-none' : s && s.gap !== null && s.gap < 0 ? ' is-ahead' : ''}`}>
+        {need ? `${need}${s!.gap !== null && s!.gap >= 0 ? `, ${num(s!.gap + 1)} to win` : ''}` : s ? 'First round: no target yet' : '\u00a0'}
+      </p>
     </div>
   );
 }

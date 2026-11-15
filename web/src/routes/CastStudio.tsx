@@ -85,6 +85,9 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [feed, setFeed] = useState<OverlayFeed | null>(null);
   const [feedStale, setFeedStale] = useState(false);
+  // Desk view: which drop-down is open over the stats. null = automatic
+  // (the match picker while nothing is on air), 'none' = closed by hand.
+  const [drawer, setDrawer] = useState<'match' | 'obs' | 'none' | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<StudioState | null>(null);
   /** The draft on air as the server last saved it: where a refused draft
@@ -231,6 +234,16 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [goScene]);
 
+  useEffect(() => {
+    if (!desk) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as Element | null)?.closest?.('.desk__ctl')) setDrawer('none');
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [desk]);
+
   if (denied) {
     return (
       <div class="page page--list">
@@ -254,27 +267,40 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
   const url = (scene: string) => `${origin}/overlay/${scene}?k=${encodeURIComponent(panel.key)}`;
 
   if (desk) {
-    const onAir = match ? `#${match.id} ${match.teams.a.tag} ${match.teams.a.score} - ${match.teams.b.score} ${match.teams.b.tag}` : 'nothing on air';
+    const onAir = match ? `#${match.id} ${match.teams.a.tag} ${match.teams.a.score} - ${match.teams.b.score} ${match.teams.b.tag}` : 'Nothing on air';
+    const open = drawer ?? (match ? 'none' : 'match');
+    const toggle = (d: 'match' | 'obs') => setDrawer(open === d ? 'none' : d);
+    const obsLabel = obsStatus === 'connected' ? (obsProgram || 'Connected') : 'Not connected';
     return (
       <div class="desk">
         {error && <p class="studio__error" role="alert">{error}</p>}
-        <div class="desk__controls studio">
-          <ScenePad state={state} goScene={goScene} obsProgram={obsProgram} obsScenes={panel.obsScenes} />
-          <details class="desk__drawer" open={!match}>
-            <summary>Match: {onAir} <span class="muted">(change)</span></summary>
-            <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
-            <DraftOnAir drafts={panel.drafts ?? []} state={state} update={update} />
-          </details>
-          <details class="desk__drawer">
-            <summary>OBS: {obsStatus === 'connected' ? `connected${obsProgram ? `, on ${obsProgram}` : ''}` : 'not connected'} <span class="muted">(settings)</span></summary>
-            <ObsBox
-              status={obsStatus} error={obsError} url={obsUrl} setUrl={setObsUrl} password={obsPassword} setPassword={setObsPassword}
-              remember={obsRemember} setRemember={setObsRemember}
-              connect={obsConnect} disconnect={() => { obs?.close(); setObs(null); setObsStatus('idle'); }}
-              scenes={obsScenes} program={obsProgram} wanted={panel.obsScenes} switchOn={obsSwitch} setSwitch={setObsSwitch}
-            />
-          </details>
-          <a class="btn btn--ghost btn--sm desk__studio" href="/cast/studio" target="_blank" rel="noopener">Full studio</a>
+        <div class="desk__ctl studio">
+          <ScenePad state={state} goScene={goScene} obsProgram={obsProgram} obsScenes={panel.obsScenes} bare />
+          <div class="desk__barbtns">
+            <button type="button" class={`desk__barbtn${open === 'match' ? ' is-open' : ''}${match ? '' : ' is-warn'}`} aria-expanded={open === 'match'} onClick={() => toggle('match')}>
+              <span>Match</span><b>{onAir}</b>
+            </button>
+            <button type="button" class={`desk__barbtn${open === 'obs' ? ' is-open' : ''}${obsStatus === 'connected' ? ' is-ok' : ''}`} aria-expanded={open === 'obs'} onClick={() => toggle('obs')}>
+              <span>OBS</span><b>{obsLabel}</b>
+            </button>
+            <a class="desk__barbtn desk__barlink" href="/cast/studio" target="_blank" rel="noopener"><span>Open</span><b>Full studio</b></a>
+          </div>
+          {open === 'match' && (
+            <div class="desk__pop" role="dialog" aria-label="Pick the match on air">
+              <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
+              <DraftOnAir drafts={panel.drafts ?? []} state={state} update={update} />
+            </div>
+          )}
+          {open === 'obs' && (
+            <div class="desk__pop" role="dialog" aria-label="OBS">
+              <ObsBox
+                status={obsStatus} error={obsError} url={obsUrl} setUrl={setObsUrl} password={obsPassword} setPassword={setObsPassword}
+                remember={obsRemember} setRemember={setObsRemember}
+                connect={obsConnect} disconnect={() => { obs?.close(); setObs(null); setObsStatus('idle'); }}
+                scenes={obsScenes} program={obsProgram} wanted={panel.obsScenes} switchOn={obsSwitch} setSwitch={setObsSwitch}
+              />
+            </div>
+          )}
         </div>
         <DeskBody feed={feed} stale={feedStale} />
       </div>
@@ -288,10 +314,10 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
           Pick what is on air, cut scenes with the number keys, and point OBS at your overlay links.
           Overlays follow this page within a second. The server connect line for the match on air is under On air.
         </p>
-        <p class="studio__lede">
-          <a class="btn btn--ghost btn--sm" href="/cast/desk" target="_blank" rel="noopener">Open the caster desk</a>
-          <span class="muted"> Live stats for a second monitor: every player's HP as numbers, damage, items, flow, box score and play by play.</span>
-        </p>
+        <div class="studio__actions">
+          <a class="btn btn--sm" href="/cast/desk" target="_blank" rel="noopener">Open the caster desk</a>
+          <span class="muted">For a second monitor: the scene keys and match picker over live stats (HP numbers, !health, box score, play by play).</span>
+        </div>
       </PageHeader>
       {error && <p class="studio__error" role="alert">{error}</p>}
       <Preflight state={state} feed={feed} obsStatus={obsStatus} panel={panel} />
@@ -507,12 +533,10 @@ export function DraftOnAir({ drafts, state, update }: { drafts: StudioPickDraft[
 
 /* ---------- scenes ---------- */
 
-function ScenePad({ state, goScene, obsProgram, obsScenes }: {
-  state: StudioState; goScene: (s: SceneKey) => void; obsProgram: string; obsScenes: Record<string, string>;
+function ScenePad({ state, goScene, obsProgram, obsScenes, bare = false }: {
+  state: StudioState; goScene: (s: SceneKey) => void; obsProgram: string; obsScenes: Record<string, string>; bare?: boolean;
 }) {
-  return (
-    <section class="panel">
-      <h3>Scenes</h3>
+  const pad = (
       <div class="studio__scenes">
         {SCENES.map((s) => {
           const on = state.scene === s;
@@ -526,6 +550,12 @@ function ScenePad({ state, goScene, obsProgram, obsScenes }: {
           );
         })}
       </div>
+  );
+  if (bare) return pad;
+  return (
+    <section class="panel">
+      <h3>Scenes</h3>
+      {pad}
     </section>
   );
 }
@@ -555,18 +585,15 @@ function Highlights({ state, match, update, onFire, onClear }: {
             onChange={(e) => { const on = e.currentTarget.checked; update((s) => ({ ...s, autoCallouts: { ...s.autoCallouts, on } }), true); }} />
           <span><b>Auto-fire</b></span>
         </label>
-        <label>Card size
-          <select value={state.calloutSize} onChange={(e) => { const v = e.currentTarget.value === 'normal' ? 'normal' : 'compact'; update((s) => ({ ...s, calloutSize: v }), true); }}>
-            <option value="compact">Compact</option>
-            <option value="normal">Big</option>
-          </select>
-        </label>
+        <select value={state.calloutSize} aria-label="Card size" onChange={(e) => { const v = e.currentTarget.value === 'normal' ? 'normal' : 'compact'; update((s) => ({ ...s, calloutSize: v }), true); }}>
+          <option value="compact">Card size: compact</option>
+          <option value="normal">Card size: big</option>
+        </select>
       </div>
-      {state.autoCallouts.on && (
-        <div class="studio__kinds" role="group" aria-label="Kinds auto-fire fires">
+      <div class={`studio__kinds${state.autoCallouts.on ? '' : ' is-off'}`} role="group" aria-label="Kinds auto-fire fires">
           {Object.entries(CALLOUT_KIND_LABELS).map(([k, label]) => (
             <label key={k} class={`studio__kind${state.autoCallouts.kinds.includes(k) ? ' is-on' : ''}`}>
-              <input type="checkbox" checked={state.autoCallouts.kinds.includes(k)}
+              <input type="checkbox" checked={state.autoCallouts.kinds.includes(k)} disabled={!state.autoCallouts.on}
                 onChange={(e) => {
                   const on = e.currentTarget.checked;
                   update((s) => ({ ...s, autoCallouts: { ...s.autoCallouts, kinds: on ? [...s.autoCallouts.kinds.filter((x) => x !== k), k] : s.autoCallouts.kinds.filter((x) => x !== k) } }), true);
@@ -574,8 +601,8 @@ function Highlights({ state, match, update, onFire, onClear }: {
               {label}
             </label>
           ))}
-        </div>
-      )}
+      </div>
+      {/* A fixed-height list: new events scroll in without pushing the page. */}
       {events.length > 0 ? (
         <ul class="studio__events">
           {events.slice(0, 8).map((e) => {
@@ -588,7 +615,7 @@ function Highlights({ state, match, update, onFire, onClear }: {
             );
           })}
         </ul>
-      ) : <p class="muted">Live events show here while a match is on air.</p>}
+      ) : <p class="muted studio__events studio__events--none">Live events show here while a match is on air.</p>}
       <div class="studio__form studio__callout">
         <input value={title} maxLength={24} placeholder="Title, e.g. Clutch" onInput={(e) => setTitle(e.currentTarget.value)} aria-label="Callout title" />
         <input value={text} maxLength={100} placeholder="Line under it" onInput={(e) => setText(e.currentTarget.value)} aria-label="Callout text" />
@@ -598,7 +625,7 @@ function Highlights({ state, match, update, onFire, onClear }: {
           <option value="b">{match?.teams.b.name ?? 'Team B'}</option>
         </select>
         <button type="button" class="btn btn--sm" disabled={!title.trim()} onClick={() => { onFire({ title: title.trim(), text: text.trim(), team }); }}>Fire</button>
-        {showing && <button type="button" class="btn btn--ghost btn--sm" onClick={onClear}>Clear</button>}
+        <button type="button" class="btn btn--ghost btn--sm" disabled={!showing} onClick={onClear} title="Take the card off air">Clear</button>
       </div>
     </section>
   );
@@ -647,6 +674,7 @@ function LiveToggles({ state, update, map, hud }: { state: StudioState; update: 
           </label>
         ))}
       </div>
+      <p class="eyebrow studio__sub">Boss points</p>
       <p class="muted studio__hint">
         {hud && (hud.tank !== null || hud.witch !== null)
           ? 'The server reports the boss points. Type a number only to override it for this map.'
@@ -732,7 +760,7 @@ function LowerThirdBox({ state, update }: { state: StudioState; update: Update }
           onInput={(e) => { const v = e.currentTarget.value; update((s) => ({ ...s, lowerThird: { ...s.lowerThird, title: v } })); }} />
         <input value={lt.text} maxLength={140} placeholder="Text" aria-label="Lower third text"
           onInput={(e) => { const v = e.currentTarget.value; update((s) => ({ ...s, lowerThird: { ...s.lowerThird, text: v } })); }} />
-        <button type="button" class={`btn btn--sm${lt.show ? '' : ' btn--ghost'}`}
+        <button type="button" class={`btn btn--sm studio__ltbtn${lt.show ? '' : ' btn--ghost'}`}
           onClick={() => update((s) => ({ ...s, lowerThird: { ...s.lowerThird, show: !s.lowerThird.show } }), true)}>
           {lt.show ? 'Hide' : 'Show'}
         </button>
@@ -749,7 +777,8 @@ function CountdownBox({ state, update }: { state: StudioState; update: Update })
       <p class="muted studio__hint">Shown on Starting soon and Be right back.</p>
       <div class="studio__chips">
         {[2, 5, 10, 15, 30].map((m) => <button key={m} type="button" class="chip" onClick={() => set(m)}>{m} min</button>)}
-        {state.countdownTo && <button type="button" class="btn btn--ghost btn--sm" onClick={() => update((s) => ({ ...s, countdownTo: null }), true)}>Clear</button>}
+        <button type="button" class="btn btn--ghost btn--sm" disabled={!state.countdownTo} onClick={() => update((s) => ({ ...s, countdownTo: null }), true)}>Clear</button>
+        <span class="muted studio__cdat">{state.countdownTo ? `Counting to ${new Date(state.countdownTo).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Not set'}</span>
       </div>
     </section>
   );
