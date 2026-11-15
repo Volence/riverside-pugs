@@ -2,8 +2,9 @@
 //
 // A player on the trailing team types !gg (or !ff). The vote only opens when
 // the match is decided in practice: even a near-record round on every survivor
-// half the team has left would not close the gap. Every rostered teammate in
-// game must agree within GG_VOTE_TIME; then the match ends here like !endpug,
+// half the team has left would not close the gap. Three of every four rostered
+// teammates in game (Gg_Need: 4 -> 3, 3 -> 3, 2 -> 2, 1 -> 1) must agree within
+// GG_VOTE_TIME; then the match ends here like !endpug,
 // with the score as it stands and forfeit=<team> on MATCH_END and on the dump's
 // END line so the site can tag it.
 //
@@ -104,7 +105,7 @@ void Gg_OnDisconnect(int client)
 {
 	if (g_iGgTeam == 0) return;
 	g_bGgYes[client] = false;
-	// The one holdout leaving can complete the vote.
+	// A holdout leaving can complete the vote (fewer voters, smaller need).
 	RequestFrame(Gg_RecheckFrame);
 }
 
@@ -494,11 +495,22 @@ public Action Cmd_Gg(int client, int args)
 	return Plugin_Handled;
 }
 
-/** Voters: rostered players of the voting team in game on a playing side. */
+/** Yes votes needed out of `voters`: three of every four, rounded up
+ *  (4 -> 3, 3 -> 3, 2 -> 2, 1 -> 1). Owner 2026-11-15: a unanimous vote let
+ *  one holdout keep a decided match going (no team with a failed vote ever
+ *  won). */
+int Gg_Need(int voters)
+{
+	return (voters * 3 + 3) / 4;
+}
+
+/** Voters: rostered players of the voting team in game on a playing side.
+ *  `need` is the yes count that passes the vote (Gg_Need of the voters), and
+ *  is what the GG log lines carry. */
 void Gg_Count(int &yes, int &need)
 {
 	yes = 0;
-	need = 0;
+	int voters = 0;
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		if (!IsClientInGame(c) || IsFakeClient(c)) continue;
@@ -506,9 +518,10 @@ void Gg_Count(int &yes, int &need)
 		if (slot == -1 || g_iRosterTeam[slot] != g_iGgTeam || Tourney_SlotOut(slot)) continue;
 		int gt = GetClientTeam(c);
 		if (gt != TEAM_SURVIVOR && gt != TEAM_INFECTED) continue;
-		need++;
+		voters++;
 		if (g_bGgYes[c]) yes++;
 	}
+	need = Gg_Need(voters);
 }
 
 void Gg_TryPass()
@@ -620,7 +633,8 @@ int Gg_ForfeitTeam()
  *
  *  steamid is the player who typed !gg (start, agree, refused) and absent on
  *  the team-wide outcomes. gap/best are -1 when they were never worked out.
- *  yes/need are counted now when not passed in. */
+ *  yes/need are counted now when not passed in. need is the yes count that
+ *  passes the vote: the voter count up to 0.3.43, Gg_Need of it from 0.3.44. */
 void Gg_Emit(const char[] ev, int team, int slot, const char[] reason, int gap, int best, int yes = -1, int need = -1)
 {
 	if (yes < 0 || need < 0)

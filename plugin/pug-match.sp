@@ -32,7 +32,7 @@ native int GetWitchPercent();
 // Optional, marked in AskPluginLoad2; read only by LIVEHUD.
 native int Score_GetLiveScores(int &distance, int &bonus, int &alive, float &mult, float &hbPct, float &pillsPct, int &wiped, int &made, int &gap);
 
-#define PLUGIN_VERSION "0.3.43"
+#define PLUGIN_VERSION "0.3.44"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who

@@ -16,6 +16,8 @@ export interface GgLine {
   gap: number | null;
   best: number | null;
   yes: number;
+  /** Yes votes that pass the vote: every voter up to pug-match 0.3.43,
+   *  three of every four (rounded up) from 0.3.44. */
   need: number;
 }
 
