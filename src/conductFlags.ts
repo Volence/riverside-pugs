@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import type { LogEvent } from './logParse.js';
-import { publishAdminEvent } from './adminFeed.js';
+import { publishAdminEvent, type AdminEvent } from './adminFeed.js';
 import { liveMatchOf } from './integrityFlags.js';
 import { findSlurs } from './slurs.js';
 
@@ -33,11 +33,15 @@ export const CHAT_POST_EVERY_MS = 60_000;
 
 type ConductEvent = Extract<LogEvent, { kind: 'say' } | { kind: 'name' }>;
 
-export function handleConduct(db: DB, ev: ConductEvent, serverId: number | null, now = new Date()): void {
+/** The staff post handleConduct published, or null when it published none
+ *  (clean text, a repeat name, or a line inside a chat stream). */
+export type ConductPost = Extract<AdminEvent, { kind: 'conduct_flag' }> & { where: 'chat' | 'name' };
+
+export function handleConduct(db: DB, ev: ConductEvent, serverId: number | null, now = new Date()): ConductPost | null {
   const where = ev.kind === 'say' ? 'chat' : 'name';
   const text = ev.kind === 'say' ? ev.message : ev.name;
   const slurs = findSlurs(text);
-  if (slurs.length === 0) return;
+  if (slurs.length === 0) return null;
 
   const iso = now.toISOString();
   let post: boolean;
@@ -45,7 +49,7 @@ export function handleConduct(db: DB, ev: ConductEvent, serverId: number | null,
     const seen = db.prepare(
       "SELECT 1 FROM integrity_flags WHERE source = 'conduct' AND kind = 'name' AND steamid = ? AND detail = ? LIMIT 1",
     ).get(ev.steamid, text);
-    if (seen) return;
+    if (seen) return null;
     post = true;
   } else {
     const since = new Date(now.getTime() - CHAT_POST_EVERY_MS).toISOString();
@@ -60,7 +64,10 @@ export function handleConduct(db: DB, ev: ConductEvent, serverId: number | null,
      VALUES (?, ?, ?, 'conduct', ?, 'suspected', ?, ?)`,
   ).run(matchId, serverId, ev.steamid, where, text, iso);
 
-  if (post) publishAdminEvent({ kind: 'conduct_flag', steamid: ev.steamid, where, text, slurs, matchId, serverId });
+  if (!post) return null;
+  const event: ConductPost = { kind: 'conduct_flag', steamid: ev.steamid, where, text, slurs, matchId, serverId };
+  publishAdminEvent(event);
+  return event;
 }
 
 /**

@@ -71,6 +71,7 @@ import type { AddonsTransport } from './addonsTransport.js';
 import { verifyLogin as realVerifyLogin, fetchPersona as realFetchPersona } from './steamAuth.js';
 import { backfillPersonas } from './personaBackfill.js';
 import { handleConduct } from './conductFlags.js';
+import { sendConductNotice } from './conductNotice.js';
 import { noteInGameName, takeRenameDigest } from './playerNames.js';
 import { handleServerChatEvent, isActiveStaff } from './serverChat.js';
 import { recordLook } from './mapLooks.js';
@@ -1201,7 +1202,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           // listener that also carries match_end.
           if (ev.kind === 'say' || ev.kind === 'name') {
             try {
-              handleConduct(deps.db, ev, sid);
+              const post = handleConduct(deps.db, ev, sid);
+              // The player hears once per staff post (src/conductNotice.ts),
+              // in the background: the box may be slow or gone.
+              if (post) {
+                void sendConductNotice(deps.db, deps.chatRcon ?? realServerRcon, post,
+                  () => hub.sendTo('server_chat', (id) => isActiveStaff(deps.db, id)));
+              }
             } catch (err) {
               console.error('[conduct] failed to check a line:', err);
             }
