@@ -2546,7 +2546,9 @@ export interface PlayStanding {
   points: number; buchholz: number; scoreDiff: number;
 }
 export interface StagePlayView {
-  ordinal: number; type: string; status: 'live' | 'finished'; layout: 'bracket' | 'table';
+  ordinal: number; type: string;
+  /** projected: the bracket the current seeds would give, before the start. */
+  status: 'live' | 'finished' | 'projected'; layout: 'bracket' | 'table';
   groups: { number: number; label: string }[]; rounds: PlayRound[]; standings: PlayStanding[]; advanceCount: number | null;
   /** Swiss, or a league paired Swiss (mirrors src/events/playViews.ts). */
   pairsAsItGoes: boolean;
@@ -2555,12 +2557,14 @@ export interface StagePlayView {
 }
 /** The Play section of the desk (plan T2 Ruling 17). Mirrors
  *  src/routes/adminEvents.ts AdminEventPlay. */
-export interface AdminEventPlay { status: string; lockedAt: string | null; startsAt: string; seeded: number; stages: StagePlayView[] }
+export interface AdminEventPlay { status: string; lockedAt: string | null; startsAt: string; seeded: number; stages: StagePlayView[]; preview?: StagePlayView | null }
 export interface EventView {
   slug: string; name: string; status: EventStatus; entryKind: EntryKind; official: boolean; organizerName: string | null;
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
   eligibility: EventEligibility; checkin: EventCheckin; roster: EventRoster;
   stages: EventStageView[]; entries: EventEntryView[]; play: StagePlayView[];
+  /** The projected bracket before the start (src/events/bracketPreview.ts); optional for an older server. */
+  preview?: StagePlayView | null;
   finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
   lockedAt: string | null; checkinOpensAt: string | null; checkinClosesAt: string | null;
   /** Draft-kind events only (drafts plan D1, mirrors src/events/views.ts): signup

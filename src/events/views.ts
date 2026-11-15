@@ -37,6 +37,8 @@ export interface EventView {
   bannerKey: string | null; startsAt: string; description: string; teamCap: number | null;
   eligibility: V.Eligibility; checkin: V.Checkin; roster: V.RosterRules;
   stages: EventStageView[]; entries: EventEntryView[]; play: StagePlayView[];
+  /** The projected bracket before the start (bracketPreview.ts); the route fills it. */
+  preview: StagePlayView | null;
   finishedAt: string | null; cancelledAt: string | null; cancelReason: string | null;
   lockedAt: string | null; checkinOpensAt: string | null; checkinClosesAt: string | null;
   /** Draft-kind events only (plan D1 Ruling 9): the signup count and names in
@@ -136,6 +138,7 @@ export function eventView(db: DB, ev: E.EventRow): EventView {
     }),
     entries: entryViews(db, ev),
     play: stagePlayViews(db, ev),
+    preview: null,
     finishedAt: ev.finished_at, cancelledAt: ev.cancelled_at, cancelReason: ev.cancel_reason,
     lockedAt: ev.locked_at,
     ...(f.checkin.enabled

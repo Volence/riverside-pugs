@@ -197,6 +197,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       <EventTimeline ev={ev} now={now} />
       {/* Once play starts the bracket is what people come for, so it leads and the description follows. */}
       {ev.play.map((s) => <StagePlay key={s.ordinal} stage={s} slug={ev.slug} />)}
+      {ev.play.length === 0 && ev.preview && <StagePlay stage={ev.preview} slug={ev.slug} />}
       {myPanels}
       {draftEvent && ev.entries.length === 0 && <DraftSection ev={ev} draft={ev.draft!} session={session} />}
       {(ev.entryKind !== 'draft' || ev.entries.length > 0) && <Panel class="evteamspanel">

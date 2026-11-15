@@ -40,7 +40,12 @@ export function StagePlay({ stage, slug }: { stage: StagePlayView; slug: string 
   const swiss = stage.type === 'swiss';
   return (
     <Panel class="stageplay">
-      <h3>Stage {stage.ordinal}: {stage.layout === 'bracket' ? 'bracket' : 'standings'}{stage.status === 'finished' ? ' (finished)' : ''}</h3>
+      {stage.status === 'projected' ? (
+        <>
+          <h3>Projected bracket</h3>
+          <p class="muted">From the current seeds. Seeds can change until the event starts, and the real bracket replaces this then.</p>
+        </>
+      ) : <h3>Stage {stage.ordinal}: {stage.layout === 'bracket' ? 'bracket' : 'standings'}{stage.status === 'finished' ? ' (finished)' : ''}</h3>}
       {stage.layout === 'bracket' ? <Bracket stage={stage} slug={slug} /> : (
         <>
           {stage.advanceCount !== null && <p class="muted">{`Top ${stage.advanceCount} advance`}</p>}

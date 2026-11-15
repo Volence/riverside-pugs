@@ -46,7 +46,7 @@ function ByeCard({ e }: { e: PlayEntry }) {
 /** A match card. Linked to its room once both teams are known and it is
  *  not a bye (plan T3a); the phase chip only shows once the room has moved
  *  past waiting, since pending/waiting/done already read from the card. */
-export function MatchCard({ m, slug, roundDefault = null }: { m: PlayMatch; slug: string; roundDefault?: string | null }) {
+export function MatchCard({ m, slug, roundDefault = null, projected = false }: { m: PlayMatch; slug: string; roundDefault?: string | null; projected?: boolean }) {
   const body = (
     <>
       <Side e={m.a} score={m.scoreA} won={m.winner === 'a'} forfeitLoss={m.forfeit && m.winner === 'b'} bye={false} />
@@ -55,7 +55,7 @@ export function MatchCard({ m, slug, roundDefault = null }: { m: PlayMatch; slug
       {m.phase !== 'done' && m.phase !== 'pending' && m.phase !== 'waiting' && <span class="matchcard__phase">{m.phase === 'confirming' ? CONFIRMING_TEXT : PHASE_TEXT[m.phase]}</span>}
     </>
   );
-  if (!m.a || !m.b || m.bye) return <div class={`matchcard matchcard--${m.status}`}>{body}</div>;
+  if (!m.a || !m.b || m.bye || projected) return <div class={`matchcard matchcard--${m.status}`}>{body}</div>;
   return <a class={`matchcard matchcard--${m.status} matchcard--link`} href={`/event/${slug}/match/${m.id}`}>{body}</a>;
 }
 
@@ -79,7 +79,7 @@ export function Bracket({ stage, slug }: { stage: StagePlayView; slug: string })
                 <div key={r.round} class="bracket__round">
                   <span class="eyebrow">{`${r.label}${r.defaultAt ? ` · ${roundWhenText(r.defaultAt)}` : ''}`}</span>
                   {r.round === 1 && byes.map((e) => <ByeCard key={`bye-${e.id}`} e={e} />)}
-                  {r.matches.map((m) => <MatchCard key={m.id} m={m} slug={slug} roundDefault={r.defaultAt} />)}
+                  {r.matches.map((m) => <MatchCard key={m.id} m={m} slug={slug} roundDefault={r.defaultAt} projected={stage.status === 'projected'} />)}
                 </div>
               ))}
             </div>
