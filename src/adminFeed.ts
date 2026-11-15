@@ -28,6 +28,12 @@ export type AdminEvent =
   // ends the match. hold_expired: a hold reached its ceiling and released
   // itself. Both link to the board, where the buttons are.
   | { kind: 'clock'; what: 'low_allowance' | 'hold_expired'; steamid: string; matchId: number; remainingS: number }
+  // A ready-up held up past slow_readyup_ping_minutes with the whole roster on
+  // the server (src/slowReadyup.ts). Once per ready-up; pings the mod call role.
+  | {
+    kind: 'slow_readyup'; matchId: number; serverName: string | null; map: string | null;
+    mapOrdinal: number; half: 1 | 2; waitedS: number; unready: string[];
+  }
   // A steamid dropped while connecting for the second time in ten minutes
   // without getting in between. `name` is the in-game name off the drop line,
   // because the steamid is often nobody the site knows. `count` is the drops in
@@ -143,6 +149,8 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   problem: 'admin_feed_problems',
   abandon: 'admin_feed_penalties',
   clock: 'admin_feed_problems',
+  // Its own minutes setting is the switch: '0' reads as off here too.
+  slow_readyup: 'slow_readyup_ping_minutes',
   signon_drop: 'admin_feed_problems',
   input_flag: 'admin_feed_problems',
   newcomer_flag: 'admin_feed_problems',
