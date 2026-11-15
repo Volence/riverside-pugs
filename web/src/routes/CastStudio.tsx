@@ -643,8 +643,32 @@ function FrameRectsBox({ state, update }: { state: StudioState; update: Update }
       ))}
     </div>
   );
+  const hudPick = (
+    <div class="studio__form">
+      <label>Caster's game HUD
+        <select value={state.frame.hud} onChange={(e) => { const v = e.currentTarget.value === 'cast' ? 'cast' : 'stock'; update((s) => ({ ...s, frame: { ...s.frame, hud: v } }), true); }}>
+          <option value="stock">Stock spectator (survivor cards in the bottom band)</option>
+          <option value="cast">Riverside cast HUD (team board across the top)</option>
+        </select>
+      </label>
+    </div>
+  );
+  if (state.frame.hud === 'cast') {
+    return (
+      <div class="studio__frames">
+        {hudPick}
+        <p class="muted studio__hint">
+          The overlay covers the cast HUD's two top wings with its own rows in the same look, adding the HP numbers the game
+          cannot show: survivors top left, infected top right, with each team's name and score under its wing. The game's
+          score box in the middle stays visible; progress and the tank sit under it. Needs the game at 16:9, captured to fill
+          the 1920 x 1080 canvas, with the board up (cast.cfg opens it).
+        </p>
+      </div>
+    );
+  }
   return (
     <div class="studio__frames">
+      {hudPick}
       <p class="muted studio__hint">
         Where the game draws its team panels, in overlay pixels (1920 x 1080). A spectator gets the survivor cards in the bottom band;
         the infected show in the free right part of that band, drawn by the overlay.

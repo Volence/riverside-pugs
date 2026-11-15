@@ -743,3 +743,50 @@
 .ov-dstrip__name { font: 400 40px var(--font-display); text-transform: uppercase; color: var(--bone); }
 .ov-dstrip__to { font: 400 24px var(--font-body); color: var(--text); }
 .ov-dstrip__sr { font: 500 22px var(--font-label); letter-spacing: 0.08em; color: var(--text-muted); }
+
+/* Frame over the Riverside cast HUD (frame.hud 'cast', CastFrameHud): each
+ * wing covered by our own rows in the HUD's look. Geometry in CAST_HUD_WINGS
+ * (cast/types.ts); the row pitch is the HUD's 20 units = 45 px, 3 units in. */
+.ov-cw { position: absolute; background: rgb(3, 2, 2); box-sizing: border-box; padding-top: 7px; border-bottom: 2px solid rgb(128, 120, 105);
+  display: flex; flex-direction: column; gap: 2px; animation: ov-fade 400ms both; }
+.ov-cw--surv { padding-left: 9px; padding-right: 10px; }
+.ov-cw--inf { padding-left: 10px; padding-right: 9px; }
+.ov-cw::after { content: ''; position: absolute; top: 0; bottom: -2px; width: 4px; background: var(--c); }
+.ov-cw--surv::after { right: 0; }
+.ov-cw--inf::after { left: 0; }
+.ov-cw__tab { position: absolute; top: 100%; margin-top: 6px; display: flex; align-items: center; gap: 10px; padding: 3px 14px 4px;
+  background: rgba(3, 2, 2, 0.94); white-space: nowrap; max-width: 100%; box-sizing: border-box; }
+.ov-cw__tab--l { left: 0; border-left: 5px solid var(--c); }
+.ov-cw__tab--r { right: 0; border-right: 5px solid var(--c); flex-direction: row-reverse; }
+.ov-cw__tab .ov-frame__name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ov-cr { display: grid; grid-template-columns: 43px 180px 62px minmax(0, 1fr); column-gap: 7px; align-items: center; height: 43px; }
+.ov-cr__face { width: 43px; height: 43px; object-fit: cover; display: block; }
+.ov-cr__face.is-dead { filter: grayscale(1) brightness(0.45); }
+.ov-cr--inf .ov-cr__face { object-fit: contain; }
+.ov-cr--inf.is-ghost .ov-cr__face { opacity: 0.4; }
+.ov-cr__face--empty, .ov-cr .ov-face--none { background: rgba(255, 255, 255, 0.05); }
+.ov-cr__body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ov-cr__name { font: 500 23px/1 var(--font-label); color: rgb(239, 226, 196); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-cr__bar { position: relative; height: 9px; background: rgba(255, 255, 255, 0.09); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6); }
+.ov-cr__perm, .ov-cr__temp { position: absolute; top: 0; bottom: 0; left: 0; }
+.ov-cr__perm { background: rgb(2, 153, 38); }
+.ov-cr__temp { background: repeating-linear-gradient(90deg, rgba(2, 153, 38, 0.75) 0 3px, transparent 3px 5px); }
+.ov-cr.is-mid .ov-cr__perm { background: rgb(226, 140, 24); }
+.ov-cr.is-mid .ov-cr__temp { background: repeating-linear-gradient(90deg, rgba(226, 140, 24, 0.75) 0 3px, transparent 3px 5px); }
+.ov-cr.is-lo .ov-cr__perm, .ov-cr.is-down .ov-cr__perm { background: rgb(222, 78, 64); }
+.ov-cr.is-lo .ov-cr__temp { background: repeating-linear-gradient(90deg, rgba(222, 78, 64, 0.75) 0 3px, transparent 3px 5px); }
+.ov-cr--inf .ov-cr__perm { background: rgb(222, 78, 64); }
+.ov-cr--inf.is-tank .ov-cr__perm { background: var(--accent); }
+.ov-cr__hp { font: 400 30px/1 var(--font-display); color: rgb(239, 226, 196); text-align: right; font-variant-numeric: tabular-nums; }
+.ov-cr.is-mid .ov-cr__hp { color: rgb(240, 170, 70); }
+.ov-cr.is-lo .ov-cr__hp, .ov-cr.is-down .ov-cr__hp { color: rgb(222, 78, 64); }
+.ov-cr__end { display: flex; justify-content: flex-end; align-items: center; min-width: 0; }
+.ov-cr__end .ov-items { display: flex; gap: 2px; }
+.ov-cr__end .ov-item { height: 26px; width: auto; }
+.ov-cr__state { font: 600 18px/1 var(--font-label); text-transform: uppercase; letter-spacing: 0.02em; color: rgb(222, 78, 64); white-space: nowrap; }
+.ov-cr--inf .ov-cr__state { color: rgb(149, 135, 112); }
+.ov-cr--inf.is-tank .ov-cr__state { color: var(--accent); }
+.ov-cr.is-dead .ov-cr__name { color: rgb(149, 135, 112); }
+.ov-cmid { position: absolute; display: flex; flex-direction: column; gap: 6px; animation: ov-fade 400ms both; }
+.ov-cmid .ov-pg { background: rgba(3, 2, 2, 0.9); }
+.ov-game--frame.ov-game--casthud .ov-callout { top: 250px; }

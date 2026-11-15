@@ -7,7 +7,7 @@ import { emptyReveal, stepReveal, type DraftReveal } from './draftReveal';
 import { camSlots } from '../../../src/cast/layout';
 import { emptyQueue, stepAuto, type AutoCard } from './callouts';
 import {
-  boomerRate, CALLOUT_MS, DRAFT_SCENES, type CastDraftView, ITEM, soloSkeets, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
+  boomerRate, CALLOUT_MS, CAST_HUD_WINGS, DRAFT_SCENES, type CastDraftView, ITEM, soloSkeets, type CastChapter, type CastRoundResult, type TankRecap, type WitchRecap, type CastInfected, type CastLiveRound, type CastMatchView, type CastPlayer,
   type CastSurvivor, type CastTeam, type OverlayFeed, type OverlayKey, type StudioState,
 } from '../../../src/cast/types';
 
@@ -672,7 +672,7 @@ function Gameplay({ studio, match, live, now, auto, feed }: {
     const Hud = studio.hudStyle === 'corners' ? CornersHud : studio.hudStyle === 'rail' ? RailHud : studio.hudStyle === 'frame' ? FrameHud : PlateHud;
     const rows = studio.elements.survivors || studio.elements.infected;
     return (
-      <div class={`ov-game ov-game--${studio.hudStyle}${rows ? ' has-rows' : ''}`}>
+      <div class={`ov-game ov-game--${studio.hudStyle}${rows ? ' has-rows' : ''}${studio.hudStyle === 'frame' && studio.frame.hud === 'cast' ? ' ov-game--casthud' : ''}`}>
         <Hud studio={studio} match={match} live={live} />
         <Recap studio={studio} feed={feed} />
         <Callout studio={studio} match={match} now={now} auto={auto} />
@@ -1173,6 +1173,7 @@ function RailHud(props: HudProps) {
  * half by us. An infected hole (for a caster HUD that shows one) is optional.
  */
 function FrameHud(props: HudProps) {
+  if (props.studio.frame.hud === 'cast') return <CastFrameHud {...props} />;
   const d = hudData(props);
   const f = props.studio.frame;
   const hole = (r: NonNullable<typeof f.infected>, team: CastTeam | null, side: 'survivor' | 'infected') => {
@@ -1210,6 +1211,98 @@ function FrameHud(props: HudProps) {
       )}
       <PlateHud {...props} noStacks />
     </>
+  );
+}
+
+/**
+ * FRAME over our cast HUD (frame.hud 'cast'). The cast HUD's Tab board has a
+ * survivor wing top left and an infected wing top right, but a Tab row can
+ * never show a health number (client RE, memory l4d1-cast-hud). So the overlay
+ * covers each wing with its own rows in the HUD's look (same panel, Oswald
+ * names, Anton numbers, the game's health bar colours) and adds the numbers:
+ * survivors HP (temp health as the lighter bar end), infected HP for their
+ * class. Covering the whole wing means the rows never have to follow the
+ * game's own row order (humans first, then client index; infected by score
+ * first). The game's score box stays; progress and the tank hang under it,
+ * each team's name and score under its wing.
+ */
+function CastFrameHud(props: HudProps) {
+  const d = hudData(props);
+  const live = props.live;
+  const W = CAST_HUD_WINGS;
+  const tankMax = live?.tank?.maxHealth ?? 0;
+  const at = (r: { x: number; y: number; w: number; h: number }) =>
+    ({ left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
+  const tab = (team: CastTeam | null, side: 'survivor' | 'infected') => team && (
+    <span class={`ov-cw__tab ov-cw__tab--${side === 'survivor' ? 'l' : 'r'}`}>
+      <span class={`ov-sideword ov-sideword--${side}`}>{side === 'survivor' ? 'Survivors' : 'Infected'}</span>
+      <span class="ov-frame__name">{team.name}</span>
+      <span class="ov-frame__pts">{team.score}</span>
+    </span>
+  );
+  return (
+    <>
+      <div class="ov-cw ov-cw--surv" data-side="survivor" style={{ ...at(W.survivor), ...teamVar(d.survTeam, 'var(--win)') }}>
+        {live && live.survivors.slice(0, 4).map((s, k) => <CastSurvivorRow key={`${s.slot}:${k}`} s={s} />)}
+        {tab(d.survTeam, 'survivor')}
+      </div>
+      <div class="ov-cw ov-cw--inf" data-side="infected" style={{ ...at(W.infected), ...teamVar(d.infTeam, 'var(--loss)') }}>
+        {live && live.infected.slice(0, 4).map((i) => <CastInfectedRow key={i.slot} i={i} tankMax={tankMax} />)}
+        {tab(d.infTeam, 'infected')}
+      </div>
+      {(d.strip || d.tank) && (
+        <div class="ov-cmid" style={{ left: `${W.centre.x}px`, top: `${W.centre.y + W.centre.h + 8}px`, width: `${W.centre.w}px` }}>
+          {d.strip && <Progress progress={d.progress} bosses={d.bosses} team={d.survTeam} rival={d.rival} dots={d.dots} />}
+          {d.tank && <TankCard tank={d.tank} team={d.infTeam} />}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** The game's HealthPanel colours: green over half, orange over 15%, red. */
+const barTone = (frac: number) => (frac > 0.5 ? 'hi' : frac > 0.15 ? 'mid' : 'lo');
+
+function CastSurvivorRow({ s }: { s: CastSurvivor }) {
+  const down = s.incap || s.ledge;
+  const max = down ? 300 : 100;
+  const perm = s.alive ? Math.max(0, Math.min(1, s.health / max)) : 0;
+  const temp = s.alive && !down ? Math.max(0, Math.min(1 - perm, s.temp / 100)) : 0;
+  const state = !s.alive ? 'Dead' : s.ledge ? 'Ledge' : s.incap ? 'Down' : null;
+  const tone = !s.alive ? 'dead' : down ? 'down' : barTone(perm + temp);
+  return (
+    <div class={`ov-cr is-${tone}`}>
+      <SurvivorFace s={s} class="ov-cr__face" />
+      <span class="ov-cr__body">
+        <span class="ov-cr__name">{s.name}</span>
+        <span class="ov-cr__bar">
+          <span class="ov-cr__perm" style={{ width: `${perm * 100}%` }} />
+          {temp > 0 && <span class="ov-cr__temp" style={{ left: `${perm * 100}%`, width: `${temp * 100}%` }} />}
+        </span>
+      </span>
+      <b class="ov-cr__hp">{s.alive ? (down ? s.health : s.health + s.temp) : ''}</b>
+      <span class="ov-cr__end">{state ? <b class="ov-cr__state">{state}</b> : <Items items={s.items} />}</span>
+    </div>
+  );
+}
+
+function CastInfectedRow({ i, tankMax }: { i: CastInfected; tankMax: number }) {
+  const cls = i.cls ? i.cls[0]!.toUpperCase() + i.cls.slice(1) : '';
+  const up = i.alive && !i.ghost;
+  const max = i.cls === 'tank' ? tankMax || i.health : SI_MAX[i.cls] ?? 0;
+  const frac = up && max > 0 ? Math.max(0, Math.min(1, i.health / max)) : 0;
+  const status = !i.alive ? 'Dead' : i.ghost ? 'Spawning' : cls;
+  const tone = !i.alive ? 'dead' : i.ghost ? 'ghost' : i.cls === 'tank' ? 'tank' : 'up';
+  return (
+    <div class={`ov-cr ov-cr--inf is-${tone}`}>
+      {up || i.ghost ? <ClassIcon cls={i.cls} class="ov-cr__face" /> : <span class="ov-cr__face ov-cr__face--empty" />}
+      <span class="ov-cr__body">
+        <span class="ov-cr__name">{i.name}</span>
+        <span class="ov-cr__bar"><span class="ov-cr__perm" style={{ width: `${frac * 100}%` }} /></span>
+      </span>
+      <b class="ov-cr__hp">{up ? i.health.toLocaleString('en-US') : ''}</b>
+      <span class="ov-cr__end"><b class="ov-cr__state">{status}</b></span>
+    </div>
   );
 }
 

@@ -138,10 +138,27 @@ export interface Rect { x: number; y: number; w: number; h: number }
  *  in the bottom band (x 60-1290, band y 962-1080) and no infected panel at
  *  all, so the survivor hole defaults to that and the infected hole is off
  *  (null) unless a caster HUD adds one. */
-export interface FrameRects { survivor: Rect; infected: Rect | null }
-export function defaultFrameRects(): FrameRects {
-  return { survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: null };
+export interface FrameRects {
+  survivor: Rect; infected: Rect | null;
+  /** Which game HUD the caster plays with. `stock`: the rects above.
+   *  `cast`: our Riverside cast HUD (~/l4d/casthud), whose Tab board puts
+   *  the survivors in a top-left wing and the infected in a top-right wing;
+   *  the overlay then covers both wings with its own rows, in the HUD's look,
+   *  that add the HP numbers the game cannot show (CAST_HUD_WINGS). */
+  hud: 'stock' | 'cast';
 }
+export function defaultFrameRects(): FrameRects {
+  return { survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: null, hud: 'stock' };
+}
+/** The cast HUD's board at 1920 x 1080 (casthud/tools/build_res.py: 640x480
+ *  units x 2.25, measured in casthud/runs/site-v3/tab.png): each wing is 172
+ *  units wide and 84 tall plus its 1-unit bone line, the score box 240 units
+ *  centred. Any 16:9 game resolution scales to these on a 1080p canvas. */
+export const CAST_HUD_WINGS = {
+  survivor: { x: 0, y: 0, w: 387, h: 191 },
+  infected: { x: 1533, y: 0, w: 387, h: 191 },
+  centre: { x: 690, y: 0, w: 540, h: 101 },
+} as const;
 /** Where an infected hole goes when the producer adds one. */
 export const DEFAULT_INFECTED_RECT: Rect = { x: 1340, y: 20, w: 560, h: 150 };
 export type HudStyle = (typeof HUD_STYLES)[number];

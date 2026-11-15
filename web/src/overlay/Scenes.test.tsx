@@ -72,8 +72,29 @@ describe('gameplay overlay: the broadcast looks', () => {
     // No medallions in frame mode, whatever the switches say.
     expect(container.querySelector('.ov-mrow')).toBeNull();
     // An infected hole when the producer adds one.
-    const withHole = render(<Overlay which="gameplay" feed={feed({ hudStyle: 'frame', frame: { survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: { x: 1340, y: 20, w: 560, h: 150 } } })} now={Date.now()} />).container;
+    const withHole = render(<Overlay which="gameplay" feed={feed({ hudStyle: 'frame', frame: { survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: { x: 1340, y: 20, w: 560, h: 150 }, hud: 'stock' } })} now={Date.now()} />).container;
     expect(withHole.querySelector('[data-side="infected"]')?.textContent).toContain('Crows');
+  });
+
+  it('frame over the cast HUD: covers both top wings with rows that carry HP numbers', () => {
+    const cast = { survivor: { x: 40, y: 966, w: 1270, h: 110 }, infected: null, hud: 'cast' as const };
+    const { container } = render(<Overlay which="gameplay" feed={feed({ hudStyle: 'frame', frame: cast, elements: allOn })} now={Date.now()} />);
+    const surv = container.querySelector('[data-side="survivor"]') as HTMLElement;
+    expect([surv.style.left, surv.style.top, surv.style.width, surv.style.height]).toEqual(['0px', '0px', '387px', '191px']);
+    expect(surv.querySelectorAll('.ov-cr')).toHaveLength(1);
+    expect(surv.querySelector('.ov-cr__hp')?.textContent).toBe('80');
+    expect(surv.textContent).toContain('Survivor One');
+    expect(surv.textContent).toContain('Rats');
+    const inf = container.querySelector('[data-side="infected"]') as HTMLElement;
+    expect(inf.style.left).toBe('1533px');
+    const hps = [...inf.querySelectorAll('.ov-cr__hp')].map((e) => e.textContent);
+    expect(hps).toEqual(['250', '']);
+    expect(inf.textContent).toContain('Spawning');
+    expect(inf.textContent).toContain('Crows');
+    // Nothing of the stock frame: no band, no centre plate over the game's score box.
+    expect(container.querySelector('.ov-band')).toBeNull();
+    expect(container.querySelector('.ov-plate')).toBeNull();
+    expect(container.querySelector('.ov-game--casthud')).not.toBeNull();
   });
 
   it("marks the opponent's reach and each survivor's own progress on the strip", () => {
