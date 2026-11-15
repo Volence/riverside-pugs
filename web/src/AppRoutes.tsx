@@ -45,6 +45,7 @@ const Scrims = lazy(() => import('./routes/Scrims'));
 const Events = lazy(() => import('./routes/Events'));
 // The caster studio is a big page only casters open: its own chunk.
 const CastStudio = lazy(() => import('./routes/CastStudio'));
+const CastDesk = lazy(() => import('./routes/CastDesk'));
 const EventPage = lazy(() => import('./routes/Event'));
 // The match room (plan T3a): its own chunk, like the rest of Events.
 const EventMatchPage = lazy(() => import('./routes/EventMatch'));
@@ -131,6 +132,7 @@ export function AppRoutes(
       <Route path="/live" component={Live} me={me} />
       <Route path="/cast" component={CastMoved} />
       <Route path="/cast/studio" component={CastStudio} />
+      <Route path="/cast/desk" component={CastDesk} />
       <Route path="/streams" component={Streams} />
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />
       <Route path="/maps" component={Maps} />
