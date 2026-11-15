@@ -52,6 +52,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	MarkNativeAsOptional("Score_GetTeamCampaignScore");
 	MarkNativeAsOptional("GetTankPercent");
 	MarkNativeAsOptional("GetWitchPercent");
+	MarkNativeAsOptional("Score_GetLiveScores");
 	// REST in Pawn is optional: see pug-livepush.inc.
 	LivePushMarkOptional();
 	return APLRes_Success;

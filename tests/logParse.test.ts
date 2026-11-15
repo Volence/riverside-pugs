@@ -288,8 +288,19 @@ describe('parseLogDatagram: LIVEHUD', () => {
           { steamid: '76561198030413993', flow: 62, items: 11, dmg: 212 },
           { steamid: '76561198030413994', flow: -1, items: 0, dmg: 157 },
         ],
+        scores: null,
       },
     });
+  });
+
+  it('parses the !health numbers (sc=, pug-match 0.3.43) and keeps the gap only in round 2', () => {
+    const r2 = parseLogDatagram(framed(`PUG ${TOKEN} LIVEHUD prog=62 tank=74 witch=31 p= sc=2:58:131:4:125:47:50:73:1155:-40`));
+    expect(r2).toMatchObject({ line: { scores: { round: 2, distance: 58, bonus: 131, alive: 4, mult: 1.25, hbPct: 47, pillsPct: 50, wiped: 73, made: 1155, gap: -40 } } });
+    const r1 = parseLogDatagram(framed(`PUG ${TOKEN} LIVEHUD prog=62 tank=74 witch=31 p= sc=1:58:131:4:125:47:50:73:1155:0`));
+    expect(r1).toMatchObject({ line: { scores: { round: 1, gap: null } } });
+    // A malformed sc drops the numbers, never the line.
+    const bad = parseLogDatagram(framed(`PUG ${TOKEN} LIVEHUD prog=62 tank=74 witch=31 p= sc=3:x`));
+    expect(bad).toMatchObject({ kind: 'live_hud', line: { prog: 62, scores: null } });
   });
 
   it('drops a malformed player entry, never the line, and needs the three numbers', () => {

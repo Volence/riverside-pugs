@@ -1149,7 +1149,18 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
         const m = /^(\d{17}):(-?\d{1,3}):(\d{1,2}):(\d{1,6})$/.exec(part);
         if (m && Number(m[3]) <= 15) players.push({ steamid: m[1]!, flow: Number(m[2]), items: Number(m[3]), dmg: Number(m[4]) });
       }
-      return { kind: 'live_hud', token, line: { prog, tank, witch, players: players.slice(0, 12) } };
+      // Optional (pug-match 0.3.43): !health from l4dscores.
+      // sc=<round>:<distance>:<bonus>:<alive>:<mult x100>:<hb %>:<pills %>:<wiped>:<made>:<gap>
+      let scores: LiveHudLine['scores'] = null;
+      const sc = /^([12]):(\d{1,3}):(\d{1,4}):(\d):(\d{1,4}):(\d{1,3}):(\d{1,3}):(\d{1,6}):(\d{1,6}):(-?\d{1,6})$/.exec(rest.sc ?? '');
+      if (sc) {
+        const n = sc.slice(1).map(Number);
+        scores = {
+          round: n[0] as 1 | 2, distance: n[1]!, bonus: n[2]!, alive: n[3]!, mult: n[4]! / 100, hbPct: n[5]!, pillsPct: n[6]!,
+          wiped: n[7]!, made: n[8]!, gap: n[0] === 2 ? n[9]! : null,
+        };
+      }
+      return { kind: 'live_hud', token, line: { prog, tank, witch, players: players.slice(0, 12), scores } };
     }
     case 'TANKDONE': {
       const alive = intOf(rest.alive);

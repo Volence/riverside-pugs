@@ -206,6 +206,9 @@ export interface LiveElements {
   tank: boolean;
   /** Tank and witch flow %. On: the game never shows them on screen. */
   bosses: boolean;
+  /** The !health line (health bonus, pills, wipe now / make it now, needed
+   *  to tie). On: players can type !health, viewers never see it. */
+  bonus: boolean;
   /** The map progress strip under the bar (the furthest survivor's flow %,
    *  with the boss points on it). Needs pug-match 0.3.20's LIVEHUD line; the
    *  strip hides itself on a server that does not send it. */
@@ -223,7 +226,7 @@ export interface LiveElements {
 }
 
 export function defaultElements(): LiveElements {
-  return { survivors: false, infected: true, tank: true, bosses: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };
+  return { survivors: false, infected: true, tank: true, bosses: true, bonus: true, progress: true, tankRecap: true, witchRecap: true, rival: true, dots: true };
 }
 
 export const MAX_CASTERS = 3;
@@ -427,6 +430,27 @@ export interface CastInfected {
 }
 
 /** The plugin's LIVEHUD line (pug-match 0.3.20), merged into the round. */
+/** The numbers l4dscores' !health prints right now (Score_GetLiveScores). */
+export interface LiveScores {
+  round: 1 | 2;
+  /** The game's distance score % (AD in !health). */
+  distance: number;
+  /** Health bonus plus pill and kit bonus, in points. */
+  bonus: number;
+  alive: number;
+  /** Map multiplier, e.g. 1.25. */
+  mult: number;
+  /** Health bonus and pills as % of their maximum (HB and Pills in !health). */
+  hbPct: number;
+  pillsPct: number;
+  /** The round's score if the survivors wiped now, and if they made it now. */
+  wiped: number;
+  made: number;
+  /** Round 2: the infected team's campaign total minus the survivors'
+   *  (positive: points the survivors need to tie). Null in round 1. */
+  gap: number | null;
+}
+
 export interface LiveHud {
   /** The furthest survivor's flow %, or null when the server could not tell. */
   progress: number | null;
@@ -437,6 +461,8 @@ export interface LiveHud {
   /** Second half: the furthest the other team got on this map in the first
    *  half (the opponent's mark), or null when not known. */
   rivalReach: number | null;
+  /** What !health prints (l4dscores via pug-match 0.3.43), null without it. */
+  scores?: LiveScores | null;
 }
 
 export interface CastLiveRound {
