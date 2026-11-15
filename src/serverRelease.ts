@@ -310,3 +310,76 @@ export function reconcileServers(db: DB, releaser: ServerReleaser, keep: readonl
   }
   return stranded.map((r) => r.id);
 }
+
+/** What a box says when asked whether it is free: whether pug-match holds no
+ *  match (sm_pug_status state=none) and how many humans are on it. Null when
+ *  it did not answer. */
+export type IdleProbe = (server: ServerRow) => Promise<{ idle: boolean; humans: number } | null>;
+
+/** Boxes a recovery pass is probing now, so a slow probe and the next sweep
+ *  never both act on one box. */
+const probing = new Set<number>();
+
+/**
+ * Put back in the pool a box a site restart left 'offline' after its
+ * after-match restart (pug-offline-strand-on-web-restart, 2026-09-26: Chicago
+ * sat out of matchmaking 4.5 h).
+ *
+ * release() marks a restart_after_match box offline and only flips it idle in
+ * the same process once the box answers again; a web restart in that window
+ * loses the flip, and reconcileServers leaves 'offline' alone on purpose. So
+ * this looks only at the boxes that strand can produce: enabled, not retired,
+ * offline, restart_after_match set, no gone flag (a booking's, which only its
+ * give-back clears), no hold (booking, practice, side game), no configuring or
+ * live match, not mid-restart in this process, the newest match that held it
+ * over, and no release engine write or park newer than that match (a parked box
+ * is offline on purpose until staff Set idle). Each is asked over rcon, and
+ * only one that answers with no match and no humans goes back to idle, with a
+ * guarded write that re-checks the same conditions. Returns the ids freed.
+ */
+export async function recoverOfflineServers(db: DB, releaser: ServerReleaser, probe: IdleProbe): Promise<number[]> {
+  const sql = `SELECT s.id FROM servers s
+     WHERE s.status = 'offline' AND s.enabled = 1 AND s.retired = 0 AND s.restart_after_match = 1
+       AND s.gone_since IS NULL
+       AND s.id NOT IN (SELECT server_id FROM open_server_holds)
+       AND NOT EXISTS (SELECT 1 FROM matches m WHERE m.server_id = s.id AND m.state IN ('configuring', 'live'))
+       AND EXISTS (SELECT 1 FROM matches m WHERE m.server_id = s.id AND m.ended_at IS NOT NULL
+                     AND m.id = (SELECT MAX(id) FROM matches WHERE server_id = s.id))
+       AND NOT EXISTS (SELECT 1 FROM release_boxes b WHERE b.server_id = s.id AND (b.state = 'writing'
+             OR (b.state = 'written' AND b.updated_at >= (SELECT MAX(ended_at) FROM matches WHERE server_id = s.id))))`;
+  const ids = (db.prepare(sql).all() as { id: number }[]).map((r) => r.id)
+    .filter((id) => !releaser.isRestarting(id) && !probing.has(id));
+  const freed: number[] = [];
+  for (const id of ids) {
+    const server = getServer(db, id);
+    if (!server) continue;
+    probing.add(id);
+    try {
+      let answer: { idle: boolean; humans: number } | null = null;
+      try {
+        answer = await probe(server);
+      } catch {
+        answer = null;
+      }
+      if (!answer) continue;
+      if (!answer.idle || answer.humans > 0) {
+        console.log(`[serverRelease] ${server.name} is offline after a restart and answers, but ${answer.idle ? `has ${answer.humans} human(s) on it` : 'its plugin holds a match'}; leaving it offline`);
+        continue;
+      }
+      if (releaser.isRestarting(id)) continue;
+      // The same conditions again, in the write: the probe took time, and a
+      // release, a hold or a match may have taken the box meanwhile.
+      const still = (db.prepare(`${sql} AND s.id = ?`).get(id) as { id: number } | undefined) !== undefined;
+      if (!still) continue;
+      const n = db.prepare("UPDATE servers SET status = 'idle' WHERE id = ? AND status = 'offline'").run(id).changes;
+      if (n === 1) {
+        console.warn(`[serverRelease] ${server.name} was left offline after its after-match restart (a site restart lost the flip); it answers idle with no humans, so it is back in the pool`);
+        freed.push(id);
+      }
+    } finally {
+      probing.delete(id);
+    }
+  }
+  if (freed.length > 0) releaser.wake();
+  return freed;
+}
