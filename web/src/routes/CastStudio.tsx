@@ -254,6 +254,10 @@ export default function CastStudio() {
           Pick what is on air, cut scenes with the number keys, and point OBS at your overlay links.
           Overlays follow this page within a second. The server connect line for the match on air is under On air.
         </p>
+        <p class="studio__lede">
+          <a class="btn btn--ghost btn--sm" href="/cast/desk" target="_blank" rel="noopener">Open the caster desk</a>
+          <span class="muted"> Live stats for a second monitor: every player's HP as numbers, damage, items, flow, box score and play by play.</span>
+        </p>
       </PageHeader>
       {error && <p class="studio__error" role="alert">{error}</p>}
       <Preflight state={state} feed={feed} obsStatus={obsStatus} panel={panel} />

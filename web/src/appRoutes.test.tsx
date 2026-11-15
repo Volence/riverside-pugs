@@ -52,6 +52,16 @@ describe('the site route table', () => {
     open('/not-a-page');
     expect(await screen.findByText('Page not found')).toBeTruthy();
   });
+  it('mounts the caster desk: the caster gate when signed out, the sample match with ?sample', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+    const first = open('/cast/desk');
+    expect(await screen.findByText(/This page is for casters/)).toBeTruthy();
+    first.unmount();
+    open('/cast/desk?sample');
+    expect(await screen.findByText('Box score', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Play by play')).toBeTruthy();
+  });
+
   it('mounts the news list and a news post, not the 404', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
     const first = open('/news');

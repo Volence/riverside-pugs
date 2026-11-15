@@ -1,0 +1,87 @@
+/* Caster desk (/cast/desk): a dense stats screen for a second monitor. Site
+ * tokens, Anton numbers, Oswald labels; read at a glance from a game chair. */
+.desk { min-height: 100vh; box-sizing: border-box; padding: 14px 18px 18px; background: var(--bg); color: var(--text);
+  font-family: var(--font-body); display: flex; flex-direction: column; gap: 12px; }
+.desk--empty { align-items: center; justify-content: center; text-align: center; }
+.desk--empty h1 { font: 400 40px var(--font-display); text-transform: uppercase; color: var(--text-bright); margin: 0; }
+.desk h2 { font: 500 15px var(--font-label); letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 8px; }
+.desk__h2note { letter-spacing: 0.04em; text-transform: none; font-weight: 400; margin-left: 8px; opacity: 0.8; }
+.desk__dim { color: var(--text-muted); }
+.desk__note { color: var(--text-muted); font-size: 14px; margin: 8px 0 0; }
+
+.desk__top { display: grid; grid-template-columns: 1fr minmax(320px, auto) 1fr; gap: 12px; align-items: stretch; }
+.desk__team { display: flex; align-items: center; gap: 14px; padding: 8px 18px; background: var(--surface); border-left: 6px solid var(--c); min-width: 0; }
+.desk__team--r { flex-direction: row-reverse; border-left: 0; border-right: 6px solid var(--c); }
+.desk__teamname { font: 400 30px/1.1 var(--font-display); text-transform: uppercase; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.desk__side { font: 600 12px var(--font-label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-muted); }
+.desk__side--survivor { color: var(--win); }
+.desk__side--infected { color: var(--loss); }
+.desk__score { margin-left: auto; font: 400 52px/1 var(--font-display); color: var(--text-bright); font-variant-numeric: tabular-nums; }
+.desk__team--r .desk__score { margin-left: 0; margin-right: auto; }
+.desk__mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 14px; background: var(--surface); }
+.desk__map { font: 400 24px/1.1 var(--font-display); text-transform: uppercase; color: var(--accent); }
+.desk__meta { font: 500 14px var(--font-label); letter-spacing: 0.08em; color: var(--text); }
+.desk__chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.desk__chip { font: 500 13px var(--font-label); padding: 2px 8px; background: var(--surface-2); color: var(--text); white-space: nowrap; }
+.desk__chip--on { color: var(--win); }
+.desk__chip--warn { color: var(--bg); background: var(--accent); }
+
+.desk__grid { flex: 1; display: grid; gap: 12px; grid-template-columns: minmax(0, 700px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr; grid-template-areas: "live box" "maps feed"; align-items: start; }
+.desk__panel { background: var(--surface); padding: 12px 14px; min-width: 0; }
+.desk__live { grid-area: live; }
+.desk__feed { grid-area: feed; align-self: stretch; }
+.desk__box { grid-area: box; }
+.desk__maps { grid-area: maps; align-self: stretch; }
+@media (max-width: 1500px) {
+  .desk__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "live feed" "box box" "maps maps"; }
+}
+@media (max-width: 900px) {
+  .desk__grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "live" "feed" "box" "maps"; }
+  .desk__top { grid-template-columns: 1fr; }
+}
+
+.desk__table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.desk__table th, .desk__table td { padding: 4px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); height: auto; }
+.desk__table thead th { font: 500 12px var(--font-label); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); border-bottom: 2px solid var(--c, var(--border)); }
+.desk__table tbody th { text-align: left; font: 500 17px var(--font-label); text-transform: none; letter-spacing: 0.01em; color: var(--text-bright); max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.desk__table thead th:first-child { text-align: left; color: var(--c, var(--text-muted)); }
+.desk__table td { font-size: 15px; }
+.desk__surv, .desk__inf { margin-bottom: 10px; }
+.desk__hp { font: 400 26px/1 var(--font-display); color: var(--text-bright); }
+.desk__state { font: 600 14px var(--font-label); text-transform: uppercase; text-align: left !important; }
+.desk__surv .is-hi .desk__hp { color: #3fbf5c; }
+.desk__surv .is-mid .desk__hp { color: #f0aa46; }
+.desk__surv .is-lo .desk__hp, .desk__surv .is-down .desk__hp, .desk__surv .is-down .desk__state { color: var(--loss); }
+.desk__table .is-dead th, .desk__table .is-dead td { color: var(--text-muted); }
+.desk__inf .is-tank .desk__state, .desk__inf .is-tank .desk__hp { color: var(--accent); }
+.desk__inf .is-ghost .desk__state { color: var(--text-muted); }
+
+.desk__tank { display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--surface-2); border-left: 4px solid var(--accent); }
+.desk__tank b { font: 400 20px var(--font-display); text-transform: uppercase; color: var(--accent); }
+.desk__bar { height: 10px; background: rgba(255, 255, 255, 0.08); position: relative; }
+.desk__bar span { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.desk__big { font: 400 28px/1 var(--font-display); color: var(--text-bright); }
+
+.desk__events { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 4px; max-height: 420px; overflow: auto; }
+.desk__ev { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 5px 8px; background: var(--surface-2); border-left: 4px solid var(--c); font-size: 15px; }
+.desk__ev b { font: 600 13px var(--font-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-bright); }
+.desk__ev--infected b { color: var(--loss); }
+.desk__recap { padding: 8px 10px; margin-bottom: 8px; background: var(--surface-2); border-left: 4px solid var(--accent); }
+.desk__recap b { font: 400 18px var(--font-display); text-transform: uppercase; color: var(--accent); }
+.desk__recap ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.desk__recap li { display: grid; grid-template-columns: 1fr 70px 46px; gap: 8px; font-size: 15px; }
+.desk__recap li span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+
+.desk__scroll { overflow-x: auto; }
+.desk__boxtable td.is-top { color: #e8c24a; font-weight: 600; }
+.desk__boxtable .desk__split { border-left: 2px solid var(--border); }
+.desk__groups th { text-align: center !important; color: var(--text) !important; border-bottom: 0 !important; }
+.desk__teamrow th { font: 400 18px var(--font-display) !important; text-transform: uppercase; color: var(--c) !important; padding-top: 10px !important; }
+.desk__teamrow th span { color: var(--text-bright); margin-left: 8px; }
+
+.desk__maptable td:first-child { text-align: left; color: var(--text-muted); width: 24px; }
+.desk__maptable tbody th { font-size: 15px; text-transform: none; }
+.desk__maptable .is-playing th { color: var(--accent); }
+.desk__maptable .is-next th, .desk__maptable .is-next td { color: var(--text-muted); }
+.desk__boxtable th, .desk__boxtable td { padding: 4px 6px; }
