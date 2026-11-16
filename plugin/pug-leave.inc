@@ -55,6 +55,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	MarkNativeAsOptional("Score_GetLiveScores");
 	// REST in Pawn is optional: see pug-livepush.inc.
 	LivePushMarkOptional();
+	TankPlanRegisterNatives();
 	return APLRes_Success;
 }
 

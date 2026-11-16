@@ -32,7 +32,7 @@ native int GetWitchPercent();
 // Optional, marked in AskPluginLoad2; read only by LIVEHUD.
 native int Score_GetLiveScores(int &distance, int &bonus, int &alive, float &mult, float &hbPct, float &pillsPct, int &wiped, int &made, int &gap);
 
-#define PLUGIN_VERSION "0.3.44"
+#define PLUGIN_VERSION "0.3.45"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -152,6 +152,8 @@ char g_sTeardownToken[65];
 char g_sRosterId[MAX_ROSTER][32];
 int g_iRosterTeam[MAX_ROSTER];          // 1 = a, 2 = b
 int g_iRosterJoinedMap[MAX_ROSTER];     // map ordinal the slot was rostered on; 0 = from the start
+int g_iRosterTankSlot[MAX_ROSTER];      // pug-tankplan.inc: SR rank in its team, 0 = none
+char g_sTankOrder[MAX_ROSTER + 1];      // pug-tankplan.inc: slot per map ordinal, "" = no plan
 int g_iRosterCount;
 
 // In-game names, captured at roster time. Only populated for self-started
@@ -555,6 +557,7 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	HookEvent("infected_death", Event_InfectedDeath);
 	HookEvent("revive_success", Event_ReviveSuccess);
 	LeaveInit();
+	TankPlanInit();
 	RatesInit();
 	PauseInit();
 	ModCall_Init();
@@ -2122,6 +2125,8 @@ public Action Cmd_Roster(int args)
 	// Optional ":<joinedmap>" (site plan 5, resume): the map ordinal this
 	// player was rostered on in the match before the restart.
 	if (arg[sep + 2] == ':') g_iRosterJoinedMap[g_iRosterCount] = StringToInt(arg[sep + 3]);
+	// Optional 4th field ":<tankslot>" after the joined map (pug-tankplan.inc).
+	TankPlanParseRosterTail(g_iRosterCount, arg[sep + 2]);
 	g_iRosterCount++;
 	PrintToServer("PUGOK roster=%d", g_iRosterCount);
 	return Plugin_Handled;
@@ -3146,12 +3151,14 @@ public Action Cmd_Status(int args)
 	for (int i = 0; i < g_iRosterCount; i++)
 	{
 		int client = ClientOfSlot(i);
-		DumpLine("STATUS roster slot=%d steamid=%s team=%s connected=%d side=%s name=%s",
+		DumpLine("STATUS roster slot=%d steamid=%s team=%s connected=%d side=%s name=%s tank=%d",
 			i, g_sRosterId[i], g_iRosterTeam[i] == 1 ? "a" : "b",
 			client != -1 ? 1 : 0,
 			client != -1 ? SideName(GetClientTeam(client)) : "-",
-			client != -1 ? NameOf(client) : "-");
+			client != -1 ? NameOf(client) : "-",
+			g_iRosterTankSlot[i]);
 	}
+	DumpLine("STATUS tank order=%s map=%d slot=%d", g_sTankOrder[0] ? g_sTankOrder : "-", g_iMapCount, TankPlanSlotNow());
 	for (int i = 0; i < g_iMapCount; i++)
 	{
 		DumpLine("STATUS map ordinal=%d map=%s a=%d b=%d", i, g_sMapName[i], g_iMapScoreA[i], g_iMapScoreB[i]);
@@ -3279,6 +3286,7 @@ void ResetMatchState()
 	g_bPendingFinalize = false;
 	g_iPugSide[1] = 0;
 	g_iPugSide[2] = 0;
+	TankPlanReset();
 	g_bSeedHold = false;
 	g_fSeedHoldUntil = 0.0;
 	g_iNextFirstL4ds = 0;
@@ -5575,6 +5583,8 @@ public void Event_PounceStopped(Event event, const char[] name, bool dontBroadca
 #include "pug-datafeeds.inc"
 // Per-player end-of-match notes and !rq (reads the roster and the end kick).
 #include "pug-endnote.inc"
+// Tank order by SR rank for l4d_tank_control (reads the roster and g_iMapCount).
+#include "pug-tankplan.inc"
 
 /** pain_pills_decay_rate (temp health lost per second), looked up once. */
 float PillsDecayRate()
