@@ -60,7 +60,7 @@ describe('recordBalanceSighting', () => {
     addServer(db, { name: 'dallas', host: '10.0.0.1', port: 27015, rconPort: 27015, rconPassword: 'x' });
     addServer(db, { name: 'chicago', host: '10.0.0.2', port: 27015, rconPort: 27015, rconPassword: 'x' });
     problems = [];
-    unsub = subscribeAdminEvents((e) => { if (e.kind === 'problem') problems.push(e.text); });
+    unsub = subscribeAdminEvents((e) => { if (e.kind === 'balance_patch') problems.push(e.text); });
   });
   afterEach(() => unsub());
 
@@ -181,7 +181,7 @@ describe('recordBalanceSighting', () => {
 
   it('a new detected patch is pending, remembers where the server came from, and the alert says so with a link', () => {
     const events: { text: string; link?: { label: string; path: string } }[] = [];
-    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') events.push(e); });
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'balance_patch') events.push(e); });
     const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: INV, versionless: [] });
     const b = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { ...INV, 'p:l4d_tvwatch.smx': '1.a' }, versionless: [] });
     off();
@@ -234,7 +234,7 @@ describe('recordBalanceSighting', () => {
     const a = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { 'c:a': '1' }, versionless: [] });
     expect(a.serverChanged).toBe(true);
     const events: string[] = [];
-    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') events.push(e.text); });
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'balance_patch') events.push(e.text); });
     db.prepare("INSERT INTO balance_patches (id, fingerprint, source, inputs_json, first_seen_at) VALUES (99, ?, 'announced', '{\"c:a\":\"2\"}', '2026-09-24 00:00:00')")
       .run(fingerprintOf({ 'c:a': '2' }, []));
     const b = recordBalanceSighting(db, { matchId: 1, serverId: 1, half: 1, inventory: { 'c:a': '2' }, versionless: [], expectedPatchId: 99 });

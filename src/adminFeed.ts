@@ -20,6 +20,10 @@ export type AdminEvent =
   | { kind: 'account'; steamid: string; what: 'linked' | 'activated'; discordName?: string }
   // `link` is a site path the Discord poster turns into a link.
   | { kind: 'problem'; text: string; matchId?: number; link?: { label: string; path: string } }
+  // A box's balance fingerprint changed (src/balancePatches.ts). Every deploy
+  // causes one, so it has its own switch, off by default; the Patches page
+  // keeps the triage list either way.
+  | { kind: 'balance_patch'; text: string; link?: { label: string; path: string } }
   /** decided: the team that won a match the quitter left already decided
    *  (it completed and is rated); null or absent: aborted, nobody else rated. */
   | { kind: 'abandon'; steamid: string; matchId: number; minutes: number; decided?: 'a' | 'b' | null }
@@ -147,6 +151,7 @@ export const FEED_SETTING: Record<AdminEvent['kind'], string> = {
   penalty: 'admin_feed_penalties',
   account: 'admin_feed_accounts',
   problem: 'admin_feed_problems',
+  balance_patch: 'admin_feed_balance',
   abandon: 'admin_feed_penalties',
   clock: 'admin_feed_problems',
   // Its own minutes setting is the switch: '0' reads as off here too.

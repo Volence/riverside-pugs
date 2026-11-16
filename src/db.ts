@@ -1687,6 +1687,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   admin_feed_penalties: '1',
   admin_feed_accounts: '1',
   admin_feed_problems: '1',
+  // Balance patch alerts: every deploy makes one, so off unless asked for.
+  admin_feed_balance: '0',
   admin_feed_conduct: '1',
   admin_feed_staff_messages: '1',
   // The once-a-day rename digest (src/playerNames.ts). Off also stops names

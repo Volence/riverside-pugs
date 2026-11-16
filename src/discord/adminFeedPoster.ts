@@ -128,6 +128,7 @@ export class AdminFeedPoster {
           color: COLOR.account,
         };
       case 'problem':
+      case 'balance_patch':
         return { text: `⚠️ ${e.text}${e.link ? ` [${e.link.label}](${this.deps.publicUrl}${e.link.path})` : ''}`, color: COLOR.problem };
       case 'abandon':
         return {

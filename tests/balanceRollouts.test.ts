@@ -150,7 +150,7 @@ describe('confirming a rollout when something else changed in the same gap', () 
     if (!r.ok) throw new Error(r.error);
     markWritten(db, r.rolloutId, s1);
     const alerts: string[] = [];
-    const off = subscribeAdminEvents((e) => { if (e.kind === 'problem') alerts.push(e.text); });
+    const off = subscribeAdminEvents((e) => { if (e.kind === 'balance_patch') alerts.push(e.text); });
     const seen = sightLive(10, s1, { ...LIVE, 'c:z_tank_health': '7500', 'c:z_new_watch': '5' });
     off();
     expect(alerts).toEqual([]);
