@@ -106,6 +106,15 @@ describe('RealOrchestrator', () => {
 
     expect(srv.cmds.some((c) => c.startsWith('logaddress_add 127.0.0.1:27500'))).toBe(true);
     expect(srv.cmds.filter((c) => c.startsWith('sm_pug_roster'))).toHaveLength(8);
+    // Tank order (src/tankOrder.ts): a slot 1..4 per team on each roster line,
+    // then one shuffled order of the four slots, after the roster.
+    const slots = srv.cmds.filter((c) => c.startsWith('sm_pug_roster'))
+      .map((c) => /^sm_pug_roster "\d{17}:[ab]:0:([1-4])"$/.exec(c)?.[1]);
+    expect(slots.slice(0, 4).sort()).toEqual(['1', '2', '3', '4']);
+    expect(slots.slice(4).sort()).toEqual(['1', '2', '3', '4']);
+    const order = srv.cmds.findIndex((c) => /^sm_pug_tankorder [1-4]{4}$/.test(c));
+    expect(order).toBeGreaterThan(srv.cmds.map((c) => c.startsWith('sm_pug_roster')).lastIndexOf(true));
+    expect(srv.cmds[order]!.slice(-4).split('').sort().join('')).toBe('1234');
     expect(srv.cmds.some((c) => c.startsWith(`sm_pug_match ${mid} ${m.token} no_mercy`))).toBe(true);
     expect(srv.cmds.some((c) => c.startsWith('changelevel'))).toBe(true);
     // Shown on the ready-up panel; must follow pug_match, which sets the generic one.

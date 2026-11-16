@@ -27,6 +27,7 @@ import { holdMaxSeconds } from './presence.js';
 import { endNotes, standingSnapshot, type StandingSnapshot } from './endNotes.js';
 import { seasonOneLive } from './seasonThemes.js';
 import { consoleText, quoted } from './serverSetup.js';
+import { planTankOrder } from './tankOrder.js';
 import type { RequeueResult } from './matchRequeue.js';
 
 /** What one attempt to collect a match came to.
@@ -288,7 +289,22 @@ export class RealOrchestrator implements Orchestrator {
       // unquoted args on ':', so the plugin would receive a bare steamid, reject
       // the line, and then kick every player as non-rostered. Verified on the
       // live box 2026-08-29. The fake RCON server in tests does not tokenize.
-      for (const r of roster) await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}"`);
+      // The 4th field is the tank slot (src/tankOrder.ts; the 3rd, joined
+      // map, is 0 = from the start). A plugin older than 0.3.45 reads
+      // "0:<slot>" as joined map 0 and ignores the rest.
+      const tank = planTankOrder(this.db, matchId, roster);
+      for (const r of roster) {
+        await expectPugOk(rcon, `sm_pug_roster "${r.player_id}:${r.team}:0:${tank.slots.get(r.player_id) ?? 0}"`);
+      }
+      // Never fatal: without it the plugin picks the tank its own way
+      // (everyone once, random order), which is also what an older plugin does.
+      try {
+        const reply = await rcon.exec(`sm_pug_tankorder ${tank.order}`);
+        if (!reply.includes('PUGOK')) console.warn(`[orchestrator] match ${matchId} tank order not taken: ${reply.trim().slice(0, 120)}`);
+        else console.log(`[orchestrator] match ${matchId} tank order ${tank.order}`);
+      } catch (err) {
+        console.error(`[orchestrator] match ${matchId} tank order failed (non-fatal):`, err);
+      }
       // A custom campaign lives in a VPK that must actually be on this box.
       // The pool gate already checks this when the campaign is enabled, but
       // that answer can be stale: a server rebuilt or re-imaged between the

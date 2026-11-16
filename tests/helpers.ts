@@ -74,8 +74,10 @@ export function pugReply(cmd: string, dumpBody: string | ((cmd: string) => strin
   if (name === 'sm_side_stop') return 'PUGOK side stop';
   if (name === 'sm_pug_roster') {
     const arg = rest.startsWith('"') ? rest.slice(1, rest.indexOf('"', 1)) : rest.split(':')[0];
-    return /^\d{17}:[ab]$/.test(arg) ? 'PUGOK roster=1' : `PUGERR bad roster arg: ${arg}`;
+    // Optional ":<joined>[:<tankslot>]" tail (resume; tank order, pug-match 0.3.45).
+    return /^\d{17}:[ab](:\d+(:\d+)?)?$/.test(arg) ? 'PUGOK roster=1' : `PUGERR bad roster arg: ${arg}`;
   }
+  if (name === 'sm_pug_tankorder') return /^[1-9]+$/.test(rest) ? `PUGOK tankorder=${rest}` : `PUGERR bad tank order: ${rest}`;
   return 'ok';
 }
 
