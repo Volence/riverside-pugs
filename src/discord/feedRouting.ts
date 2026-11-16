@@ -19,6 +19,7 @@ export const FEED_DESTINATION: Record<AdminEvent['kind'], 'mod' | 'admin'> = {
   penalty: 'admin',
   account: 'admin',
   problem: 'admin',
+  balance_patch: 'admin',
   abandon: 'admin',
   clock: 'admin',
   // A moderator nudges the player holding it up.

@@ -207,7 +207,7 @@ export function recordBalanceSighting(db: DB, s: {
             ) WHERE id = ?`).get(patchId) as { number: number }).number;
           const pending = (db.prepare('SELECT triage FROM balance_patches WHERE id = ?').get(patchId) as { triage: string | null }).triage === 'pending';
           publishAdminEvent({
-            kind: 'problem', text: alertText(db, s.serverId, patchNumber, newPatch, pending, prev, inventory),
+            kind: 'balance_patch', text: alertText(db, s.serverId, patchNumber, newPatch, pending, prev, inventory),
             ...(pending ? { link: { label: 'Triage it', path: '/admin/balance/patches' } } : {}),
           });
         }
