@@ -111,6 +111,9 @@ int TankPlanPick()
 public int Native_PlannedTank(Handle plugin, int numParams)
 {
 	int c = TankPlanPick();
-	if (c > 0) PugDebug("tank plan: map %d slot %d -> %N", g_iMapCount, TankPlanSlotNow(), c);
+	int r = (c > 0) ? g_iClientRoster[c] : -1;
+	LogMessage("[pug] tank plan: map %d order %s slot %d -> %s%L", g_iMapCount,
+		g_sTankOrder[0] ? g_sTankOrder : "-", TankPlanSlotNow(),
+		c <= 0 ? "none (fallback) " : (r >= 0 && g_iRosterTankSlot[r] != 0) ? "" : "sub ", c > 0 ? c : 0);
 	return c;
 }
