@@ -518,6 +518,12 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       if (!ch || !('setParent' in ch)) return;
       await ch.setParent(parentId, { lockPermissions: false });
     },
+    async renameChannel(channelId, name) {
+      const ch = await channelById(channelId);
+      if (!ch || !('setName' in ch) || ch.name === name) return false;
+      await ch.setName(name);
+      return true;
+    },
     async memberVoiceChannel(userId) {
       return guild.voiceStates.cache.get(userId)?.channelId ?? null;
     },
