@@ -34,6 +34,21 @@ describe('AdminServersPanel and practice leases', () => {
     expect(screen.queryByRole('button', { name: 'Set idle' })).toBeNull();
   });
 
+  it('shows an idle booked box as booked, linking to the booking, not as idle', () => {
+    render(<AdminServersPanel busy={false} run={async () => {}}
+      servers={[server({ booking: { id: 12, purpose: 'scrim', title: 'Heart and Soul vs experts minions' } })]} />);
+    expect(screen.getByText('booked (scrim)')).toBeTruthy();
+    expect(screen.queryByText('idle')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Heart and Soul vs experts minions' }).getAttribute('href')).toBe('/booking/12');
+  });
+
+  it('keeps a live status on a booked box with a game on, and still links the booking', () => {
+    render(<AdminServersPanel busy={false} run={async () => {}}
+      servers={[server({ status: 'live', booking: { id: 12, purpose: 'scrim', title: 'A vs B' } })]} />);
+    expect(screen.getByText('live')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'A vs B' })).toBeTruthy();
+  });
+
   it('an unleased box shows its status as before', () => {
     render(<AdminServersPanel busy={false} run={async () => {}} servers={[server()]} />);
     expect(screen.getByText('idle')).toBeTruthy();

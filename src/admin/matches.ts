@@ -7,6 +7,8 @@ import { archiveAborted } from '../matchArchive.js';
 import { applyAbandonPenalty, matchForecast, recomputeSeasonRatings } from '../rating.js';
 import { publishRecorded, recordAbandons, type RecordedAbandon } from '../abandon.js';
 import { getServer, PICK_ORDER_SQL } from '../serverPool.js';
+import { holdFor } from '../serverHolds.js';
+import { getBooking, sideName, sidesOf } from '../bookings/bookings.js';
 import type { LogAuth } from '../logAuth.js';
 import { serverPasswordFor } from '../matchToken.js';
 import { abortParties, noteMatchAborted } from '../matchAborts.js';
@@ -67,6 +69,9 @@ export function adminOverview(db: DB, logAuth?: LogAuth) {
       // not a status; see src/practiceLeases.ts), so without this the table
       // would call a box people are practising on idle.
       practice: practiceOn(db, s.id),
+      // A booked box is 'idle' in status too (a booking holds it through
+      // open_server_holds), so the booking speaks for it the same way.
+      booking: bookingOn(db, s.id),
       logAuth: {
         mode: logMode,
         hasSecret: hasLogSecret === 1,
@@ -222,6 +227,17 @@ export function voidMatch(db: DB, matchId: number, reason: string): ActionResult
     recomputeSeasonRatings(db, m.season_id);
   })();
   return { ok: true };
+}
+
+/** The booking holding this server (src/serverHolds.ts), for the admin
+ *  Servers table, or null. */
+function bookingOn(db: DB, serverId: number): { id: number; purpose: 'scrim' | 'tournament'; title: string } | null {
+  const hold = holdFor(db, serverId);
+  if (hold?.kind !== 'booking') return null;
+  const b = getBooking(db, hold.rowId);
+  if (!b) return null;
+  const [a, s] = sidesOf(db, b.id);
+  return { id: b.id, purpose: b.purpose, title: a && s ? `${sideName(db, a)} vs ${sideName(db, s)}` : `booking ${b.id}` };
 }
 
 /** The open practice lease holding this server, for the admin Servers

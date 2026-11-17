@@ -10,6 +10,7 @@ import { buildServer } from '../src/server.js';
 import { addServer } from '../src/serverPool.js';
 import { cancelBooking, confirmBooking, createBooking, holdBox, markReady, markSetup } from '../src/bookings/bookings.js';
 import { bookingRoutes } from '../src/routes/bookings.js';
+import { adminOverview } from '../src/admin/matches.js';
 import type { BookingRunner } from '../src/bookings/runner.js';
 import { authedCookie, stubOrchestrator } from './helpers.js';
 
@@ -164,6 +165,41 @@ describe('staff', () => {
     expect((await call('POST', `/api/admin/bookings/${id}/cancel`, MOD, { reason: 'test' })).statusCode).toBe(200);
     expect(db.prepare('SELECT state, cancel_side FROM bookings WHERE id = ?').get(id)).toEqual({ state: 'cancelled', cancel_side: null });
     expect(db.prepare("SELECT action FROM admin_actions WHERE action = 'booking_cancel'").all()).toHaveLength(1);
+  });
+
+  it('staff add someone to a side, accepted at once, and remove them; both audited; players cannot use the admin routes', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    expect((await call('POST', `/api/admin/bookings/${id}/people`, P[0], { side: 'b', steamid: P[2], role: 'ringer' })).statusCode).toBe(403);
+    const added = await call('POST', `/api/admin/bookings/${id}/people`, MOD, { side: 'b', steamid: P[2], role: 'ringer' });
+    expect(added.statusCode).toBe(200);
+    expect(added.json().sides[1].people).toContainEqual(expect.objectContaining({ steamid: P[2], role: 'ringer', status: 'accepted' }));
+    expect((await call('POST', `/api/admin/bookings/${id}/people`, MOD, { side: 'b', steamid: P[2], role: 'ringer' })).statusCode).not.toBe(200);
+    expect((await call('POST', `/api/admin/bookings/${id}/people/${P[2]}/remove`, P[0])).statusCode).toBe(403);
+    const removed = await call('POST', `/api/admin/bookings/${id}/people/${P[2]}/remove`, MOD);
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json().sides[1].people.map((p: { steamid: string }) => p.steamid)).not.toContain(P[2]);
+    expect((await call('POST', `/api/admin/bookings/${id}/people/${P[1]}/remove`, MOD)).statusCode).not.toBe(200);
+    expect(db.prepare("SELECT action FROM admin_actions WHERE action LIKE 'booking_person_%' ORDER BY id").all())
+      .toEqual([{ action: 'booking_person_add' }, { action: 'booking_person_remove' }]);
+  });
+
+  it('the admin Servers table names the booking holding an idle box, and nothing on the others', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    const serverId = (db.prepare("SELECT id FROM servers WHERE name = 'bb'").get() as { id: number }).id;
+    expect(holdBox(db, id, serverId, new Date())).toBe(true);
+    const rows = adminOverview(db).servers as unknown as { id: number; status: string; booking: unknown }[];
+    expect(rows.find((r) => r.id === serverId)).toMatchObject({ status: 'idle', booking: { id, purpose: 'scrim', title: "p300's group vs p301's group" } });
+    expect(rows.filter((r) => r.id !== serverId).map((r) => r.booking)).toEqual([null, null]);
+  });
+
+  it('staff cannot add or remove people on a tournament booking from here', async () => {
+    const id = await create();
+    await call('POST', `/api/bookings/${id}/confirm`, P[1]);
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(id);
+    expect((await call('POST', `/api/admin/bookings/${id}/people`, MOD, { side: 'a', steamid: P[2], role: 'player' })).statusCode).toBe(409);
+    expect((await call('POST', `/api/admin/bookings/${id}/people/${P[0]}/remove`, MOD)).statusCode).toBe(409);
   });
 
   it('the staff list names each booking\'s purpose and the scrim cap beside the PUG reserve (server priority Ruling 9)', async () => {
