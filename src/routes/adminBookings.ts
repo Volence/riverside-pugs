@@ -107,6 +107,38 @@ export async function adminBookingRoutes(app: FastifyInstance, opts: { db: DB; r
     return { ok: true };
   });
 
+  /** Add someone to a side (owner 2026-11-17: a sub turned up and only the
+   *  captain could add them). Staff vouch, so they are accepted at once and
+   *  on the box's list at the next minute's push. Answers the booking view. */
+  app.post('/api/admin/bookings/:id/people', async (req, reply) => {
+    const me = requireStaff(req, reply);
+    if (!me) return;
+    const id = idOf(req.params);
+    if (B.getBooking(db, id)?.purpose === 'tournament') {
+      return reply.code(409).send({ error: 'The event runs this tournament match. Use the event desk.' });
+    }
+    const b = (req.body ?? {}) as { side?: unknown; steamid?: unknown; role?: unknown };
+    const r = B.addPerson(db, { bookingId: id, by: me, staff: true, side: b.side, steamid: b.steamid, role: b.role });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'booking_person_add', id, { side: b.side, steamid: b.steamid, role: b.role });
+    runner?.onPersonAdded(id, String(b.steamid), me);
+    return B.bookingView(db, id, { steamid: me, staff: true });
+  });
+
+  app.post('/api/admin/bookings/:id/people/:steamid/remove', async (req, reply) => {
+    const me = requireStaff(req, reply);
+    if (!me) return;
+    const id = idOf(req.params);
+    if (B.getBooking(db, id)?.purpose === 'tournament') {
+      return reply.code(409).send({ error: 'The event runs this tournament match. Use the event desk.' });
+    }
+    const steamid = (req.params as { steamid: string }).steamid;
+    const r = B.removePerson(db, { bookingId: id, by: me, staff: true, steamid });
+    if (!r.ok) return refuse(reply, r.error);
+    logAdmin(db, me, 'booking_person_remove', id, { steamid });
+    return B.bookingView(db, id, { steamid: me, staff: true });
+  });
+
   app.post('/api/admin/bookings/:id/end', async (req, reply) => {
     const me = requireStaff(req, reply);
     if (!me) return;

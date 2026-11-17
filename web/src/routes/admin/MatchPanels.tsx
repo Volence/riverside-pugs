@@ -111,6 +111,16 @@ export function AdminServersPanel({ servers, busy, run, health, canManage = true
                         ? <span class="muted">started by {s.practice.ownerName}</span>
                         : <a class="muted" href={`/practice/${s.practice.leaseId}`}>{s.practice.ownerName}</a>}
                     </>
+                  ) : s.booking ? (
+                    <>
+                      {/* Booked boxes stay 'idle' between games (the booking
+                          is a hold, not a status), so the booking speaks for
+                          an idle one; a live game keeps its own status. */}
+                      {s.status === 'idle'
+                        ? <span class="admin-status admin-status--reserved">booked ({s.booking.purpose})</span>
+                        : <span class={`admin-status admin-status--${s.status}`}>{s.status}</span>}{' '}
+                      <a class="muted" href={`/booking/${s.booking.id}`}>{s.booking.title}</a>
+                    </>
                   ) : <span class={`admin-status admin-status--${s.status}`}>{s.status}</span>}
                 </td>
                 {/* Eligibility, not lifecycle. A disabled box keeps whatever

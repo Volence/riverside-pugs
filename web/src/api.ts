@@ -1324,6 +1324,9 @@ export interface AdminOverview {
      *  leased box is 'idle' in status, so this is what says it is in use.
      *  Optional only for a browser holding new JS against an older server. */
     practice?: { leaseId: number; kind: PracticeKind; ownerName: string; ending: boolean } | null;
+    /** The booking holding this box (it stays 'idle' in status as well).
+     *  Optional only for a browser holding new JS against an older server. */
+    booking?: { id: number; purpose: 'scrim' | 'tournament'; title: string } | null;
   }[];
   recent: { id: number; campaign: string; endedAt: string | null; teamAScore: number; teamBScore: number; winner: string | null; forecast: Forecast | null; pauses: MatchPause[]; readyups: MatchReadyup[]; abandons?: AbandonRecord[]; booked?: BookedSides | null }[];
   /** Ended with no result. `abandonedBy` names the leaver when the abandon
@@ -3272,6 +3275,10 @@ export const adminApi = {
   endBooking: (id: number) => post(`/api/admin/bookings/${id}/end`),
   /** Staff excuse a side's late cancel or no-show (plan 2), with an optional note. */
   excuseBooking: (id: number, side: BookingSide, note: string) => post(`/api/admin/bookings/${id}/excuse`, { side, note }),
+  /** Staff add someone to a side: accepted at once, no invite. */
+  addBookingPerson: (id: number, side: BookingSide, steamid: string, role: BookingRole) =>
+    post<BookingView>(`/api/admin/bookings/${id}/people`, { side, steamid, role }),
+  removeBookingPerson: (id: number, steamid: string) => post<BookingView>(`/api/admin/bookings/${id}/people/${enc(steamid)}/remove`),
   /** The Events desk (tournaments plan T1a). */
   events: (signal?: AbortSignal) => get<{ events: AdminEventRow[] }>('/api/admin/events', signal),
   eventOptions: (signal?: AbortSignal) => get<AdminEventOptions>('/api/admin/events/options', signal),

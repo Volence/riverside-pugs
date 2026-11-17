@@ -2,19 +2,20 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { LocationProvider } from 'preact-iso';
 
-const { mockBookings, mockAdmin, mockScrims, mockConfirm } = vi.hoisted(() => ({
+const { mockBookings, mockAdmin, mockScrims, mockConfirm, mockTeams } = vi.hoisted(() => ({
   mockBookings: {
     get: vi.fn(), act: vi.fn(), addCampaign: vi.fn(), cancel: vi.fn(), options: vi.fn(), next: vi.fn(), stay: vi.fn(), startNow: vi.fn(), withdrawStartNow: vi.fn(),
     casters: vi.fn(), inviteCaster: vi.fn(), withdrawCaster: vi.fn(), excuse: vi.fn(), review: vi.fn(),
   },
-  mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn(), excuseBooking: vi.fn() },
+  mockAdmin: { cancelBooking: vi.fn(), extendBooking: vi.fn(), endBooking: vi.fn(), excuseBooking: vi.fn(), addBookingPerson: vi.fn(), removeBookingPerson: vi.fn() },
+  mockTeams: { search: vi.fn() },
   mockScrims: { repost: vi.fn() },
   mockConfirm: vi.fn(),
 }));
 vi.mock('../components/Confirm', () => ({ confirm: mockConfirm }));
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, bookingsApi: mockBookings, adminApi: { ...actual.adminApi, ...mockAdmin }, scrimsApi: mockScrims };
+  return { ...actual, bookingsApi: mockBookings, adminApi: { ...actual.adminApi, ...mockAdmin }, scrimsApi: mockScrims, teamsApi: { ...actual.teamsApi, ...mockTeams } };
 });
 const { Booking } = await import('./Booking');
 
@@ -41,6 +42,7 @@ afterEach(() => {
   for (const f of Object.values(mockBookings)) f.mockReset();
   for (const f of Object.values(mockAdmin)) f.mockReset();
   for (const f of Object.values(mockScrims)) f.mockReset();
+  for (const f of Object.values(mockTeams)) f.mockReset();
   mockConfirm.mockReset();
   history.replaceState(null, '', '/');
 });
@@ -185,6 +187,37 @@ describe('Booking page', () => {
     await waitFor(() => expect(mockAdmin.cancelBooking).toHaveBeenCalledWith(7, ''));
     expect(mockConfirm.mock.calls[0][0]).toMatchObject({ confirmLabel: 'Cancel booking', danger: true });
     await waitFor(() => expect(mockBookings.get).toHaveBeenCalledTimes(2));
+  });
+
+  it('a staff-only viewer adds a sub to either side and removes a player, through the admin routes', async () => {
+    const staffView = VIEW({ state: 'active', viewer: { side: null, manages: [], staff: true, invited: false } });
+    mockBookings.get.mockResolvedValue(staffView);
+    mockTeams.search.mockResolvedValue({ players: [{ steamid: 'm1', name: 'mourn' }] });
+    mockAdmin.addBookingPerson.mockResolvedValue(staffView);
+    mockAdmin.removeBookingPerson.mockResolvedValue({});
+    mockConfirm.mockResolvedValue(true);
+    render(<Booking id="7" session={session} />);
+    const inputs = await screen.findAllByRole('textbox', { name: 'Add a player' });
+    expect(inputs).toHaveLength(2);
+    fireEvent.input(inputs[1], { target: { value: 'mou' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add mourn' }));
+    await waitFor(() => expect(mockAdmin.addBookingPerson).toHaveBeenCalledWith(7, 'b', 'm1', 'player'));
+    expect(mockBookings.act).not.toHaveBeenCalled();
+    cleanup();
+    const withSub = VIEW({ state: 'active', viewer: { side: null, manages: [], staff: true, invited: false },
+      sides: VIEW().sides.map((s) => s.side === 'b' ? { ...s, people: [{ steamid: 'm1', name: 'mourn', avatar: null, role: 'ringer', status: 'accepted' }] } : s) });
+    mockBookings.get.mockResolvedValue(withSub);
+    render(<Booking id="7" session={session} />);
+    const removes = await screen.findAllByRole('button', { name: 'Remove' });
+    fireEvent.click(removes[removes.length - 1]);
+    await waitFor(() => expect(mockAdmin.removeBookingPerson).toHaveBeenCalledWith(7, 'm1'));
+  });
+
+  it('a plain player who manages no side gets no add box', async () => {
+    mockBookings.get.mockResolvedValue(VIEW({ viewer: { side: 'a', manages: [], staff: false, invited: false } }));
+    render(<Booking id="7" session={session} />);
+    await screen.findAllByText('p0');
+    expect(screen.queryByRole('textbox', { name: 'Add a player' })).toBeNull();
   });
 
   describe('by campaign', () => {

@@ -25,7 +25,9 @@ const STATE_SHORT: Record<BookingView['state'], string> = {
   ended: 'Over', cancelled: 'Cancelled', no_show: 'No-show',
 };
 
-function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone: (v: BookingView) => void }) {
+/** `staff`: a staff viewer who does not manage this side adds through the
+ *  admin route, and the person is accepted at once (no invite). */
+function AddPerson({ id, side, onDone, staff = false }: { id: number; side: BookingSide; onDone: (v: BookingView) => void; staff?: boolean }) {
   const [q, setQ] = useState('');
   const [found, setFound] = useState<{ steamid: string; name: string }[]>([]);
   const [role, setRole] = useState<BookingRole>('player');
@@ -41,7 +43,7 @@ function AddPerson({ id, side, onDone }: { id: number; side: BookingSide; onDone
     if (adding) return;
     setError(null);
     setAdding(true);
-    try { onDone(await bookingsApi.addPerson(id, side, steamid, role)); setQ(''); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setAdding(false); }
+    try { onDone(await (staff ? adminApi.addBookingPerson : bookingsApi.addPerson)(id, side, steamid, role)); setQ(''); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setAdding(false); }
   };
   return (
     <div class="bookingadd">
@@ -439,13 +441,17 @@ export function Booking({ id, session }: { id: string; session: Session }) {
               <li key={p.steamid}>
                 <a class="bkperson" href={`/player/${p.steamid}`}>{p.name}</a>
                 <span class="muted"> · {ROLE_LABEL[p.role]}{p.status === 'invited' ? ' · invited' : ''}{p.steamid === s.captain.steamid ? ' · captain' : ''}</span>
-                {open && !tournament && v.viewer.manages.includes(s.side) && p.steamid !== s.captain.steamid && (
-                  <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => sure(`Remove ${p.name}?`, 'They come off this booking and its server list.', 'Remove', () => act(() => bookingsApi.removePerson(v.id, p.steamid)))}>Remove</button>
+                {open && !tournament && (v.viewer.manages.includes(s.side) || v.viewer.staff) && p.steamid !== s.captain.steamid && (
+                  <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => sure(`Remove ${p.name}?`, 'They come off this booking and its server list.', 'Remove',
+                    () => v.viewer.manages.includes(s.side)
+                      ? act(() => bookingsApi.removePerson(v.id, p.steamid))
+                      : staffAct(() => adminApi.removeBookingPerson(v.id, p.steamid)))}>Remove</button>
                 )}
               </li>
             ))}
           </ul>
-          {open && !tournament && s.confirmed && v.viewer.manages.includes(s.side) && <AddPerson id={v.id} side={s.side} onDone={setV} />}
+          {open && !tournament && s.confirmed && (v.viewer.manages.includes(s.side) || v.viewer.staff)
+            && <AddPerson id={v.id} side={s.side} onDone={setV} staff={!v.viewer.manages.includes(s.side)} />}
         </Panel>
       ))}
       </div>

@@ -605,7 +605,10 @@ export function addPerson(db: DB, o: {
     if (db.prepare('SELECT 1 FROM booking_people WHERE booking_id = ? AND steamid = ?').get(b.id, steamid)) return fail('already_in');
     const count = (db.prepare('SELECT COUNT(*) AS n FROM booking_people WHERE booking_id = ? AND side = ?').get(b.id, side) as { n: number }).n;
     if (count >= PEOPLE_PER_SIDE) return fail('side_full');
-    const status = s.team_id !== null && roleOf(db, s.team_id, steamid) !== null ? 'accepted' : 'invited';
+    // Staff adding someone (a sub the captain could not add, owner
+    // 2026-11-17) vouches for them: no invite to accept, they are on the
+    // server list at the next push.
+    const status = o.staff || (s.team_id !== null && roleOf(db, s.team_id, steamid) !== null) ? 'accepted' : 'invited';
     insertPerson(db, b.id, side, steamid, role, status, o.by, now);
     logEvent(db, b.id, o.by, 'person_added', { steamid, side, role, status }, now);
     return ok({ status });
