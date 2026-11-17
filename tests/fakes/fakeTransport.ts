@@ -47,6 +47,8 @@ export class FakeTransport implements BotTransport {
   /** Discord refuses the staff role overwrite: the channels are made without
    *  it and the result says staffDropped, as the real transport does. */
   refuseStaffRole = false;
+  /** Every renameChannel that changed a name, in order. */
+  renames: { channelId: string; name: string }[] = [];
   /** channelId -> the category moveChannel last put it under. */
   parentOf = new Map<string, string>();
   /** A createPrivateCategory's afterId, by the category it made. */
@@ -463,6 +465,14 @@ export class FakeTransport implements BotTransport {
     moveChannel: async (channelId, parentId) => {
       if (!this.channels.has(channelId)) return;
       this.parentOf.set(channelId, parentId);
+    },
+    renameChannel: async (channelId, name) => {
+      const ch = this.channels.get(channelId);
+      if (!ch || ch.name === name) return false;
+      if (this.failVoice) throw new Error('missing permissions');
+      ch.name = name;
+      this.renames.push({ channelId, name });
+      return true;
     },
     memberVoiceChannel: async (userId) => this.voiceOf.get(userId) ?? null,
     move: async (userId, channelId) => {

@@ -232,6 +232,11 @@ export interface VoiceOps {
   /** Move a channel under another category, keeping its own permission
    *  overwrites (never synced to the new parent). Ignores an unknown channel. */
   moveChannel(channelId: string, parentId: string): Promise<void>;
+  /** Rename a channel. A no-op when it already has that name, so a caller
+   *  can repeat it after a restart without spending Discord's rename budget
+   *  (two renames per channel per ten minutes). Ignores an unknown channel.
+   *  True when the name was changed. */
+  renameChannel(channelId: string, name: string): Promise<boolean>;
   /** The voice channel a guild member is sitting in, or null. */
   memberVoiceChannel(userId: string): Promise<string | null>;
   move(userId: string, channelId: string): Promise<void>;

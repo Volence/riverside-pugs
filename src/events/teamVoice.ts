@@ -11,6 +11,10 @@ const NAME_MAX = 100;
 /** A finished event keeps its team channels this long, so teams can talk
  *  over the final before the channels go. */
 export const FINISHED_GRACE_MS = 10 * 60_000;
+/** The least time between two renames of one team channel. Discord allows a
+ *  channel two renames per ten minutes and makes the caller wait (minutes)
+ *  past that, so one rename per six minutes never meets the limit. */
+export const RENAME_GAP_MS = 6 * 60_000;
 
 interface VoiceRow { entry_id: number; event_id: number; category_id: string; channel_id: string; created_at: string; deleted_at: string | null }
 
@@ -87,6 +91,15 @@ export class TeamVoice {
    *  first sync lets everyone in again (setMemberAccess is idempotent). */
   private readonly granted = new Map<number, Set<string>>();
   private ticking = false;
+  /** The name each entry's channel was last given (or found to have). Empty
+   *  after a restart; the first rename is then a no-op on Discord's side
+   *  when the name already matches (renameChannel compares first). */
+  private readonly named = new Map<number, string>();
+  /** When each entry's channel was last renamed or a rename failed, for
+   *  RENAME_GAP_MS. A call that found the name already right does not count. */
+  private readonly renamedAt = new Map<number, number>();
+  /** Renames still waiting on Discord, by entry. */
+  private readonly renaming = new Map<number, Promise<void>>();
 
   constructor(private readonly deps: { db: DB; voice: () => VoiceOps | null; now?: () => number }) {}
 
@@ -180,6 +193,7 @@ export class TeamVoice {
     for (const row of this.rowsOf(ev.id)) {
       const entry = N.getEntry(this.deps.db, row.entry_id);
       if (!entry || !N.isActive(entry)) continue;
+      this.rename(voice, row, entry.name.slice(0, NAME_MAX));
       const want = this.desired(row.entry_id);
       const had = this.granted.get(row.entry_id) ?? new Set<string>();
       this.granted.set(row.entry_id, had);
@@ -202,6 +216,37 @@ export class TeamVoice {
         }
       }
     }
+  }
+
+  /**
+   * Keep a team's channel named after the team (owner 2026-11-17: a team
+   * renamed on the site kept its old channel name). Not awaited: a rename past
+   * Discord's limit is held for minutes, and the roster sync must not wait on
+   * it. One rename in flight per channel, and at most one per RENAME_GAP_MS; a
+   * failed rename is logged and tried again after the gap.
+   */
+  private rename(voice: VoiceOps, row: VoiceRow, name: string): void {
+    const id = row.entry_id;
+    if (this.named.get(id) === name || this.renaming.has(id)) return;
+    const now = this.deps.now?.() ?? Date.now();
+    const last = this.renamedAt.get(id);
+    if (last !== undefined && now - last < RENAME_GAP_MS) return;
+    const done = voice.renameChannel(row.channel_id, name)
+      .then((changed) => {
+        this.named.set(id, name);
+        if (changed) this.renamedAt.set(id, now);
+      })
+      .catch((err: unknown) => {
+        this.renamedAt.set(id, now);
+        console.error(`[events] entry ${id}: renaming its team voice failed:`, err);
+      })
+      .finally(() => { this.renaming.delete(id); });
+    this.renaming.set(id, done);
+  }
+
+  /** Resolves once every rename started so far has finished (for tests). */
+  async renamesSettled(): Promise<void> {
+    await Promise.all([...this.renaming.values()]);
   }
 
   /** A heading for every match being played whose two teams both have a
@@ -302,6 +347,8 @@ export class TeamVoice {
       if (await this.deleteOne(voice, r.entry_id, r.channel_id, lobby)) {
         db.prepare('UPDATE event_entry_voice SET deleted_at = ? WHERE entry_id = ?').run(this.nowIso(), r.entry_id);
         this.granted.delete(r.entry_id);
+        this.named.delete(r.entry_id);
+        this.renamedAt.delete(r.entry_id);
         if (eventOver) closedEvents.add(r.event_id);
       }
     }

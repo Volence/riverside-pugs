@@ -3,7 +3,7 @@ import type { DB } from '../src/db.js';
 import { setSetting } from '../src/settings.js';
 import { subscribeAdminEvents, type AdminEvent } from '../src/adminFeed.js';
 import * as N from '../src/events/entries.js';
-import { FINISHED_GRACE_MS, TeamVoice, outSince, teamVoiceChannel, teamVoiceCovers } from '../src/events/teamVoice.js';
+import { FINISHED_GRACE_MS, RENAME_GAP_MS, TeamVoice, outSince, teamVoiceChannel, teamVoiceCovers } from '../src/events/teamVoice.js';
 import { ADMIN, NOW, must } from './eventFixture.js';
 import { draftFixture } from './draftFixture.js';
 import { BENCH, liveStandins, standinFixture } from './standinFixture.js';
@@ -99,6 +99,69 @@ describe('TeamVoice', () => {
     expect(ch.allowed).toContain(disc(BENCH[0]));
     expect(ch.allowed).not.toContain(disc(out));
     expect([...ch.allowed].sort()).toEqual(rosterIds(f.db, entry.id));
+  });
+
+  it('renames a team channel when the team is renamed, once, and not again within the rename gap', async () => {
+    const f = standinFixture();
+    const tv = setup(f.db);
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.renames).toEqual([]);
+    const entry = f.entries[0];
+    const ch = teamVoiceChannel(f.db, entry)!;
+    const rename = (name: string) => f.db.prepare('UPDATE event_entries SET name = ? WHERE id = ?').run(name, entry);
+    rename('Heart and Soul');
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.channels.get(ch)!.name).toBe('Heart and Soul');
+    expect(t.renames).toEqual([{ channelId: ch, name: 'Heart and Soul' }]);
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.renames).toHaveLength(1);
+    rename('Heart and Soul II');
+    clock += RENAME_GAP_MS - 1;
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.channels.get(ch)!.name).toBe('Heart and Soul');
+    clock += 1;
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.channels.get(ch)!.name).toBe('Heart and Soul II');
+    expect(t.renames).toHaveLength(2);
+  });
+
+  it('puts back a channel renamed by hand in Discord after a restart, and touches nothing that already matches', async () => {
+    const f = standinFixture();
+    await setup(f.db).tick();
+    const [a, b] = f.entries;
+    t.channels.get(teamVoiceChannel(f.db, a)!)!.name = 'Team VI renamed by hand';
+    const restarted = setup(f.db);
+    await restarted.tick();
+    await restarted.renamesSettled();
+    expect(t.renames).toEqual([{ channelId: teamVoiceChannel(f.db, a)!, name: N.getEntry(f.db, a)!.name }]);
+    expect(t.channels.get(teamVoiceChannel(f.db, b)!)!.name).toBe(N.getEntry(f.db, b)!.name);
+  });
+
+  it('logs a refused rename, keeps syncing the roster, and tries again after the gap', async () => {
+    const f = standinFixture();
+    const tv = setup(f.db);
+    await tv.tick();
+    const entry = f.entries[0];
+    const ch = teamVoiceChannel(f.db, entry)!;
+    f.db.prepare('UPDATE event_entries SET name = ? WHERE id = ?').run('New Name', entry);
+    t.failVoice = true;
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.channels.get(ch)!.name).not.toBe('New Name');
+    t.failVoice = false;
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.channels.get(ch)!.name).not.toBe('New Name');
+    clock += RENAME_GAP_MS;
+    await tv.tick();
+    await tv.renamesSettled();
+    expect(t.channels.get(ch)!.name).toBe('New Name');
+    expect([...t.channels.get(ch)!.allowed].sort()).toEqual(rosterIds(f.db, entry));
   });
 
   it('deletes the channel of a team that is out, and leaves the rest', async () => {
