@@ -93,8 +93,10 @@ export function AltScoring() {
       </table>
       {summary.mismatchedHalves > 0 && (
         <p class="error" data-testid="alt-mismatch">
-          {summary.mismatchedHalves} halves have a stored score that does not match its own breakdown. That points at a
-          bug in the game server's scoring, not in the match.
+          {summary.mismatchedHalves === 1
+            ? '1 half has a stored score that does not match its own breakdown.'
+            : `${summary.mismatchedHalves} halves have a stored score that does not match their own breakdown.`}{' '}
+          That points at a bug in the game server's scoring, not in the match.
         </p>
       )}
 

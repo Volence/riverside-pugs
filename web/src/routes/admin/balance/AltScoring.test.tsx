@@ -106,12 +106,21 @@ describe('AltScoring', () => {
     const { container } = render(<AltScoring />);
     await waitFor(() => expect(screen.getByTestId('alt-mismatch')).toBeTruthy());
     expect(screen.getByTestId('alt-mismatch').textContent).toBe(
-      "3 halves have a stored score that does not match its own breakdown. That points at a bug in the game server's scoring, not in the match.",
+      "3 halves have a stored score that does not match their own breakdown. That points at a bug in the game server's scoring, not in the match.",
     );
     fireEvent.click(container.querySelectorAll('[data-testid="alt-matches"] tbody > tr')[0]);
     const halfRows = screen.getByTestId('alt-halves-902').querySelectorAll('tbody > tr');
     expect(halfRows[0].textContent).not.toMatch(/mismatch/);
     expect(halfRows[1].textContent).toMatch(/mismatch/);
+  });
+
+  it('words the mismatch line for a single half', async () => {
+    mockAdmin.altScoring.mockResolvedValue({ ...report, summary: { ...report.summary, mismatchedHalves: 1 } });
+    render(<AltScoring />);
+    await waitFor(() => expect(screen.getByTestId('alt-mismatch')).toBeTruthy());
+    expect(screen.getByTestId('alt-mismatch').textContent).toBe(
+      "1 half has a stored score that does not match its own breakdown. That points at a bug in the game server's scoring, not in the match.",
+    );
   });
 
   it('says when no match has reported alt scores yet', async () => {
