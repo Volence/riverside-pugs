@@ -2,7 +2,7 @@
 
 Written 2026-11-18 by Claude after an overnight build, updated the same day with the owner's rulings (walking
 purely distance based, a vanished tank pays, the tank needs a survivor standing, ledge clamp kept, no kits in
-ranked). Nothing here has been deployed, merged to master, or run in game. Design: `docs/superpowers/specs/2026-11-18-health-run-scoring-design.md`. Plan:
+ranked). Nothing here has been deployed or merged to master. The in-game rig was run on 2026-11-18 (task 9, below). Design: `docs/superpowers/specs/2026-11-18-health-run-scoring-design.md`. Plan:
 `docs/superpowers/plans/2026-11-18-health-run-scoring-shadow.md`.
 
 ## What exists and where
@@ -33,24 +33,52 @@ Plugin files: `plugin/pug-altscore.inc`; `plugins-src/l4dscores_alt.inc`, data f
 - The site formula reproduces the plugin's integers from the raw components (checked by hand on a worked
   example; the admin page now flags any half where they disagree by more than 1).
 
+- **In game, 2026-11-18 (task 9)**: own local srcds on port 27075 (l4d1-ds install, l4dscores 8.5.9-riverside9
+  at deploy 61ac90d, rig at deploy eec0e1f), bots plus SourceMod fake clients, no game client. Every rig case
+  passes; numbers in `deploy/tools/altscore-test/README.md` Status and below.
+  - Cases: fresh 127.5; incap 16 / 15 / 16 (solid 1) / 8.48 (8.5); still: walk raw unchanged, points lose only
+    temp decay; teleport: mark 0.16 to 6.23, gain 4.798 for 4.795 expected; down: mark held, gain 2.269 = 2.269;
+    respawn: mark 1.97 to 3.48 with walk raw unchanged; pills: 77.5 held, 77.5 eaten; tankfreeze: walk raw and
+    mark held while the tank is up, then the mark catches up and pays 1.761; tankgone: paid 460 = 460, tankBy 3;
+    tankwipe kill and gone: window closed, unpaid, `ts` 0, tankBy 2 and 3; clean: 700 / 300 / 500 = 1500.
+  - Saved health by offset: read = the health set before the grab in every run (10, 1, 60). The ledge-restore
+    prediction matched the game for solid and temp (stock: 10 solid gives 10 + 20 temp). A 12 s hang at 60 solid
+    restored 53 + 0, at 10 solid 8 + 22; hr1 points never rose above the pre-grab value.
+  - First survivor left: fires from Director::Update only when a survivor is really outside the start area
+    (flow ~1500 on hospital01; 315 was still inside), bots included. With the normal 4v4 config (`sv_cheats 0`,
+    ready-up on): a survivor moved out during ready-up is put back and the half stays not live; after the
+    live countdown (`sm_forcestart`, no humans) the half went live when a survivor left, not at the countdown.
+  - Takeover: fake client takes a bot (mark 3.422 = 3.422, body known, walk raw unchanged) and back (mark 5.96
+    kept).
+  - Frustration pass (`L4D_ReplaceTank` to another infected): the window stays open, tanks stays 1, nothing paid;
+    the later kill paid once.
+  - Map multipliers: hospital01 walk 0.95 / door 1.00; after a changelevel to hospital02 walk 0.95 / door 1.20;
+    after the natural versus transition to hospital03 walk 1.05 / door 1.40; greenhouse 0.85. Loaded each time.
+    (SourceMod `%.2f` truncates, so the rig shows 0.94 and 1.04; the held integers are 95 and 105.)
+  - Real score unchanged: the same scripted half (fixed health, same flow, into the end saferoom) with
+    `l4d_score_alt 1` then `0` gave roundScores 400 and 400, engine chapter score 400 and 400, same 27.7% and
+    4 alive.
+  - Commands (from `sm_altshow`, colours removed): `[Alt] Walk 30 | Tank up to 300 (194 now) | Door up to 600
+    (388 now)` / `[Alt] This half: 30 banked, 951 if you finish at this health. Team health 65%.`; with a tank up
+    `Walk 93 (paused while the tank is up)`; after a kill `Walk 32 | Tank 193 | Door up to 600 (386 now)` and
+    `225 banked`; unpaid tank `Tank 0`; between halves `[Alt] No half in progress.`; second half third line
+    `[Alt] To beat: 244.`; `!scoresalt`: header, `Map 1: 290/244`, `Total: ...`; with `l4d_score_alt 0` both print
+    `[Alt] Alt scoring is off.` The "Some rounds are missing" line showed only when the plugin was loaded
+    mid-map; after a map start (including `sm_restartmap` from the 4v4 config) the tally is not partial.
+  - `l4d_ledge_heal_fix` loaded alongside: no conflict; hr1's clamp held in every ledge run.
+
 ## What was NOT verified
 
-The in-game rig (`deploy/tools/altscore-test`, see its README) was written but never run: the local test servers
-were in use by other sessions all night. So every game-facing assumption is unconfirmed:
+- Chat colours and line lengths as a human sees them (needs a game client typing `!healthalt` / `!scoresalt`).
+- A full non-cheats match with humans readying up (the normal-config pass above used bots and `sm_forcestart`).
+- Takeover by a real human (the rig used a SourceMod fake client).
+- Two rig lines FAIL by design: `takeover` on a half that is not live, and the ledge temp prediction when
+  `l4d_ledge_HealthExpolitFixes` is loaded (it zeroes the buffer at the grab, so the rig's snapshot reads 0).
 
-- the saved pre-grab health read by offset, and the ledge-restore prediction;
-- that left4dhooks' first-survivor-left-safe-area forward fires on our boxes and at the right moment around ready-up;
-- bot and human takeover event order, and that walking state follows the body;
-- that a frustration pass is not read as a tank death;
-- the rulings' cases: a jump forward is paid, ground gained with a tank up is paid once it is gone, a tank
-  killed or kicked with all four down pays 0, a kicked tank with someone standing pays (rig cases `teleport`,
-  `tankfreeze`, `tankwipe`, `tankgone`, `respawn`);
-- whether the "Some rounds are missing from this list." line shows in normal matches (if match configs load
-  l4dscores late);
-- chat colours and line lengths of both commands;
-- that the map multiplier is loaded one frame after map start.
-
-Do not stage riverside9 to a live box before the rig has been run on a free local server.
+Found while testing: `l4d_ledge_HealthExpolitFixes.smx` (raziEiL) is in every server's plugins/ in the deploy
+state snapshot and already stops ledge-rescue health gain: with it loaded, 10 solid 0 temp came back 10 + 0 (also
+on a natural bot rescue after an 18 s hang: 8 + 0), and 10 solid 50 temp came back 10 + 49.6 a frame after the
+rescue. The scoring clamp stays per the ruling; it just rarely has anything to clamp on our boxes.
 
 ## Decisions made without the owner
 
@@ -86,10 +114,9 @@ rows, so it can shift against `!scores` after a map with no alt half.
 ## Decisions waiting for the owner
 
 1. **`!scoresalt` as chat lines** (as built) or a panel.
-2. **Who runs the rig**, and on which local server.
 
-Settled by the owner on 2026-11-18: the ledge clamp stays (our servers have no game-side fix for health gained
-through a ledge rescue: `l4d_ledge_fix` only blocks harmless grabs and `survivor_ledge_grab_health` is 300; a
+Settled by the owner on 2026-11-18: the ledge clamp stays (believed then that no game-side fix existed; the
+in-game run found `l4d_ledge_HealthExpolitFixes` already does it, see above; a
 game-side ledge fix, plugin `l4d_ledge_heal_fix`, is being built separately, and the scoring clamp stays either
 way); a vanished tank pays like a dead one; ranked has no first aid kits; walking is purely distance based; the
 dead-respawn guard does not matter in versus.
@@ -102,7 +129,7 @@ Each step is safe without the next one.
    table is created on boot. With no plugin sending data, the admin page shows its empty state.
 2. **pug-match 0.3.46.** Build with `plugin/build.sh`, stage as usual when the boxes are empty. Against the
    current l4dscores it loads and sends nothing new.
-3. **l4dscores riverside9.** First run the rig locally. Then merge `feature/altscore` into deploy master, build
+3. **l4dscores riverside9.** The rig has been run (2026-11-18). Merge `feature/altscore` into deploy master, build
    with `./build.sh l4dscores` (the script now carries `l4dscores_alt.inc` along), and deploy with
    `altscore_maps.txt`. From the next map on, matches report alt scores and the two commands work.
 
