@@ -33,6 +33,12 @@ function alt(db: DB, id: number, r: Alt): void {
     .run(id, r.ordinal, r.half, r.rule ?? 'hr1', r.surv, r.walk, r.tank, r.door, r.walkMult ?? 1, r.ws ?? 255);
 }
 
+/** A real round for every alt half of the match, so it is complete. */
+function realForAlt(db: DB, id: number): void {
+  db.prepare(`INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score)
+    SELECT match_id, ordinal, half, surv_team, 0 FROM match_round_alt WHERE match_id = ?`).run(id);
+}
+
 /** Eight alt halves; team b scores `bWalk` walking per half, team a 100. */
 function fullAlt(db: DB, id: number, bWalk: number, count = 8): void {
   for (let i = 0; i < count; i++) {
@@ -160,6 +166,7 @@ describe('buildAltReport', () => {
     // Stored walk is after a 1.2 multiplier; ws 255 alone is 350 at multiplier 1.
     alt(db, 1, { ordinal: 0, half: 1, surv: 'a', walk: 420, tank: 0, door: 0, ws: 255, walkMult: 1.2 });
     alt(db, 1, { ordinal: 0, half: 2, surv: 'b', walk: 210, tank: 0, door: 0, ws: 127.5, walkMult: 1.2 });
+    realForAlt(db, 1);
     expect(buildAltReport(db).maps).toEqual([{ map: 'm1', halves: 2, avgWalkRaw: 262.5, suggestedWalkMult: 1 }]);
   });
 
@@ -177,6 +184,7 @@ describe('buildAltReport', () => {
     }
     db.prepare("INSERT INTO match_maps (match_id, ordinal, map) VALUES (3, 0, 'rare')").run();
     alt(db, 3, { ordinal: 0, half: 1, surv: 'a', walk: 350, tank: 0, door: 0, ws: 255 });
+    for (const id of [1, 2, 3]) realForAlt(db, id);
     const byMap = new Map(buildAltReport(db).maps.map((m) => [m.map, m]));
     // Overall mean over 201 halves: (101 x 350 + 100 x 175) / 201.
     const overall = (101 * 350 + 100 * 175) / 201;
@@ -184,5 +192,29 @@ describe('buildAltReport', () => {
     expect(byMap.get('easy')).toEqual({ map: 'easy', halves: 100, avgWalkRaw: 350, suggestedWalkMult: 0.75 });
     expect(byMap.get('hard')).toEqual({ map: 'hard', halves: 100, avgWalkRaw: 175, suggestedWalkMult: 1.5 });
     expect(byMap.get('rare')).toEqual({ map: 'rare', halves: 1, avgWalkRaw: 350, suggestedWalkMult: 1 });
+  });
+
+  it('per-map walking counts only counted matches', () => {
+    // Counted: one half on m1 at 350.
+    match(db, 1);
+    maps(db, 1, 'match_maps', ['m1']);
+    alt(db, 1, { ordinal: 0, half: 1, surv: 'a', walk: 350, tank: 0, door: 0, ws: 255 });
+    realForAlt(db, 1);
+    // Voided, scrim, aborted, live and incomplete matches on m1 at 175 must not count.
+    match(db, 2, { voided: true });
+    match(db, 3, { kind: 'scrim' });
+    match(db, 4, { state: 'aborted' });
+    match(db, 5, { state: 'live', winner: null });
+    match(db, 6);
+    for (const id of [2, 3, 4, 5, 6]) {
+      maps(db, id, id === 5 ? 'match_live_maps' : 'match_maps', ['m1']);
+      alt(db, id, { ordinal: 0, half: 1, surv: 'a', walk: 175, tank: 0, door: 0, ws: 127.5 });
+      alt(db, id, { ordinal: 0, half: 2, surv: 'b', walk: 175, tank: 0, door: 0, ws: 127.5 });
+      if (id !== 6) realForAlt(db, id);
+    }
+    db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score) VALUES (6, 0, 1, 'a', 0)").run();
+    const r = buildAltReport(db);
+    expect(r.matches.filter((m) => m.counted).map((m) => m.id)).toEqual([1]);
+    expect(r.maps).toEqual([{ map: 'm1', halves: 1, avgWalkRaw: 350, suggestedWalkMult: 1 }]);
   });
 });

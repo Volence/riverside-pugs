@@ -77,7 +77,8 @@ interface MatchRow {
 
 /**
  * Every match with hr1 rows, newest first (`limit` matches, default 100).
- * Summary and maps cover all matches with data, not only the listed ones.
+ * Summary and maps cover every match with data, not only the listed ones;
+ * the counted fields and maps use counted matches only.
  * Totals shown are the stored walk/tank/door the server reported; the raw
  * components are used only for the per-map walking at multiplier 1.
  */
@@ -85,6 +86,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
   const limit = opts.limit ?? 100;
   // A completed match keeps its maps in match_maps; a live one in
   // match_live_maps (deleted at archive). Both are keyed by the round ordinal.
+  // The match_live_maps lookup assumes one map row per ordinal.
   const rows = db.prepare(
     `SELECT a.match_id AS matchId, a.ordinal, a.half, a.surv_team AS survTeam, a.walk, a.tank, a.door,
             a.walk_mult AS walkMult, a.door_mult AS doorMult,
@@ -101,6 +103,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
      ORDER BY a.match_id, a.ordinal, a.half`,
   ).all(ALT_RULE) as AltRow[];
 
+  // Newest first is by match id, because ids grow over time.
   const matchRows = db.prepare(
     `SELECT m.id, m.state, m.kind, m.voided_at AS voidedAt, m.campaign, m.ended_at AS endedAt,
             m.team_a_score AS realA, m.team_b_score AS realB, m.winner AS realWinner,
@@ -120,6 +123,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
   let complete = 0;
   let differentWinner = 0;
   const parts = { walk: 0, tank: 0, door: 0 };
+  const countedHalves: AltRow[] = [];
   const matches: AltReportMatch[] = [];
   for (const m of matchRows) {
     const halves = byMatch.get(m.id) ?? [];
@@ -146,6 +150,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
         parts.tank += h.tank;
         parts.door += h.door;
       }
+      countedHalves.push(...halves);
     }
     if (matches.length < limit) {
       matches.push({
@@ -164,7 +169,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
 
   return {
     summary: { matchesWithData: matchRows.length, complete, differentWinner, share },
-    maps: mapWalking(rows),
+    maps: mapWalking(countedHalves),
     matches,
   };
 }
@@ -174,7 +179,8 @@ function rawOf(h: AltRow): AltRaw {
 }
 
 /** Mean walking per half at walk multiplier 1, per named map, and the
- *  multiplier that would bring the map to the overall mean (to 0.05). */
+ *  multiplier that would bring the map to the overall mean (to 0.05).
+ *  Fed only halves of counted matches, so the fit is from ranked play. */
 function mapWalking(rows: AltRow[]): AltReport['maps'] {
   const perMap = new Map<string, { halves: number; walk: number }>();
   let allHalves = 0;
