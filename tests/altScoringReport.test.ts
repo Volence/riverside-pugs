@@ -167,7 +167,7 @@ describe('buildAltReport', () => {
     alt(db, 1, { ordinal: 0, half: 1, surv: 'a', walk: 420, tank: 0, door: 0, ws: 255, walkMult: 1.2 });
     alt(db, 1, { ordinal: 0, half: 2, surv: 'b', walk: 210, tank: 0, door: 0, ws: 127.5, walkMult: 1.2 });
     realForAlt(db, 1);
-    expect(buildAltReport(db).maps).toEqual([{ map: 'm1', halves: 2, avgWalkRaw: 262.5, suggestedWalkMult: 1 }]);
+    expect(buildAltReport(db).maps).toEqual([{ map: 'm1', halves: 2, avgWalkRaw: 262.5, suggestedWalkMult: null }]);
   });
 
   it('suggests a walk multiplier once a map has 100 halves', () => {
@@ -191,7 +191,17 @@ describe('buildAltReport', () => {
     expect(overall / 350).toBeCloseTo(0.751, 3);
     expect(byMap.get('easy')).toEqual({ map: 'easy', halves: 100, avgWalkRaw: 350, suggestedWalkMult: 0.75 });
     expect(byMap.get('hard')).toEqual({ map: 'hard', halves: 100, avgWalkRaw: 175, suggestedWalkMult: 1.5 });
-    expect(byMap.get('rare')).toEqual({ map: 'rare', halves: 1, avgWalkRaw: 350, suggestedWalkMult: 1 });
+    expect(byMap.get('rare')).toEqual({ map: 'rare', halves: 1, avgWalkRaw: 350, suggestedWalkMult: null });
+  });
+
+  it('suggests nothing for a map whose average walking is 0', () => {
+    match(db, 1);
+    for (let o = 0; o < 50; o++) {
+      db.prepare("INSERT INTO match_maps (match_id, ordinal, map) VALUES (1, ?, 'flat')").run(o);
+      for (const half of [1, 2]) alt(db, 1, { ordinal: o, half, surv: half === 1 ? 'a' : 'b', walk: 0, tank: 0, door: 0, ws: 0 });
+    }
+    realForAlt(db, 1);
+    expect(buildAltReport(db).maps).toEqual([{ map: 'flat', halves: 100, avgWalkRaw: 0, suggestedWalkMult: null }]);
   });
 
   it('per-map walking counts only counted matches', () => {
@@ -215,6 +225,6 @@ describe('buildAltReport', () => {
     db.prepare("INSERT INTO match_rounds (match_id, ordinal, half, surv_team, score) VALUES (6, 0, 1, 'a', 0)").run();
     const r = buildAltReport(db);
     expect(r.matches.filter((m) => m.counted).map((m) => m.id)).toEqual([1]);
-    expect(r.maps).toEqual([{ map: 'm1', halves: 1, avgWalkRaw: 350, suggestedWalkMult: 1 }]);
+    expect(r.maps).toEqual([{ map: 'm1', halves: 1, avgWalkRaw: 350, suggestedWalkMult: null }]);
   });
 });

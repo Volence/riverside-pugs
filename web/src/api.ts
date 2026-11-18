@@ -1583,7 +1583,7 @@ export interface AltReportMatch {
 export interface AltReport {
   /** Shares are 0..1, over complete counted matches. */
   summary: { matchesWithData: number; complete: number; differentWinner: number; share: { walk: number; tank: number; door: number } };
-  maps: { map: string; halves: number; avgWalkRaw: number; suggestedWalkMult: number }[];
+  maps: { map: string; halves: number; avgWalkRaw: number; suggestedWalkMult: number | null }[];
   matches: AltReportMatch[];
 }
 

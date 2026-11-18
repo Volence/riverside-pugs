@@ -21,7 +21,10 @@ const half = (ordinal: number, h: number, survTeam: 'a' | 'b', walk: number, tan
 
 const report: AltReport = {
   summary: { matchesWithData: 2, complete: 1, differentWinner: 1, share: { walk: 0.5555, tank: 0.1234, door: 0.3211 } },
-  maps: [{ map: 'l4d_vs_hospital01_apartment', halves: 4, avgWalkRaw: 512.6, suggestedWalkMult: 1 }],
+  maps: [
+    { map: 'l4d_vs_airport05_runway', halves: 120, avgWalkRaw: 600, suggestedWalkMult: 0.85 },
+    { map: 'l4d_vs_hospital01_apartment', halves: 4, avgWalkRaw: 512.6, suggestedWalkMult: null },
+  ],
   matches: [
     {
       id: 902, endedAt: '2026-11-18 03:10:00', campaign: 'no_mercy', realA: 820, realB: 790, realWinner: 'a',
@@ -49,9 +52,14 @@ describe('AltScoring', () => {
     expect(summary).toMatch(/Walking 56%, tank 12%, saferoom 32%/);
 
     // Per-map walking: integer average, no suggestion below 100 halves.
-    const maps = screen.getByTestId('alt-maps').textContent ?? '';
-    expect(maps).toMatch(/Apartment/);
-    expect(maps).toMatch(/513/);
+    const mapRows = screen.getByTestId('alt-maps').querySelectorAll('tbody > tr');
+    expect(mapRows[0].textContent).toMatch(/Runway/);
+    expect(mapRows[0].querySelectorAll('td')[3].textContent).toBe('0.85');
+    expect(mapRows[1].textContent).toMatch(/Apartment/);
+    expect(mapRows[1].querySelectorAll('td')[2].textContent).toBe('513');
+    expect(mapRows[1].querySelectorAll('td')[3].textContent).toBe('-');
+    expect(screen.getByText(/The alt score is what a match would have scored under the new health-run scoring/)).toBeTruthy();
+    expect(screen.getByText(/most recent 100 matches/).textContent).toMatch(/"0 of 0" is expected at first/);
 
     const rows = container.querySelectorAll('[data-testid="alt-matches"] tbody > tr');
     expect(rows).toHaveLength(2);
@@ -60,7 +68,7 @@ describe('AltScoring', () => {
     expect(rows[0].textContent).toMatch(/1201 - 1350/);
     expect(rows[0].textContent).toMatch(/different/);
     expect(rows[1].textContent).toMatch(/incomplete/);
-    expect(screen.getByText(/the match ended early/)).toBeTruthy();
+    expect(screen.getByText(/Incomplete: some halves of the match have a real score but no alt score/).textContent).toMatch(/Not counted: not a ranked PUG, voided, or not finished yet/);
 
     // No halves until a row is opened.
     expect(screen.queryByTestId('alt-halves-902')).toBeNull();
@@ -72,6 +80,10 @@ describe('AltScoring', () => {
     expect(halfRows[1].textContent).toMatch(/Team B/);
     expect(halfRows[1].textContent).toMatch(/650.*200.*500.*1350/);
     expect(halfRows[1].textContent).toMatch(/62%/);
+    // No tank fight ended in the first half: a dash, not a claim there was no tank.
+    expect(halfRows[0].querySelectorAll('td')[8].textContent).toBe('-');
+    expect(halves.textContent).toMatch(/Team health % when the tank fight ended/);
+    expect(halves.textContent).toMatch(/Survivors in saferoom/);
     expect(halves.textContent).toMatch(/Saferoom/);
 
     // Enter toggles it closed again.
