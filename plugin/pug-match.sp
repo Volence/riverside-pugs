@@ -37,8 +37,15 @@ native int Score_GetLiveScores(int &distance, int &bonus, int &alive, float &mul
 // dt dr. tankBy: 0 none (tankPct -1), 1 survivor kill, 2 other death, 3 gone.
 // Optional, marked in AskPluginLoad2; read only by pug-altscore.inc.
 native bool Score_GetAltHalf(int &walk, int &tank, int &door, float raw[9], int &walkMultX100, int &doorMultX100, int &tankPct, int &tankBy, int &tanks, int &survivorsIn);
+// The same held half's health curve: curve[k] = team health % (0..100) when the
+// map covered first reached 5 x k %, -1 for a point never reached; tankOpen and
+// tankClose = the covered figure (0..100) where the half's first tank window
+// opened and where the paying (or last) one closed, -1 when none. False when no
+// finished half is held. Newer than Score_GetAltHalf: optional, marked in
+// AskPluginLoad2 and feature-checked on its own, read only by pug-altscore.inc.
+native bool Score_GetAltCurve(int curve[21], int &tankOpen, int &tankClose);
 
-#define PLUGIN_VERSION "0.3.46"
+#define PLUGIN_VERSION "0.3.47"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
