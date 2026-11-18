@@ -58,7 +58,7 @@ describe('buildAltReport', () => {
 
   it('an empty database gives zeros and empty arrays', () => {
     expect(buildAltReport(db)).toEqual({
-      summary: { matchesWithData: 0, complete: 0, differentWinner: 0, share: { walk: 0, tank: 0, door: 0 } },
+      summary: { matchesWithData: 0, complete: 0, differentWinner: 0, share: { walk: 0, tank: 0, door: 0 }, mismatchedHalves: 0 },
       maps: [],
       matches: [],
     });
@@ -114,6 +114,8 @@ describe('buildAltReport', () => {
       expect(m1.halves[0]).toEqual({
         ordinal: 0, half: 1, map: 'm1', survTeam: 'a', real: 400, walk: 100, tank: 50, door: 30, total: 180,
         tankPct: 55, tankBy: 'surv', survivorsIn: 4,
+        // The fixture's stored parts are not its raw components' (ws 255 is 350 walking).
+        mismatch: true,
       });
       expect(m1.halves[7]).toMatchObject({ ordinal: 3, half: 2, map: 'm4', survTeam: 'b', total: 380 });
       // Match 2 has no map rows: the name is empty, not an error.
@@ -125,6 +127,29 @@ describe('buildAltReport', () => {
       expect(r.matches.map((m) => m.id)).toEqual([3]);
       expect(r.summary.matchesWithData).toBe(3);
     });
+  });
+
+  it('flags a half whose stored parts differ from its raw components by more than 1', () => {
+    match(db, 1);
+    // ws 255 alone is 350 walking at multiplier 1; tank and door are 0 from zero raw.
+    alt(db, 1, { ordinal: 0, half: 1, surv: 'a', walk: 355, tank: 0, door: 0, ws: 255 });
+    alt(db, 1, { ordinal: 0, half: 2, surv: 'b', walk: 351, tank: 0, door: 0, ws: 255 });
+    alt(db, 1, { ordinal: 1, half: 1, surv: 'a', walk: 350, tank: 0, door: 0, ws: 255 });
+    // Under a 1.2 multiplier the same raw is 420.
+    alt(db, 1, { ordinal: 1, half: 2, surv: 'b', walk: 420, tank: 0, door: 0, ws: 255, walkMult: 1.2 });
+    const r = buildAltReport(db);
+    expect(r.matches[0].halves.map((h) => h.mismatch)).toEqual([true, false, false, false]);
+    expect(r.summary.mismatchedHalves).toBe(1);
+  });
+
+  it('counts mismatched halves over every match, not only the listed ones', () => {
+    match(db, 1, { kind: 'scrim' });
+    alt(db, 1, { ordinal: 0, half: 1, surv: 'a', walk: 300, tank: 0, door: 0, ws: 255 });
+    match(db, 2);
+    alt(db, 2, { ordinal: 0, half: 1, surv: 'a', walk: 350, tank: 0, door: 0, ws: 255 });
+    const r = buildAltReport(db, { limit: 1 });
+    expect(r.matches.map((m) => m.id)).toEqual([2]);
+    expect(r.summary.mismatchedHalves).toBe(1);
   });
 
   it('a half without a real round has a null real score', () => {

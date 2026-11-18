@@ -40,10 +40,12 @@ describe('GET /api/admin/balance/alt-scoring', () => {
     const res = await a.inject({ method: 'GET', url: URL, cookies });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.summary).toEqual({ matchesWithData: 1, complete: 1, differentWinner: 0, share: { walk: 300 / 380, tank: 50 / 380, door: 30 / 380 } });
+    expect(body.summary).toEqual({ matchesWithData: 1, complete: 1, differentWinner: 0, share: { walk: 300 / 380, tank: 50 / 380, door: 30 / 380 },
+      // The fixture's stored parts are not its raw components' own.
+      mismatchedHalves: 1 });
     expect(body.maps).toEqual([]);
     expect(body.matches).toHaveLength(1);
     expect(body.matches[0]).toMatchObject({ id: 1, campaign: 'c_test', altA: 380, altB: 0, altWinner: 'a', complete: true, differs: false, counted: true });
-    expect(body.matches[0].halves[0]).toMatchObject({ ordinal: 0, half: 1, map: '', real: 400, total: 380 });
+    expect(body.matches[0].halves[0]).toMatchObject({ ordinal: 0, half: 1, map: '', real: 400, total: 380, mismatch: true });
   });
 });

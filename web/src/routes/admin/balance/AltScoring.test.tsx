@@ -17,10 +17,11 @@ afterEach(() => {
 const half = (ordinal: number, h: number, survTeam: 'a' | 'b', walk: number, tank: number, door: number): AltReportHalf => ({
   ordinal, half: h, map: 'l4d_vs_hospital01_apartment', survTeam, real: 400 + walk, walk, tank, door,
   total: walk + tank + door, tankPct: tank > 0 ? 62 : null, tankBy: tank > 0 ? 'surv' : null, survivorsIn: 3,
+  mismatch: false,
 });
 
 const report: AltReport = {
-  summary: { matchesWithData: 2, complete: 1, differentWinner: 1, share: { walk: 0.5555, tank: 0.1234, door: 0.3211 } },
+  summary: { matchesWithData: 2, complete: 1, differentWinner: 1, share: { walk: 0.5555, tank: 0.1234, door: 0.3211 }, mismatchedHalves: 0 },
   maps: [
     { map: 'l4d_vs_airport05_runway', halves: 120, avgWalkRaw: 600, suggestedWalkMult: 0.85 },
     { map: 'l4d_vs_hospital01_apartment', halves: 4, avgWalkRaw: 512.6, suggestedWalkMult: null },
@@ -86,14 +87,36 @@ describe('AltScoring', () => {
     expect(halves.textContent).toMatch(/Survivors in saferoom/);
     expect(halves.textContent).toMatch(/Saferoom/);
 
+    // No mismatch: no warning line and no mark on any half.
+    expect(screen.queryByTestId('alt-mismatch')).toBeNull();
+    expect(halves.textContent).not.toMatch(/mismatch/);
+
     // Enter toggles it closed again.
     fireEvent.keyDown(rows[0], { key: 'Enter' });
     expect(screen.queryByTestId('alt-halves-902')).toBeNull();
   });
 
+  it('warns about halves whose stored score does not match their breakdown, and marks them', async () => {
+    const bad = { ...half(0, 2, 'b', 650, 200, 500), mismatch: true };
+    mockAdmin.altScoring.mockResolvedValue({
+      ...report,
+      summary: { ...report.summary, mismatchedHalves: 3 },
+      matches: [{ ...report.matches[0], halves: [half(0, 1, 'a', 601, 0, 600), bad] }],
+    });
+    const { container } = render(<AltScoring />);
+    await waitFor(() => expect(screen.getByTestId('alt-mismatch')).toBeTruthy());
+    expect(screen.getByTestId('alt-mismatch').textContent).toBe(
+      "3 halves have a stored score that does not match its own breakdown. That points at a bug in the game server's scoring, not in the match.",
+    );
+    fireEvent.click(container.querySelectorAll('[data-testid="alt-matches"] tbody > tr')[0]);
+    const halfRows = screen.getByTestId('alt-halves-902').querySelectorAll('tbody > tr');
+    expect(halfRows[0].textContent).not.toMatch(/mismatch/);
+    expect(halfRows[1].textContent).toMatch(/mismatch/);
+  });
+
   it('says when no match has reported alt scores yet', async () => {
     mockAdmin.altScoring.mockResolvedValue({
-      summary: { matchesWithData: 0, complete: 0, differentWinner: 0, share: { walk: 0, tank: 0, door: 0 } },
+      summary: { matchesWithData: 0, complete: 0, differentWinner: 0, share: { walk: 0, tank: 0, door: 0 }, mismatchedHalves: 0 },
       maps: [], matches: [],
     });
     render(<AltScoring />);

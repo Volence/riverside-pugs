@@ -1561,6 +1561,9 @@ export interface AltReportHalf {
   tankPct: number | null;
   tankBy: string | null;
   survivorsIn: number;
+  /** A stored walk, tank or door differs by more than 1 from the same part
+   *  recomputed from the half's raw components and multipliers. */
+  mismatch: boolean;
 }
 export interface AltReportMatch {
   id: number;
@@ -1582,7 +1585,11 @@ export interface AltReportMatch {
 }
 export interface AltReport {
   /** Shares are 0..1, over complete counted matches. */
-  summary: { matchesWithData: number; complete: number; differentWinner: number; share: { walk: number; tank: number; door: number } };
+  summary: {
+    matchesWithData: number; complete: number; differentWinner: number; share: { walk: number; tank: number; door: number };
+    /** Halves with data, over every match, whose stored parts do not match their own breakdown. */
+    mismatchedHalves: number;
+  };
   maps: { map: string; halves: number; avgWalkRaw: number; suggestedWalkMult: number | null }[];
   matches: AltReportMatch[];
 }

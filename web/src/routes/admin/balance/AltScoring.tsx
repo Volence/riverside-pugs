@@ -39,7 +39,10 @@ function Halves({ m }: { m: AltReportMatch }) {
             <td class="num">{h.walk}</td>
             <td class="num">{h.tank}</td>
             <td class="num">{h.door}</td>
-            <td class="num">{h.total}</td>
+            <td class="num">
+              {h.total}
+              {h.mismatch && <span class="error"> mismatch</span>}
+            </td>
             <td>{tankEnd(h)}</td>
             <td class="num">{h.survivorsIn}</td>
           </tr>
@@ -88,6 +91,12 @@ export function AltScoring() {
           <tr><th>Share of points</th><td>Walking {pct(share.walk)}, tank {pct(share.tank)}, saferoom {pct(share.door)}</td></tr>
         </tbody>
       </table>
+      {summary.mismatchedHalves > 0 && (
+        <p class="error" data-testid="alt-mismatch">
+          {summary.mismatchedHalves} halves have a stored score that does not match its own breakdown. That points at a
+          bug in the game server's scoring, not in the match.
+        </p>
+      )}
 
       <h3>Walking by map</h3>
       <p class="muted">

@@ -2,12 +2,14 @@
 //
 // l4dscores computes each half under the alt rule and holds the result from its
 // round_end Pre hook until the next round_start (Score_GetAltHalf). This file
-// reads it once per finished half, sends it as one ALT_ROUND line and keeps a
-// copy for the dump's ALT lines, so a lost datagram is filled in when the
-// backend collects the result. Nothing here feeds a real score: the native is
-// optional and feature-checked, and when it is missing (today's l4dscores) or
-// returns false (l4d_score_alt 0, or no finished half held) nothing is sent and
-// nothing is stored.
+// reads it once per finished half in pug-match's own round_end handler (the
+// delayed score read runs 2 to 8 seconds later, possibly after round_start has
+// cleared it), holds it as the pending record, and sends it as one ALT_ROUND
+// line where the half is finished, keeping a copy for the dump's ALT lines, so
+// a lost datagram is filled in when the backend collects the result. Nothing
+// here feeds a real score: the native is optional and feature-checked, and when
+// it is missing (today's l4dscores) or returns false (l4d_score_alt 0, or no
+// finished half held) nothing is sent and nothing is stored.
 //
 // The line format is pinned by src/logParse.ts parseAltFields (UDP ALT_ROUND)
 // and src/dumpParse.ts (dump ALT), which share the fields after the verb.
@@ -22,6 +24,11 @@
 char g_sAltBody[ALT_SLOTS][ALT_BODY_LEN];
 int g_iAltCount;
 
+// The half read at round_end and not yet sent: its line body, and whether one
+// is held.
+char g_sAltPending[ALT_BODY_LEN];
+bool g_bAltPending;
+
 /** The words parseAltFields accepts for Score_GetAltHalf's tankBy. */
 void AltTankByName(int by, char[] out, int maxlen)
 {
@@ -34,12 +41,14 @@ void AltTankByName(int by, char[] out, int maxlen)
 	}
 }
 
-/** A half has ended and been scored: send its alt numbers and keep them for
- *  the dump. Called before FinishSecondHalf, which can end the match in the
- *  same frame (a line after MATCH_END is dropped by the backend). `half` and
- *  `surv` are the values captured at round_end, as EmitRoundEnd takes them. */
-void AltScore_OnRoundEnd(int half, const char[] surv)
+/** A half has ended: read its alt numbers now, while l4dscores still holds
+ *  them, and keep them as the pending record. Called from Event_RoundEnd only,
+ *  once per half. `half` and `surv` are the values captured there, as
+ *  EmitRoundEnd takes them. Any older pending record (a half whose send never
+ *  ran) is dropped first, so it can never go out under a later half. */
+void AltScore_Capture(int half, const char[] surv)
 {
+	g_bAltPending = false;
 	if (surv[0] == '\0') return;
 	if (GetFeatureStatus(FeatureType_Native, "Score_GetAltHalf") != FeatureStatus_Available) return;
 
@@ -52,6 +61,8 @@ void AltScore_OnRoundEnd(int half, const char[] surv)
 	// The backend refuses tankby=none with any tankpct but -1, and the others
 	// outside 0..100: keep the pair consistent with the word sent.
 	if (tankBy < 1 || tankBy > 3) tankPct = -1;
+	else if (tankPct < 0) tankPct = 0;
+	else if (tankPct > 100) tankPct = 100;
 
 	char body[ALT_BODY_LEN];
 	FormatEx(body, sizeof(body),
@@ -62,10 +73,22 @@ void AltScore_OnRoundEnd(int half, const char[] surv)
 		raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8],
 		tankPct, by, tanks, survivorsIn);
 
-	EmitPug("ALT_ROUND %s", body);
+	strcopy(g_sAltPending, sizeof(g_sAltPending), body);
+	g_bAltPending = true;
+}
+
+/** The half has been scored: send the pending record and keep it for the
+ *  dump. Called before FinishSecondHalf, which can end the match in the same
+ *  frame (a line after MATCH_END is dropped by the backend). Sends nothing
+ *  when no record is pending, and at most once per capture. */
+void AltScore_SendPending()
+{
+	if (!g_bAltPending) return;
+	g_bAltPending = false;
+	EmitPug("ALT_ROUND %s", g_sAltPending);
 	if (g_iAltCount < ALT_SLOTS)
 	{
-		strcopy(g_sAltBody[g_iAltCount], ALT_BODY_LEN, body);
+		strcopy(g_sAltBody[g_iAltCount], ALT_BODY_LEN, g_sAltPending);
 		g_iAltCount++;
 	}
 }
@@ -82,4 +105,5 @@ void AltScore_WriteDump()
 void AltScore_Reset()
 {
 	g_iAltCount = 0;
+	g_bAltPending = false;
 }
