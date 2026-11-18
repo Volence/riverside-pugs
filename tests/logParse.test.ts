@@ -521,6 +521,19 @@ describe('round lines', () => {
         ALT.replace(' rule=hr1', ''),
       ]) expect(alt(bad)).toBeNull();
     });
+
+    it('the longest line pug-match can send fits in 700 bytes and parses', () => {
+      // A 63 character map (pug-match keeps map names in char[64]), every
+      // integer at 5 digits, every float as 99999.99, the longest tankby,
+      // plus the signed-line trailer pug-logauth.inc appends.
+      const map = 'm'.repeat(63);
+      const raw = ['ws', 'wt', 'wr', 'ts', 'tt', 'tr', 'ds', 'dt', 'dr'].map((k) => `${k}=99999.99`).join(' ');
+      const body = `ALT_ROUND map=${map} half=2 surv=b rule=hr1 walk=99999 tank=99999 door=99999 wm=99999 dm=99999 `
+        + `${raw} tankpct=100 tankby=other tanks=99999 in=99999`;
+      const datagram = framed(`PUG ${TOKEN} ${body} lseq=4294967295.4294967295 mac=0123abcd`);
+      expect(datagram.length).toBeLessThan(700);
+      expect(alt(body)).toMatchObject({ kind: 'alt_round', map, walk: 99999, tankBy: 'other', survivorsIn: 99999 });
+    });
   });
 
   it('carries half and t_ms on an EVENT line', () => {
