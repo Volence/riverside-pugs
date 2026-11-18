@@ -54,6 +54,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	MarkNativeAsOptional("GetWitchPercent");
 	MarkNativeAsOptional("Score_GetLiveScores");
 	MarkNativeAsOptional("Score_GetAltHalf");
+	MarkNativeAsOptional("Score_GetAltCurve");
 	// REST in Pawn is optional: see pug-livepush.inc.
 	LivePushMarkOptional();
 	TankPlanRegisterNatives();
