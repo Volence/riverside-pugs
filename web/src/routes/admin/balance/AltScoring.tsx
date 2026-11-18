@@ -77,7 +77,8 @@ export function AltScoring() {
       <p class="muted">
         The alt score is what a match would have scored under the new health-run scoring. It splits each half into
         three parts: walking (700 points, for ground covered while healthy), tank (300, for health left when the tank
-        dies) and saferoom (500, for survivors who make it in healthy). Walking and saferoom are then scaled per map.
+        dies or leaves the game, if a survivor is still standing) and saferoom (500, for survivors who make it in
+        healthy). Walking and saferoom are then scaled per map.
       </p>
       <p class="muted">
         The list shows the most recent 100 matches. The totals count only ranked PUGs that finished, were not voided and
