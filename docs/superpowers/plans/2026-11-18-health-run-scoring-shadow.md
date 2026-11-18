@@ -20,7 +20,7 @@
 - Raw components are always unweighted and unmultiplied, in this order: `ws wt wr ts tt tr ds dt dr` (walking / tank / door, each solid / temp+pills / revive).
 - Each of walk, tank, door is rounded to the nearest integer after its multiplier; total = their sum.
 - No em dashes in any text a person reads (chat lines, page copy, comments, docs).
-- Tests and scripts run under `timeout` and `ulimit -v 12000000`. Agents do not spawn sub-agents or background tasks.
+- Tests and scripts run under `timeout` and a memory cap: prefix node and vitest commands with `systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0` (not `ulimit -v`, which breaks vitest's WebAssembly). Agents do not spawn sub-agents or background tasks.
 - Author name in any byline or version note: Malevolence.
 
 ## Review Focus
@@ -75,21 +75,23 @@ export function compareMatch(halves: AltHalf[], realHalfCount: number, realWinne
 ### Task 2: Store `ALT_ROUND` lines from UDP
 
 **Files:**
+- Create: `src/altRoundStore.ts`
 - Modify: `src/db.ts` (`SCHEMA`, add table), `src/logParse.ts` (new event), `src/liveView.ts` (new `recordAltRound` beside `recordRoundEnd`), `src/server.ts` (dispatch beside the `recordRoundEnd` call, about line 1607)
 - Test: `tests/altRound.test.ts`, and one case added to `tests/logParse.test.ts`
 
 **Interfaces:**
 - Consumes: `AltRaw`, `ALT_RULE` from Task 1.
 - Produces:
-  - Table `match_round_alt`: `match_id INTEGER NOT NULL REFERENCES matches(id)`, `ordinal INTEGER NOT NULL`, `half INTEGER NOT NULL`, `rule TEXT NOT NULL`, `surv_team TEXT NOT NULL CHECK (surv_team IN ('a','b'))`, `walk INTEGER NOT NULL`, `tank INTEGER NOT NULL`, `door INTEGER NOT NULL`, `walk_mult REAL NOT NULL`, `door_mult REAL NOT NULL`, `ws wt wr ts tt tr ds dt dr REAL NOT NULL`, `tank_pct INTEGER` (null when unpaid), `tank_by TEXT CHECK (tank_by IN ('surv','other'))` (null when unpaid), `survivors_in INTEGER NOT NULL`, `source TEXT NOT NULL CHECK (source IN ('udp','dump'))`, `created_at TEXT NOT NULL DEFAULT (datetime('now'))`, `PRIMARY KEY (match_id, ordinal, half, rule)`.
-  - Parsed event `{ kind: 'alt_round', token, map: string, half: 1|2, surv: 'a'|'b', rule: string, walk, tank, door: number, walkMult, doorMult: number, raw: AltRaw, tankPct: number|null, tankBy: 'surv'|'other'|null, survivorsIn: number }` (name the kind to match the file's existing convention).
+  - Table `match_round_alt`: `match_id INTEGER NOT NULL REFERENCES matches(id)`, `ordinal INTEGER NOT NULL`, `half INTEGER NOT NULL`, `rule TEXT NOT NULL`, `surv_team TEXT NOT NULL CHECK (surv_team IN ('a','b'))`, `walk INTEGER NOT NULL`, `tank INTEGER NOT NULL`, `door INTEGER NOT NULL`, `walk_mult REAL NOT NULL`, `door_mult REAL NOT NULL`, `ws wt wr ts tt tr ds dt dr REAL NOT NULL`, `tank_pct INTEGER` (null when no tank window closed), `tank_by TEXT CHECK (tank_by IN ('surv','other','gone'))` (null when none), `tanks INTEGER NOT NULL DEFAULT 0`, `survivors_in INTEGER NOT NULL`, `source TEXT NOT NULL CHECK (source IN ('udp','dump'))`, `created_at TEXT NOT NULL DEFAULT (datetime('now'))`, `PRIMARY KEY (match_id, ordinal, half, rule)`.
+  - Parsed event `{ kind: 'alt_round', token, map: string, half: 1|2, surv: 'a'|'b', rule: string, walk, tank, door: number, walkMult, doorMult: number, raw: AltRaw, tankPct: number|null, tankBy: 'surv'|'other'|'gone'|null, tanks: number, survivorsIn: number }` (name the kind to match the file's existing convention).
   - `export function parseAltFields(kv: Record<string,string>): AltRoundFields | null` in `src/logParse.ts`, shared with Task 3, returning null unless every field is present and numeric where it must be.
-  - `export function recordAltRound(db: DB, token: string, ev: AltRoundEvent, source: 'udp' | 'dump'): void` in `src/liveView.ts`. Resolves the ordinal with `ordinalForRoundEnd`. A `udp` write never overwrites an existing `dump` row; a `dump` write always replaces.
+  - `export function upsertAltRound(db: DB, matchId: number, ordinal: number, f: AltRoundFields, source: 'udp' | 'dump'): void` in a new `src/altRoundStore.ts`. A `udp` write never overwrites an existing `dump` row; a `dump` write always replaces.
+  - `export function recordAltRound(db: DB, token: string, ev: AltRoundEvent): void` in `src/liveView.ts`: the UDP path. Resolves the live match from the token and the ordinal with `ordinalForRoundEnd`, then calls `upsertAltRound(..., 'udp')`. It needs a live match (`liveMatchIdOf`), so it is not usable after completion; the dump path (Task 3) calls `upsertAltRound` directly.
 - The wire line (pinned, used verbatim in tests):
-  `ALT_ROUND map=l4d_vs_airport03_garage half=2 surv=b rule=hr1 walk=463 tank=164 door=0 wm=115 dm=175 ws=180.25 wt=40.50 wr=96.00 ts=150.00 tt=60.00 tr=90.00 ds=0.00 dt=0.00 dr=0.00 tankpct=41 tankby=surv in=0`
-  `wm` and `dm` are multipliers x100. `tankpct=-1` and `tankby=none` mean unpaid.
+  `ALT_ROUND map=l4d_vs_airport03_garage half=2 surv=b rule=hr1 walk=463 tank=164 door=0 wm=115 dm=175 ws=180.25 wt=40.50 wr=96.00 ts=150.00 tt=60.00 tr=90.00 ds=0.00 dt=0.00 dr=0.00 tankpct=41 tankby=surv tanks=1 in=0`
+  `wm` and `dm` are multipliers x100. `tankby` is `surv`, `other`, `gone` or `none`; `tankpct=-1 tankby=none` means no tank window closed. `tankby=gone` carries a snapshot with `tank=0`.
 
-- [ ] **Step 1: Write the failing tests.** In `tests/logParse.test.ts` (follow how the file wraps a line in a datagram with the token and trailing NUL): the pinned line parses to the event above with `walkMult 1.15`, `doorMult 1.75`, `tankPct 41`, `tankBy 'surv'`; the same line with `tankpct=-1 tankby=none` gives nulls; the line with `ws=` removed, with `walk=abc`, with `half=3`, or with `rule` missing yields no event. In `tests/altRound.test.ts` (in-memory DB as other liveView tests build it): a UDP event inserts one row with `source 'udp'`; a second UDP event for the same half updates it; after a `dump` write, a later `udp` write leaves the dump values; an unknown token writes nothing and does not throw.
+- [ ] **Step 1: Write the failing tests.** In `tests/logParse.test.ts` (follow how the file wraps a line in a datagram with the token and trailing NUL): the pinned line parses to the event above with `walkMult 1.15`, `doorMult 1.75`, `tankPct 41`, `tankBy 'surv'`, `tanks 1`; the same line with `tankpct=-1 tankby=none` gives nulls; `tankby=gone` parses; `tankby=bogus` yields no event; the line with `ws=` removed, with `walk=abc`, with `half=3`, or with `rule` missing yields no event. In `tests/altRound.test.ts` (in-memory DB as other liveView tests build it): a UDP event inserts one row with `source 'udp'`; a second UDP event for the same half updates it; after a `dump` write, a later `udp` write leaves the dump values; an unknown token writes nothing and does not throw.
 - [ ] **Step 2:** Run `timeout 300 npx vitest run tests/altRound.test.ts tests/logParse.test.ts`. Expected: the new cases FAIL.
 - [ ] **Step 3:** Add the table to `SCHEMA`, the parser branch and `parseAltFields`, `recordAltRound`, and the `server.ts` dispatch.
 - [ ] **Step 4:** Run the same command. Expected: PASS. Run `timeout 900 npm test` and `timeout 300 npm run typecheck`. Expected: all green.
@@ -98,17 +100,17 @@ export function compareMatch(halves: AltHalf[], realHalfCount: number, realWinne
 ### Task 3: Reliable copy from the match dump
 
 **Files:**
-- Modify: `src/dumpParse.ts` (new `ALT` verb), `src/matchResult.ts` (`completeMatch` writes the rows)
+- Modify: `src/dumpParse.ts` (new `ALT` verb), and the caller of `completeMatch` in `src/orchestrator.ts` (about line 503) or a small wrapper in `src/matchResult.ts`, so the rows are written after the result transaction
 - Test: `tests/dumpParse.test.ts` (add cases), `tests/altDump.test.ts`
 
 **Interfaces:**
-- Consumes: `parseAltFields`, `recordAltRound` (Task 2).
-- Produces: `ParsedDump.alt: AltRoundFields[]` (empty array when the dump has none). `completeMatch` upserts each with source `dump` inside its existing transaction.
+- Consumes: `parseAltFields`, `upsertAltRound` (Task 2).
+- Produces: `ParsedDump.alt: AltRoundFields[]` (empty array when the dump has none); `export function storeDumpAlt(db: DB, matchId: number, dump: ParsedDump, log?: (msg: string) => void): void`, called AFTER the `completeMatch` transaction has committed. It wraps every write in try/catch and only logs: an alt write must never roll back or fail a match result. Every place that completes a match from a dump calls it (check `src/matchArchive.ts` and any admin re-import path too).
 - Dump line: `ALT ` followed by exactly the same `key=value` fields as the UDP line. It appears before `END`.
 
-- [ ] **Step 1: Write the failing tests.** `dumpParse`: a dump containing two `ALT` lines before `END` yields `alt.length === 2` with the pinned values; a dump with none yields `alt: []` and parses exactly as before; a malformed `ALT` line is skipped and the rest of the dump still parses. `altDump`: after `completeMatch` on a dump with `ALT` lines for halves that already have `udp` rows, the rows have `source 'dump'` and the dump's values; halves with only a dump line are inserted; `match_maps` and the match winner are unchanged by the presence of `ALT` lines (compare against the same dump without them).
+- [ ] **Step 1: Write the failing tests.** `dumpParse`: a dump containing two `ALT` lines before `END` yields `alt.length === 2` with the pinned values; a dump with none yields `alt: []` and parses exactly as before; a malformed `ALT` line is skipped and the rest of the dump still parses. `altDump`: after `completeMatch` on a dump with `ALT` lines for halves that already have `udp` rows, the rows have `source 'dump'` and the dump's values; halves with only a dump line are inserted; `match_maps` and the match winner are unchanged by the presence of `ALT` lines (compare against the same dump without them); when `upsertAltRound` is made to throw (drop the table first), the match still completes with the same result and `storeDumpAlt` does not throw; an `ALT` line whose `map=` has no `MAP` line gets ordinal = the `MAP` count.
 - [ ] **Step 2:** Run `timeout 300 npx vitest run tests/dumpParse.test.ts tests/altDump.test.ts`. Expected: new cases FAIL.
-- [ ] **Step 3:** Implement. The ordinal for a dump `ALT` line is the position of its `map=` among the dump's `MAP` lines.
+- [ ] **Step 3:** Implement. The ordinal for a dump `ALT` line is the 0-based position of its `map=` among the dump's `MAP` lines (the dump's own match id, never the live-token lookup, which fails once the match is `completed`).
 - [ ] **Step 4:** Same command, expected PASS; then `timeout 900 npm test`.
 - [ ] **Step 5:** Commit: `Alt scoring: ALT lines in the match dump`.
 
@@ -165,7 +167,7 @@ Page content, in order: an intro line ("Health-run scoring, computed in the back
 
 **Files:**
 - Create: `plugin/pug-altscore.inc`
-- Modify: `plugin/pug-match.sp` (native declaration with the other l4dscores natives at lines 24-33, `#include`, a call from the round-end path after the real score is credited, a call from `WriteDump` before the `END` line, state reset where per-match state resets, version bump from 0.3.45)
+- Modify: `plugin/pug-match.sp` (native declaration with the other l4dscores natives at lines 24-33, `#include`, the round-end calls, a call from `WriteDump` before the `END` line, version bump from 0.3.45), `plugin/pug-leave.inc` (add `MarkNativeAsOptional("Score_GetAltHalf")` beside the existing ones at lines 52-55; without it pug-match will not load against today's l4dscores and no match can run)
 - Test: `tests/logParse.test.ts` (one more case)
 
 **Interfaces:**
@@ -174,22 +176,25 @@ Page content, in order: an intro line ("Health-run scoring, computed in the back
 ```sourcepawn
 // False when alt scoring is off, or no finished half is held. Valid from the
 // round_end Pre hook until the next round_start. raw = ws wt wr ts tt tr ds dt dr.
-native bool Score_GetAltHalf(int &walk, int &tank, int &door, float raw[9], int &walkMultX100, int &doorMultX100, int &tankPct, int &tankBy, int &survivorsIn);
-// tankPct -1 when unpaid. tankBy: 0 none, 1 survivor kill, 2 other.
+native bool Score_GetAltHalf(int &walk, int &tank, int &door, float raw[9], int &walkMultX100, int &doorMultX100, int &tankPct, int &tankBy, int &tanks, int &survivorsIn);
+// tankBy: 0 none (tankPct -1), 1 survivor kill, 2 other death, 3 gone (snapshot kept, tank = 0). tanks = tanks spawned this half.
 ```
 
 - Produces: the UDP line and the dump line pinned in Tasks 2 and 3. Floats print with `%.2f`. One stored record per finished half for the whole match (64 slots, indexed like the plugin's other per-half state), written when the native returns true.
 
 - [ ] **Step 1: Write the failing test:** add to `tests/logParse.test.ts` a case that builds the longest possible line (map name of 63 characters, every integer at 5 digits, every float as `99999.99`) and asserts it is under 700 bytes and parses. Run `timeout 120 npx vitest run tests/logParse.test.ts`; it should pass already if Task 2 is right. If it does not, fix the format here, not the limit.
-- [ ] **Step 2:** Implement `pug-altscore.inc` (`AltScore_OnRoundEnd(int half, const char[] surv)`, `AltScore_WriteDump()`, `AltScore_Reset()`) and wire the three calls. When the native is unavailable or returns false, emit nothing and store nothing. The round-end call must also run on the delayed retry path that credits a late score, once per half.
+- [ ] **Step 2:** Implement `pug-altscore.inc` (`AltScore_OnRoundEnd(int half, const char[] surv)`, `AltScore_WriteDump()`, `AltScore_Reset()`) and wire the calls. Call `AltScore_OnRoundEnd` immediately BEFORE each `if (second) FinishSecondHalf();` (`pug-match.sp:4597` and `4779`, the synchronous and the delayed-retry paths): on the last map `FinishSecondHalf` ends the match in the same frame and a line sent after `MATCH_END` is dropped by the site. Once per half. Skip it when the survivor side is empty, as `EmitRoundEnd` does. When the native is unavailable or returns false, emit nothing and store nothing. Call `AltScore_Reset` only where `g_iMapScoreA` is cleared for a new match, never from `EndMatchNow`: `sm_pug_dump` is read after the match has ended.
+- [ ] **Step 2b:** Check: `grep -n 'MarkNativeAsOptional("Score_GetAltHalf")' plugin/pug-leave.inc` prints one line.
 - [ ] **Step 3:** Build with `plugin/build.sh`. Expected: compiles with no warnings. Do not run `plugin/stage.sh`.
-- [ ] **Step 4:** Commit `plugin/pug-altscore.inc plugin/pug-match.sp tests/logParse.test.ts` (and the built `.smx` only if the repo tracks it): `pug-match: send alt scores (ALT_ROUND, dump ALT lines)`.
+- [ ] **Step 4:** Commit `plugin/pug-altscore.inc plugin/pug-match.sp plugin/pug-leave.inc tests/logParse.test.ts` (and the built `.smx` only if the repo tracks it): `pug-match: send alt scores (ALT_ROUND, dump ALT lines)`.
 
 ### Task 7: l4dscores computes the rule
 
 **Files (deploy worktree):**
 - Create: `plugins-src/l4dscores_alt.inc`, `overrides/left4dead/addons/sourcemod/data/altscore_maps.txt`, `tools/altscore-test/README.md` and its rig script
-- Modify: `plugins-src/l4dscores.sp` (include, `CreateNative` in `AskPluginLoad2`, calls from `OnPluginStart`, `OnMapStart`, the `round_start` handler, `Event_RoundEnd` before any reset, and the same-map-reload subtraction at lines 640-658; `SCORE_VERSION` to `8.5.9-riverside9`)
+- Modify: `plugins-src/l4dscores.sp` (include, `CreateNative` in `AskPluginLoad2`, one `Alt_OnPluginStart()` call at the END of `OnPluginStart`, `RequestFrame(Alt_OnMapStartDeferred)` as the FIRST line of `OnMapStart`, the same-map-reload subtraction at lines 640-658, the swap and set-score commands; `SCORE_VERSION` to `8.5.9-riverside9`)
+
+**Isolation rule (the main risk in this task):** a SourcePawn runtime error aborts the callback it happens in. No alt code may run inside `Event_RoundEnd`, the `round_start` handler, `OnMapStart` (beyond the one `RequestFrame` line) or `L4D_OnRecalculateVersusScore`. The include registers its own hooks from `Alt_OnPluginStart`: its own `HookEvent("round_end", Alt_RoundEnd, EventHookMode_Pre)` (registered after the existing hook, so it runs after it), its own `round_start` hook, its own timer callback. The one-line calls added to existing functions (same-map-reload subtraction, score swap, set-score) go at the very end of those code paths. No new native imports unless marked optional with `MarkNativeAsOptional`; go-live comes from left4dhooks' first-survivor-left-safe-area forward, not from readyup or pause plugins.
 
 **Interfaces:**
 - Produces: `Score_GetAltHalf` exactly as declared in Task 6; cvar `l4d_score_alt` (default `1`); for Task 8, these stocks in the include:
@@ -206,11 +211,11 @@ bool Alt_TallyIsPartial();                   // true after a plugin load or resu
 ```
 
 - `altscore_maps.txt`: KeyValues `"AltScore" { "<map>" { "walk" "<float>" } }` with the 16 starting values from the spec's "Starting `walkMult` table"; maps absent from it get 1.00.
-- Everything else in the include is the implementer's design, bound by the spec sections "The rule (hr1)" and "Plugin: l4dscores", including: distance rescaling with `startFlow` and the door top-up; raw float flow from `L4D_GetLastKnownArea` + `L4D2Direct_GetTerrorNavAreaFlow`; the 0.5 s timer; tank-window detection mirroring `pug-match.sp:3452-3498` and `5103-5105`; state that follows the survivor body across `bot_player_replace` / `player_bot_replace`; a half that was already live when the plugin loaded reports nothing (`Score_GetAltHalf` false); `doorMult` falls back to 1.0 when `MapVersusDifficulty` is 0.
+- Everything else in the include is the implementer's design, bound by the spec sections "The rule (hr1)" and "Plugin: l4dscores", including: distance rescaling with `startFlow` and the door top-up; raw float flow from `L4D_GetLastKnownArea` + `L4D2Direct_GetTerrorNavAreaFlow`; the 0.5 s timer; tank-window detection mirroring `pug-match.sp:3452-3498` and `5103-5105`; state that follows the survivor body across `bot_player_replace` / `player_bot_replace`; a half that was already live when the plugin loaded reports nothing (`Score_GetAltHalf` false); `doorMult` falls back to 1.0 when `MapVersusDifficulty` is 0; the walking mark rules (start at distance 0, no pay for a respawn, teleport or any flow jump larger than a survivor could walk in one sample, mark moves without pay while not standing); the ledge clamp (spec "Ledge clamp", marked in a comment as pending the owner's ruling); the tank snapshot recorded whenever a tank window closes, with `tankBy` and the count of tanks spawned; a ready-up round restart (`roundRestarting`) discards the alt half and tallies nothing; `Command_SwapScores` swaps the alt tally; `sm_setscores` and the score vote set the partial flag.
 
 - [ ] **Step 1:** Write `l4dscores_alt.inc` and the hooks. Read cvars (`survivor_revive_health`, `survivor_revive_successive_penalty`, `survivor_max_incapacitated_count`, `survivor_ledge_grab_health`, `pain_pills_decay_rate`) rather than hardcoding. Confirm in the server source (`/home/volence/l4d/source`, read-only) which cvar divides the ledge restore and note the answer in a comment and in `tools/altscore-test/README.md`.
 - [ ] **Step 2:** Compile with `./build-staged.sh l4dscores` from `plugins-src/` (it fails on warnings and never ships). Expected: clean build into `plugins-src/staged/`.
-- [ ] **Step 3: Rig.** Write `tools/altscore-test/` following a neighbouring rig (`tools/incaprig`, `tools/ledge-fix-test`): a test-only plugin or rcon script for the LOCAL test server that sets up each case and prints `Alt_SurvivorPoints` and the live parts, with the expected value beside it. Cases, each asserting a spec property: fresh survivor 127.5; 1 solid before incap equals after revive (16, 16) and is 8.5 after the second; pills held equals pills eaten at the moment of eating; standing still for 20 s changes nothing but temp decay; one survivor teleported ahead earns only their own quarter; a downed survivor earns nothing while the others advance; a hanging survivor counts what a rescue then actually restores; a full clean half with multipliers 1 and 1 reports 700 / 300 / 500; a bot takeover mid-map keeps the body's distance.
+- [ ] **Step 3: Rig.** Write `tools/altscore-test/` following a neighbouring rig (`tools/incaprig`, `tools/ledge-fix-test`): a test-only plugin or rcon script for the LOCAL test server that sets up each case and prints `Alt_SurvivorPoints` and the live parts, with the expected value beside it. Cases, each asserting a spec property: fresh survivor 127.5; 1 solid before incap equals after revive (16, 16) and is 8.5 after the second; pills held equals pills eaten at the moment of eating; standing still for 20 s changes nothing but temp decay; one survivor teleported ahead is paid nothing for the jump and then earns only their own quarter for ground walked after it; a survivor on 1 solid who grabs a ledge and is rescued is worth no more than before the grab; a downed survivor earns nothing while the others advance; a hanging survivor counts what a rescue then actually restores; a full clean half with multipliers 1 and 1 reports 700 / 300 / 500; a bot takeover mid-map keeps the body's distance.
 - [ ] **Step 4: Run the rig only if the local server is free.** Check `rcon status` on the local test server (rcon port 27055) and the game log for other sessions' `rcon from` lines; with any human connected or another session active, do not run it: record "rig not run, server busy" in the README and stop. Never kill or restart a local srcds. If it runs, record the output in the README and fix anything that disagrees with the spec.
 - [ ] **Step 5:** Commit the created and modified paths (not `staged/` unless tracked): `l4dscores 8.5.9-riverside9: health-run scoring in shadow (hr1)`.
 
@@ -228,11 +233,11 @@ Output, to the caller only. With `l4d_score_alt 0` both commands print one line:
 
 ```
 [Alt] Walk 312 | Tank up to 300 (222 now) | Door up to 875 (648 now)
-[Alt] This half: 312 banked, 1182 if you make it now. Team health 74%.
+[Alt] This half: 312 banked, 1290 if you finish at this health. Team health 74%.
 [Alt] To beat: 1040.
 ```
 
-"Tank up to 300 (222 now)" becomes `Tank 186` once paid, and `Tank 0` if the half's tank can no longer pay. The third line appears only in the second half and is the first half's alt total on this map. "Door up to N" is `500 x doorMult`. Between halves it prints `[Alt] No half in progress.`
+"If you finish at this health" = banked + the rest of the walk for standing survivors at their current points + the tank at its current worth (if unpaid and still possible) + the door at its current worth (`makeItNow` from `Alt_LiveParts`). "Tank up to 300 (222 now)" becomes `Tank 186` once paid, and `Tank 0` if the half's tank can no longer pay. The third line appears only in the second half and is the first half's alt total on this map. "Door up to N" is `500 x doorMult`. Between halves it prints `[Alt] No half in progress.`
 
 `!scoresalt`: a panel built like `Command_PrintScores` builds the real one (same `SendPanelToClient` lifetime), titled `Alt scores (health-run)`, one line per map played with both teams' alt half totals in the same team order the real panel uses, then the two match totals. When `Alt_TallyIsPartial()` add the line `Since the last restart only.`
 
@@ -246,5 +251,5 @@ Output, to the caller only. With `l4d_score_alt 0` both commands print one line:
 **Files:**
 - Create: `docs/superpowers/plans/2026-11-18-health-run-scoring-shadow-HANDOFF.md` (pug worktree)
 
-- [ ] **Step 1:** Write what was built and where (both branches, commit ids), what was verified and how (test counts, build results, whether the rig ran and its results), every decision made without the owner (from the spec's "Claude's call" lines plus any made during the build), what was not verified, and the exact steps the owner would take to ship it: merge order (site, then pug-match, then l4dscores with `altscore_maps.txt`), the commands, and the rollback (`l4d_score_alt 0`).
+- [ ] **Step 1:** Write what was built and where (both branches, commit ids), what was verified and how (test counts, build results, whether the rig ran and its results), every decision made without the owner (from the spec's "Claude's call" and "Fable review" lines plus any made during the build), the open owner decisions (the ledge clamp; whether a vanished tank should pay; confirming the ranked config has no first aid kits), what was not verified, and the exact steps the owner would take to ship it: merge order (site, then pug-match, then l4dscores with `altscore_maps.txt`), the commands, and the rollback (`l4d_score_alt 0`).
 - [ ] **Step 2:** Commit it: `Alt scoring: hand-off note`.

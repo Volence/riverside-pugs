@@ -54,7 +54,7 @@ Each survivor has three stores. Points = solid + 0.25 x pills + 0.25 x revives.
 | Store | What counts | Weight | Max |
 |---|---|---|---|
 | Solid | permanent health (`m_iHealth` while standing) | 1.0 | 100 |
-| Pills | temp health that came from pills, plus 50 for a bottle held in slot 4 | 0.25 | 12.5 |
+| Pills | temp health that came from pills, plus 50 for a bottle held in slot 4 | 0.25 | 12.5 from one bottle |
 | Revives | temp health that came from a revive, plus the temp health each unused revive would give | 0.25 | 15 |
 
 A fresh survivor is 127.5 points; that is "100%". With the pill and revive weights equal (as here), eaten-pill temp
@@ -85,6 +85,13 @@ The decompile labels the divisor `SurvivorIncapacitatedHealth`, not the ledge-gr
 which cvar it is before relying on the ratio (rig: `deploy/tools/ledge-fix-test`). The saved health is not a
 netprop; record `m_iHealth` in a `player_ledge_grab` hook (or read the field) rather than guess.
 
+Ledge clamp (Fable review 2026-11-18, PENDING THE OWNER'S RULING): as the game works, a ledge grab would raise a
+low-health survivor's points (1 solid, no temp: 16 before, about 23 while hanging and after rescue), which breaks
+"going down never raises a score". Until the owner rules, temp health granted by a ledge rescue is not counted
+beyond the temp the survivor had just before the grab (decayed as usual): while hanging and after rescue, the
+counted temp is `min(game temp, pre-grab temp decayed)`. The excess stops being tracked when the buffer is next
+replaced (an incap and revive) or the survivor dies.
+
 Team stored health % = sum of the four survivors' points / (4 x 127.5).
 
 ### The three payouts
@@ -101,13 +108,19 @@ Base pools per half: walking 700, tank 300, door 500. A perfect half is 1500 bef
    survivor flow at the moment the half goes live (one value for the team). At round end, each survivor who banks
    the door is credited the rest of the way to 100 at their points at that moment, so a clean make always walks
    the full map. Use raw float flow, not pug-match's rounded whole percent.
+   Every survivor's furthest mark starts at distance 0 when the half goes live (survivors with no nav area are
+   ignored when taking `startFlow`). Only ground walked while standing pays: while a survivor is down, hanging or
+   dead, and on any respawn or teleport (a rescue closet, a warp, a jump in flow no survivor could walk in one
+   sample), the mark moves to the survivor's current position without pay. (Fable review, 2026-11-18.)
 2. **Tank (300).** Paid once per half, when the tank fight ends with the tank dead and at least one survivor not
    dead: `300 x team stored health %` at that instant. Claude's calls, 2026-11-18: the tank's death pays whatever
    killed it (survivors, a fall, fire, a stuck-tank slay), because the survivors outlived it either way; with more
    than one tank alive it pays when the last one dies, as pug-match's `TANKDONE` window does
    (`pug-match.sp:3452-3498`, `5103-5105`). A frustration pass or a despawn pays nothing. If the survivors wipe
    with the tank alive, nothing is paid. The saferoom door cannot close with the tank alive on our config, so
-   there is no "ran past it" case. The log line records whether a survivor made the kill, so this call can be
+   there is no "ran past it" case. Whenever a tank window closes, the team's stored-health snapshot at that
+   instant is recorded whether or not it paid, with who ended it (`surv`, `other`, or `gone` for a tank that
+   vanished through a kick, disconnect or despawn) and how many tanks spawned in the half, so these calls can be
    revisited from the data.
 3. **Door (500).** At round end with at least one survivor up: each survivor who is alive and not incapacitated
    or hanging banks `125 x (own points / 127.5)`.
@@ -197,10 +210,17 @@ games; walking per survivor; the store model above; quarter weights; door 500.
   `OpenConfig()` fails, `l4dscores.sp:105`, `673-674`). `walkMult` from a new KeyValues file
   `addons/sourcemod/data/altscore_maps.txt` (map name to walk multiplier), default 1.0, read in `OnMapStart`.
 - Match tally: alt half totals per logical team, kept and reset at exactly the points `campaignScores[]` is.
-- New native `Score_GetAltScores(...)` returning, for the half in progress or just ended: rule version, the half's
-  walking / tank / door (multiplied, integer), the raw unweighted components, team stored health % now, tank
-  paid flag and the health % it was paid at, survivors in, both multipliers, and both teams' alt match totals.
-  Exact signature is the builder's call; follow `Score_GetLiveScores`.
+- New native `Score_GetAltHalf(...)` returning, for the half that just ended (valid from round end until the next
+  round start): the half's walking / tank / door (multiplied, integer), the raw unweighted components, the tank
+  snapshot's health %, who ended the tank window, tanks spawned, survivors in, and both multipliers. The exact
+  signature is fixed in the plan.
+- Isolation (Fable review): no alt code runs inside l4dscores' real handlers, because a runtime error there
+  would abort the real scoring. The door snapshot is its own `round_end` Pre hook registered after the existing
+  one; map setup is deferred with `RequestFrame` from the first line of `OnMapStart`; the sampler is its own timer
+  callback. No new native imports unless marked optional (go-live comes from left4dhooks' first-survivor-left-
+  safe-area forward, not from readyup). A ready-up round restart (`roundRestarting`, `l4dscores.sp:386`) discards
+  the alt half exactly as the real handler returns early. `Command_SwapScores` swaps the alt tally; `sm_setscores`
+  and the score vote mark it partial.
 - Two player commands, mirroring the existing pair (owner ruling 2026-11-18: `!scoresalt` shows every round's
   scores, `!health` shows the parts of the bonus). In shadow the real `!health` and `!scores` keep showing today's
   scoring unchanged, so the alt versions are separate commands:
@@ -210,9 +230,11 @@ games; walking per survivor; the store model above; quarter weights; door 500.
 
     ```
     [Alt] Walk 312 | Tank up to 300 (222 now) | Door up to 875 (648 now)
-    [Alt] This half: 312 banked, 1182 if you make it now. Team health 74%.
+    [Alt] This half: 312 banked, 1290 if you finish at this health. Team health 74%.
     ```
 
+    "If you finish at this health" = banked + the rest of the walk for standing survivors at their current
+    points + the tank at its current worth (if it has not paid and still can) + the door at its current worth.
     After the tank is paid the tank part reads `Tank 186`. In the second half add the other team's alt score for
     this map as the number to beat.
   - `!scoresalt` (`sm_scoresalt`): every round played so far under the rule, one row per map with both teams'
@@ -228,10 +250,12 @@ games; walking per survivor; the store model above; quarter weights; door 500.
 - At round end, after the real score is credited, emit one UDP line (within the 768-byte `EmitPug` limit, which
   truncates silently):
   `ALT_ROUND map=<n> half=<1|2> surv=<a|b> rule=hr1 walk=<int> tank=<int> door=<int> wm=<x100> dm=<x100>
-  ws=<f> wt=<f> wr=<f> ts=<f> tt=<f> tr=<f> ds=<f> dt=<f> dr=<f> tankpct=<int|-1> tankby=<surv|other|none>
-  in=<0..4>`
+  ws=<f> wt=<f> wr=<f> ts=<f> tt=<f> tr=<f> ds=<f> dt=<f> dr=<f> tankpct=<int|-1> tankby=<surv|other|gone|none>
+  tanks=<n> in=<0..4>`
   where `ws/wt/wr`, `ts/tt/tr`, `ds/dt/dr` are the raw solid / temp+pills / revive components of walking, tank
-  and door before weights and multipliers.
+  and door before weights and multipliers. `ts/tt/tr` and `tankpct` hold the snapshot whenever a tank window
+  closed, paid or not (`tank=0` when unpaid); `tankby=none tankpct=-1` means no window closed. The line is sent
+  before the match can end on the last half, and skipped when the survivor side is unknown, as `ROUND_END` is.
 - Keep the same values per round in memory and add one `ALT` line per round to `sm_pug_dump`
   (`WriteDump`), same fields including `map=` (dump `MAP` lines carry no ordinal, it is their position), so the
   site has a reliable copy at match end. `DumpLine` is 1024 bytes. The `ALT` lines must come before `END`: the
@@ -243,12 +267,15 @@ games; walking per survivor; the store model above; quarter weights; door 500.
 ### Site (pug repo)
 
 - `src/db.ts` `SCHEMA`: new table `match_round_alt` (match_id, ordinal, half, surv_team, rule, walk, tank, door,
-  total, walk_mult, door_mult, the nine raw components, tank_pct, survivors_in, source `udp|dump`, created_at;
+  total, walk_mult, door_mult, the nine raw components, tank_pct, tank_by, tanks, survivors_in, source
+  `udp|dump`, created_at;
   primary key match_id + ordinal + half + rule). No changes to existing tables.
 - `src/logParse.ts`: parse `ALT_ROUND` (unknown keys ignored, like the other lines); `src/server.ts` dispatches to
   a new `recordAltRound` next to `recordRoundEnd` in `src/liveView.ts`, using the same ordinal resolution.
-- `src/dumpParse.ts`: parse `ALT` lines; `completeMatch` upserts them with source `dump`, replacing UDP rows.
-  A dump without `ALT` lines is normal (old plugin) and must not fail.
+- `src/dumpParse.ts`: parse `ALT` lines. They are written with source `dump`, replacing UDP rows, AFTER the
+  `completeMatch` transaction has committed and inside a try/catch that only logs: an alt write must never be
+  able to roll back or fail a match result. A dump without `ALT` lines is normal (old plugin) and must not fail.
+  An `ALT` line whose map has no `MAP` line (a forfeit mid-map) takes ordinal = the `MAP` count.
 - A pure module `src/altScore.ts`: recompute a half's total from raw components for given weights and multipliers,
   and the match-level comparison (alt totals per team, alt winner, differs from real). Unit tested, including
   that hr1 weights reproduce the plugin's reported integers within rounding.
@@ -273,9 +300,12 @@ The site half can ship first: it ignores absent lines. Order: site, then pug-mat
 
 ## Known gaps accepted for hr1
 
-- **Ledge rescue hands out temp health without spending a revive** (game behaviour). A low-health survivor who is
-  rescued from a ledge gains up to about 7 points. Today's bonus has the same hole at twice the weight. Closing it
-  means tracking ledge-granted temp separately; left out unless shadow data shows it matters.
+- **Ledge rescue hands out temp health without spending a revive** (game behaviour). Today's bonus pays for it.
+  hr1 clamps it out (see "Ledge clamp"), pending the owner's ruling on whether that is wanted.
+- **Tank-less maps.** `!healthalt` says "Tank up to 300" until the half ends even on a map that never spawns one.
+  The data records how many tanks spawned.
+- **First aid kits.** A held kit is worth nothing under hr1 and a heal raises solid health and resets revives.
+  The ranked config is believed to have no kits; confirm before any stage 2.
 - **Pills cap.** The pills-use code is not in the converted source and the cap on total health was not verified.
   The rule counts a held bottle as a flat 50 and eaten pills as whatever temp health the game actually gave, so no
   constant needs to be right; the builder should note what the game does when verifying "eating never gains".
