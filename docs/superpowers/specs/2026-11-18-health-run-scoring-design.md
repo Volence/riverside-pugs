@@ -266,6 +266,20 @@ games; walking per survivor; the store model above; quarter weights; door 500.
     (the score panel around `Menu_ScorePanel` in l4dscores.sp), with the alt numbers in place of the real ones.
     The plugin therefore keeps the alt half scores per map for the whole match, reset where `campaignScores[]` is.
   - In stage 2 test games, where the rule is the real score, `!health` and `!scores` themselves show these.
+- Tank payout line (owner request 2026-11-18, after testing): when a tank window closes and settles the half's
+  tank result, one chat line to everyone (both teams and spectators), printed from `Alt_CloseTankWindow` in the
+  alt include, never from a real handler. It carries the same rounded number `!healthalt` shows afterwards and
+  says it is not the real score:
+
+    ```
+    [Alt] Tank is gone. Health-run scoring gives the survivors 123 of 300 (team health 41%). Not the real score.
+    [Alt] Tank is gone with no survivor standing. Health-run scoring gives 0 of 300. Not the real score.
+    ```
+
+  Overlapping tanks share one window, so one line when the last is gone. The tank pays once per half: after a
+  paid line later windows print nothing; an unpaid close prints its line and a later tank that pays prints the
+  paid one. Nothing prints with `l4d_score_alt` 0 or no live alt half. Cvar `l4d_score_alt_announce` (default 1;
+  0 = no automatic alt chat lines) silences it on live boxes without turning shadow scoring off.
 - Version bump to 8.5.9-riverside9. Build with `./build.sh l4dscores`.
 
 ### Plugin: pug-match (pug repo, `plugin/pug-match.sp`, currently 0.3.45)
