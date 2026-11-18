@@ -172,3 +172,48 @@ describe('parseDump with a nonce', () => {
     expect(parseDump(body)!.winner).toBe('b');
   });
 });
+
+describe('parseDump ALT lines (health-run scoring, shadow)', () => {
+  const ALT1 = 'ALT map=l4d_hospital01_apartment half=1 surv=a rule=hr1 walk=463 tank=164 door=0 wm=115 dm=175 '
+    + 'ws=180.25 wt=40.50 wr=96.00 ts=150.00 tt=60.00 tr=90.00 ds=0.00 dt=0.00 dr=0.00 tankpct=41 tankby=surv tanks=1 in=0';
+  const ALT2 = 'ALT map=l4d_hospital02_subway half=2 surv=b rule=hr1 walk=700 tank=0 door=500 wm=100 dm=100 '
+    + 'ws=300.00 wt=200.00 wr=200.00 ts=0.00 tt=0.00 tr=0.00 ds=250.00 dt=100.00 dr=150.00 tankpct=-1 tankby=none tanks=0 in=4';
+  const withAlt = (...alt: string[]) => SAMPLE.replace('END winner=a', `${alt.join('\n')}\nEND winner=a`);
+
+  it('reads two ALT lines before END with the pinned values', () => {
+    const d = parseDump(withAlt(ALT1, ALT2))!;
+    expect(d.alt).toHaveLength(2);
+    expect(d.alt).toEqual([
+      {
+        map: 'l4d_hospital01_apartment', half: 1, surv: 'a', rule: 'hr1', walk: 463, tank: 164, door: 0,
+        walkMult: 1.15, doorMult: 1.75,
+        raw: { ws: 180.25, wt: 40.5, wr: 96, ts: 150, tt: 60, tr: 90, ds: 0, dt: 0, dr: 0 },
+        tankPct: 41, tankBy: 'surv', tanks: 1, survivorsIn: 0,
+      },
+      {
+        map: 'l4d_hospital02_subway', half: 2, surv: 'b', rule: 'hr1', walk: 700, tank: 0, door: 500,
+        walkMult: 1, doorMult: 1,
+        raw: { ws: 300, wt: 200, wr: 200, ts: 0, tt: 0, tr: 0, ds: 250, dt: 100, dr: 150 },
+        tankPct: null, tankBy: null, tanks: 0, survivorsIn: 4,
+      },
+    ]);
+  });
+
+  it('a dump with no ALT lines has alt [] and parses exactly as before', () => {
+    const d = parseDump(SAMPLE)!;
+    expect(d.alt).toEqual([]);
+    const { alt: _a, ...rest } = parseDump(withAlt(ALT1, ALT2))!;
+    const { alt: _b, ...plain } = d;
+    expect(rest).toEqual(plain);
+  });
+
+  it('skips a malformed ALT line and still parses the rest of the dump', () => {
+    const d = parseDump(withAlt(ALT1.replace('walk=463', 'walk=abc'), ALT2, 'ALT junk'))!;
+    expect(d).not.toBeNull();
+    expect(d.alt!.map((a) => a.map)).toEqual(['l4d_hospital02_subway']);
+    expect(d.maps).toHaveLength(2);
+    expect(d.players).toHaveLength(2);
+    expect(d.winner).toBe('a');
+    expect(d.totalA).toBe(645);
+  });
+});

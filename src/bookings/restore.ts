@@ -149,6 +149,7 @@ export function resumeLines(s: RestoreSnapshot): string[] {
 export function prepareRestore(db: DB, s: RestoreSnapshot): void {
   db.transaction(() => {
     db.prepare('DELETE FROM match_rounds WHERE match_id = ? AND ordinal >= ?').run(s.matchId, s.maps.length);
+    db.prepare('DELETE FROM match_round_alt WHERE match_id = ? AND ordinal >= ?').run(s.matchId, s.maps.length);
     db.prepare('DELETE FROM match_live_maps WHERE match_id = ? AND ordinal >= ?').run(s.matchId, s.maps.length);
     // The first restore decides: stats cover from there on, even after a second one.
     db.prepare('UPDATE matches SET restored_at_map = COALESCE(restored_at_map, ?) WHERE id = ?').run(s.maps.length, s.matchId);

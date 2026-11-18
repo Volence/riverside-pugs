@@ -6,6 +6,7 @@ import { canonicaliseDump } from './aliases.js';
 import { publishAdminEvent } from './adminFeed.js';
 import { foldMatchNames } from './playerNames.js';
 import { publishRecorded, recordAbandons, type RecordedAbandon } from './abandon.js';
+import { upsertAltRound } from './altRoundStore.js';
 
 /** Persist a finished match (result, per-map scores, per-player stats) and
  *  apply ratings, atomically. Returns false when the match is missing or
@@ -120,7 +121,28 @@ export function completeMatch(db: DB, matchId: number, rawDump: Dump): boolean {
   } catch (err) {
     console.error(`[playerNames] could not record the names in match ${matchId}:`, err);
   }
+  // Shadow health-run scores, after the commit for the same reason: they are
+  // a side record and may never roll back, delay or fail the result.
+  storeDumpAlt(db, matchId, rawDump);
   return true;
+}
+
+/** Copy the dump's ALT lines into match_round_alt as source 'dump', which
+ *  replaces whatever the UDP lines left. Call only after the completion
+ *  transaction has committed. Each write is guarded and only logged: an alt
+ *  row must never cost a match its result. The ordinal is the line's map
+ *  among the dump's own MAP lines (the live-token lookup the UDP path uses
+ *  fails once the match is completed), and a map with no MAP line yet is the
+ *  next one. */
+export function storeDumpAlt(db: DB, matchId: number, dump: Dump, log: (msg: string) => void = console.error): void {
+  for (const f of dump.alt ?? []) {
+    try {
+      const i = dump.maps.findIndex((m) => m.map === f.map);
+      upsertAltRound(db, matchId, i === -1 ? dump.maps.length : i, f, 'dump');
+    } catch (err) {
+      log(`[altScore] could not store the dump's ALT line for match ${matchId} ${f.map} half ${f.half}: ${String(err)}`);
+    }
+  }
 }
 
 /** Hold every roster row that arrived over UDP to the dump. Runs inside the

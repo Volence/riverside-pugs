@@ -1,4 +1,5 @@
 import { isKnownStat } from './statKeys.js';
+import { parseAltFields, type AltRoundFields } from './logParse.js';
 
 /** Why a game was forfeited (plan T5): a !gg, the reconnect pool running out, or a staff ruling. */
 export type ForfeitWhy = 'gg' | 'disconnect' | 'staff';
@@ -57,6 +58,10 @@ export interface Dump {
   /** Every player the plugin recorded as running out of reconnect time
    *  (pug-match 0.3.31 ABANDON lines). Absent or empty from older plugins. */
   abandoners?: string[];
+  /** Health-run scoring, shadow only: one entry per ALT line, the same fields
+   *  as the UDP ALT_ROUND line. The parser always sets it ([] when the dump has
+   *  none); optional so hand-built dumps need not. Never read for a result. */
+  alt?: AltRoundFields[];
 }
 
 /** StateName() in pug-match.sp, less `none`: with no match configured
@@ -142,6 +147,7 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
   const players: DumpPlayer[] = [];
   const skills: DumpSkill[] = [];
   const abandoners: string[] = [];
+  const alt: AltRoundFields[] = [];
   let end: { winner: 'a' | 'b' | 'draw'; totalA: number; totalB: number; forfeit: 'a' | 'b' | null; forfeitWhy: ForfeitWhy | null } | null = null;
 
   for (const line of lines.slice(start + 1)) {
@@ -176,6 +182,11 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
     } else if (verb === 'ABANDON') {
       if (!/^\d{17}$/.test(rest.steamid ?? '')) return null;
       if (!abandoners.includes(rest.steamid)) abandoners.push(rest.steamid);
+    } else if (verb === 'ALT') {
+      // Shadow data: a malformed line is skipped, never a reason to refuse the
+      // dump, since that would hold a real result back over a side record.
+      const fields = parseAltFields(rest);
+      if (fields !== null) alt.push(fields);
     } else if (verb === 'END') {
       const a = intOf(rest.a), b = intOf(rest.b);
       if (a === null || b === null) return null;
@@ -196,5 +207,5 @@ export function parseDump(body: string, opts: ParseDumpOpts = {}): Dump | null {
   }
 
   if (!end) return null;
-  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state, forfeit: end.forfeit, forfeitWhy: end.forfeitWhy, abandoners };
+  return { matchId, maps, players, skillDetect, skills, winner: end.winner, totalA: end.totalA, totalB: end.totalB, nonce, state, forfeit: end.forfeit, forfeitWhy: end.forfeitWhy, abandoners, alt };
 }

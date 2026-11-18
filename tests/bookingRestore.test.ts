@@ -6,6 +6,7 @@ import { openDb, type DB } from '../src/db.js';
 import { currentSeasonId } from '../src/players.js';
 import { setMissionsDirs, invalidateCampaignCache } from '../src/campaignRegistry.js';
 import { prepareRestore, replayableChapters, restoreSnapshot, resumeLines } from '../src/bookings/restore.js';
+import { upsertAltRound } from '../src/altRoundStore.js';
 
 // The stock No Mercy chapter list, in the same mission-file shape the real
 // game ships (see tests/campaignRegistry.test.ts's AIRPORT fixture). Without
@@ -153,6 +154,25 @@ describe('restoreSnapshot', () => {
     ]);
     prepareRestore(db, s);
     expect(db.prepare('SELECT MAX(ordinal) AS o FROM match_rounds WHERE match_id = ?').get(m)).toEqual({ o: 1 });
+  });
+
+  it('also clears the shadow alt rows from the interrupted map on, so a half never replayed keeps no stale alt score', () => {
+    round(0, 1, 'a', 400); round(0, 2, 'b', 350);
+    round(1, 1, 'b', 100);
+    db.prepare("INSERT INTO match_live (match_id, current_map, last_seen) VALUES (?, 'l4d_vs_hospital02_subway', '2026-10-02 21:00:00')").run(m);
+    const alt = (map: string, half: 1 | 2) => ({
+      map, half, surv: 'a' as const, rule: 'hr1', walk: 400, tank: 0, door: 0, walkMult: 1, doorMult: 1,
+      raw: { ws: 0, wt: 0, wr: 0, ts: 0, tt: 0, tr: 0, ds: 0, dt: 0, dr: 0 },
+      tankPct: null, tankBy: null, tanks: 0, survivorsIn: 4,
+    });
+    upsertAltRound(db, m, 0, alt('l4d_vs_hospital01_apartment', 1), 'udp');
+    upsertAltRound(db, m, 0, alt('l4d_vs_hospital01_apartment', 2), 'udp');
+    upsertAltRound(db, m, 1, alt('l4d_vs_hospital02_subway', 1), 'udp');
+    const s = restoreSnapshot(db, m)!;
+    expect(s.maps).toHaveLength(1);
+    prepareRestore(db, s);
+    expect(db.prepare('SELECT ordinal, half FROM match_round_alt WHERE match_id = ? ORDER BY ordinal, half').all(m))
+      .toEqual([{ ordinal: 0, half: 1 }, { ordinal: 0, half: 2 }]);
   });
 });
 
