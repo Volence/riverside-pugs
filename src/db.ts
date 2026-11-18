@@ -797,6 +797,34 @@ CREATE TABLE IF NOT EXISTS match_rounds (
   ended_at   TEXT,
   PRIMARY KEY (match_id, ordinal, half)
 );
+-- Health-run scoring in shadow mode (src/altScore.ts, src/altRoundStore.ts):
+-- one half under a candidate rule, beside the real score in match_rounds and
+-- never read by a result, SR or win chance. walk/tank/door are the plugin's
+-- rounded points after multipliers; ws..dr the raw unweighted team sums.
+-- tank_pct and tank_by are NULL when no tank window closed. source 'dump'
+-- (the completion rcon dump) is authoritative over 'udp'.
+CREATE TABLE IF NOT EXISTS match_round_alt (
+  match_id     INTEGER NOT NULL REFERENCES matches(id),
+  ordinal      INTEGER NOT NULL,
+  half         INTEGER NOT NULL,
+  rule         TEXT    NOT NULL,
+  surv_team    TEXT    NOT NULL CHECK (surv_team IN ('a','b')),
+  walk         INTEGER NOT NULL,
+  tank         INTEGER NOT NULL,
+  door         INTEGER NOT NULL,
+  walk_mult    REAL    NOT NULL,
+  door_mult    REAL    NOT NULL,
+  ws REAL NOT NULL, wt REAL NOT NULL, wr REAL NOT NULL,
+  ts REAL NOT NULL, tt REAL NOT NULL, tr REAL NOT NULL,
+  ds REAL NOT NULL, dt REAL NOT NULL, dr REAL NOT NULL,
+  tank_pct     INTEGER,
+  tank_by      TEXT    CHECK (tank_by IN ('surv','other','gone')),
+  tanks        INTEGER NOT NULL DEFAULT 0,
+  survivors_in INTEGER NOT NULL,
+  source       TEXT    NOT NULL CHECK (source IN ('udp','dump')),
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (match_id, ordinal, half, rule)
+);
 CREATE TABLE IF NOT EXISTS match_player_stats (
   match_id  INTEGER NOT NULL REFERENCES matches(id),
   player_id TEXT    NOT NULL REFERENCES players(steamid),

@@ -3,6 +3,7 @@ import type { LiveHudLine, TankDone, WitchDone } from './cast/liveHud.js';
 import { steamId64Of } from './steamId.js';
 import { MAX_HOLDS, MAX_TICKRATE, MIN_TICKRATE, burstMaxTicks, decodeIntervals, rateOf, ticksAtMost } from './inputStats.js';
 import { eventExtrasOf, parseDataFeedLine, type DataFeedEvent } from './dataFeedParse.js';
+import type { AltRaw } from './altScore.js';
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
@@ -108,6 +109,27 @@ export type AdminPauseCause = 'call' | 'staff' | 'reset' | 'forced';
  *  out of technical time, or was flagged by the other team. */
 export type TechEventKind = 'start' | 'end' | 'over' | 'flag';
 
+/** One half under a shadow scoring rule (src/altScore.ts), as l4dscores sends
+ *  it in ALT_ROUND and in the match dump. walk/tank/door are the plugin's
+ *  rounded points after multipliers; raw is the unweighted, unmultiplied
+ *  team sums. tankPct and tankBy are null when no tank window closed. */
+export interface AltRoundFields {
+  map: string;
+  half: 1 | 2;
+  surv: 'a' | 'b';
+  rule: string;
+  walk: number;
+  tank: number;
+  door: number;
+  walkMult: number;
+  doorMult: number;
+  raw: AltRaw;
+  tankPct: number | null;
+  tankBy: 'surv' | 'other' | 'gone' | null;
+  tanks: number;
+  survivorsIn: number;
+}
+
 export type LogEvent =
   | { kind: 'match_start'; token: string; map: string }
   | { kind: 'map_result'; token: string; map: string; a: number; b: number }
@@ -195,6 +217,8 @@ export type LogEvent =
   // most interesting, value. Optional for the same reason `map` is, an older
   // plugin does not send it.
   | { kind: 'round_end'; token: string; map: string | null; half: number; surv: 'a' | 'b'; score: number; alive: number | null; demo?: DemoSync }
+  // Shadow scoring only: stored in match_round_alt, never read by a result.
+  | ({ kind: 'alt_round'; token: string } & AltRoundFields)
   /** `sent`: items on the line, a key sent twice counted twice (items keeps
    *  one), so a duplicate watch entry does not look like a lost item. */
   | { kind: 'balance_part'; token: string; half: 1 | 2; part: number; items: Record<string, string>; sent: number }
@@ -498,6 +522,54 @@ function teamOf(s: string | undefined): 'a' | 'b' | null {
 function halfOf(s: string | undefined): number | null {
   const n = intOf(s);
   return n === 1 || n === 2 ? n : null;
+}
+
+const ALT_RAW_KEYS = ['ws', 'wt', 'wr', 'ts', 'tt', 'tr', 'ds', 'dt', 'dr'] as const;
+
+/** The fields of one ALT_ROUND, from the UDP line or the match dump (both
+ *  carry the same `key=val` set). Null unless every field is present and well
+ *  formed: this is a shadow record, so a doubtful line is dropped whole rather
+ *  than stored in part. `wm`/`dm` are multipliers x100; `tankpct=-1
+ *  tankby=none` is the only way to say no tank window closed. */
+export function parseAltFields(kv: Record<string, string>): AltRoundFields | null {
+  const half = halfOf(kv.half);
+  const surv = teamOf(kv.surv);
+  if (!kv.map || half === null || surv === null) return null;
+  if (!/^[a-z0-9_]{1,16}$/.test(kv.rule ?? '')) return null;
+  const nonNeg = (s: string | undefined): number | null => {
+    const v = intOf(s);
+    return v !== null && v >= 0 ? v : null;
+  };
+  const walk = nonNeg(kv.walk);
+  const tank = nonNeg(kv.tank);
+  const door = nonNeg(kv.door);
+  const wm = nonNeg(kv.wm);
+  const dm = nonNeg(kv.dm);
+  const tanks = nonNeg(kv.tanks);
+  const survivorsIn = nonNeg(kv.in);
+  if (walk === null || tank === null || door === null || wm === null || dm === null || tanks === null || survivorsIn === null) return null;
+  const raw = {} as AltRaw;
+  for (const k of ALT_RAW_KEYS) {
+    const v = floatOf(kv[k]);
+    if (v === null || v < 0) return null;
+    raw[k] = v;
+  }
+  const pct = intOf(kv.tankpct);
+  let tankPct: number | null;
+  let tankBy: AltRoundFields['tankBy'];
+  if (kv.tankby === 'none') {
+    if (pct !== -1) return null;
+    tankPct = null;
+    tankBy = null;
+  } else if (kv.tankby === 'surv' || kv.tankby === 'other' || kv.tankby === 'gone') {
+    if (pct === null || pct < 0 || pct > 100) return null;
+    tankPct = pct;
+    tankBy = kv.tankby;
+  } else return null;
+  return {
+    map: kv.map, half: half as 1 | 2, surv, rule: kv.rule!, walk, tank, door,
+    walkMult: wm / 100, doorMult: dm / 100, raw, tankPct, tankBy, tanks, survivorsIn,
+  };
 }
 
 /** The plugin encodes exactly '%' and ' ' in balance keys and values. */
@@ -1226,6 +1298,10 @@ export function parseLogDatagram(buf: Buffer): LogEvent | null {
       const aliveRaw = intOf(rest.alive);
       const alive = aliveRaw !== null && aliveRaw >= 0 ? aliveRaw : null;
       return { kind: 'round_end', token, map: rest.map ?? null, half, surv, score, alive, ...demoSyncOf(rest) };
+    }
+    case 'ALT_ROUND': {
+      const fields = parseAltFields(rest);
+      return fields === null ? null : { kind: 'alt_round', token, ...fields };
     }
     case 'EVENT': {
       const seq = intOf(rest.seq);

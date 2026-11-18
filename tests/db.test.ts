@@ -34,7 +34,7 @@ describe('openDb', () => {
       'match_abandons', 'match_abort_notices', 'match_balance_log', 'match_chat', 'match_connect_funnel', 'match_demos', 'match_gg_votes', 'match_live', 'match_live_events', 'match_live_map_stats', 'match_live_maps',
       'match_live_players', 'match_maps', 'match_name_sightings',
       'match_pauses', 'match_player_stats', 'match_players', 'match_presence', 'match_progress_samples', 'match_readyup_players', 'match_readyups',
-      'match_replays', 'match_requeue', 'match_round_feeds', 'match_round_marks', 'match_round_stats', 'match_rounds', 'match_si_lives',
+      'match_replays', 'match_requeue', 'match_round_alt', 'match_round_feeds', 'match_round_marks', 'match_round_stats', 'match_rounds', 'match_si_lives',
       'match_survivor_downs', 'match_win_point_runs', 'match_win_points',
       'matches', 'matchmaker_state',
       'mod_calls',

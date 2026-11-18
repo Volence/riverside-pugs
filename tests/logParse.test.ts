@@ -489,6 +489,40 @@ describe('round lines', () => {
     expect(parseLogDatagram(framed(`PUG ${TOKEN} ROUND_END half=0 surv=a score=1`))).toBeNull();
   });
 
+  describe('ALT_ROUND (health-run scoring, shadow)', () => {
+    const ALT = 'ALT_ROUND map=l4d_vs_airport03_garage half=2 surv=b rule=hr1 walk=463 tank=164 door=0 wm=115 dm=175 '
+      + 'ws=180.25 wt=40.50 wr=96.00 ts=150.00 tt=60.00 tr=90.00 ds=0.00 dt=0.00 dr=0.00 tankpct=41 tankby=surv tanks=1 in=0';
+    const alt = (line: string) => parseLogDatagram(framed(`PUG ${TOKEN} ${line}`));
+
+    it('parses the pinned line, multipliers back from x100', () => {
+      expect(alt(ALT)).toEqual({
+        kind: 'alt_round', token: TOKEN, map: 'l4d_vs_airport03_garage', half: 2, surv: 'b', rule: 'hr1',
+        walk: 463, tank: 164, door: 0, walkMult: 1.15, doorMult: 1.75,
+        raw: { ws: 180.25, wt: 40.5, wr: 96, ts: 150, tt: 60, tr: 90, ds: 0, dt: 0, dr: 0 },
+        tankPct: 41, tankBy: 'surv', tanks: 1, survivorsIn: 0,
+      });
+    });
+
+    it('reads tankpct=-1 tankby=none as no tank window', () => {
+      expect(alt(ALT.replace('tankpct=41 tankby=surv', 'tankpct=-1 tankby=none')))
+        .toMatchObject({ kind: 'alt_round', tankPct: null, tankBy: null });
+    });
+
+    it('parses tankby=gone', () => {
+      expect(alt(ALT.replace('tankby=surv', 'tankby=gone'))).toMatchObject({ kind: 'alt_round', tankPct: 41, tankBy: 'gone' });
+    });
+
+    it('rejects a line with a bad or missing field', () => {
+      for (const bad of [
+        ALT.replace('tankby=surv', 'tankby=bogus'),
+        ALT.replace(' ws=180.25', ''),
+        ALT.replace('walk=463', 'walk=abc'),
+        ALT.replace('half=2', 'half=3'),
+        ALT.replace(' rule=hr1', ''),
+      ]) expect(alt(bad)).toBeNull();
+    });
+  });
+
   it('carries half and t_ms on an EVENT line', () => {
     const ev = parseLogDatagram(framed(`PUG ${TOKEN} EVENT seq=7 kind=pinned actor=${ACTOR} target=${TARGET} value=0 half=1 t=4320`));
     expect(ev).toMatchObject({ kind: 'live_event', event: 'pinned', half: 1, tMs: 4320 });
