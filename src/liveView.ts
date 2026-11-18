@@ -10,6 +10,7 @@ import { noteMatchAborted } from './matchAborts.js';
 import { liveWinLine, type WinLine } from './winProb.js';
 import type { FormParams } from './winForm.js';
 import { DEFAULT_DELAY_MS } from './replayTail.js';
+import { upsertAltRound } from './altRoundStore.js';
 
 /** How long without a HEARTBEAT before a match is shown as stale. The plugin
  *  emits one every 30s, so this tolerates three consecutive losses on a lossy
@@ -725,6 +726,18 @@ export function recordRoundEnd(
     ev.demo?.tick ?? null, ev.demo?.hz ?? null,
     ev.demo?.shifts && ev.demo.shifts.length > 0 ? JSON.stringify(ev.demo.shifts) : null);
   touch(db, id);
+}
+
+export type AltRoundEvent = Extract<LogEvent, { kind: 'alt_round' }>;
+
+/** ALT_ROUND over UDP (shadow scoring). Filed under the map the line names,
+ *  as ROUND_END is; the completion dump writes the same rows authoritatively
+ *  through upsertAltRound directly, since a completed match is no longer live. */
+export function recordAltRound(db: DB, token: string, ev: AltRoundEvent): void {
+  const id = liveMatchIdOf(db, token);
+  if (id === null) return;
+  const { kind: _kind, token: _token, ...fields } = ev;
+  upsertAltRound(db, id, ordinalForRoundEnd(db, id, ev.map), fields, 'udp');
 }
 
 export function roundsFor(db: DB, matchId: number): RoundRow[] {

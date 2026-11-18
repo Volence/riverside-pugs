@@ -122,7 +122,7 @@ import { SelfStartedMatches } from './selfStarted.js';
 import { SignonDropNotifier } from './signonDropNotify.js';
 import {
   recordMatchStart, recordMapResult, recordHeartbeat, recordLiveStat, recordLiveEvent, recordChat,
-  recordRoundStart, recordRoundEnd, ordinalForRoundEnd,
+  recordRoundStart, recordRoundEnd, ordinalForRoundEnd, recordAltRound,
   reapOrphanedMatches,
   recordPhase,
   currentOrdinal,
@@ -1628,6 +1628,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               recordMatchReplays(deps.db, rr.id, ev.token, deps.config.replayDir,
                 { excludeOpen: true });
             }
+          }
+          else if (ev.kind === 'alt_round') {
+            // Shadow scoring: stored, never shown, so nothing to broadcast.
+            // Garnish: a failure here must not reach the real round path.
+            try { recordAltRound(deps.db, ev.token, ev); }
+            catch (err) { console.error('[alt] storing ALT_ROUND failed:', err); }
+            return;
           }
           else if (ev.kind === 'map_result') {
             recordMapResult(deps.db, ev.token, ev.map, ev.a, ev.b);
