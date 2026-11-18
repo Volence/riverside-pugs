@@ -4586,6 +4586,9 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 	// Captured here for the same reason as half and survEnd: by the time the
 	// retry chain runs, the next half may already have a living survivor team.
 	int alive = CountAliveSurvivors();
+	// The alt half is read now too: l4dscores clears it at the next
+	// round_start, which can come before the delayed score read below.
+	AltScore_Capture(half, survEnd);
 
 	// Flush here, while this round's clock is still valid: g_iHalf still names
 	// this half and EmitRoundEnd has not yet zeroed g_fRoundLiveAt. Left to
@@ -4604,7 +4607,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 		EmitRoundEnd(half, survEnd, mine, alive);
 
-		AltScore_OnRoundEnd(half, survEnd);
+		AltScore_SendPending();
 		if (second) FinishSecondHalf();
 		return;
 	}
@@ -4777,7 +4780,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			// readings are independent, and a round whose score never landed
 			// still tells us truthfully whether anyone survived it.
 			EmitRoundEnd(half, survEnd, -1, alive);
-			AltScore_OnRoundEnd(half, survEnd);
+			AltScore_SendPending();
 			if (second) FinishSecondHalf();
 		}
 		return Plugin_Stop;
@@ -4787,7 +4790,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	g_bScoreReadPending = false;
 	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 	EmitRoundEnd(half, survEnd, mine, alive);
-	AltScore_OnRoundEnd(half, survEnd);
+	AltScore_SendPending();
 	if (second) FinishSecondHalf();
 	return Plugin_Stop;
 }

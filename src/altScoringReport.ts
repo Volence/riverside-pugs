@@ -17,6 +17,9 @@ export interface AltReportHalf {
   tankPct: number | null;
   tankBy: string | null;
   survivorsIn: number;
+  /** A stored walk, tank or door differs by more than 1 from the same part
+   *  recomputed from the half's raw components and multipliers. */
+  mismatch: boolean;
 }
 
 export interface AltReportMatch {
@@ -37,7 +40,11 @@ export interface AltReportMatch {
 
 export interface AltReport {
   /** Shares are 0..1, over complete counted matches. */
-  summary: { matchesWithData: number; complete: number; differentWinner: number; share: { walk: number; tank: number; door: number } };
+  summary: {
+    matchesWithData: number; complete: number; differentWinner: number; share: { walk: number; tank: number; door: number };
+    /** Halves with data, over every match, whose stored parts do not match their own breakdown. */
+    mismatchedHalves: number;
+  };
   maps: { map: string; halves: number; avgWalkRaw: number; suggestedWalkMult: number | null }[];
   matches: AltReportMatch[];
 }
@@ -80,7 +87,8 @@ interface MatchRow {
  * Summary and maps cover every match with data, not only the listed ones;
  * the counted fields and maps use counted matches only.
  * Totals shown are the stored walk/tank/door the server reported; the raw
- * components are used only for the per-map walking at multiplier 1.
+ * components are used for the per-map walking at multiplier 1 and to check
+ * the stored parts against their own breakdown (`mismatch`).
  */
 export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport {
   const limit = opts.limit ?? 100;
@@ -159,7 +167,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
         halves: halves.map((h) => ({
           ordinal: h.ordinal, half: h.half, map: h.map, survTeam: h.survTeam, real: h.real,
           walk: h.walk, tank: h.tank, door: h.door, total: h.walk + h.tank + h.door,
-          tankPct: h.tankPct, tankBy: h.tankBy, survivorsIn: h.survivorsIn,
+          tankPct: h.tankPct, tankBy: h.tankBy, survivorsIn: h.survivorsIn, mismatch: isMismatch(h),
         })),
       });
     }
@@ -168,7 +176,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
   const share = sum > 0 ? { walk: parts.walk / sum, tank: parts.tank / sum, door: parts.door / sum } : { walk: 0, tank: 0, door: 0 };
 
   return {
-    summary: { matchesWithData: matchRows.length, complete, differentWinner, share },
+    summary: { matchesWithData: matchRows.length, complete, differentWinner, share, mismatchedHalves: rows.filter(isMismatch).length },
     maps: mapWalking(countedHalves),
     matches,
   };
@@ -176,6 +184,13 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
 
 function rawOf(h: AltRow): AltRaw {
   return { ws: h.ws, wt: h.wt, wr: h.wr, ts: h.ts, tt: h.tt, tr: h.tr, ds: h.ds, dt: h.dt, dr: h.dr };
+}
+
+/** The stored parts are the plugin's own arithmetic on the stored raw
+ *  components; a difference of more than 1 (beyond rounding) is a bug there. */
+function isMismatch(h: AltRow): boolean {
+  const p = halfParts(rawOf(h), h.walkMult, h.doorMult, HR1);
+  return Math.abs(h.walk - p.walk) > 1 || Math.abs(h.tank - p.tank) > 1 || Math.abs(h.door - p.door) > 1;
 }
 
 /** Mean walking per half at walk multiplier 1, per named map, and the
