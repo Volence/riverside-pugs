@@ -265,6 +265,31 @@ games; walking per survivor; the store model above; quarter weights; door 500.
     alt half scores, then the alt match totals. Mirror how the existing `!scores` output is built and shown
     (the score panel around `Menu_ScorePanel` in l4dscores.sp), with the alt numbers in place of the real ones.
     The plugin therefore keeps the alt half scores per map for the whole match, reset where `campaignScores[]` is.
+    As built it prints chat lines like `!scores` (header, `Map N: a/b` per map numbered like `!scores`, `Total`,
+    "Some rounds are missing from this list." when partial) and ends with a hint:
+    `[Alt] Type !scoresalt full for the walk, tank and door of every round.`
+  - `!scoresalt full` (also `detail`, `d`; owner request 2026-11-18, "what each point pool gave, per round, per
+    team"): the same header, then one line per half played, per map the Sur team's half then the Inf team's,
+    then the same `Total` and partial lines:
+
+    ```
+    [Alt] Alt scores (health-run), not the real score: Sur/Inf
+    Map 1 Sur: 643 = Walk 310 + Tank 123 (41%) + Door 210 (2 in)
+    Map 1 Inf: 266 = Walk 200 + Tank 0 (no tank) + Door 66 (1 in)
+    Map 2 Sur: 512 = Walk 420 + Tank 0 + Door 92 (1 in)
+    Map 2 Inf: -
+    Total: 1155/266
+    ```
+
+    Each tally row keeps, per half, the three rounded, multiplied parts (summing exactly to the stored total),
+    the team health % when the tank paid, the number of tanks spawned and the survivors who made the saferoom;
+    they are swapped with the totals on every real swap and dropped with them on reset and same-map reload.
+    `(N%)` = the tank paid at that team health; `(no tank)` = none spawned; bare `Tank 0` = a tank came and paid
+    nothing. `(N in)` survivors banked the door, `(wiped)` none did. A finished half with no alt score prints
+    `-`. The half in progress is never listed (no numbers invented for it). Chat only, no console copy: the
+    lines go through SourceMod's reliable chat user messages like the real `!scores`, so a five-map match (up
+    to 13 lines of about 100 bytes) is not dropped. Shadow isolation unchanged: alt include and its own
+    command only; no wire format, native or site change.
   - In stage 2 test games, where the rule is the real score, `!health` and `!scores` themselves show these.
 - Tank payout line (owner request 2026-11-18, after testing): when a tank window closes and settles the half's
   tank result, one chat line to every opted-in player (see `!newhealth` below), printed from `Alt_CloseTankWindow` in the

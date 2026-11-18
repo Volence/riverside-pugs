@@ -11,7 +11,7 @@ ranked). Nothing here has been deployed or merged to master. The in-game rig was
 |---|---|---|---|
 | Site: rule module, storage, admin report and page | pug, `alt-scoring` (from master 0ee5e855) | `/home/volence/l4d/pug/.claude/worktrees/alt-scoring` | b76bb6d7 (plus the commit with this note) |
 | pug-match 0.3.46: sends `ALT_ROUND` and dump `ALT` lines | same branch, `plugin/` | same | same |
-| l4dscores 8.5.9-riverside9: computes hr1, `!healthalt`, `!scoresalt` | deploy, `feature/altscore` (from master 7a6bee7) | `/home/volence/l4d/deploy-altscore` | 61ac90d |
+| l4dscores 8.5.9-riverside9: computes hr1, `!healthalt`, `!scoresalt`, `!scoresalt full` (or `detail`, `d`), `!newhealth` | deploy, `feature/altscore` (from master 7a6bee7) | `/home/volence/l4d/deploy-altscore` | dfdbd94 |
 
 Site files: `src/altScore.ts` (the rule, pure), `src/altRoundStore.ts`, `src/altScoringReport.ts`,
 `src/routes/adminAltScoring.ts`, table `match_round_alt` in `src/db.ts`, parser branches in `src/logParse.ts` and
@@ -70,6 +70,9 @@ Plugin files: `plugin/pug-altscore.inc`; `plugins-src/l4dscores_alt.inc`, data f
 ## What was NOT verified
 
 - Chat colours and line lengths as a human sees them (needs a game client typing `!healthalt` / `!scoresalt`).
+- `!scoresalt full` (added 2026-11-18, commit dfdbd94): compiled only (plugin and rig), never run in game or
+  through the rig. The rig's `sm_altshow` now prints it and checks every stored half's parts sum to its total;
+  each round_end checks the filed half carries the held parts.
 - A full non-cheats match with humans readying up (the normal-config pass above used bots and `sm_forcestart`).
 - Takeover by a real human (the rig used a SourceMod fake client).
 - Two rig lines FAIL by design: `takeover` on a half that is not live, and the ledge temp prediction when
