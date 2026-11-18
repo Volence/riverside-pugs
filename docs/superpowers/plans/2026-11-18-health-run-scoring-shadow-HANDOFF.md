@@ -105,6 +105,8 @@ Design calls (marked "Claude's call" or "Fable review" in the spec):
 9. `!healthalt` was added as a separate command, because in shadow the real `!health` must keep showing today's
    scoring.
 10. The alt tally is swapped wherever the real tally is swapped (map start and end as well as the swap command).
+11. The automatic alt chat lines (tank payout, round end) are opt in per player with `!newhealth` (owner ruling
+    2026-11-18), default off, kept in a clientprefs cookie; `!healthalt` and `!scoresalt` answer anyone.
 
 Left as they are for shadow, on purpose: more than four survivors push the percentages over 100 (clamped only
 on the tank line); a pinned or dragged survivor counts as standing, so ground they are dragged forward is paid;
