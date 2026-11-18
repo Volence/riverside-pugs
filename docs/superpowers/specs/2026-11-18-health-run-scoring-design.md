@@ -245,14 +245,22 @@ games; walking per survivor; the store model above; quarter weights; door 500.
     fixed):
 
     ```
-    [Alt] Walk 312 | Tank up to 300 (222 now) | Door up to 875 (648 now)
-    [Alt] This half: 312 banked, 1290 if you finish at this health. Team health 74%.
+    [Alt] Walk: 171 so far, 26% of the map covered. 74% left, worth up to 487 (438 at this health).
+    [Alt] Tank: up to 300 (269 at this health).
+    [Alt] Door: up to 500 (449 at this health).
+    [Alt] This half: 171 banked, 1327 if you finish at this health. Team health 90%.
     ```
 
-    "If you finish at this health" = banked + the rest of the walk for standing survivors at their current
-    points + the tank at its current worth (if it has not paid and still can) + the door at its current worth.
-    After the tank is paid the tank part reads `Tank 186`. In the second half add the other team's alt score for
-    this map as the number to beat.
+    "% of the map covered" is the average of the survivors' paid marks; "left" is 100 minus that. "Worth up
+    to" is the unpaid ground of every living survivor at full points, with the map's walk multiplier; "at this
+    health" is the same ground for the standing survivors at their current points (a dead survivor adds
+    nothing; a down or hanging one adds to "up to" only). While a tank window is open the walk line says
+    "(paused while the tank is up)".
+    "If you finish at this health" = banked walk + walk at this health + the tank at its current worth (if it
+    has not paid and still can) + the door at its current worth, so the parts add up to it. After the tank is
+    paid the tank line reads `Tank: 186 (team was at 62%)`; a window that closed with no survivor standing reads
+    `Tank: 0, the window closed with no survivor standing.` In the second half a fifth line gives the other
+    team's alt score for this map as the number to beat (`To beat: N.`).
   - `!scoresalt` (`sm_scoresalt`): every round played so far under the rule, one row per map with both teams'
     alt half scores, then the alt match totals. Mirror how the existing `!scores` output is built and shown
     (the score panel around `Menu_ScorePanel` in l4dscores.sp), with the alt numbers in place of the real ones.
@@ -318,7 +326,7 @@ The site half can ship first: it ignores absent lines. Order: site, then pug-mat
 
 - **Ledge rescue hands out temp health without spending a revive** (game behaviour). Today's bonus pays for it.
   hr1 clamps it out (see "Ledge clamp"); the owner kept the clamp.
-- **Tank-less maps.** `!healthalt` says "Tank up to 300" until the half ends even on a map that never spawns one.
+- **Tank-less maps.** `!healthalt` says "Tank: up to 300" until the half ends even on a map that never spawns one.
   The data records how many tanks spawned.
 - **First aid kits.** A held kit is worth nothing under hr1 and a heal raises solid health and resets revives.
   Settled: the owner confirmed ranked has no kits.
