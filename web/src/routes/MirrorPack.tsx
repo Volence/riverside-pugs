@@ -3,10 +3,17 @@ import { Panel } from '../components/bits';
 import { mb, readGot, type Got } from './L4D2Pack';
 
 /** The mirrored campaigns (Season 1): one zip of the same thirteen 00_mirrormaps_*.vpk files as all
- *  five servers, built by mirror/out/dist/s1/build.sh. One download only (owner 11-02); an updated
+ *  five servers, built by mirror/out/dist/s1r2/build.sh. One download only (owner 11-02); an updated
  *  pack gets a new key, which is how a player who downloaded the old one is told it changed. */
-export const MIRROR_PACK_URL = 'https://assets.riversidepug.com/mappack/mirror-s1/Riverside-Mirror-Maps-S1.zip';
-export const MIRROR_PACK_BYTES = 912533321;
+export const MIRROR_PACK_URL = 'https://assets.riversidepug.com/mappack/mirror-s1/Riverside-Mirror-Maps-S1-r2.zip';
+export const MIRROR_PACK_BYTES = 912534294;
+/** Earlier zips whose maps are the same bytes as the current one, so a browser that downloaded one
+ *  still reads "Downloaded" (owner 11-18). r2 only adds an addoninfo.txt to each VPK, which gives
+ *  them their names in the game's Addons menu; nobody should fetch 900 MB again for that. A zip
+ *  that changes a map does NOT go here: that is what "Updated" is for. */
+export const MIRROR_PACK_SAME_FILES: readonly string[] = [
+  'https://assets.riversidepug.com/mappack/mirror-s1/Riverside-Mirror-Maps-S1.zip',
+];
 
 /** What this browser downloaded: { all: url }. Its own key, apart from the L4D2 pack's. */
 const STORE_KEY = 'mirror-downloads';
@@ -18,7 +25,8 @@ export function gotAnyMirror(): boolean {
 
 export function MirrorPack() {
   const [got, setGot] = useState<Got>(() => readGot(STORE_KEY));
-  const status = got.all === MIRROR_PACK_URL ? 'have' : got.all ? 'updated' : null;
+  const status = !got.all ? null
+    : got.all === MIRROR_PACK_URL || MIRROR_PACK_SAME_FILES.includes(got.all) ? 'have' : 'updated';
   const mark = () => {
     const next = { ...got, all: MIRROR_PACK_URL };
     setGot(next);
