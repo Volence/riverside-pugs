@@ -267,7 +267,7 @@ games; walking per survivor; the store model above; quarter weights; door 500.
     The plugin therefore keeps the alt half scores per map for the whole match, reset where `campaignScores[]` is.
   - In stage 2 test games, where the rule is the real score, `!health` and `!scores` themselves show these.
 - Tank payout line (owner request 2026-11-18, after testing): when a tank window closes and settles the half's
-  tank result, one chat line to everyone (both teams and spectators), printed from `Alt_CloseTankWindow` in the
+  tank result, one chat line to every opted-in player (see `!newhealth` below), printed from `Alt_CloseTankWindow` in the
   alt include, never from a real handler. It carries the same rounded number `!healthalt` shows afterwards and
   says it is not the real score:
 
@@ -281,7 +281,7 @@ games; walking per survivor; the store model above; quarter weights; door 500.
   paid one. Nothing prints with `l4d_score_alt` 0 or no live alt half. Cvar `l4d_score_alt_announce` (default 1;
   0 = no automatic alt chat lines) silences it on live boxes without turning shadow scoring off.
 - Half result line (owner request 2026-11-18, after a test round ended with real 660, alt 643 and no word of it):
-  when a half ends, one line to everyone with the half's alt parts and total, printed from the alt round_end hook
+  when a half ends, one line to every opted-in player with the half's alt parts and total, printed from the alt round_end hook
   (`Alt_RoundEnd`, hooked after the real one) once the half is held and tallied, never from a real handler. The
   parts are the rounded, multiplied parts and add up to the total. The real score shown is l4dscores'
   `roundScores[team]`, set by the real round_end handler earlier in the same round_end: the number the real tally
@@ -298,6 +298,22 @@ games; walking per survivor; the store model above; quarter weights; door 500.
 
   Once per half (round_end fires twice; only the first is handled). Nothing for a half that never went live or
   after a mid-round load with nothing recorded; same cvar gates as the tank line.
+- Opt in for the automatic lines (owner ruling 2026-11-18): in shadow, players who do not know about the
+  experiment must see nothing, so the tank line and the round-end lines go only to players who asked for them
+  (humans in game, any team or spectating). `!newhealth` (`sm_newhealth`, any player, registered from the alt
+  include) toggles the caller's choice and answers only the caller:
+
+    ```
+    [Alt] Health-run scoring printouts are ON for you. This is a test scoring system and not the real score. Type !healthalt for the current round, !scoresalt for the match, !newhealth to turn this off.
+    [Alt] Health-run scoring printouts are OFF for you.
+    ```
+
+  Default off. The choice is a clientprefs cookie (`l4dscores_alt_lines`, 1 on, 0 off), so it holds across map
+  changes and reconnects, plus an in-memory copy by SteamID for the server run, used when clientprefs is not
+  loaded (its natives are optional; l4dscores still loads) or the cookies are not cached yet.
+  `l4d_score_alt_announce` stays the master switch: at 0 nobody gets automatic lines, and the command still
+  toggles and says the lines are switched off on the server. With `l4d_score_alt` 0 the command answers
+  "Alt scoring is off." and changes nothing. `!healthalt` and `!scoresalt` answer anyone, unchanged.
 - Version bump to 8.5.9-riverside9. Build with `./build.sh l4dscores`.
 
 ### Plugin: pug-match (pug repo, `plugin/pug-match.sp`, currently 0.3.45)
