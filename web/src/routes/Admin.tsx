@@ -21,6 +21,7 @@ import { Knobs } from './admin/balance/Knobs';
 import { Values } from './admin/balance/Values';
 import { Looks } from './admin/balance/Looks';
 import { TeamBalance } from './admin/balance/TeamBalance';
+import { AltScoring } from './admin/balance/AltScoring';
 import { AdminCampaigns } from './admin/AdminCampaigns';
 import { PeopleSearch } from './admin/PeopleSearch';
 import { NeedsALook } from './admin/NeedsALook';
@@ -166,6 +167,7 @@ export function Admin({ session }: { session: Session }) {
         {r.desk === 'balance' && r.section === 'values' && <Values />}
         {r.desk === 'balance' && r.section === 'looks' && <Looks />}
         {r.desk === 'balance' && r.section === 'teams' && <TeamBalance />}
+        {r.desk === 'balance' && r.section === 'alt' && <AltScoring />}
         {/* A desk that does not exist, or a section of one that does not.
             Either way the panel says so rather than showing an empty page. */}
         {r.section === 'unknown' && <NoSuchPage />}
