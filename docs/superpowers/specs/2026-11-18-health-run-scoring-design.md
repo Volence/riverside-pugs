@@ -280,6 +280,24 @@ games; walking per survivor; the store model above; quarter weights; door 500.
   paid line later windows print nothing; an unpaid close prints its line and a later tank that pays prints the
   paid one. Nothing prints with `l4d_score_alt` 0 or no live alt half. Cvar `l4d_score_alt_announce` (default 1;
   0 = no automatic alt chat lines) silences it on live boxes without turning shadow scoring off.
+- Half result line (owner request 2026-11-18, after a test round ended with real 660, alt 643 and no word of it):
+  when a half ends, one line to everyone with the half's alt parts and total, printed from the alt round_end hook
+  (`Alt_RoundEnd`, hooked after the real one) once the half is held and tallied, never from a real handler. The
+  parts are the rounded, multiplied parts and add up to the total. The real score shown is l4dscores'
+  `roundScores[team]`, set by the real round_end handler earlier in the same round_end: the number the real tally
+  and `!scores` keep (the real round print reads the engine again 4 s later and can differ in rare cases, such as
+  a bot spawning after a wipe). When it is not set, the line says "Not the real score." instead. After the second
+  half of a map, a second line gives the map's two alt halves in `!scoresalt`'s order (current survivors first,
+  `-` for a half with no alt score):
+
+    ```
+    [Alt] Round over. Health-run scoring: Walk 310 + Tank 123 + Door 210 = 643 (real score 660).
+    [Alt] Round over. Health-run scoring: Walk 310 + Tank 123 + Door 210 = 643. Not the real score.
+    [Alt] This map under health-run scoring (Sur/Inf): 512 / 643.
+    ```
+
+  Once per half (round_end fires twice; only the first is handled). Nothing for a half that never went live or
+  after a mid-round load with nothing recorded; same cvar gates as the tank line.
 - Version bump to 8.5.9-riverside9. Build with `./build.sh l4dscores`.
 
 ### Plugin: pug-match (pug repo, `plugin/pug-match.sp`, currently 0.3.45)
