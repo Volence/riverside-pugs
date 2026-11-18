@@ -345,6 +345,25 @@ games; walking per survivor; the store model above; quarter weights; door 500.
   `l4d_score_alt_announce` stays the master switch: at 0 nobody gets automatic lines, and the command still
   toggles and says the lines are switched off on the server. With `l4d_score_alt` 0 the command answers
   "Alt scoring is off." and changes nothing. `!healthalt` and `!scoresalt` answer anyone, unchanged.
+- Health curve (owner request 2026-11-18: "a graph of team health as the map goes on, per half", for the admin
+  page). Per half the plugin records the team health % (the "Team health N%" `!healthalt` shows: integer, clamped
+  0..100) at each 5% of map covered, 21 points for covered = 0, 5, .., 100. "Covered" is `!healthalt`'s figure
+  (the average of the survivors' paid marks, the one the 25/50/75% lines use). Point 0 is taken when the half goes
+  live. Marks do not move while a tank is up, so the catch-up after it can cross several points in one sample: each
+  crossed point gets the health at that moment. On a make (at least one survivor banks the door) every point not
+  reached yet, up to 100, gets the health at round end: the door credit walks the made survivors the rest of the
+  map, so the team is treated as having covered it. Points never reached stay -1 (a wipe ends the curve where the
+  team was). Two tank positions, as the same covered figure: `tankOpen` when the half's first tank window opened,
+  `tankClose` when the paying window closed (or, until one pays, the last one). Builder's call: because marks are
+  held while a tank is up, the covered figure at the close itself is where the fight started, so `tankClose` is
+  read again at the end of the same sample, after the walk has caught up, which is where the team had got to when
+  the tank was gone; a window closed inside the round_end hook keeps the figure at the close. -1 for none; an open
+  with close -1 means the half ended with the tank up. All of it is reset with the half and held with the held half
+  until the next round start, like the other held values. Alt include only (its sampler, its tank window code, its
+  round_end hook); nothing in a real handler.
+  New optional native, `Score_GetAltHalf` unchanged:
+  `native bool Score_GetAltCurve(int curve[21], int &tankOpen, int &tankClose);` false when alt scoring is off
+  or no finished half is held (the same validity as `Score_GetAltHalf`).
 - Version bump to 8.5.9-riverside9. Build with `./build.sh l4dscores`.
 
 ### Plugin: pug-match (pug repo, `plugin/pug-match.sp`, currently 0.3.45)
@@ -365,7 +384,16 @@ games; walking per survivor; the store model above; quarter weights; door 500.
   dump parser stops reading there (`dumpParse.ts:194`) and ignores verbs it does not know, so an older site is
   unaffected.
 - No behaviour change when the native is missing or `l4d_score_alt` is 0: no `ALT_ROUND`, no `ALT` lines.
-- Version bump; rebuild before `stage.sh`.
+- Health curve (0.3.47): when l4dscores also has `Score_GetAltCurve` (marked optional and feature-checked on its
+  own, so an l4dscores with only `Score_GetAltHalf` still sends the rest), the same body, so both the `ALT_ROUND`
+  line and the dump `ALT` line, ends with
+  `curve=<21 comma separated ints, team health % at 0, 5, .., 100% of the map covered, -1 not reached>
+  tankat=<open>,<close>` (the covered figure 0..100 at the tank window, -1 none). Each value is sent clamped to
+  -1..100. Without the native the two fields are absent. Worst case body (a 63 character map, every int at 11
+  characters, every raw float at 14, curve and tankat at their widest): 504 characters, so the body buffer is 640;
+  the UDP line is at most 649 of `EmitPug`'s 768 and the dump line at most 643 of `DumpLine`'s 1024. A real line
+  is about 310 (`ALT_ROUND` on hospital01 with a tank and a make: 311 bytes).
+- Version bump (0.3.46 with the alt lines, 0.3.47 with the curve); rebuild before `stage.sh`.
 
 ### Site (pug repo)
 
@@ -393,6 +421,19 @@ games; walking per survivor; the store model above; quarter weights; door 500.
   - Claude's call: a match counts toward "different winner" only when every half the real score recorded has an
     alt row. `!gg` forfeits and abandons end through `EndMatchNow` with no final round end, so their last half has
     none; they are listed with an "incomplete" mark and left out of the summary counts.
+- Health curve: `curve=` and `tankat=` are optional on both lines. Absent means null; a malformed one (not exactly
+  21 entries, an entry not an integer in -1..100, a tank pair not two such values, or a close with no open) is
+  dropped on its own and the rest of the line is stored as before. Stored on the same `match_round_alt` row
+  (`curve` TEXT, the 21 values comma separated; `tank_open`, `tank_close` INTEGER; added with `ensureColumn`, NULL
+  on older rows), by the live path (`recordAltRound`) and the dump path (`storeDumpAlt`) through the one
+  `upsertAltRound`, with the same udp/dump precedence. The report gives each half `curve` (21 numbers or null),
+  `tankOpen` and `tankClose` (null when not recorded). Page: in a match's detail, under the halves table, one chart
+  per map: x = % of the map covered (0..100), y = team health % (0..100), one line per half in the team's colour
+  (team A green, team B red, as the win chart colours them; legend "Team A (half 1)"), gaps where a point is -1,
+  a faint band in the team's colour over each half's tank fight (`tank_open`..`tank_close`; a dashed marker at the
+  open when the half ended with the tank up), and a title on every point and band with the exact numbers. A map
+  whose halves have no curve says "No curve recorded for <map>."; a half without one is named in the legend as
+  such. Plain inline SVG in the site's chart style (the win chart), no chart library.
 - No public page, no setting, no change to `/api/maps`, win chance, or any existing route.
 
 ### Rollout
@@ -400,6 +441,12 @@ games; walking per survivor; the store model above; quarter weights; door 500.
 Deploying plugins to the live boxes is the owner's call (stage on restart, never mid-match, push after deploy).
 The site half can ship first: it ignores absent lines. Order: site, then pug-match, then l4dscores with
 `altscore_maps.txt`. Rollback is `l4d_score_alt 0`.
+
+The health curve keeps every pairing working (checked by reading the parsers, 2026-11-18): the site's
+`parseAltFields` reads only the keys it knows, so an older site ignores `curve=` and `tankat=` on both lines and
+stores the rest as before; the new site reads a line without them as null and shows "No curve recorded". pug-match
+0.3.47 against an l4dscores without `Score_GetAltCurve` sends the line without the two fields; pug-match 0.3.46 never
+calls the new native, so a new l4dscores with it changes nothing there.
 
 ## Known gaps accepted for hr1
 

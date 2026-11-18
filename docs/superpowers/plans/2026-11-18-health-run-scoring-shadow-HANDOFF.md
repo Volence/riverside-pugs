@@ -9,14 +9,16 @@ ranked). Nothing here has been deployed or merged to master. The in-game rig was
 
 | Piece | Repo and branch | Worktree | Head |
 |---|---|---|---|
-| Site: rule module, storage, admin report and page | pug, `alt-scoring` (from master 0ee5e855) | `/home/volence/l4d/pug/.claude/worktrees/alt-scoring` | b76bb6d7 (plus the commit with this note) |
-| pug-match 0.3.46: sends `ALT_ROUND` and dump `ALT` lines | same branch, `plugin/` | same | same |
-| l4dscores 8.5.9-riverside9: computes hr1, `!healthalt`, `!scoresalt`, `!scoresalt full` (or `detail`, `d`), `!newhealth`, 25/50/75% progress lines | deploy, `feature/altscore` (from master 7a6bee7) | `/home/volence/l4d/deploy-altscore` | 8294e01 |
+| Site: rule module, storage, admin report and page, health curve chart | pug, `alt-scoring` (from master 0ee5e855) | `/home/volence/l4d/pug/.claude/worktrees/alt-scoring` | 723c01c4 (site), 80bef4f3 (pug-match), plus the commit with this note |
+| pug-match 0.3.47: sends `ALT_ROUND` and dump `ALT` lines, with `curve=` and `tankat=` when l4dscores has `Score_GetAltCurve` | same branch, `plugin/` | same | same |
+| l4dscores 8.5.9-riverside9: computes hr1, `!healthalt`, `!scoresalt`, `!scoresalt full` (or `detail`, `d`), `!newhealth`, 25/50/75% progress lines, health curve (`Score_GetAltCurve`) | deploy, `feature/altscore` (from master 7a6bee7) | `/home/volence/l4d/deploy-altscore` | dfb3a3c (plugin), bf5a3a3 (rig) |
 
 Site files: `src/altScore.ts` (the rule, pure), `src/altRoundStore.ts`, `src/altScoringReport.ts`,
-`src/routes/adminAltScoring.ts`, table `match_round_alt` in `src/db.ts`, parser branches in `src/logParse.ts` and
-`src/dumpParse.ts`, `storeDumpAlt` in `src/matchResult.ts`, one extra delete in `src/bookings/restore.ts`, page
-`web/src/routes/admin/balance/AltScoring.tsx` (Admin, Balance desk, "Alt scoring" tab).
+`src/routes/adminAltScoring.ts`, table `match_round_alt` in `src/db.ts` (columns `curve`, `tank_open`, `tank_close`
+added with `ensureColumn`), parser branches in `src/logParse.ts` (`parseAltFields`, `parseAltCurve`,
+`parseAltTankAt`) and `src/dumpParse.ts`, `storeDumpAlt` in `src/matchResult.ts`, one extra delete in
+`src/bookings/restore.ts`, page `web/src/routes/admin/balance/AltScoring.tsx` (Admin, Balance desk, "Alt scoring"
+tab) with the health curve chart `web/src/routes/admin/balance/AltCurveChart.tsx`.
 Plugin files: `plugin/pug-altscore.inc`; `plugins-src/l4dscores_alt.inc`, data file
 `overrides/left4dead/addons/sourcemod/data/altscore_maps.txt`, rig `tools/altscore-test/`.
 
@@ -67,13 +69,57 @@ Plugin files: `plugin/pug-altscore.inc`; `plugins-src/l4dscores_alt.inc`, data f
     mid-map; after a map start (including `sm_restartmap` from the 4v4 config) the tally is not partial.
   - `l4d_ledge_heal_fix` loaded alongside: no conflict; hr1's clamp held in every ledge run.
 
+- **Health curve, 2026-11-18** (owner request: team health as the map goes on, per half, on the admin page).
+  Wire format, native and page are in the spec. Builds: l4dscores, the rig (with and without the pug include) and
+  pug-match compile with only the `halflife.inc` deprecation warning. In game on port 27075 (l4d1-ds, bots only,
+  rig at deploy bf5a3a3 built against this branch's `plugin/pug-altscore.inc`), three maps in a row:
+
+  | Half | Outcome | Held curve | tankat |
+  |---|---|---|---|
+  | hospital01 A | tank killed at 37%, catch-up to 54%, make | `100,100,100,100,88,88,88,88,23,23,23,22,23,20,20,20,20,19,19,19,19` | 37,54 |
+  | hospital01 B | wipe at 40%, no tank | `100,100,100,100,86,84,84,67,67,-1 x12` | -1,-1 |
+  | hospital02 A | wipe with the tank up | `90,90,90,100,100,100,-1 x15` | 27,-1 |
+  | hospital02 B | tank kicked (gone, paid), wipe at 69% | `100,100,100,100,89 x10,-1 x7` | 42,63 |
+  | hospital03 A | scripted make, no tank | `90 x5,75 x16` | -1,-1 |
+  | airport01 A (sanity, final build) | make | `100 x7,89 x14` | -1,-1 |
+
+  Point 0 at go-live every time; points fill in order (rig check on every live and held curve); -1 past the wipe;
+  point 100 on every make; the points crossed in the catch-up after a tank all carry the health right after it
+  (23 on hospital01); `Score_GetAltCurve` returned exactly the held curve and positions every half (rig calls its
+  own native) and false with no held half. (hospital02 A's 90s: the bots left the saferoom on their own before the
+  rig gave them pills, so the first points are 115 of 127.5 points each.) The wire text was checked by running
+  pug-match's own `AltScore_Capture`, `AltScore_SendPending` and `AltScore_WriteDump` inside the rig, with `EmitPug`
+  and `DumpLine` logging instead of sending; two of those captured lines are fixtures in `tests/logParse.test.ts`
+  and `tests/altDump.test.ts`. pug-match itself only emits in a site-run match, which the test server does not
+  have.
+  Also run then, never run before: `!scoresalt full` on three maps (Sur/Inf lines per half, `(23%)`, `(no tank)`,
+  bare `Tank 0` for the wipe with the tank up, `(89%)` for the kicked tank, `(4 in)`, `(wiped)`, `Map 3 Inf: -` for
+  the half played with alt off, the same Map numbers as the compact view, parts summing to every total), and the
+  25/50/75% lines (once per threshold per half, Walk equal to `!healthalt`'s at the same moment, tank suffix only
+  after a paid tank, a threshold crossed during a tank printed right after the tank line, only the highest after a
+  jump). Real score with alt on and off for the same scripted half on hospital03: 560 and 560 (27.7%, 4 alive).
+  Site: typecheck clean, production build passing. Full suite: 874 files, 12,999 tests; 12,997 passed and 2 failed,
+  both HUD editor tests this change does not touch (`web/src/hud/splatter.build.test.ts` "ships an uploaded picture
+  pixel for pixel": "Test timed out in 5000ms"; `web/src/routes/Hud.import.test.tsx` "says which pictures an import
+  names but neither ships nor the game has": text not found). Both passed in the run before and pass when run alone
+  (2 files, 55 tests); the run before had one real failure, `tests/dumpParse.test.ts` pinning the parsed ALT record
+  without the new null fields, fixed. The alt-scoring, parser and page tests: 8 files plus the new chart test.
+- **Deploy order with the curve (checked by reading the parsers).** New site with old plugins: `curve=` and
+  `tankat=` are optional in `parseAltFields`, absent is null, the row is stored as before and the page says "No curve
+  recorded". Old site with new plugins: the old `parseAltFields` (and the dump parser, which uses it) reads only the
+  keys it knows, so the two extra keys are ignored and every half is stored as today; the line is 105 bytes longer
+  at most and still far under the engine's 1024-byte log line. New pug-match with an l4dscores that lacks
+  `Score_GetAltCurve`: the feature check fails and the fields are left out. New l4dscores with pug-match 0.3.46:
+  the native is never called. So the three pieces can still ship in any order.
+
 ## What was NOT verified
 
 - Chat colours and line lengths as a human sees them (needs a game client typing `!healthalt` / `!scoresalt`).
-- The 25/50/75% progress lines (added 2026-11-18, commit 8294e01): compiled only, never run in game or through the rig.
-- `!scoresalt full` (added 2026-11-18, commit dfdbd94): compiled only (plugin and rig), never run in game or
-  through the rig. The rig's `sm_altshow` now prints it and checks every stored half's parts sum to its total;
-  each round_end checks the filed half carries the held parts.
+- The 25/50/75% lines and `!scoresalt full` as a human sees them in chat (run through the rig with bots,
+  2026-11-18, see above; colours and wrapping not seen in a game client).
+- The health curve chart in a browser: component tests and the production build only, no screenshot.
+- The curve on a real ranked match (humans, a real `ALT_ROUND` over UDP into the site): the line was produced by
+  pug-match's own code in the rig and parsed by the site's parser in tests, not sent end to end.
 - A full non-cheats match with humans readying up (the normal-config pass above used bots and `sm_forcestart`).
 - Takeover by a real human (the rig used a SourceMod fake client).
 - Two rig lines FAIL by design: `takeover` on a half that is not live, and the ledge temp prediction when
@@ -133,8 +179,9 @@ Each step is safe without the next one.
 
 1. **Site.** Merge `alt-scoring` into pug master and deploy with `deploy-web.sh` under the shared lock. The new
    table is created on boot. With no plugin sending data, the admin page shows its empty state.
-2. **pug-match 0.3.46.** Build with `plugin/build.sh`, stage as usual when the boxes are empty. Against the
-   current l4dscores it loads and sends nothing new.
+2. **pug-match 0.3.47.** Build with `plugin/build.sh`, stage as usual when the boxes are empty. Against the
+   current l4dscores it loads and sends nothing new; against riverside9 without the curve native it sends the
+   alt lines without `curve=` and `tankat=`.
 3. **l4dscores riverside9.** The rig has been run (2026-11-18). Merge `feature/altscore` into deploy master, build
    with `./build.sh l4dscores` (the script now carries `l4dscores_alt.inc` along), and deploy with
    `altscore_maps.txt`. From the next map on, matches report alt scores and the two commands work.
