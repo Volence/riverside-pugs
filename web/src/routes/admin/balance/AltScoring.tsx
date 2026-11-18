@@ -5,10 +5,6 @@ import { Empty } from '../../../components/bits';
 import { campaignName, fmtDate, mapName } from '../../../format';
 import { pct } from './TeamBalance';
 
-/** The report suggests a walk multiplier only from this many halves on a map
- *  (SUGGEST_MIN_HALVES in src/altScoringReport.ts); below it it sends 1. */
-const SUGGEST_MIN_HALVES = 100;
-
 const TANK_BY: Record<string, string> = { surv: 'survivors killed it', other: 'died another way', gone: 'tank left the game' };
 
 /** The winner column: same or different winner, incomplete, or a dash while undecided. */
@@ -19,7 +15,7 @@ export function winnerMark(m: AltReportMatch): string {
 }
 
 function tankEnd(h: AltReportHalf): string {
-  if (h.tankPct === null) return 'no tank';
+  if (h.tankPct === null) return '-';
   const by = h.tankBy ? TANK_BY[h.tankBy] ?? h.tankBy : null;
   return by ? `${h.tankPct}% (${by})` : `${h.tankPct}%`;
 }
@@ -30,7 +26,7 @@ function Halves({ m }: { m: AltReportMatch }) {
       <thead>
         <tr>
           <th>Map</th><th>Half</th><th>Survivors</th><th>Real</th><th>Walking</th><th>Tank</th><th>Saferoom</th><th>Alt total</th>
-          <th>Team health when the tank fight ended</th><th>Made the saferoom</th>
+          <th>Team health % when the tank fight ended</th><th>Survivors in saferoom</th>
         </tr>
       </thead>
       <tbody>
@@ -76,11 +72,13 @@ export function AltScoring() {
     <div class="stack">
       {intro}
       <p class="muted">
-        The new scoring splits each half into three parts: walking (700 points, for ground covered while healthy), tank
-        (300, for health left when the tank dies) and saferoom (500, for survivors who make it in healthy). Walking and
-        saferoom are then scaled per map.
-        Only completed, unvoided PUGs where every half has an alt score count in the totals below; every match with
-        data is listed.
+        The alt score is what a match would have scored under the new health-run scoring. It splits each half into
+        three parts: walking (700 points, for ground covered while healthy), tank (300, for health left when the tank
+        dies) and saferoom (500, for survivors who make it in healthy). Walking and saferoom are then scaled per map.
+      </p>
+      <p class="muted">
+        The list shows the most recent 100 matches. The totals count only ranked PUGs that finished, were not voided and
+        have an alt score for every half, so "0 of 0" is expected at first.
       </p>
       <table class="admin-table" data-testid="alt-summary">
         <tbody>
@@ -93,8 +91,8 @@ export function AltScoring() {
 
       <h3>Walking by map</h3>
       <p class="muted">
-        Average walking points per half before any map multiplier, and the walk multiplier that would bring the map to
-        the average of all maps. A multiplier is suggested once a map has {SUGGEST_MIN_HALVES} halves.
+        Average walking points per half in counted matches, before any map multiplier, and the walk multiplier that
+        would bring the map to the average of all maps. A dash means the map does not have enough halves yet.
       </p>
       <div class="table-wrap">
         <table class="admin-table" data-testid="alt-maps">
@@ -105,7 +103,7 @@ export function AltScoring() {
                 <td>{mapName(r.map)} <span class="muted">{r.map}</span></td>
                 <td class="num">{r.halves}</td>
                 <td class="num">{Math.round(r.avgWalkRaw)}</td>
-                <td class="num">{r.halves >= SUGGEST_MIN_HALVES ? r.suggestedWalkMult.toFixed(2) : '-'}</td>
+                <td class="num">{r.suggestedWalkMult === null ? '-' : r.suggestedWalkMult.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
@@ -155,8 +153,9 @@ export function AltScoring() {
         </table>
       </div>
       <p class="muted">
-        Incomplete: the match ended early, for example by forfeit, so its last half has no alt score and it is left out
-        of the totals above. Not counted: a scrim, a voided match or one not finished yet.
+        Incomplete: some halves of the match have a real score but no alt score (for example a forfeit, or a server that
+        was not running the new scoring yet), so it is left out of the totals above. Not counted: not a ranked PUG,
+        voided, or not finished yet.
       </p>
     </div>
   );

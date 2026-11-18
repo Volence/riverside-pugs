@@ -108,7 +108,7 @@ const SECTION_INTROS: Record<string, string> = {
   'balance/values': 'Every game value, as the public Game values page shows it.',
   'balance/looks': 'How each night mode look plays, per campaign.',
   'balance/teams': 'How queue teams were picked: the stat-aware tie-break, its holdout and results.',
-  'balance/alt': 'Health-run scoring beside the real score, match by match. Real scores are not affected.',
+  'balance/alt': 'Health-run scoring beside the real score, match by match.',
 };
 
 /**

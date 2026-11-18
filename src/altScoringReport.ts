@@ -38,7 +38,7 @@ export interface AltReportMatch {
 export interface AltReport {
   /** Shares are 0..1, over complete counted matches. */
   summary: { matchesWithData: number; complete: number; differentWinner: number; share: { walk: number; tank: number; door: number } };
-  maps: { map: string; halves: number; avgWalkRaw: number; suggestedWalkMult: number }[];
+  maps: { map: string; halves: number; avgWalkRaw: number; suggestedWalkMult: number | null }[];
   matches: AltReportMatch[];
 }
 
@@ -179,7 +179,8 @@ function rawOf(h: AltRow): AltRaw {
 }
 
 /** Mean walking per half at walk multiplier 1, per named map, and the
- *  multiplier that would bring the map to the overall mean (to 0.05).
+ *  multiplier that would bring the map to the overall mean (to 0.05), or
+ *  null below SUGGEST_MIN_HALVES halves or with no walking at all.
  *  Fed only halves of counted matches, so the fit is from ranked play. */
 function mapWalking(rows: AltRow[]): AltReport['maps'] {
   const perMap = new Map<string, { halves: number; walk: number }>();
@@ -201,7 +202,7 @@ function mapWalking(rows: AltRow[]): AltReport['maps'] {
       const avgWalkRaw = m.walk / m.halves;
       const suggestedWalkMult = m.halves >= SUGGEST_MIN_HALVES && avgWalkRaw > 0
         ? Number((Math.round(overall / avgWalkRaw / 0.05) * 0.05).toFixed(2))
-        : 1;
+        : null;
       return { map, halves: m.halves, avgWalkRaw, suggestedWalkMult };
     })
     .sort((x, y) => y.halves - x.halves || x.map.localeCompare(y.map));
