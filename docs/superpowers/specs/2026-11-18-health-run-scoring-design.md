@@ -85,12 +85,15 @@ The decompile labels the divisor `SurvivorIncapacitatedHealth`, not the ledge-gr
 which cvar it is before relying on the ratio (rig: `deploy/tools/ledge-fix-test`). The saved health is not a
 netprop; record `m_iHealth` in a `player_ledge_grab` hook (or read the field) rather than guess.
 
-Ledge clamp (Fable review 2026-11-18, PENDING THE OWNER'S RULING): as the game works, a ledge grab would raise a
-low-health survivor's points (1 solid, no temp: 16 before, about 23 while hanging and after rescue), which breaks
-"going down never raises a score". Until the owner rules, temp health granted by a ledge rescue is not counted
-beyond the temp the survivor had just before the grab (decayed as usual): while hanging and after rescue, the
-counted temp is `min(game temp, pre-grab temp decayed)`. The excess stops being tracked when the buffer is next
-replaced (an incap and revive) or the survivor dies.
+Ledge clamp (Fable review 2026-11-18; kept by the owner's ruling, 2026-11-18): as the game works, a ledge grab
+would raise a low-health survivor's points (1 solid, no temp: 16 before, about 23 while hanging and after rescue),
+which breaks "going down never raises a score". Temp health granted by a ledge rescue is not counted beyond the
+temp the survivor had just before the grab (decayed as usual): while hanging and after rescue, the counted temp is
+`min(game temp, pre-grab temp decayed)`. The excess stops being tracked when the buffer is next replaced (an incap
+and revive) or the survivor dies. Our servers have no game-side fix for health gained through a ledge rescue
+(`l4d_ledge_fix` only blocks harmless grabs; `survivor_ledge_grab_health` is 300), so this clamp is what stops a
+ledge grab from raising a score. A game-side ledge fix (plugin `l4d_ledge_heal_fix`) is being built separately;
+the scoring clamp stays either way.
 
 Team stored health % = sum of the four survivors' points / (4 x 127.5).
 
@@ -98,30 +101,41 @@ Team stored health % = sum of the four survivors' points / (4 x 127.5).
 
 Base pools per half: walking 700, tank 300, door 500. A perfect half is 1500 before multipliers.
 
-1. **Walking (700).** Each survivor owns a quarter (175). A survivor earns
-   `175 x (own points / 127.5) x (own new distance / 100)` for each step forward. Only standing survivors earn.
-   A downed, hanging or dead survivor earns nothing while in that state; a revived survivor earns again for
-   ground they newly cover. Health is read at the start of each sample interval.
+1. **Walking (700).** Each survivor owns a quarter (175) and has a mark: the furthest distance already paid.
+   At each sample (every 0.5 s) a survivor is paid `175 x (own points now / 127.5) x ((distance - mark) / 100)`
+   and the mark moves to their distance, only when all of these hold: the survivor is standing (alive, not
+   incapacitated, not hanging), no tank is up (no tank window open), and the distance is past the mark. In every
+   other case the mark does not move, so ground covered while down, hanging or with a tank alive is paid later,
+   the first sample the survivor stands with no tank up, at the health they have then. This mirrors how
+   `l4d_tank_rules` freezes the real distance points while a tank lives and lets them catch up after. How the
+   survivor got there does not matter (walked, flung, punched, warped or teleported): a warp or stuck-teleport
+   never costs a team points, and a team that makes the map at full health always gets the full walking pool.
+   (Owner ruling, 2026-11-18.)
    Distance (Claude's call, 2026-11-18): rescaled so the start saferoom is 0 and the end saferoom is 100.
    `distance = clamp((flow - startFlow) / (maxFlow - startFlow), 0, 1) x 100`, where `flow` is the survivor's own
    furthest flow so far (never decreasing), `maxFlow` is the map's max flow and `startFlow` is the lowest
    survivor flow at the moment the half goes live (one value for the team). At round end, each survivor who banks
-   the door is credited the rest of the way to 100 at their points at that moment, so a clean make always walks
-   the full map. Use raw float flow, not pug-match's rounded whole percent.
-   Every survivor's furthest mark starts at distance 0 when the half goes live (survivors with no nav area are
-   ignored when taking `startFlow`). Only ground walked while standing pays: while a survivor is down, hanging or
-   dead, and on any respawn or teleport (a rescue closet, a warp, a jump in flow no survivor could walk in one
-   sample), the mark moves to the survivor's current position without pay. (Fable review, 2026-11-18.)
-2. **Tank (300).** Paid once per half, when the tank fight ends with the tank dead and at least one survivor not
-   dead: `300 x team stored health %` at that instant. Claude's calls, 2026-11-18: the tank's death pays whatever
-   killed it (survivors, a fall, fire, a stuck-tank slay), because the survivors outlived it either way; with more
-   than one tank alive it pays when the last one dies, as pug-match's `TANKDONE` window does
-   (`pug-match.sp:3452-3498`, `5103-5105`). A frustration pass or a despawn pays nothing. If the survivors wipe
-   with the tank alive, nothing is paid. The saferoom door cannot close with the tank alive on our config, so
-   there is no "ran past it" case. Whenever a tank window closes, the team's stored-health snapshot at that
-   instant is recorded whether or not it paid, with who ended it (`surv`, `other`, or `gone` for a tank that
-   vanished through a kick, disconnect or despawn) and how many tanks spawned in the half, so these calls can be
-   revisited from the data.
+   the door is credited the rest of the way from their mark to 100 at their points at that moment, so a clean make
+   always walks the full map, including any ground held back while a tank was still up. Use raw float flow, not
+   pug-match's rounded whole percent.
+   Every survivor's mark starts at distance 0 when the half goes live (survivors with no nav area are ignored when
+   taking `startFlow`). A body first seen mid-half (a bot added late) starts with its mark where it stands. A guard
+   (Claude's call, 2026-11-18): a survivor who was dead and is alive again has their mark moved up to where they
+   reappear without pay, since dying resets health and revives and paying the skipped ground would make dying pay
+   better than limping. Versus has no rescue closets, so this cannot fire in a real match (only on an admin
+   respawn); it is harmless.
+2. **Tank (300).** Paid once per half, when the tank fight ends with the tank dead or vanished and at least one
+   survivor standing (alive, not incapacitated, not hanging) at that moment: `300 x team stored health %` at that
+   instant. All four down or hanging when the tank goes means the round is lost, and the tank pays nothing.
+   Claude's calls, 2026-11-18: the tank's death pays whatever killed it (survivors, a fall, fire, a stuck-tank
+   slay), because the survivors outlived it either way; with more than one tank alive it pays when the last one
+   dies, as pug-match's `TANKDONE` window does (`pug-match.sp:3452-3498`, `5103-5105`). Owner ruling, 2026-11-18:
+   a tank that vanishes (kick, disconnect, despawn) pays exactly like a dead one. A frustration pass keeps the
+   window open. A tank removed by round-end cleanup pays nothing (the window is only judged while the half is
+   live). If the survivors wipe with the tank alive, nothing is paid. The saferoom door cannot close with the tank
+   alive on our config, so there is no "ran past it" case. Whenever a tank window closes, the team's stored-health
+   snapshot at that instant is recorded whether or not it paid, with who ended it (`surv`, `other`, or `gone` for
+   a tank that vanished) and how many tanks spawned in the half.
 3. **Door (500).** At round end with at least one survivor up: each survivor who is alive and not incapacitated
    or hanging banks `125 x (own points / 127.5)`.
 
@@ -148,6 +162,8 @@ health measure (see Evidence) and are placeholders until shadow data replaces th
 - Eating pills never raises points over holding them.
 - A survivor standing still, or a team waiting, earns nothing and loses nothing except temp decay.
 - Walking for one survivor never pays for distance another survivor covered.
+- How a survivor moved never matters: a warp, fling or teleport forward is paid like walking, and a team that
+  makes the map at full health always gets the full walking pool.
 - The sum of a perfect half is exactly 700 x walkMult + 300 + 500 x doorMult.
 
 ## Evidence so far
@@ -301,14 +317,16 @@ The site half can ship first: it ignores absent lines. Order: site, then pug-mat
 ## Known gaps accepted for hr1
 
 - **Ledge rescue hands out temp health without spending a revive** (game behaviour). Today's bonus pays for it.
-  hr1 clamps it out (see "Ledge clamp"), pending the owner's ruling on whether that is wanted.
+  hr1 clamps it out (see "Ledge clamp"); the owner kept the clamp.
 - **Tank-less maps.** `!healthalt` says "Tank up to 300" until the half ends even on a map that never spawns one.
   The data records how many tanks spawned.
 - **First aid kits.** A held kit is worth nothing under hr1 and a heal raises solid health and resets revives.
-  The ranked config is believed to have no kits; confirm before any stage 2.
+  Settled: the owner confirmed ranked has no kits.
 - **Pills cap.** The pills-use code is not in the converted source and the cap on total health was not verified.
   The rule counts a held bottle as a flat 50 and eaten pills as whatever temp health the game actually gave, so no
   constant needs to be right; the builder should note what the game does when verifying "eating never gains".
+- **Health at the moment of pay.** Walking is paid at the survivor's health at the sample it is paid, so ground
+  held back during a tank is paid at the health after the tank. Accepted (owner ruling).
 - **Chip damage.** Common-infected scratches and friendly fire move the score all map long. Accepted; shadow data
   will show how much.
 
