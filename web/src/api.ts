@@ -1544,6 +1544,49 @@ export interface TeamBalance {
   rows: TeamBalanceRow[];
 }
 
+/** One half in /api/admin/balance/alt-scoring (src/altScoringReport.ts).
+ *  walk/tank/door are the plugin's points after multipliers; `door` is the saferoom part. */
+export interface AltReportHalf {
+  ordinal: number;
+  half: number;
+  map: string;
+  survTeam: 'a' | 'b';
+  /** The real score of the half, null when the real round was not recorded. */
+  real: number | null;
+  walk: number;
+  tank: number;
+  door: number;
+  total: number;
+  /** Survivor team health % when the tank fight ended; null when none ended. */
+  tankPct: number | null;
+  tankBy: string | null;
+  survivorsIn: number;
+}
+export interface AltReportMatch {
+  id: number;
+  endedAt: string | null;
+  campaign: string;
+  realA: number;
+  realB: number;
+  realWinner: string | null;
+  altA: number;
+  altB: number;
+  altWinner: string;
+  /** Every half the real score recorded has an alt row. */
+  complete: boolean;
+  /** Null when incomplete or the real winner is not decided. */
+  differs: boolean | null;
+  /** Complete, completed, unvoided PUG: counts in the summary. */
+  counted: boolean;
+  halves: AltReportHalf[];
+}
+export interface AltReport {
+  /** Shares are 0..1, over complete counted matches. */
+  summary: { matchesWithData: number; complete: number; differentWinner: number; share: { walk: number; tank: number; door: number } };
+  maps: { map: string; halves: number; avgWalkRaw: number; suggestedWalkMult: number }[];
+  matches: AltReportMatch[];
+}
+
 export interface GameValues {
   /** Admin view only. */
   asOf?: { patchId: number; number: number } | null;
@@ -3468,6 +3511,7 @@ export const adminApi = {
   gameValues: (signal?: AbortSignal) => get<GameValues>('/api/admin/balance/values', signal),
   looks: (days: number, signal?: AbortSignal) => get<LookStats>(`/api/admin/balance/looks?days=${days}`, signal),
   teamBalance: (signal?: AbortSignal) => get<TeamBalance>('/api/admin/balance/teams', signal),
+  altScoring: (signal?: AbortSignal) => get<AltReport>('/api/admin/balance/alt-scoring', signal),
   balancePatch: (id: number, signal?: AbortSignal) => get<PatchDetail>(`/api/admin/balance/patches/${id}`, signal),
   balanceDrift: (signal?: AbortSignal) => get<{ servers: DriftRow[] }>('/api/admin/balance/drift', signal),
   editBalancePatch: (id: number, body: { name?: string | null; notes?: string; reviewed?: boolean }) =>
