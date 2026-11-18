@@ -31,8 +31,14 @@ native int GetWitchPercent();
 // in round 2 the campaign gap). Returns 0 while the round ends, else the round.
 // Optional, marked in AskPluginLoad2; read only by LIVEHUD.
 native int Score_GetLiveScores(int &distance, int &bonus, int &alive, float &mult, float &hbPct, float &pillsPct, int &wiped, int &made, int &gap);
+// l4dscores health-run scoring (rule hr1, shadow only): the half that just
+// ended. False when alt scoring is off, or no finished half is held. Valid from
+// the round_end Pre hook until the next round_start. raw = ws wt wr ts tt tr ds
+// dt dr. tankBy: 0 none (tankPct -1), 1 survivor kill, 2 other death, 3 gone.
+// Optional, marked in AskPluginLoad2; read only by pug-altscore.inc.
+native bool Score_GetAltHalf(int &walk, int &tank, int &door, float raw[9], int &walkMultX100, int &doorMultX100, int &tankPct, int &tankBy, int &tanks, int &survivorsIn);
 
-#define PLUGIN_VERSION "0.3.45"
+#define PLUGIN_VERSION "0.3.46"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -431,6 +437,8 @@ int g_iRplPushRound;
 // Live push of the round being recorded. Below the replay globals because it
 // reads g_State; see the include for why everything in it is optional.
 #include "pug-livepush.inc"
+// Health-run scoring, shadow only: ALT_ROUND lines and the dump's ALT lines.
+#include "pug-altscore.inc"
 
 // Staging knobs. Both default to production behaviour; they exist so the plugin
 // can be exercised on a test instance without eight people in the server.
@@ -3266,6 +3274,7 @@ void ResetMatchState()
 	g_iBoomerClient = 0;
 	g_bHasBoomLanded = false;
 	g_iMapCount = 0;
+	AltScore_Reset();
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
 	g_iRound1Logical = 0;
@@ -4595,6 +4604,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 		EmitRoundEnd(half, survEnd, mine, alive);
 
+		AltScore_OnRoundEnd(half, survEnd);
 		if (second) FinishSecondHalf();
 		return;
 	}
@@ -4767,6 +4777,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 			// readings are independent, and a round whose score never landed
 			// still tells us truthfully whether anyone survived it.
 			EmitRoundEnd(half, survEnd, -1, alive);
+			AltScore_OnRoundEnd(half, survEnd);
 			if (second) FinishSecondHalf();
 		}
 		return Plugin_Stop;
@@ -4776,6 +4787,7 @@ public Action Timer_ReadScore(Handle timer, DataPack pack)
 	g_bScoreReadPending = false;
 	int mine = (survEnd[0] != '\0') ? (StrEqual(survEnd, "a") ? g_iHalfScoreA : g_iHalfScoreB) : 0;
 	EmitRoundEnd(half, survEnd, mine, alive);
+	AltScore_OnRoundEnd(half, survEnd);
 	if (second) FinishSecondHalf();
 	return Plugin_Stop;
 }
@@ -5532,6 +5544,7 @@ void WriteDump(const char[] nonce)
 	Gg_ForfeitTail(ff, sizeof(ff));
 	char ab[48];
 	LeaveAbandonTail(ab, sizeof(ab));
+	AltScore_WriteDump();
 	DumpLine("END winner=%s a=%d b=%d%s%s%s", winner, a, b, ff, ab, tail);
 }
 
