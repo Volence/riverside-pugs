@@ -305,6 +305,12 @@ games; walking per survivor; the store model above; quarter weights; door 500.
   paid line later windows print nothing; an unpaid close prints its line and a later tank that pays prints the
   paid one. Nothing prints with `l4d_score_alt` 0 or no live alt half. Cvar `l4d_score_alt_announce` (default 1;
   0 = no automatic alt chat lines) silences it on live boxes without turning shadow scoring off.
+- Map progress line (owner request 2026-11-18): at 25%, 50% and 75% of the map (`!healthalt`'s "covered", checked
+  in the alt sampler), once per threshold per half and only the highest when one step passes several, the same
+  opted-in players and gates get `[Alt] 25% of the map: Walk 150 so far, of 166 possible. Team health 88%.`
+  ("so far" = `!healthalt`'s Walk; "possible" = the same marks at full points, same multiplier and rounding;
+  ` Tank N.` added once the tank has paid). A threshold crossed during a tank prints after it; a half started
+  mid-map starts from the covered figure then.
 - Half result line (owner request 2026-11-18, after a test round ended with real 660, alt 643 and no word of it):
   when a half ends, one line to every opted-in player with the half's alt parts and total, printed from the alt round_end hook
   (`Alt_RoundEnd`, hooked after the real one) once the half is held and tallied, never from a real handler. The
