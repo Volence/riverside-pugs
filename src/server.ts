@@ -36,6 +36,7 @@ import { activeTimeout, timeoutCause } from './penalties.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminBalanceKnobRoutes } from './routes/adminBalanceKnobs.js';
 import { adminBalancePatchRoutes } from './routes/adminBalancePatches.js';
+import { adminAltScoringRoutes } from './routes/adminAltScoring.js';
 import { isWheel } from './inputStats.js';
 import { peopleRoutes } from './routes/people.js';
 import { appealRoutes } from './routes/appeals.js';
@@ -2396,6 +2397,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     console.error('[balance] knob panel disabled, balance/knobs.json failed to load:', err);
   }
   await app.register(adminBalancePatchRoutes, { db: deps.db, knobs: panelKnobs });
+  await app.register(adminAltScoringRoutes, { db: deps.db });
   await app.register(adminBalanceKnobRoutes, { db: deps.db, knobs: panelKnobs, writer: deps.config.devMode ? undefined : balanceWriter });
   await app.register(peopleRoutes, { db: deps.db });
   await app.register(appealRoutes, {
