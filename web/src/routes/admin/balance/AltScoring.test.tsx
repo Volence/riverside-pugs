@@ -96,6 +96,71 @@ describe('AltScoring', () => {
     expect(screen.queryByTestId('alt-halves-902')).toBeNull();
   });
 
+  it('draws one health curve chart per map in the match detail, and says when a map has none', async () => {
+    const make = [100, 100, 100, 100, 88, 88, 88, 88, 23, 23, 23, 22, 23, 20, 20, 20, 20, 19, 19, 19, 19];
+    const wipe = [100, 100, 100, 100, 86, 84, 84, 67, 67, ...Array(12).fill(-1)];
+    const map2 = 'l4d_vs_hospital02_subway';
+    mockAdmin.altScoring.mockResolvedValue({
+      ...report,
+      matches: [{
+        ...report.matches[0],
+        halves: [
+          { ...half(0, 1, 'a', 321, 68, 97), curve: make, tankOpen: 37, tankClose: 54 },
+          { ...half(0, 2, 'b', 248, 0, 0), curve: wipe, tankOpen: -1, tankClose: -1 },
+          // A wipe with the tank still up, then a half from an older plugin (no curve fields at all).
+          { ...half(1, 1, 'a', 175, 0, 0), map: map2, curve: [90, 90, 90, 100, 100, 100, ...Array(15).fill(-1)], tankOpen: 27, tankClose: -1 },
+          { ...half(1, 2, 'b', 420, 266, 0), map: map2 },
+          // A third map recorded entirely without curves.
+          { ...half(2, 1, 'a', 300, 0, 300), map: 'l4d_vs_hospital03_sewers', curve: null, tankOpen: null, tankClose: null },
+        ],
+      }],
+    });
+    const { container } = render(<AltScoring />);
+    await waitFor(() => expect(screen.getByTestId('alt-matches')).toBeTruthy());
+    expect(screen.queryByTestId('alt-curve')).toBeNull();
+    fireEvent.click(container.querySelectorAll('[data-testid="alt-matches"] tbody > tr')[0]);
+
+    const charts = screen.getAllByTestId('alt-curve');
+    expect(charts).toHaveLength(2);
+    const [first, second] = charts;
+    expect(first.textContent).toMatch(/The Apartments: team health as the map goes on/);
+    expect(first.textContent).toMatch(/Team A \(half 1\).*Team B \(half 2\)/);
+    expect(first.querySelector('svg')?.getAttribute('aria-label')).toMatch(/team health % against % of the map covered/);
+
+    // Team A's make: one unbroken line over all 21 points, in team A's colour.
+    const lineA = first.querySelector('[data-testid="alt-curve-line-a-1"]')!;
+    expect(lineA.querySelectorAll('polyline')).toHaveLength(1);
+    expect(lineA.querySelector('polyline')!.getAttribute('class')).toBe('altcurve__line altcurve__line--a');
+    expect(lineA.querySelector('polyline')!.getAttribute('points')!.split(' ')).toHaveLength(21);
+    const dotsA = lineA.querySelectorAll('circle');
+    expect(dotsA).toHaveLength(21);
+    expect(dotsA[8].querySelector('title')!.textContent).toBe('Team A (half 1): 40% of the map covered, team health 23%');
+    expect(dotsA[20].querySelector('title')!.textContent).toBe('Team A (half 1): 100% of the map covered, team health 19%');
+
+    // Team B's wipe stops at 40%: nine points, nothing drawn past them.
+    const lineB = first.querySelector('[data-testid="alt-curve-line-b-2"]')!;
+    expect(lineB.querySelector('polyline')!.getAttribute('class')).toBe('altcurve__line altcurve__line--b');
+    expect(lineB.querySelectorAll('circle')).toHaveLength(9);
+    expect(lineB.querySelectorAll('circle')[8].querySelector('title')!.textContent).toBe('Team B (half 2): 40% of the map covered, team health 67%');
+
+    // Tank fight band for A (37% to 54%); none for B, which had no tank.
+    const bandA = first.querySelector('[data-testid="alt-curve-tank-a-1"]')!;
+    expect(bandA.tagName.toLowerCase()).toBe('rect');
+    expect(bandA.querySelector('title')!.textContent).toBe('Team A (half 1): tank fight from 37% to 54% of the map');
+    expect(first.querySelector('[data-testid="alt-curve-tank-b-2"]')).toBeNull();
+
+    // Map 2: the half from an older plugin is named in the legend as having no curve; the tank still up at the end is a marker.
+    expect(second.textContent).toMatch(/Subway/);
+    expect(second.textContent).toMatch(/Team B \(half 2\) \(no curve recorded\)/);
+    expect(second.querySelector('[data-testid="alt-curve-line-b-2"]')).toBeNull();
+    const endA = second.querySelector('[data-testid="alt-curve-tank-a-1"]')!;
+    expect(endA.tagName.toLowerCase()).toBe('line');
+    expect(endA.querySelector('title')!.textContent).toBe('Team A (half 1): tank came at 27% of the map and was still up when the half ended');
+
+    // Map 3 has no curve at all.
+    expect(screen.getByTestId('alt-curve-none').textContent).toBe('No curve recorded for The Sewer.');
+  });
+
   it('warns about halves whose stored score does not match their breakdown, and marks them', async () => {
     const bad = { ...half(0, 2, 'b', 650, 200, 500), mismatch: true };
     mockAdmin.altScoring.mockResolvedValue({

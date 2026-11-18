@@ -189,14 +189,24 @@ describe('parseDump ALT lines (health-run scoring, shadow)', () => {
         walkMult: 1.15, doorMult: 1.75,
         raw: { ws: 180.25, wt: 40.5, wr: 96, ts: 150, tt: 60, tr: 90, ds: 0, dt: 0, dr: 0 },
         tankPct: 41, tankBy: 'surv', tanks: 1, survivorsIn: 0,
+        // No curve= or tankat=: an older pug-match or l4dscores.
+        curve: null, tankOpen: null, tankClose: null,
       },
       {
         map: 'l4d_hospital02_subway', half: 2, surv: 'b', rule: 'hr1', walk: 700, tank: 0, door: 500,
         walkMult: 1, doorMult: 1,
         raw: { ws: 300, wt: 200, wr: 200, ts: 0, tt: 0, tr: 0, ds: 250, dt: 100, dr: 150 },
         tankPct: null, tankBy: null, tanks: 0, survivorsIn: 4,
+        curve: null, tankOpen: null, tankClose: null,
       },
     ]);
+  });
+
+  it('reads the health curve and tank window on an ALT line (pug-match 0.3.47)', () => {
+    const curve = [100, 100, 100, 100, 88, 88, 88, 88, 23, 23, 23, 22, 23, 20, 20, 20, 20, 19, 19, 19, 19];
+    const d = parseDump(withAlt(`${ALT1} curve=${curve.join(',')} tankat=37,54`, ALT2))!;
+    expect(d.alt?.[0]).toMatchObject({ walk: 463, curve, tankOpen: 37, tankClose: 54 });
+    expect(d.alt?.[1]).toMatchObject({ walk: 700, curve: null, tankOpen: null, tankClose: null });
   });
 
   it('a dump with no ALT lines has alt [] and parses exactly as before', () => {

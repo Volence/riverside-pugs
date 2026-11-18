@@ -4,6 +4,7 @@ import { useFetch } from '../../../hooks/useFetch';
 import { Empty } from '../../../components/bits';
 import { campaignName, fmtDate, mapName } from '../../../format';
 import { pct } from './TeamBalance';
+import { AltCurveChart } from './AltCurveChart';
 
 const TANK_BY: Record<string, string> = { surv: 'survivors killed it', other: 'died another way', gone: 'tank left the game' };
 
@@ -20,7 +21,27 @@ function tankEnd(h: AltReportHalf): string {
   return by ? `${h.tankPct}% (${by})` : `${h.tankPct}%`;
 }
 
+/** The match's halves grouped by map (round ordinal), in play order. */
+function byMap(halves: AltReportHalf[]): { ordinal: number; map: string; halves: AltReportHalf[] }[] {
+  const out: { ordinal: number; map: string; halves: AltReportHalf[] }[] = [];
+  for (const h of halves) {
+    const last = out[out.length - 1];
+    if (last && last.ordinal === h.ordinal) last.halves.push(h);
+    else out.push({ ordinal: h.ordinal, map: h.map ? mapName(h.map) : `Map ${h.ordinal + 1}`, halves: [h] });
+  }
+  return out;
+}
+
 function Halves({ m }: { m: AltReportMatch }) {
+  return (
+    <div class="stack">
+      <HalvesTable m={m} />
+      {byMap(m.halves).map((g) => <AltCurveChart key={g.ordinal} map={g.map} halves={g.halves} />)}
+    </div>
+  );
+}
+
+function HalvesTable({ m }: { m: AltReportMatch }) {
   return (
     <table class="admin-table" data-testid={`alt-halves-${m.id}`}>
       <thead>
@@ -123,7 +144,7 @@ export function AltScoring() {
       </div>
 
       <h3>Matches</h3>
-      <p class="muted">Click a match to see its halves.</p>
+      <p class="muted">Click a match to see its halves and, for each map, how the team health went as the map went on.</p>
       <div class="table-wrap">
         <table class="admin-table" data-testid="alt-matches">
           <thead>
