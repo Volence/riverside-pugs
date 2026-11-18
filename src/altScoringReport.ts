@@ -3,6 +3,7 @@
 // only; nothing here writes a table.
 import type { DB } from './db.js';
 import { ALT_RULE, compareMatch, halfParts, HR1, type AltRaw } from './altScore.js';
+import { parseAltCurve } from './logParse.js';
 
 export interface AltReportHalf {
   ordinal: number;
@@ -20,6 +21,13 @@ export interface AltReportHalf {
   /** A stored walk, tank or door differs by more than 1 from the same part
    *  recomputed from the half's raw components and multipliers. */
   mismatch: boolean;
+  /** Team health % at 0, 5, .., 100% of the map covered (21 entries, -1 for a
+   *  point not reached); null for a half recorded without the health curve. */
+  curve: number[] | null;
+  /** The covered figure (0..100) where the half's first tank window opened and
+   *  where the paying (or last) one closed; -1 none, null not recorded. */
+  tankOpen: number | null;
+  tankClose: number | null;
 }
 
 export interface AltReportMatch {
@@ -67,6 +75,9 @@ interface AltRow extends AltRaw {
   survivorsIn: number;
   map: string;
   real: number | null;
+  curve: string | null;
+  tankOpen: number | null;
+  tankClose: number | null;
 }
 
 interface MatchRow {
@@ -100,6 +111,7 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
             a.walk_mult AS walkMult, a.door_mult AS doorMult,
             a.ws, a.wt, a.wr, a.ts, a.tt, a.tr, a.ds, a.dt, a.dr,
             a.tank_pct AS tankPct, a.tank_by AS tankBy, a.survivors_in AS survivorsIn,
+            a.curve, a.tank_open AS tankOpen, a.tank_close AS tankClose,
             COALESCE(
               (SELECT mm.map FROM match_maps mm WHERE mm.match_id = a.match_id AND mm.ordinal = a.ordinal),
               (SELECT ml.map FROM match_live_maps ml WHERE ml.match_id = a.match_id AND ml.ordinal = a.ordinal LIMIT 1),
@@ -168,6 +180,8 @@ export function buildAltReport(db: DB, opts: { limit?: number } = {}): AltReport
           ordinal: h.ordinal, half: h.half, map: h.map, survTeam: h.survTeam, real: h.real,
           walk: h.walk, tank: h.tank, door: h.door, total: h.walk + h.tank + h.door,
           tankPct: h.tankPct, tankBy: h.tankBy, survivorsIn: h.survivorsIn, mismatch: isMismatch(h),
+          // Read back through the parser that admitted it, so a hand-edited row cannot reach the page malformed.
+          curve: h.curve === null ? null : parseAltCurve(h.curve), tankOpen: h.tankOpen, tankClose: h.tankClose,
         })),
       });
     }

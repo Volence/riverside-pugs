@@ -108,6 +108,31 @@ describe('ALT lines in the match dump', () => {
     expect(altRows(m)).toEqual([{ ordinal: 2, half: 1, walk: 300, source: 'dump' }]);
   });
 
+  it('stores the health curve and tank window from a dump ALT line the plugin produced', () => {
+    // Captured on the local test server (2026-11-18): the rig ran pug-match's own AltScore_WriteDump
+    // (plugin/pug-altscore.inc) after hospital02's second half (tank kicked and paid, then a wipe).
+    const captured = 'ALT map=l4d_vs_hospital02_subway half=2 surv=b rule=hr1 walk=420 tank=266 door=0 wm=95 dm=120 '
+      + 'ws=249.45 wt=139.85 wr=149.67 ts=350.00 tt=200.23 tr=210.00 ds=0.00 dt=0.00 dr=0.00 tankpct=89 tankby=gone tanks=1 in=0 '
+      + 'curve=100,100,100,100,89,89,89,89,89,89,89,89,89,89,-1,-1,-1,-1,-1,-1,-1 tankat=42,63';
+    const m = seedLiveMatch();
+    const dump = dumpOf(m, [altLine(MAP0, 1, 400), captured]);
+    expect(dump.alt?.[1]).toMatchObject({ map: MAP1, half: 2, tankBy: 'gone', curve: [100, 100, 100, 100, ...Array(10).fill(89), ...Array(7).fill(-1)], tankOpen: 42, tankClose: 63 });
+    expect(completeMatch(db, m, dump)).toBe(true);
+    expect(db.prepare('SELECT ordinal, half, curve, tank_open, tank_close, source FROM match_round_alt WHERE match_id = ? ORDER BY ordinal, half').all(m)).toEqual([
+      // The older line (no curve=, no tankat=): NULLs, the row stored as before.
+      { ordinal: 0, half: 1, curve: null, tank_open: null, tank_close: null, source: 'dump' },
+      { ordinal: 1, half: 2, curve: '100,100,100,100,89,89,89,89,89,89,89,89,89,89,-1,-1,-1,-1,-1,-1,-1', tank_open: 42, tank_close: 63, source: 'dump' },
+    ]);
+  });
+
+  it('a dump ALT line with a malformed curve still stores the half, without the curve', () => {
+    const m = seedLiveMatch();
+    expect(completeMatch(db, m, dumpOf(m, [`${altLine(MAP0, 1, 400)} curve=1,2,3 tankat=5,9`]))).toBe(true);
+    expect(db.prepare('SELECT walk, curve, tank_open, tank_close FROM match_round_alt WHERE match_id = ?').all(m)).toEqual([
+      { walk: 400, curve: null, tank_open: 5, tank_close: 9 },
+    ]);
+  });
+
   it('a dump with no alt field (hand-built, or an older plugin) writes nothing', () => {
     const m = seedLiveMatch();
     const { alt: _alt, ...dump } = dumpOf(m, []);

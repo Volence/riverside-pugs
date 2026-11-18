@@ -1564,6 +1564,14 @@ export interface AltReportHalf {
   /** A stored walk, tank or door differs by more than 1 from the same part
    *  recomputed from the half's raw components and multipliers. */
   mismatch: boolean;
+  /** Team health % at 0, 5, .., 100% of the map covered (21 entries, -1 for a
+   *  point not reached); null for a half recorded without the health curve.
+   *  Optional: a server from before the curve leaves it out. */
+  curve?: number[] | null;
+  /** The covered figure (0..100) where the half's first tank window opened and
+   *  where the paying (or last) one closed; -1 none, null not recorded. */
+  tankOpen?: number | null;
+  tankClose?: number | null;
 }
 export interface AltReportMatch {
   id: number;

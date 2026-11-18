@@ -3275,6 +3275,13 @@ export function openDb(path: string): DB {
   // signal: 'readyup' or 'infected' (src/lilacIgnore.ts), NULL when it
   // counts. The backfill marks older rows; it only ever sets a mark.
   ensureColumn(db, 'integrity_flags', 'ignored', 'TEXT');
+  // Health-run scoring's health curve (pug-match 0.3.47): the half's team
+  // health % at 0, 5, .., 100% of the map as 21 comma separated ints (-1 not
+  // reached), and the covered figure where the tank window opened and closed
+  // (-1 none). NULL on rows from plugins that do not send them.
+  ensureColumn(db, 'match_round_alt', 'curve', 'TEXT');
+  ensureColumn(db, 'match_round_alt', 'tank_open', 'INTEGER');
+  ensureColumn(db, 'match_round_alt', 'tank_close', 'INTEGER');
   markIgnoredLilac(db);
 
   seed(db);

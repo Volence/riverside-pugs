@@ -128,6 +128,19 @@ export interface AltRoundFields {
   tankBy: 'surv' | 'other' | 'gone' | null;
   tanks: number;
   survivorsIn: number;
+  /** The health curve (pug-match 0.3.47 with an l4dscores that has
+   *  Score_GetAltCurve): team health % (0..100) at 0, 5, .., 100% of the map
+   *  covered, -1 for a point the half never reached; always 21 entries. Null
+   *  when the line has no `curve=` (older plugins) or it is malformed. Optional
+   *  so hand-built records from before it still type-check; the parser always
+   *  sets it. */
+  curve?: number[] | null;
+  /** The covered figure (0..100) where the half's first tank window opened and
+   *  where the paying (or last) one closed, from `tankat=<open>,<close>`; -1
+   *  for none (a close of -1 with an open: the half ended with the tank up).
+   *  Null when the line has no `tankat=` or it is malformed. */
+  tankOpen?: number | null;
+  tankClose?: number | null;
 }
 
 export type LogEvent =
@@ -526,11 +539,52 @@ function halfOf(s: string | undefined): number | null {
 
 const ALT_RAW_KEYS = ['ws', 'wt', 'wr', 'ts', 'tt', 'tr', 'ds', 'dt', 'dr'] as const;
 
+/** Points on the health curve: 0, 5, .., 100% of the map. */
+export const ALT_CURVE_POINTS = 21;
+
+/** One curve value or tank position: an integer -1..100. */
+function curveValue(s: string): number | null {
+  if (!/^-?\d{1,3}$/.test(s)) return null;
+  const v = Number(s);
+  return v >= -1 && v <= 100 ? v : null;
+}
+
+/** `curve=` as sent: exactly 21 comma separated integers, each -1..100.
+ *  Anything else is null, so a bad curve is dropped on its own and the rest
+ *  of the line still counts. */
+export function parseAltCurve(s: string | undefined): number[] | null {
+  if (s === undefined) return null;
+  const parts = s.split(',');
+  if (parts.length !== ALT_CURVE_POINTS) return null;
+  const out: number[] = [];
+  for (const p of parts) {
+    const v = curveValue(p);
+    if (v === null) return null;
+    out.push(v);
+  }
+  return out;
+}
+
+/** `tankat=<open>,<close>`, each -1..100. A close with no open (a window
+ *  cannot close before one opened) is malformed. Null pair when absent or bad. */
+export function parseAltTankAt(s: string | undefined): { open: number; close: number } | null {
+  if (s === undefined) return null;
+  const parts = s.split(',');
+  if (parts.length !== 2) return null;
+  const open = curveValue(parts[0]);
+  const close = curveValue(parts[1]);
+  if (open === null || close === null) return null;
+  if (open === -1 && close !== -1) return null;
+  return { open, close };
+}
+
 /** The fields of one ALT_ROUND, from the UDP line or the match dump (both
  *  carry the same `key=val` set). Null unless every field is present and well
  *  formed: this is a shadow record, so a doubtful line is dropped whole rather
  *  than stored in part. `wm`/`dm` are multipliers x100; `tankpct=-1
- *  tankby=none` is the only way to say no tank window closed. */
+ *  tankby=none` is the only way to say no tank window closed. The exception is
+ *  the optional pair added later (`curve=`, `tankat=`, the health curve): each
+ *  is null when absent or malformed and never decides whether the line counts. */
 export function parseAltFields(kv: Record<string, string>): AltRoundFields | null {
   const half = halfOf(kv.half);
   const surv = teamOf(kv.surv);
@@ -566,9 +620,12 @@ export function parseAltFields(kv: Record<string, string>): AltRoundFields | nul
     tankPct = pct;
     tankBy = kv.tankby;
   } else return null;
+  // Optional, newer fields: a bad one is dropped alone, never the line.
+  const tankAt = parseAltTankAt(kv.tankat);
   return {
     map: kv.map, half: half as 1 | 2, surv, rule: kv.rule!, walk, tank, door,
     walkMult: wm / 100, doorMult: dm / 100, raw, tankPct, tankBy, tanks, survivorsIn,
+    curve: parseAltCurve(kv.curve), tankOpen: tankAt?.open ?? null, tankClose: tankAt?.close ?? null,
   };
 }
 

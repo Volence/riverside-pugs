@@ -500,7 +500,56 @@ describe('round lines', () => {
         walk: 463, tank: 164, door: 0, walkMult: 1.15, doorMult: 1.75,
         raw: { ws: 180.25, wt: 40.5, wr: 96, ts: 150, tt: 60, tr: 90, ds: 0, dt: 0, dr: 0 },
         tankPct: 41, tankBy: 'surv', tanks: 1, survivorsIn: 0,
+        // No curve= or tankat= on the line (pug-match before 0.3.47, or an l4dscores without Score_GetAltCurve).
+        curve: null, tankOpen: null, tankClose: null,
       });
+    });
+
+    // Captured on the local test server (port 27075, 2026-11-18): the rig ran pug-match's own
+    // AltScore_Capture / AltScore_SendPending (plugin/pug-altscore.inc) on hospital01's first half,
+    // a make after a tank fight, and logged what EmitPug was handed.
+    const RIG_LINE = 'ALT_ROUND map=l4d_vs_hospital01_apartment half=1 surv=a rule=hr1 walk=321 tank=68 door=97 wm=95 dm=100 '
+      + 'ws=171.85 wt=112.81 wr=184.09 ts=54.00 tt=63.55 tr=180.00 ds=55.00 dt=23.75 dr=150.00 tankpct=23 tankby=other tanks=1 in=4 '
+      + 'curve=100,100,100,100,88,88,88,88,23,23,23,22,23,20,20,20,20,19,19,19,19 tankat=37,54';
+
+    it('parses the health curve and tank window from a line the plugin produced', () => {
+      expect(alt(RIG_LINE)).toMatchObject({
+        kind: 'alt_round', map: 'l4d_vs_hospital01_apartment', half: 1, surv: 'a', walk: 321, tank: 68, door: 97,
+        walkMult: 0.95, doorMult: 1, tankPct: 23, tankBy: 'other', tanks: 1, survivorsIn: 4,
+        curve: [100, 100, 100, 100, 88, 88, 88, 88, 23, 23, 23, 22, 23, 20, 20, 20, 20, 19, 19, 19, 19],
+        tankOpen: 37, tankClose: 54,
+      });
+    });
+
+    it('keeps -1 for points never reached and for a tank still up at the end', () => {
+      // hospital02's first half, captured the same way: a wipe with the tank alive.
+      const wipe = RIG_LINE.replace(/curve=\S+ tankat=\S+/, 'curve=90,90,90,100,100,100,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 tankat=27,-1');
+      expect(alt(wipe)).toMatchObject({
+        curve: [90, 90, 90, 100, 100, 100, ...Array(15).fill(-1)], tankOpen: 27, tankClose: -1,
+      });
+      expect(alt(RIG_LINE.replace('tankat=37,54', 'tankat=-1,-1'))).toMatchObject({ tankOpen: -1, tankClose: -1 });
+    });
+
+    it('drops a malformed curve or tankat on its own and keeps the rest of the line', () => {
+      const good = alt(RIG_LINE) as Record<string, unknown>;
+      const twenty = Array(20).fill(50).join(',');
+      for (const badCurve of [
+        `curve=${twenty}`,                         // 20 entries
+        `curve=${twenty},50,50`,                   // 22 entries
+        `curve=${twenty},101`,                     // above 100
+        `curve=${twenty},-2`,                      // below -1
+        `curve=${twenty},5.5`,                     // not an integer
+        `curve=${twenty},`,                        // empty entry
+        `curve=${twenty},x`,
+        'curve=',
+      ]) {
+        const r = alt(RIG_LINE.replace(/curve=\S+/, badCurve));
+        expect(r, badCurve).toMatchObject({ kind: 'alt_round', walk: 321, tankPct: 23, curve: null, tankOpen: 37, tankClose: 54 });
+      }
+      for (const badTank of ['tankat=37', 'tankat=37,54,60', 'tankat=37,101', 'tankat=-2,5', 'tankat=a,b', 'tankat=-1,40', 'tankat=']) {
+        const r = alt(RIG_LINE.replace('tankat=37,54', badTank));
+        expect(r, badTank).toMatchObject({ kind: 'alt_round', walk: 321, curve: good.curve, tankOpen: null, tankClose: null });
+      }
     });
 
     it('reads tankpct=-1 tankby=none as no tank window', () => {
@@ -522,17 +571,20 @@ describe('round lines', () => {
       ]) expect(alt(bad)).toBeNull();
     });
 
-    it('the longest line pug-match can send fits in 700 bytes and parses', () => {
+    it('the longest line pug-match can send, health curve included, fits in 700 bytes and parses', () => {
       // A 63 character map (pug-match keeps map names in char[64]), every
       // integer at 5 digits, every float as 99999.99, the longest tankby,
       // plus the signed-line trailer pug-logauth.inc appends.
       const map = 'm'.repeat(63);
       const raw = ['ws', 'wt', 'wr', 'ts', 'tt', 'tr', 'ds', 'dt', 'dr'].map((k) => `${k}=99999.99`).join(' ');
       const body = `ALT_ROUND map=${map} half=2 surv=b rule=hr1 walk=99999 tank=99999 door=99999 wm=99999 dm=99999 `
-        + `${raw} tankpct=100 tankby=other tanks=99999 in=99999`;
+        + `${raw} tankpct=100 tankby=other tanks=99999 in=99999`
+        // The health curve at its widest (0.3.47): every point and both tank positions at 100.
+        + ` curve=${Array(21).fill(100).join(',')} tankat=100,100`;
       const datagram = framed(`PUG ${TOKEN} ${body} lseq=4294967295.4294967295 mac=0123abcd`);
       expect(datagram.length).toBeLessThan(700);
-      expect(alt(body)).toMatchObject({ kind: 'alt_round', map, walk: 99999, tankBy: 'other', survivorsIn: 99999 });
+      expect(alt(body)).toMatchObject({ kind: 'alt_round', map, walk: 99999, tankBy: 'other', survivorsIn: 99999, tankOpen: 100, tankClose: 100 });
+      expect((alt(body) as { curve: number[] }).curve).toEqual(Array(21).fill(100));
     });
   });
 

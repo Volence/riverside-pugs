@@ -116,6 +116,8 @@ describe('buildAltReport', () => {
         tankPct: 55, tankBy: 'surv', survivorsIn: 4,
         // The fixture's stored parts are not its raw components' (ws 255 is 350 walking).
         mismatch: true,
+        // A row with no health curve (an older plugin): all three null.
+        curve: null, tankOpen: null, tankClose: null,
       });
       expect(m1.halves[7]).toMatchObject({ ordinal: 3, half: 2, map: 'm4', survTeam: 'b', total: 380 });
       // Match 2 has no map rows: the name is empty, not an error.
@@ -127,6 +129,24 @@ describe('buildAltReport', () => {
       expect(r.matches.map((m) => m.id)).toEqual([3]);
       expect(r.summary.matchesWithData).toBe(3);
     });
+  });
+
+  it('carries the health curve of each half and tank window, and null for a row without them', () => {
+    match(db, 1);
+    maps(db, 1, 'match_maps', ['m1']);
+    alt(db, 1, { ordinal: 0, half: 1, surv: 'a', walk: 100, tank: 50, door: 30 });
+    alt(db, 1, { ordinal: 0, half: 2, surv: 'b', walk: 100, tank: 50, door: 30 });
+    alt(db, 1, { ordinal: 0, half: 1, surv: 'a', walk: 1, tank: 0, door: 0, rule: 'other' });
+    // Half 1: a make with a tank fight from 37 to 54. Half 2 stays as an older plugin stored it.
+    const curve = '100,100,100,100,88,88,88,88,23,23,23,22,23,20,20,20,20,19,19,19,19';
+    db.prepare("UPDATE match_round_alt SET curve = ?, tank_open = 37, tank_close = 54 WHERE match_id = 1 AND half = 1 AND rule = 'hr1'").run(curve);
+    const [h1, h2] = buildAltReport(db).matches[0].halves;
+    expect(h1).toMatchObject({ half: 1, curve: curve.split(',').map(Number), tankOpen: 37, tankClose: 54 });
+    expect(h1.curve).toHaveLength(21);
+    expect(h2).toMatchObject({ half: 2, curve: null, tankOpen: null, tankClose: null });
+    // A stored curve that is not 21 values in -1..100 (edited by hand) reaches the page as null, the row still listed.
+    db.prepare("UPDATE match_round_alt SET curve = '100,101' WHERE match_id = 1 AND half = 2").run();
+    expect(buildAltReport(db).matches[0].halves[1]).toMatchObject({ half: 2, curve: null, total: 180 });
   });
 
   it('flags a half whose stored parts differ from its raw components by more than 1', () => {

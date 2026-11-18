@@ -4465,6 +4465,32 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .draftcontrols__presence { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
 .draftcontrols__delegates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 
+/* Alt scoring's health curve (admin, Balance, Alt scoring; AltCurveChart.tsx):
+ * team A green and team B red as the win chart has them, faint bands where the
+ * tank fight was, the grid and labels in the win chart's quiet ink. */
+.altcurve { margin: var(--sp-3) 0 0; max-width: 640px; }
+.altcurve svg { display: block; width: 100%; height: auto; overflow: visible; }
+.altcurve__title { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); align-items: baseline; font-size: var(--fs-dense); }
+.altcurve__legend { display: inline-flex; flex-wrap: wrap; gap: var(--sp-3); }
+.altcurve__key { display: inline-flex; align-items: center; gap: 6px; }
+.altcurve__swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.altcurve__swatch--a { background: var(--win); }
+.altcurve__swatch--b { background: var(--accent); }
+.altcurve__grid { stroke: var(--border); stroke-width: 1; }
+.altcurve__axis { fill: var(--text-muted); font-family: var(--font-label); font-size: 12px; letter-spacing: 0.03em; }
+.altcurve__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.altcurve__line--a { stroke: var(--win); }
+.altcurve__line--b { stroke: var(--accent); }
+.altcurve__dot { stroke: var(--surface); stroke-width: 1; }
+.altcurve__dot--a { fill: var(--win); }
+.altcurve__dot--b { fill: var(--accent); }
+.altcurve__tank--a { fill: var(--win); fill-opacity: 0.12; }
+.altcurve__tank--b { fill: var(--accent); fill-opacity: 0.12; }
+.altcurve__tankend { stroke-width: 2; stroke-dasharray: 4 3; }
+.altcurve__tankend--a { stroke: var(--win); }
+.altcurve__tankend--b { stroke: var(--accent); }
+.altcurve__foot { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); }
+
 /* ---------- win chance line (match page) ----------
  * Team A above the 50% rule in the versus header's team A color, team B below
  * in its team B color. The fills are faint on purpose: position says who was

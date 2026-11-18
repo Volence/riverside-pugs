@@ -46,6 +46,19 @@ describe('GET /api/admin/balance/alt-scoring', () => {
     expect(body.maps).toEqual([]);
     expect(body.matches).toHaveLength(1);
     expect(body.matches[0]).toMatchObject({ id: 1, campaign: 'c_test', altA: 380, altB: 0, altWinner: 'a', complete: true, differs: false, counted: true });
-    expect(body.matches[0].halves[0]).toMatchObject({ ordinal: 0, half: 1, map: '', real: 400, total: 380, mismatch: true });
+    expect(body.matches[0].halves[0]).toMatchObject({ ordinal: 0, half: 1, map: '', real: 400, total: 380, mismatch: true,
+      // Recorded without the health curve.
+      curve: null, tankOpen: null, tankClose: null });
+  });
+
+  it('returns the health curve and tank window of a half', async () => {
+    const curve = [100, 95, 95, 90, 90, 90, 90, 61, 61, 61, 61, 60, 58, 58, 58, 58, 55, 55, 55, -1, -1];
+    db.prepare("UPDATE match_round_alt SET curve = ?, tank_open = 30, tank_close = 35 WHERE match_id = 1").run(curve.join(','));
+    const a = await server();
+    const cookies = await authedCookie(a, db, ADMIN);
+    db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
+    const res = await a.inject({ method: 'GET', url: URL, cookies });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().matches[0].halves[0]).toMatchObject({ curve, tankOpen: 30, tankClose: 35, total: 380 });
   });
 });
