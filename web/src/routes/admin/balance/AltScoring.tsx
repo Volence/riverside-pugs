@@ -43,11 +43,14 @@ function Halves({ m }: { m: AltReportMatch }) {
 
 function HalvesTable({ m }: { m: AltReportMatch }) {
   return (
-    <table class="admin-table" data-testid={`alt-halves-${m.id}`}>
+    <div class="table-wrap">
+    <table class="admin-table admin-table--fit" data-testid={`alt-halves-${m.id}`}>
       <thead>
         <tr>
-          <th>Map</th><th>Half</th><th>Survivors</th><th>Real</th><th>Walking</th><th>Tank</th><th>Saferoom</th><th>Alt total</th>
-          <th>Team health % when the tank fight ended</th><th>Survivors in saferoom</th>
+          <th>Map</th><th class="num">Half</th><th>Survivors</th><th class="num">Real</th><th class="num">Walking</th>
+          <th class="num">Tank</th><th class="num">Saferoom</th><th class="num">Alt total</th>
+          <th title="Team health % when the tank fight ended">Health after tank</th>
+          <th class="num" title="Survivors in saferoom">In saferoom</th>
         </tr>
       </thead>
       <tbody>
@@ -70,6 +73,7 @@ function HalvesTable({ m }: { m: AltReportMatch }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -105,7 +109,7 @@ export function AltScoring() {
         The list shows the most recent 100 matches. The totals count only ranked PUGs that finished, were not voided and
         have an alt score for every half, so "0 of 0" is expected at first.
       </p>
-      <table class="admin-table" data-testid="alt-summary">
+      <table class="admin-table admin-table--fit" data-testid="alt-summary">
         <tbody>
           <tr><th>Matches with data</th><td class="num">{summary.matchesWithData}</td></tr>
           <tr><th>Complete matches counted</th><td class="num">{summary.complete}</td></tr>
@@ -128,8 +132,8 @@ export function AltScoring() {
         would bring the map to the average of all maps. A dash means the map does not have enough halves yet.
       </p>
       <div class="table-wrap">
-        <table class="admin-table" data-testid="alt-maps">
-          <thead><tr><th>Map</th><th>Halves</th><th>Avg walking</th><th>Suggested walk multiplier</th></tr></thead>
+        <table class="admin-table admin-table--fit" data-testid="alt-maps">
+          <thead><tr><th>Map</th><th class="num">Halves</th><th class="num">Avg walking</th><th class="num">Suggested walk multiplier</th></tr></thead>
           <tbody>
             {maps.map((r) => (
               <tr key={r.map}>
@@ -148,7 +152,7 @@ export function AltScoring() {
       <div class="table-wrap">
         <table class="admin-table" data-testid="alt-matches">
           <thead>
-            <tr><th>Match</th><th>Ended (UTC)</th><th>Campaign</th><th>Real (A - B)</th><th>Alt (A - B)</th><th>Winner</th></tr>
+            <tr><th>Match</th><th>Ended (UTC)</th><th>Campaign</th><th class="num">Real (A - B)</th><th class="num">Alt (A - B)</th><th>Winner</th></tr>
           </thead>
           <tbody>
             {matches.flatMap((m) => {
@@ -179,7 +183,7 @@ export function AltScoring() {
                 </tr>
               );
               return open === m.id
-                ? [row, <tr key={`${m.id}-halves`}><td colSpan={6}><Halves m={m} /></td></tr>]
+                ? [row, <tr key={`${m.id}-halves`} class="alt-expand"><td colSpan={6}><Halves m={m} /></td></tr>]
                 : [row];
             })}
           </tbody>

@@ -1,8 +1,9 @@
+import { useState } from 'preact/hooks';
 import type { AltReportHalf } from '../../../api';
 
 /** Health-run scoring's health curve for one map: team health % (y) against
  *  % of the map covered (x), one line per half in the team's colour (team A
- *  green, team B red, as the win chart colours them), gaps where the half
+ *  in the win chart's team A colour, team B in its team B colour), gaps where the half
  *  never reached a point, and a band for each half's tank fight. Plain inline
  *  SVG in the site's chart style (see WinChart); every point carries a title
  *  with its exact numbers. */
@@ -109,6 +110,17 @@ export function AltCurveChart({ map, halves }: { map: string; halves: AltReportH
     return <p class="muted" data-testid="alt-curve-none">No curve recorded for {map}.</p>;
   }
   const missing = halves.filter((h) => !withCurve.includes(h));
+  const [hover, setHover] = useState<number | null>(null);
+  const points = Math.max(...withCurve.map((h) => h.curve!.length));
+  const onMove = (e: PointerEvent) => {
+    const svg = (e.currentTarget as SVGElement).ownerSVGElement;
+    if (!svg) return;
+    const r = svg.getBoundingClientRect();
+    if (r.width === 0) return;
+    const covered = ((((e.clientX - r.left) / r.width) * W - PAD.left) / PLOT_W) * 100;
+    setHover(Math.min(points - 1, Math.max(0, Math.round(covered / CURVE_STEP))));
+  };
+  const hx = hover === null ? 0 : x(hover * CURVE_STEP);
   return (
     <figure class="altcurve" data-testid="alt-curve">
       <figcaption class="altcurve__title">
@@ -123,6 +135,7 @@ export function AltCurveChart({ map, halves }: { map: string; halves: AltReportH
           ))}
         </span>
       </figcaption>
+      <div class="altcurve__plot">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${map}: team health % against % of the map covered, per half`}>
         {withCurve.map((h) => <TankMark key={`t${h.survTeam}${h.half}`} h={h} />)}
         {TICKS.map((t) => (
@@ -133,11 +146,41 @@ export function AltCurveChart({ map, halves }: { map: string; halves: AltReportH
           </g>
         ))}
         <text class="altcurve__axis" x={PAD.left + PLOT_W / 2} y={H - 2} text-anchor="middle">Map covered</text>
+        {hover !== null && <line class="altcurve__cross" x1={hx} x2={hx} y1={PAD.top} y2={PAD.top + PLOT_H} />}
         {withCurve.map((h) => <HalfLine key={`l${h.survTeam}${h.half}`} h={h} />)}
+        {hover !== null && withCurve.map((h) => {
+          const v = h.curve![hover] ?? -1;
+          return v < 0 ? null : (
+            <circle key={`h${h.survTeam}${h.half}`} class={`altcurve__hot altcurve__dot--${h.survTeam}`} cx={hx} cy={y(v)} r={5} />
+          );
+        })}
+        <rect class="altcurve__hit" data-testid="alt-curve-hit" x={PAD.left - 6} y={PAD.top} width={PLOT_W + 12} height={PLOT_H}
+          onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)} />
       </svg>
+      {hover !== null && (
+        <div class="altcurve__tip" data-testid="alt-curve-tip"
+          style={{ left: `${Math.min(Math.max((hx / W) * 100, 18), 82)}%` }}>
+          <div class="altcurve__tiphead">{hover * CURVE_STEP}% of the map covered</div>
+          {withCurve.map((h) => {
+            const v = h.curve![hover] ?? -1;
+            const c = hover * CURVE_STEP;
+            const open = h.tankOpen ?? -1;
+            const close = h.tankClose ?? -1;
+            const inTank = open >= 0 && (close < 0 ? c >= open : c >= Math.min(open, close) && c <= Math.max(open, close));
+            return (
+              <div key={`${h.survTeam}-${h.half}`} class="altcurve__tiprow">
+                <span class={`altcurve__swatch altcurve__swatch--${h.survTeam}`} aria-hidden="true" />
+                <span>{teamLabel(h)}</span>
+                <span class="altcurve__tipval">{v < 0 ? 'not reached' : `${v}%`}{inTank ? ' (tank)' : ''}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      </div>
       <p class="muted altcurve__foot">
         Up: team health (the "Team health" figure !healthalt shows). Across: how much of the map the team had covered.
-        Gaps are ground the half never reached; a band is where the tank fight was. Hover a point for its numbers.
+        Gaps are ground the half never reached; a band is where the tank fight was. Hover the chart for the numbers.
       </p>
     </figure>
   );

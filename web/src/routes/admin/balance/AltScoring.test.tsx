@@ -83,8 +83,8 @@ describe('AltScoring', () => {
     expect(halfRows[1].textContent).toMatch(/62%/);
     // No tank fight ended in the first half: a dash, not a claim there was no tank.
     expect(halfRows[0].querySelectorAll('td')[8].textContent).toBe('-');
-    expect(halves.textContent).toMatch(/Team health % when the tank fight ended/);
-    expect(halves.textContent).toMatch(/Survivors in saferoom/);
+    expect(halves.textContent).toMatch(/Health after tank/);
+    expect(halves.textContent).toMatch(/In saferoom/);
     expect(halves.textContent).toMatch(/Saferoom/);
 
     // No mismatch: no warning line and no mark on any half.
@@ -159,6 +159,20 @@ describe('AltScoring', () => {
 
     // Map 3 has no curve at all.
     expect(screen.getByTestId('alt-curve-none').textContent).toBe('No curve recorded for The Sewer.');
+
+    // Hovering the chart snaps to the nearest 5% and lists every half there; B never reached 45%.
+    const svg = first.querySelector('svg')!;
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 230, right: 600, bottom: 230, x: 0, y: 0, toJSON: () => ({}) });
+    const hit = first.querySelector('[data-testid="alt-curve-hit"]')!;
+    fireEvent.pointerMove(hit, { clientX: 40 + 0.4 * 548 });
+    const tip = first.querySelector('[data-testid="alt-curve-tip"]')!;
+    expect(tip.textContent).toMatch(/^40% of the map covered/);
+    expect(tip.textContent).toMatch(/Team A \(half 1\)23% \(tank\)/);
+    expect(tip.textContent).toMatch(/Team B \(half 2\)67%/);
+    fireEvent.pointerMove(hit, { clientX: 40 + 0.46 * 548 });
+    expect(first.querySelector('[data-testid="alt-curve-tip"]')!.textContent).toMatch(/Team B \(half 2\)not reached/);
+    fireEvent.pointerLeave(hit);
+    expect(first.querySelector('[data-testid="alt-curve-tip"]')).toBeNull();
   });
 
   it('warns about halves whose stored score does not match their breakdown, and marks them', async () => {
