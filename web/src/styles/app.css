@@ -4490,6 +4490,23 @@ a.matchcard--link:hover { border-color: var(--border-strong); }
 .altcurve__tankend--a { stroke: var(--win); }
 .altcurve__tankend--b { stroke: var(--accent); }
 .altcurve__foot { margin: var(--sp-1) 0 0; font-size: var(--fs-dense); }
+.altcurve__plot { position: relative; }
+.altcurve__cross { stroke: var(--border-strong); stroke-width: 1; pointer-events: none; }
+.altcurve__hot { stroke: var(--text-bright); stroke-width: 2; pointer-events: none; }
+.altcurve__hit { fill: transparent; cursor: crosshair; touch-action: pan-y; }
+.altcurve__tip {
+  position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; z-index: 2;
+  min-width: 190px; padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  font-size: var(--fs-dense); color: var(--text); line-height: 1.5; white-space: nowrap;
+}
+.altcurve__tiphead { color: var(--text-bright); margin-bottom: var(--sp-1); }
+.altcurve__tiprow { display: flex; align-items: center; gap: 6px; }
+.altcurve__tipval { margin-left: auto; padding-left: var(--sp-3); font-variant-numeric: tabular-nums; color: var(--text-bright); }
+/* Alt scoring: a match's expanded row holds prose and charts, not a cell. */
+.admin-table tr.alt-expand > td { white-space: normal; padding-block: var(--sp-3); }
+.admin-table--fit { width: auto; min-width: min(100%, 36rem); }
+.admin-table th.num { text-align: right; }
 
 /* ---------- win chance line (match page) ----------
  * Team A above the 50% rule in the versus header's team A color, team B below
