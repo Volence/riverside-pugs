@@ -45,7 +45,7 @@ native bool Score_GetAltHalf(int &walk, int &tank, int &door, float raw[9], int 
 // AskPluginLoad2 and feature-checked on its own, read only by pug-altscore.inc.
 native bool Score_GetAltCurve(int curve[21], int &tankOpen, int &tankClose);
 
-#define PLUGIN_VERSION "0.3.47"
+#define PLUGIN_VERSION "0.3.48"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -4406,6 +4406,7 @@ public void OnRoundIsLive()
 		SampleSkillDetect();
 		EmitPug("MATCH_START map=%s", g_sCurrentMap);
 	}
+	if (g_State == MS_Live) TankPlanGoLive();	// 0.3.48: who tanks which map, once per match
 
 	// Plan T6 Ruling 7: a map restart after go-live clears l4dscores' tally on
 	// a first map (L4D_OnClearTeamScores -> OnNewMission), so seed it again at
