@@ -3,7 +3,7 @@ import Fastify from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import {
   CLIP_TRIPLES_SINCE, CLIPS_SINCE, claimClip, failClip, findClipBursts, findQuads, finishClip, getClip, jobFor, listClips, scanClips, setClipFile,
-  setReelFile,
+  setReelFile, clipPlayers,
 } from '../src/clips.js';
 import { findSkeetStreaks } from '../src/skeetStreaks.js';
 import { clipRoutes } from '../src/routes/clips.js';
@@ -183,6 +183,8 @@ describe('quad caps', () => {
     setClipFile(db, row.id, 'video', 'clips/x.mp4', 1); finishClip(db, row.id);
     expect(listClips(db, (k) => k, { player: I[0] })).toHaveLength(1);
     expect(listClips(db, (k) => k, { minCount: 3 })).toHaveLength(0);
+    // the /clips player filter offers all four cappers, once each
+    expect(clipPlayers(db)).toEqual(I.map((id) => ({ steamid: id, name: `p${id.slice(-2)}`, count: 1 })));
   });
 });
 

@@ -6756,7 +6756,11 @@ a.mapch__name:hover { color: var(--accent); }
 
 /* Highlight clips (routes/Clips.tsx) */
 .clipintro { color: var(--text-muted); margin: 0 0 var(--sp-3); }
-.clipfilter { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.clipfilter { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.clipfilter__search { margin-left: auto; width: min(100%, 240px); }
+.clipfilter__who { margin-left: auto; text-transform: none; }
+.prof__clipshead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.prof__clipshead h3 { margin-bottom: var(--sp-3); }
 .clipgrid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
 .clipgrid--small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
 .cliptile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

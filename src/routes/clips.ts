@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
-  claimClip, clipThumbKeyFor, clipVideoKeyFor, failClip, finishClip, getClip, jobFor, listClips, reelOf, setClipFile, setReelFile,
+  claimClip, clipThumbKeyFor, clipVideoKeyFor, failClip, finishClip, getClip, jobFor, clipPlayers, listClips, reelOf, setClipFile, setReelFile,
 } from '../clips.js';
 import type { DB } from '../db.js';
 import { head, put, publicUrlFor, type R2Config } from '../r2.js';
@@ -137,6 +137,8 @@ export async function clipRoutes(app: FastifyInstance, opts: { db: DB; r2: R2Con
     failClip(db, row.id, error);
     return { ok: true };
   });
+
+  app.get('/api/clips/players', async () => ({ players: r2 ? clipPlayers(db) : [] }));
 
   app.get('/api/clips', async (req, reply) => {
     if (!r2) return { clips: [] };

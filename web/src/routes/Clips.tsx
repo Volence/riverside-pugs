@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { useLocation } from 'preact-iso';
 import { api, type ClipCard } from '../api';
 import { Empty, Panel } from '../components/bits';
 import { PageHeader } from '../components/PageHeader';
@@ -12,6 +13,9 @@ export function burstLabel(count: number): string {
   if (count === 4) return 'Quad skeet';
   return `${count}-skeet streak`;
 }
+
+/** The /clips page narrowed to one player (a quad counts for all four cappers). */
+export const clipsOf = (steamid: string) => `/clips?player=${steamid}`;
 
 /** One clip: the video (nothing downloads until play, the poster frame
  *  shows meanwhile), who, what, where, and a link to the moment in the
@@ -29,16 +33,18 @@ export function ClipTile({ clip, showPlayer = true }: { clip: ClipCard; showPlay
         </span>
         {quad && (
           <div class="cliptile__crew">
-            {clip.people.map((p, i) => <>{i > 0 && ', '}<a href={`/player/${p.steamid}`}>{p.name}</a></>)}
+            {clip.people.map((p, i) => <>{i > 0 && ', '}<a href={clipsOf(p.steamid)} title={`${p.name}'s clips`}>{p.name}</a></>)}
           </div>
         )}
         {showPlayer && !quad && (
-          <a class="cliptile__who" href={`/player/${clip.player.steamid}`}>
-            {clip.player.avatar
-              ? <img class="cliptile__avatar" src={clip.player.avatar} alt="" loading="lazy" />
-              : <span class="cliptile__avatar cliptile__avatar--blank" />}
-            <span class="cliptile__name">{clip.player.name}</span>
-          </a>
+          <div class="cliptile__who">
+            <a href={`/player/${clip.player.steamid}`} title={`${clip.player.name}'s profile`}>
+              {clip.player.avatar
+                ? <img class="cliptile__avatar" src={clip.player.avatar} alt="" loading="lazy" />
+                : <span class="cliptile__avatar cliptile__avatar--blank" />}
+            </a>
+            <a class="cliptile__name" href={clipsOf(clip.player.steamid)} title={`${clip.player.name}'s clips`}>{clip.player.name}</a>
+          </div>
         )}
         <div class="cliptile__where">
           <a href={replay}>Match {clip.matchId}</a> · {clip.campaign}, map {clip.ordinal + 1} · {fmtAgo(clip.doneAt)}
@@ -121,7 +127,7 @@ export function ProfileClips({ steamid }: { steamid: string }) {
   if (!clips.length) return null;
   return (
     <Panel class="prof__clips">
-      <h3>Clips</h3>
+      <div class="prof__clipshead"><h3>Clips</h3><a href={clipsOf(steamid)}>See all</a></div>
       <div class="clipgrid clipgrid--small">
         {clips.map((c) => <ClipTile key={c.id} clip={c} showPlayer={false} />)}
       </div>
@@ -129,7 +135,44 @@ export function ProfileClips({ steamid }: { steamid: string }) {
   );
 }
 
+/** Pick a player by name from everyone with a clip; the choice lives in the
+ *  page address (?player=) so a player's clips can be linked. */
+function PlayerFilter({ player, onPick }: { player: string | undefined; onPick: (steamid: string | undefined) => void }) {
+  const [players, setPlayers] = useState<{ steamid: string; name: string; count: number }[]>([]);
+  const [text, setText] = useState('');
+  useEffect(() => {
+    const ac = new AbortController();
+    api.clipPlayers(ac.signal).then((r) => setPlayers(r.players)).catch(() => {});
+    return () => ac.abort();
+  }, []);
+  const chosen = players.find((p) => p.steamid === player);
+  if (player) {
+    return (
+      <button type="button" class="chip is-on clipfilter__who" onClick={() => { setText(''); onPick(undefined); }} title="Show everyone's clips">
+        {chosen?.name ?? 'One player'} ×
+      </button>
+    );
+  }
+  const pick = (v: string) => {
+    setText(v);
+    const want = v.trim().toLowerCase();
+    const hit = players.find((p) => p.name.toLowerCase() === want);
+    if (hit) onPick(hit.steamid);
+  };
+  return (
+    <>
+      <input class="field__input clipfilter__search" type="search" list="clipplayers" placeholder="Find a player" aria-label="Find a player"
+        value={text} onInput={(e) => pick((e.target as HTMLInputElement).value)} />
+      <datalist id="clipplayers">
+        {players.map((p) => <option key={p.steamid} value={p.name}>{p.count === 1 ? '1 clip' : `${p.count} clips`}</option>)}
+      </datalist>
+    </>
+  );
+}
+
 export function Clips() {
+  const { query, route } = useLocation();
+  const player = /^\d{17}$/.test(query.player ?? '') ? query.player : undefined;
   const [show, setShow] = useState<'all' | 'triples' | 'quads'>('all');
   const pick = (v: typeof show, label: string) => (
     <button type="button" class={`chip${show === v ? ' is-on' : ''}`} aria-pressed={show === v} onClick={() => setShow(v)}>{label}</button>
@@ -143,10 +186,14 @@ export function Clips() {
       </p>
       <div class="clipfilter">
         {pick('all', 'All')}{pick('triples', 'Triple skeets')}{pick('quads', 'Quad caps')}
+        <PlayerFilter player={player} onPick={(id) => route(id ? clipsOf(id) : '/clips', true)} />
       </div>
       <ClipGrid
+        player={player}
         min={show === 'triples' ? 3 : undefined} kind={show === 'quads' ? 'quad' : show === 'triples' ? 'skeet' : undefined}
-        empty="No clips here yet. They show up a little while after a match with a double or triple skeet or a quad cap."
+        empty={player
+          ? 'No clips like that for this player yet.'
+          : 'No clips here yet. They show up a little while after a match with a double or triple skeet or a quad cap.'}
       />
     </div>
   );

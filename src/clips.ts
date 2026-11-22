@@ -304,13 +304,30 @@ export interface PublicClip {
 
 /** Finished clips (clipMatch), newest first; `before` pages
  *  by id. urlFor turns an R2 key into its public address. */
+// a finished clip being rendered again (a new look) keeps showing its last video meanwhile
+const LISTED = `(c.status = 'done' OR (c.done_at IS NOT NULL AND c.video_key IS NOT NULL AND c.status IN ('queued', 'rendering')))`;
+
+/** Everyone with a listed clip, for the /clips player filter: the skeeter,
+ *  or all four cappers of a quad (the same rule as listClips' player). */
+export function clipPlayers(db: DB): { steamid: string; name: string; count: number }[] {
+  const rows = db.prepare(
+    `SELECT pid, COUNT(*) AS n FROM (
+       SELECT c.id, c.player_id AS pid FROM clips c JOIN matches m ON m.id = c.match_id WHERE ${LISTED} AND ${clipMatch('m')}
+       UNION
+       SELECT c.id, j.value AS pid FROM clips c JOIN matches m ON m.id = c.match_id, json_each(c.people_json) j
+       WHERE c.kind = 'quad' AND ${LISTED} AND ${clipMatch('m')}
+     ) GROUP BY pid`,
+  ).all() as { pid: string; n: number }[];
+  return rows.map((r) => ({ steamid: r.pid, name: getPlayer(db, r.pid)?.name ?? r.pid, count: r.n }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
 export function listClips(
   db: DB, urlFor: (key: string) => string,
   opts: { player?: string; before?: number; limit?: number; minCount?: number; kind?: 'skeet' | 'quad' } = {},
 ): PublicClip[] {
   const limit = Math.max(1, Math.min(60, opts.limit ?? 24));
-  // a finished clip being rendered again (a new look) keeps showing its last video meanwhile
-  const where = [`(c.status = 'done' OR (c.done_at IS NOT NULL AND c.video_key IS NOT NULL AND c.status IN ('queued', 'rendering')))`, clipMatch('m')];
+  const where = [LISTED, clipMatch('m')];
   const args: unknown[] = [];
   // a quad shows on all four cappers' profiles, not only the one whose eyes filmed it
   if (opts.player) { where.push(`(c.player_id = ? OR (c.kind = 'quad' AND EXISTS (SELECT 1 FROM json_each(c.people_json) WHERE value = ?)))`); args.push(opts.player, opts.player); }

@@ -3775,6 +3775,8 @@ export const api = {
     const qs = q.toString();
     return get<{ clips: ClipCard[] }>(qs ? `/api/clips?${qs}` : '/api/clips', signal);
   },
+  /** Everyone with a clip, for the /clips player filter. */
+  clipPlayers: (signal?: AbortSignal) => get<{ players: { steamid: string; name: string; count: number }[] }>('/api/clips/players', signal),
   /** A finished tournament's highlight reel (src/routes/clips.ts); 404 = none. */
   eventReel: (slug: string, signal?: AbortSignal) =>
     get<{ video: string; thumb: string | null }>(`/api/clips/reel/${encodeURIComponent(slug)}`, signal),
