@@ -33,40 +33,65 @@ export interface ClipBurst { steamid: string; mapOrdinal: number; half: number; 
 export const QUAD_WINDOW_MS = 5000;
 
 /**
- * Quad caps from the pin feed: pins in order per map half, a pin ends when its
- * victim is cleared or its attacker dies; four different survivors held at
- * once, all pinned within QUAD_WINDOW_MS, is a quad. The fourth capper's eyes
- * film it. The feed cannot see a survivor getting back up some other way, so
- * the caller only trusts this on a match whose quad_caps stat says it had one
- * (that stat is settled at round end: nobody recovered).
+ * Quad caps from the pin feed, by the rule the quad_caps stat settles at round
+ * end (l4d1-quad-caps): all four survivors pinned at once, and nobody back on
+ * their feet before the round ends. Per map half, in order: a pin ends when its
+ * victim is cleared or dies, its attacker dies, or its attacker pins someone
+ * else (one infected holds one survivor; an incap does not end a pin); four
+ * different survivors held, all pinned within QUAD_WINDOW_MS, is a candidate.
+ * The rest of the half must then take them down (incap or death; the last one,
+ * whose incap ends the round, is not in the feed, so three will do) with none
+ * getting up first: cleared, freed by their capper dying, or in a revive. A
+ * tongue that breaks leaves no event, but the round then goes on, so that
+ * survivor's own going down shows up later or the count falls short. The fourth capper's eyes film it. The
+ * caller also needs the match's quad_caps stat.
  */
 export function findQuads(db: DB, matchId: number): ClipBurst[] {
   const rows = db.prepare(
     `SELECT kind, actor, target, map_ordinal AS o, half AS h, t_ms AS t FROM match_live_events
-     WHERE match_id = ? AND kind IN ('pinned', 'cleared', 'death') AND t_ms != -1
+     WHERE match_id = ? AND kind IN ('pinned', 'cleared', 'death', 'incap', 'revive') AND t_ms != -1
      ORDER BY map_ordinal, half, t_ms, seq`,
   ).all(matchId) as { kind: string; actor: string; target: string | null; o: number; h: number; t: number }[];
   const out: ClipBurst[] = [];
-  let key = '';
   let held = new Map<string, { by: string; t: number }>();   // victim -> pin
-  for (const r of rows) {
-    const k = `${r.o}:${r.h}`;
-    if (k !== key) { key = k; held = new Map(); }
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]!;
+    if (i === 0 || r.o !== rows[i - 1]!.o || r.h !== rows[i - 1]!.h) held = new Map();
     if (r.kind === 'pinned' && r.target) {
+      for (const [v, p] of held) if (p.by === r.actor || r.t - p.t > QUAD_WINDOW_MS) held.delete(v);
       held.set(r.target, { by: r.actor, t: r.t });
-      for (const [v, p] of held) if (r.t - p.t > QUAD_WINDOW_MS) held.delete(v);
-      if (held.size >= 4) {
-        const pins = [...held.values()].sort((a, b) => a.t - b.t);
-        out.push({ kind: 'quad', steamid: r.actor, mapOrdinal: r.o, half: r.h, times: pins.map((p) => p.t), people: pins.map((p) => p.by) });
-        held = new Map();   // one quad per hold
-      }
+      if (held.size < 4) continue;
+      const pins = [...held].sort((a, b) => a[1].t - b[1].t);
+      held = new Map();   // one quad per hold
+      if (!staysDown(rows, i + 1, new Map(pins.map(([v, p]) => [v, p.by])))) continue;
+      out.push({ kind: 'quad', steamid: r.actor, mapOrdinal: r.o, half: r.h, times: pins.map(([, p]) => p.t), people: pins.map(([, p]) => p.by) });
     } else if (r.kind === 'cleared' && r.target) held.delete(r.target);
-    else if (r.kind === 'death' && r.target) {
-      held.delete(r.target);
-      for (const [v, p] of held) if (p.by === r.target) held.delete(v);
+    else if (r.kind === 'death') {   // death: actor is who died
+      held.delete(r.actor);
+      for (const [v, p] of held) if (p.by === r.actor) held.delete(v);
     }
   }
   return out;
+}
+
+/** From rows[from] to the end of that map half: does every victim (victim ->
+ *  capper) go down (incap or death), none getting up first? */
+function staysDown(
+  rows: { kind: string; actor: string; target: string | null; o: number; h: number }[], from: number, victims: Map<string, string>,
+): boolean {
+  const o = rows[from - 1]!.o, h = rows[from - 1]!.h;
+  const down = new Set<string>();
+  for (let i = from; i < rows.length && rows[i]!.o === o && rows[i]!.h === h; i++) {
+    const r = rows[i]!;
+    const t = r.target ?? '';
+    // incap and death name the one going down as actor; cleared names the freed survivor as target
+    if ((r.kind === 'incap' || r.kind === 'death') && victims.has(r.actor)) { down.add(r.actor); continue; }
+    if (r.kind === 'cleared' && victims.has(t) && !down.has(t)) return false;
+    if (r.kind === 'death') for (const [v, by] of victims) if (by === r.actor && !down.has(v)) return false;
+    if (r.kind === 'revive' && (victims.has(t) || victims.has(r.actor))) return false;
+  }
+  // the incap that ends the round (the last survivor going down) is not in the feed, so one may be missing
+  return down.size >= victims.size - 1;
 }
 
 /**
