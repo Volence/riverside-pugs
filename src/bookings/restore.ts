@@ -1,7 +1,8 @@
 import type { DB } from '../db.js';
 import { campaignRegistry } from '../campaignRegistry.js';
 import { isMapName } from '../campaigns.js';
-import { carryFor, type Carry } from '../events/carry.js';
+import { carryFor, seriesFor, seriesLine, type Carry, type SeriesInfo } from '../events/carry.js';
+import { consoleText, quoted } from '../serverSetup.js';
 import { gameStopMap } from '../events/stopMap.js';
 import { matchPlayersRoster, tournamentRoster } from './tournamentGames.js';
 
@@ -28,6 +29,8 @@ export interface RestoreSnapshot {
   firstSurv: 'a' | 'b';
   /** A carried tournament game 2: game 1's totals in pug-team order, else null (plan T6). */
   carry: Carry | null;
+  /** Game 2+ of a total-score series: the earlier games in pug-team order, for the plugin's chat line (pug-match 0.3.49), else null or absent. */
+  series?: SeriesInfo | null;
   roster: { steamid: string; team: 'a' | 'b'; joinedMap: number }[];
   /** One above the highest event seq the site holds for this game. */
   nextSeq: number;
@@ -106,7 +109,7 @@ export function restoreSnapshot(db: DB, matchId: number, opts: { replayFrom?: nu
     .map((r) => ({ ...r, joinedMap: opts.replayFrom !== undefined ? Math.min(r.joinedMap, maps.length) : r.joinedMap }));
   const maxSeq = (db.prepare('SELECT MAX(seq) AS s FROM match_live_events WHERE match_id = ?').get(matchId) as { s: number | null }).s ?? 0;
 
-  return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, carry, roster, nextSeq: maxSeq + 1, stopMap: gameStopMap(db, matchId) };
+  return { matchId, token: m.token, campaign: m.campaign, firstMap, maps, map, firstSurv, carry, series: seriesFor(db, matchId), roster, nextSeq: maxSeq + 1, stopMap: gameStopMap(db, matchId) };
 }
 
 /** The chapters of a live game that may be replayed from their start
@@ -141,6 +144,9 @@ export function resumeLines(s: RestoreSnapshot): string[] {
     // so an unquoted roster arg reaches the plugin as a bare steamid and is
     // refused (as orchestrator.ts already quotes its own sm_pug_roster call).
     ...s.roster.filter((r) => /^\d{17}$/.test(r.steamid)).map((r) => `sm_pug_roster "${r.steamid}:${r.team}:${r.joinedMap}"`),
+    // pug-match 0.3.49: the series line in chat (carry or not); latches onto the
+    // pending match sm_pug_resume set up. An older plugin answers "Unknown command".
+    ...(s.series ? [seriesLine(s.matchId, s.series, (n) => quoted(consoleText(n, 32)))] : []),
     'sm_pug_resume_commit',
   ];
 }

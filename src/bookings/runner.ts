@@ -1914,6 +1914,11 @@ export class BookingRunner {
     if (b.purpose === 'tournament') {
       // The series engine records the game and schedules what follows (T3b).
       this.hook(b.id, 'gameEnded', () => this.deps.tournament?.gameEnded(b.id, matchId));
+      // The engine set the next game's time from the stage's series.nextGameSeconds
+      // (0 since 2026-11-22): load it then, not at the minute watch after it.
+      // loadNext checks everything again, so an early or stale timer does nothing.
+      const after = getBooking(this.db, b.id);
+      if (after?.next_campaign && after.next_at) this.wakeAt(b.id, Date.parse(after.next_at), 'load');
       return;
     }
     const played = gamesPlayed(this.db, b.id);

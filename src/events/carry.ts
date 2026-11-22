@@ -9,11 +9,14 @@ import * as R from './room.js';
 /** Game 1's totals in pug-team order: a is the game's pug team a (the entry on matches.booking_side_a). */
 export interface Carry { a: number; b: number }
 
-interface GameCtx { eventMatchId: number; stageId: number; sideA: 'a' | 'b' | null; rulesJson: string | null }
+interface GameCtx {
+  eventMatchId: number; stageId: number; sideA: 'a' | 'b' | null; rulesJson: string | null; entryA: number | null; entryB: number | null;
+}
 
 function contextOf(db: DB, gameMatchId: number): GameCtx | null {
   const row = db.prepare(
-    `SELECT em.id AS eventMatchId, em.stage_id AS stageId, m.booking_side_a AS sideA, m.rules_json AS rulesJson
+    `SELECT em.id AS eventMatchId, em.stage_id AS stageId, m.booking_side_a AS sideA, m.rules_json AS rulesJson,
+            em.entry_a AS entryA, em.entry_b AS entryB
        FROM matches m JOIN event_matches em ON em.booking_id = m.booking_id
       WHERE m.id = ? AND m.booking_id IS NOT NULL AND m.kind = 'tournament'`,
   ).get(gameMatchId) as GameCtx | undefined;
@@ -48,4 +51,41 @@ export function carryFor(db: DB, gameMatchId: number): Carry | null {
   const e = c ? entriesOf(db, gameMatchId, c) : null;
   if (!c || !e) return null;
   return (c.sideA ?? 'a') === 'a' ? { a: e.entryA, b: e.entryB } : { a: e.entryB, b: e.entryA };
+}
+
+/** The in-game series line (pug-match 0.3.49 sm_pug_series): which game of a
+ *  total-score series this is, and what the earlier games scored, in THIS
+ *  game's pug-team order (a is the entry on matches.booking_side_a, as
+ *  carryFor), with the two entries' names in the same order. Sent whether or
+ *  not the ruleset carries the score: it only puts a line in chat. Null for a
+ *  game 1, a tiebreak, a games-won series (Bo1/Bo3/Bo5), or before every
+ *  earlier game has two scores. */
+export interface SeriesInfo { game: number; prevA: number; prevB: number; nameA: string; nameB: string }
+
+export function seriesFor(db: DB, gameMatchId: number): SeriesInfo | null {
+  const c = contextOf(db, gameMatchId);
+  if (!c || c.entryA === null || c.entryB === null) return null;
+  const stage = E.getStage(db, c.stageId);
+  if (!stage || E.stageSettingsOf(stage).veto.games !== 2) return null;
+  const games = R.gamesOf(db, c.eventMatchId);
+  const me = games.find((g) => g.match_id === gameMatchId);
+  if (!me || me.tiebreak_of !== null || me.ordinal < 2) return null;
+  const before = games.filter((g) => g.tiebreak_of === null && g.ordinal < me.ordinal);
+  if (before.length !== me.ordinal - 1 || before.some((g) => g.score_a === null || g.score_b === null)) return null;
+  const entryA = before.reduce((n, g) => n + g.score_a!, 0);
+  const entryB = before.reduce((n, g) => n + g.score_b!, 0);
+  const nameOf = (id: number, fallback: string): string =>
+    (db.prepare('SELECT name FROM event_entries WHERE id = ?').get(id) as { name: string | null } | undefined)?.name ?? fallback;
+  const n1 = nameOf(c.entryA, 'Team A');
+  const n2 = nameOf(c.entryB, 'Team B');
+  return (c.sideA ?? 'a') === 'a'
+    ? { game: me.ordinal, prevA: entryA, prevB: entryB, nameA: n1, nameB: n2 }
+    : { game: me.ordinal, prevA: entryB, prevB: entryA, nameA: n2, nameB: n1 };
+}
+
+/** The console line for seriesFor's answer (pug-match 0.3.49; an older plugin
+ *  answers "Unknown command" and nothing else happens). After sm_pug_match or
+ *  sm_pug_resume, whose reset would clear it. */
+export function seriesLine(matchId: number, s: SeriesInfo, safe: (name: string) => string): string {
+  return `sm_pug_series ${matchId} ${s.game} ${Math.trunc(s.prevA)} ${Math.trunc(s.prevB)} ${safe(s.nameA)} ${safe(s.nameB)}`;
 }

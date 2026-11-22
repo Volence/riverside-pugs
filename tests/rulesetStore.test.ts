@@ -40,13 +40,16 @@ describe('reading the editable rules', () => {
       .toMatchObject({ disconnect: { teamSeconds: 900 }, staffCall: { cooldownSeconds: 60 }, series: { nextGameSeconds: 120 }, subs: { perMatch: 3, emergency: false, emergencyChargeSeconds: 30 } });
     const { disconnect: _d, staffCall: _c, series: _s, subs: _u, ...bare } = cupEditable;
     expect(okOf(readEditableRules({ ...bare, pause: { ...cupEditable.pause, techSeconds: undefined } })))
-      .toMatchObject({ pause: { techSeconds: 300 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 60 }, subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 } });
+      .toMatchObject({ pause: { techSeconds: 300 }, disconnect: { teamSeconds: 600 }, staffCall: { cooldownSeconds: 180 }, series: { nextGameSeconds: 0 }, subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 } });
     expect(errOf(readEditableRules(body({ pause: { ...cupEditable.pause, techSeconds: 59 } })))).toBe('bad_tech_seconds');
     expect(errOf(readEditableRules(body({ disconnect: { teamSeconds: 3601 } })))).toBe('bad_reconnect');
     expect(errOf(readEditableRules(body({ subs: { perMatch: 5, emergency: true, emergencyChargeSeconds: 0 } })))).toBe('bad_subs');
     expect(errOf(readEditableRules(body({ subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 900 } })))).toBe('bad_sub_charge');
     expect(errOf(readEditableRules(body({ staffCall: { cooldownSeconds: 20 } })))).toBe('bad_call_cooldown');
-    expect(errOf(readEditableRules(body({ series: { nextGameSeconds: 20 } })))).toBe('bad_next_game');
+    expect(errOf(readEditableRules(body({ series: { nextGameSeconds: -1 } })))).toBe('bad_next_game');
+    expect(errOf(readEditableRules(body({ series: { nextGameSeconds: 601 } })))).toBe('bad_next_game');
+    // 0 (owner 2026-11-22): the next game loads as soon as the last one's result is in.
+    expect(okOf(readEditableRules(body({ series: { nextGameSeconds: 0 } }))).series.nextGameSeconds).toBe(0);
   });
 
   it('reads series.carryScore (plan T6) and refuses a non-boolean', () => {

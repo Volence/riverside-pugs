@@ -45,7 +45,7 @@ native bool Score_GetAltHalf(int &walk, int &tank, int &door, float raw[9], int 
 // AskPluginLoad2 and feature-checked on its own, read only by pug-altscore.inc.
 native bool Score_GetAltCurve(int curve[21], int &tankOpen, int &tankClose);
 
-#define PLUGIN_VERSION "0.3.48"
+#define PLUGIN_VERSION "0.3.49"
 
 // 12, not 8, since 2026-09-15: late joiners and subs are rostered at go-live
 // (RosterLateJoiners), so a night with two subs needs room past the eight who
@@ -203,6 +203,26 @@ int g_iCarryA;
 int g_iCarryB;
 int g_iCarrySeedMaps = -1;
 int g_iResumeFirst;
+// 0.3.49: game 2+ of a total-score series, from sm_pug_series (display only,
+// never in any score): the game's number, the earlier games' totals in this
+// game's pug-team order, and the two teams' names in that order.
+int g_iSeriesGame;
+int g_iSeriesPrevA;
+int g_iSeriesPrevB;
+char g_sSeriesNameA[48];
+char g_sSeriesNameB[48];
+// FinalizeMap has filed this map's score (so the running total must not add
+// g_iHalfScoreA/B again); cleared at every map start.
+bool g_bCurMapFiled;
+// 0.3.49: unrostered clients kept off the teams (UnrosteredMustSpectate).
+// Engine time before which the roster is still arriving (the burst's
+// sm_pug_roster lines), so a half-sent roster never reads a rostered player
+// as a watcher; the last notice per client, for the rate limit.
+float g_fRosterQuietAt;
+float g_fSpecNoticeAt[MAXPLAYERS + 1];
+#define ROSTER_QUIET_SECS 1.5
+#define SPEC_NOTICE_SECS 15.0
+#define UNROSTERED_CHECK_SECS 0.3
 
 /** Monotonic per-match counter stamped on every EVENT line. UDP can deliver
  *  the same datagram twice, and an event feed that double-counts a deadly
@@ -485,6 +505,8 @@ public void OnPluginStart()
 	RegServerCmd("sm_pug_resume", Cmd_Resume, "sm_pug_resume <matchid> <token> <firstmap> <a|b> <nextseq> - rebuild a match after a server restart");
 	RegServerCmd("sm_pug_resume_map", Cmd_ResumeMap, "sm_pug_resume_map <map> <a> <b> - a map the resumed match already finished");
 	RegServerCmd("sm_pug_carry", Cmd_Carry, "sm_pug_carry <matchid> <a> <b> - plan T6: game 1's totals that game 2 of a best of 2 starts with (tournament box)");
+	RegServerCmd("sm_pug_series", Cmd_Series, "sm_pug_series <matchid> <game> <prev a> <prev b> [\"<name a>\" \"<name b>\"] - 0.3.49: the earlier games of a total-score series, for the chat line and !series");
+	RegConsoleCmd("sm_series", Cmd_SeriesSay, "Show the series score: the earlier games, this game so far, and the total");
 	RegServerCmd("sm_pug_resume_commit", Cmd_ResumeCommit, "sm_pug_resume_commit - the resumed match is complete; seed sides at the next map start");
 	RegServerCmd("sm_pug_leave", Cmd_Leave, "sm_pug_leave <token> <steamid64> hold|release|add <seconds>|end");
 	RegServerCmd("sm_pug_endkick_now", Cmd_EndKickNow, "sm_pug_endkick_now - run the end-of-match kick now, before the backend restarts the box");
@@ -583,6 +605,8 @@ No config exec and no restart: it tracks the game already being played. Implies 
 	DataFeeds_Init();
 	EndNote_Init();
 	HookEvent("player_spawn", Event_PlayerSpawn);
+	// 0.3.49: an unrostered client taking a side in a rostered match.
+	HookEventEx("player_team", Event_PugPlayerTeam);
 	HookEvent("player_now_it", Event_PlayerBoomed);
 
 	// Names verified against l4d2_skill_detect.sp and the Rotoblin-AZMod
@@ -2103,6 +2127,14 @@ public Action Cmd_Match(int args)
 	// Convention shared with the backend: pug team a starts as survivors on map 1.
 	g_iPugSide[1] = TEAM_SURVIVOR;
 	g_iPugSide[2] = TEAM_INFECTED;
+	// 0.3.49: and the players sitting where the last game left them (a series
+	// box keeps them across games) must not vote that away. Held as at a new
+	// map; SeedNewMapSides holds again at the changelevel that normally
+	// follows, and this covers a burst sent again with no changelevel.
+	g_bSeedHold = true;
+	g_fSeedHoldUntil = 0.0;
+	for (int c = 1; c <= MaxClients; c++) g_iLockAttempts[c] = 0;
+	g_fRosterQuietAt = GetEngineTime() + ROSTER_QUIET_SECS;
 	PrintToServer("PUGOK match=%d", g_iMatchId);
 	return Plugin_Handled;
 }
@@ -2143,8 +2175,104 @@ public Action Cmd_Roster(int args)
 	// Optional 4th field ":<tankslot>" after the joined map (pug-tankplan.inc).
 	TankPlanParseRosterTail(g_iRosterCount, arg[sep + 2]);
 	g_iRosterCount++;
+	// 0.3.49: the unrostered sweep runs once the burst's roster lines stop
+	// (each line pushes it back), never between two of them.
+	g_fRosterQuietAt = GetEngineTime() + ROSTER_QUIET_SECS;
+	CreateTimer(ROSTER_QUIET_SECS + 0.1, Timer_RosterCommitted, _, TIMER_FLAG_NO_MAPCHANGE);
 	PrintToServer("PUGOK roster=%d", g_iRosterCount);
 	return Plugin_Handled;
+}
+
+// ---------- unrostered clients stay in spectator (0.3.49) ----------
+//
+// In a site-started match nothing used to move a client who is not on the
+// roster off a team: Timer_TeamLock walks rostered clients only, Book_Pass
+// leaves site games alone, l4d2_spec_stays_spec is unloaded for matches, and
+// the engine auto-assigns a connecting or changelevelled watcher to a side
+// (l4dready's jointeam, !sur and !inf check no roster either). In match 1257
+// (Draft Tourney #2) a caster and a staff member sat on survivors and blocked
+// two rostered players; at go-live RosterLateJoiners would have rostered them.
+// No SourceMod admin exemption: staff watch from spectator too.
+
+/** The policy, in one place: every backend (site-started) match, PUG and
+ *  tournament alike. Owner 2026-11-22: neither ever has a player join who is
+ *  not on the roster (no subs in a PUG; a tournament sub comes in by !sub,
+ *  which rosters him first). Self-started matches and booked scrims, which
+ *  may take a sub, are not judged here: the callers check !g_bSelfStarted
+ *  and Book_Pass places a scrim. */
+bool UnrosteredSpecPolicy()
+{
+	return !g_bSelfStarted;
+}
+
+/** Whether `client` is a human with no roster slot sitting on a side of a
+ *  site-started match that keeps watchers in spectator. A client whose id IS
+ *  on the roster but who is not mapped to a slot yet (the burst came while
+ *  they were in game; OnClientPostAdminCheck maps them at the changelevel)
+ *  is never moved, nor one whose id cannot be read yet. */
+bool UnrosteredMustSpectate(int client)
+{
+	if (client <= 0 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client) || IsClientSourceTV(client)) return false;
+	if (g_iClientRoster[client] != -1) return false;
+	if (g_State != MS_Pending && g_State != MS_Live) return false;
+	if (g_bSelfStarted || !TeamLockActive() || !UnrosteredSpecPolicy()) return false;
+	if (g_iRosterCount == 0 || GetEngineTime() < g_fRosterQuietAt) return false;
+	int team = GetClientTeam(client);
+	if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) return false;
+	char id[32];
+	if (!GetClientAuthId(client, AuthId_SteamID64, id, sizeof(id))) return false;
+	return RosterIndexOfId(id) == -1;
+}
+
+void MoveUnrosteredOff(int client)
+{
+	int team = GetClientTeam(client);
+	ChangeClientTeam(client, TEAM_SPEC);
+	LogMessage("[pug] unrostered %N moved off team %d", client, team);
+	float now = GetEngineTime();
+	if (g_fSpecNoticeAt[client] == 0.0 || now - g_fSpecNoticeAt[client] >= SPEC_NOTICE_SECS)
+	{
+		g_fSpecNoticeAt[client] = now;
+		PrintToChat(client, "[PUG] This match is rostered: spectators stay in spectator.");
+	}
+}
+
+/** Every unrostered client on a side, moved. The backstop for the hook. */
+void SweepUnrostered()
+{
+	for (int c = 1; c <= MaxClients; c++)
+		if (UnrosteredMustSpectate(c)) MoveUnrosteredOff(c);
+}
+
+public Action Timer_RosterCommitted(Handle timer)
+{
+	SweepUnrostered();
+	return Plugin_Stop;
+}
+
+public void Event_PugPlayerTeam(Event event, const char[] name, bool dontBroadcast)
+{
+	if (event.GetBool("disconnect")) return;
+	int team = event.GetInt("team");
+	if (team != TEAM_SURVIVOR && team != TEAM_INFECTED) return;
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	if (client <= 0 || IsFakeClient(client)) return;
+	// The event fires before the team is set; judge it a little later, with
+	// every condition read again. Not one frame later: l4dscores keeps a
+	// placement wish per client (sm_swapto, map-change placement) and
+	// re-applies it 0.1 s after every player_team until it sees the client on
+	// that team. Moving the client off within a frame meant it never saw that,
+	// so the two plugins swapped the client back and forth forever (measured
+	// 2026-11-22, ~4 moves a second). At UNROSTERED_CHECK_SECS l4dscores has
+	// seen the wish met and dropped it, and the move off sticks.
+	CreateTimer(UNROSTERED_CHECK_SECS, Timer_UnrosteredCheck, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_UnrosteredCheck(Handle timer, int userid)
+{
+	int client = GetClientOfUserId(userid);
+	if (UnrosteredMustSpectate(client)) MoveUnrosteredOff(client);
+	return Plugin_Stop;
 }
 
 /** Plan T6: game 1's totals (pug-team order) for game 2 of a best of 2 that
@@ -2173,6 +2301,102 @@ public Action Cmd_Carry(int args)
 }
 
 bool HasCarry() { return g_iCarryA > 0 || g_iCarryB > 0; }
+
+/** 0.3.49: game 2 (or later) of a total-score series. The site sends what the
+ *  earlier games scored, already in THIS game's pug-team order (a is the team
+ *  on pug side a of this game, which need not be game 1's a), plus the names
+ *  in that order. Display only: the chat line at each first-half go-live and
+ *  !series. Sent whether or not the ruleset carries the score, so it is never
+ *  added to anything. Latches onto the pending match, as sm_pug_carry. */
+public Action Cmd_Series(int args)
+{
+	if (args < 4) { PrintToServer("PUGERR usage: sm_pug_series <matchid> <game> <prev a> <prev b> [\"<name a>\" \"<name b>\"]"); return Plugin_Handled; }
+	char buf[16];
+	GetCmdArg(1, buf, sizeof(buf));
+	int id = StringToInt(buf);
+	GetCmdArg(2, buf, sizeof(buf));
+	int game = StringToInt(buf);
+	GetCmdArg(3, buf, sizeof(buf));
+	int a = StringToInt(buf);
+	GetCmdArg(4, buf, sizeof(buf));
+	int b = StringToInt(buf);
+	if (g_State != MS_Pending || id != g_iMatchId) { PrintToServer("PUGERR no pending match %d", id); return Plugin_Handled; }
+	if (game < 2 || game > 9 || a < 0 || b < 0 || a > 100000 || b > 100000) { PrintToServer("PUGERR bad series"); return Plugin_Handled; }
+	g_iSeriesGame = game;
+	g_iSeriesPrevA = a;
+	g_iSeriesPrevB = b;
+	if (args >= 6)
+	{
+		GetCmdArg(5, g_sSeriesNameA, sizeof(g_sSeriesNameA));
+		GetCmdArg(6, g_sSeriesNameB, sizeof(g_sSeriesNameB));
+	}
+	if (g_sSeriesNameA[0] == '\0') strcopy(g_sSeriesNameA, sizeof(g_sSeriesNameA), "Team A");
+	if (g_sSeriesNameB[0] == '\0') strcopy(g_sSeriesNameB, sizeof(g_sSeriesNameB), "Team B");
+	PrintToServer("PUGOK series game=%d a=%d b=%d", game, a, b);
+	LogMessage("[pug] match %d is game %d of a series: earlier games a(%s)=%d b(%s)=%d", id, game, g_sSeriesNameA, a, g_sSeriesNameB, b);
+	return Plugin_Handled;
+}
+
+/** This game's score so far in pug-team order: every filed map, plus the
+ *  current map's credited halves until FinalizeMap files them. */
+void SeriesRunning(int &a, int &b)
+{
+	TotalScores(a, b);
+	if (!g_bCurMapFiled)
+	{
+		a += g_iHalfScoreA;
+		b += g_iHalfScoreB;
+	}
+}
+
+/** The series lines, to one client (0 = everyone). Two lines: the earlier
+ *  games, then the total with this game so far and who leads by how much. */
+void SeriesPrint(int client)
+{
+	if (g_iSeriesGame < 2) return;
+	int ca, cb;
+	SeriesRunning(ca, cb);
+	int ta = g_iSeriesPrevA + ca, tb = g_iSeriesPrevB + cb;
+	char prev[160], total[224];
+	if (g_iSeriesGame == 2)
+		Format(prev, sizeof(prev), "[Series] Game 1: %s %d, %s %d.", g_sSeriesNameA, g_iSeriesPrevA, g_sSeriesNameB, g_iSeriesPrevB);
+	else
+		Format(prev, sizeof(prev), "[Series] Games 1 to %d: %s %d, %s %d.", g_iSeriesGame - 1, g_sSeriesNameA, g_iSeriesPrevA, g_sSeriesNameB, g_iSeriesPrevB);
+	if (ta == tb)
+		Format(total, sizeof(total), "[Series] Total with game %d so far (%d to %d): %s %d, %s %d. Level.", g_iSeriesGame, ca, cb, g_sSeriesNameA, ta, g_sSeriesNameB, tb);
+	else
+		Format(total, sizeof(total), "[Series] Total with game %d so far (%d to %d): %s %d, %s %d. %s lead by %d.", g_iSeriesGame, ca, cb,
+			g_sSeriesNameA, ta, g_sSeriesNameB, tb, ta > tb ? g_sSeriesNameA : g_sSeriesNameB, ta > tb ? ta - tb : tb - ta);
+	if (client == 0)
+	{
+		PrintToChatAll("%s", prev);
+		PrintToChatAll("%s", total);
+	}
+	else
+	{
+		PrintToChat(client, "%s", prev);
+		PrintToChat(client, "%s", total);
+	}
+}
+
+/** !series: the same two lines to whoever asked (server console too). */
+public Action Cmd_SeriesSay(int client, int args)
+{
+	if (g_iSeriesGame < 2 || (g_State != MS_Pending && g_State != MS_Live && g_State != MS_Ended))
+	{
+		ReplyToCommand(client, "[Series] This is not a later game of a total-score series.");
+		return Plugin_Handled;
+	}
+	if (client == 0)
+	{
+		int ca, cb;
+		SeriesRunning(ca, cb);
+		PrintToServer("[Series] game=%d prev a=%d b=%d this a=%d b=%d total a=%d b=%d", g_iSeriesGame, g_iSeriesPrevA, g_iSeriesPrevB, ca, cb, g_iSeriesPrevA + ca, g_iSeriesPrevB + cb);
+		return Plugin_Handled;
+	}
+	SeriesPrint(client);
+	return Plugin_Handled;
+}
 
 /** Crash recovery (site plan 5). The backend rebuilds a booking game that
  *  srcds lost: same match id and token, the finished maps with their scores,
@@ -2320,6 +2544,11 @@ int SnapshotRoster()
 int RosterLateJoiners()
 {
 	int added = 0;
+	// 0.3.49: never in a backend match (UnrosteredSpecPolicy): a caster or a
+	// staff member on a side at go-live is not a player, a PUG has no subs and
+	// a tournament sub comes in by !sub. Self-started games keep it (a friend
+	// night's or a scrim's sub, match 18).
+	if (UnrosteredSpecPolicy()) return 0;
 	for (int c = 1; c <= MaxClients; c++)
 	{
 		if (!IsClientInGame(c) || IsFakeClient(c) || g_iClientRoster[c] != -1) continue;
@@ -3277,6 +3506,12 @@ void ResetMatchState()
 	g_iCarryA = 0;
 	g_iCarryB = 0;
 	g_iCarrySeedMaps = -1;
+	g_iSeriesGame = 0;
+	g_iSeriesPrevA = 0;
+	g_iSeriesPrevB = 0;
+	g_sSeriesNameA[0] = '\0';
+	g_sSeriesNameB[0] = '\0';
+	g_bCurMapFiled = false;
 	g_iEventSeq = 0;
 	g_iBoomerClient = 0;
 	g_bHasBoomLanded = false;
@@ -3789,6 +4024,7 @@ int RosterIndexOfId(const char[] steamid64)
 
 public void OnClientPostAdminCheck(int client)
 {
+	g_fSpecNoticeAt[client] = 0.0;
 	g_iClientRoster[client] = -1;
 	g_iLockAttempts[client] = 0;
 	if (IsFakeClient(client)) return;
@@ -3929,6 +4165,23 @@ void SeedNewMapSides(int prevRound1Surv)
 		g_iResumeFirst = 0;
 		return;
 	}
+	// 0.3.49: a site-started match waiting for its first go-live. Team a
+	// survives first on map 1 (Cmd_Match), but the players arrive where the
+	// last game left them: on a series box game 1's finale seating carries
+	// into game 2, and with no hold the lock adopted the inverted sides from
+	// the first three to land and enforced them (match 1256, 2026-11-22, until
+	// a !swapteams six minutes in). Set again here because a tick on the old
+	// map may already have flipped the mapping. A self-started match records
+	// whoever is where at go-live and is left alone.
+	if (g_State == MS_Pending && !g_bSelfStarted)
+	{
+		g_iPugSide[1] = TEAM_SURVIVOR;
+		g_iPugSide[2] = TEAM_INFECTED;
+		g_bSeedHold = true;
+		for (int c = 1; c <= MaxClients; c++) g_iLockAttempts[c] = 0;
+		LogMessage("[pug] map %s: pending match, pug team a survives first", g_sCurrentMap);
+		return;
+	}
 	if (g_State != MS_Live || g_iMapCount < 1) return;
 
 	int totA, totB;
@@ -4059,6 +4312,8 @@ public Action Timer_TeamLock(Handle timer)
 	// reach need": with all rostered players auto-assigned to one side the joint
 	// vote ties at straight == inverted, so gating on confirmation would stall
 	// enforcement forever.
+	// 0.3.49: watchers off the sides, whatever the vote says (the hook's backstop).
+	SweepUnrostered();
 	if (straight == 0 && inverted == 0) return Plugin_Continue;
 	if (!TeamLockActive()) return Plugin_Continue;
 
@@ -4222,6 +4477,7 @@ public void OnMapStart()
 	int prevRound1Surv = g_iRound1SurvPug;
 	g_iHalfScoreA = 0;
 	g_iHalfScoreB = 0;
+	g_bCurMapFiled = false;
 	g_iRound1Logical = 0;
 	g_iRound1SurvPug = 0;
 	g_bRoundEnded = false;
@@ -4341,6 +4597,34 @@ void CheckRosterMismatch()
 
 /** Rotoblin ready-up go-live signal (global forward; fires even if we never call
  *  the readyup natives). First live round flips Pending -> Live. */
+/** 0.3.49: l4dready's forward at the start of the go-live countdown, while
+ *  ready-up is still on (sm_resetscores only works in ready-up). */
+public void OnRoundIsLivePre()
+{
+	if (FreshTallyReset()) ServerCommand("sm_resetscores");
+}
+
+/** 0.3.49: a site-started game on a tournament box, with no carry and not
+ *  resumed, starts l4dscores' tally from 0 to 0. l4dscores only clears its
+ *  tally if the engine's campaign scores read 0 to 0 a tenth of a second
+ *  after ClearTeamScores on a first map, which is a race; a series box plays
+ *  game 2 without a restart, and twice on Draft Tourney #2 game 2 kept game
+ *  1's totals, on the wrong teams, so l4dscores sent the wrong team out first
+ *  on later maps. sm_resetscores (ResetCampaignScores + ResetRoundScores)
+ *  clears the tally AND the shadow health-run tally, so !scoresalt stays
+ *  whole; the sm_l4dscores_seed used for carry and resume marks it partial,
+ *  which is only true there. First chapter, half 1 only: later the tally
+ *  holds this game's own scores. Not a queue PUG (the box restarts before
+ *  every match) and not a self-started game. */
+bool FreshTallyReset()
+{
+	if (g_State != MS_Pending && g_State != MS_Live) return false;
+	if (g_bSelfStarted || !TourneyOn() || g_bResumed || HasCarry()) return false;
+	if (g_iMapCount != 0 || view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"))) return false;
+	LogMessage("[pug] fresh match %d going live: l4dscores tally reset (sm_resetscores)", g_iMatchId);
+	return true;
+}
+
 public void OnRoundIsLive()
 {
 	g_bHalfWasLive = true;
@@ -4413,12 +4697,19 @@ public void OnRoundIsLive()
 	// every half-1 go-live of the first chapter this instance plays. Half 1
 	// only: l4dscores adds each half's round score to its tally at that half's
 	// round_end, so a seed at half 2's go-live would wipe half 1's score.
+	//
+	// A fresh tournament game (no carry, not resumed) is not seeded: it is
+	// cleared in OnRoundIsLivePre instead, see FreshTallyReset.
 	if (g_State == MS_Live && (g_bResumed || HasCarry()))
 	{
 		if (g_iCarrySeedMaps == -1) g_iCarrySeedMaps = g_iMapCount;
 		if (g_iMapCount == g_iCarrySeedMaps && !view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")))
 			SeedL4dscoresTally();
 	}
+	// 0.3.49: the series score in chat at every first-half go-live of a later
+	// game of a total-score series (sm_pug_series), so nobody has to ask.
+	if (g_State == MS_Live && g_iSeriesGame >= 2 && !view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")))
+		SeriesPrint(0);
 
 	// readyup's go-live forward fires for every round on the box, PUG match or
 	// not, so gate this on an actually-tracked match.
@@ -4877,6 +5168,7 @@ void FinalizeMap()
 	// growing. Below the cap this stays equal to g_iMapCount.
 	g_iRplMapSeq++;
 	if (g_iMapCount >= MAX_MAPS) return;
+	g_bCurMapFiled = true;
 	strcopy(g_sMapName[g_iMapCount], 64, g_sCurrentMap);
 	g_iMapScoreA[g_iMapCount] = g_iHalfScoreA;
 	g_iMapScoreB[g_iMapCount] = g_iHalfScoreB;

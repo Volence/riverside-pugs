@@ -35,7 +35,13 @@ Difference from a backend-driven match, deliberate:
 
 No match, self-started or not, kicks a non-rostered player. `Timer_TeamLock`
 places the rostered eight on their correct sides; anyone else stays,
-unscored, and may spectate.
+unscored, and may spectate. From 0.3.49 a backend match (a site PUG or a
+tournament game, with the team lock on) also keeps them in spectator: a
+non-rostered human who takes a side (engine auto-assign, `jointeam`, `!sur`,
+`!inf`) is moved back a frame later, swept every team-lock tick and once the
+roster lines stop, and is never rostered at go-live (`RosterLateJoiners` runs
+for self-started games only). Booked scrims and other self-started games are
+unchanged.
 
 Refuses cleanly when a match is already configured, when nobody is on a team,
 or when more than `MAX_ROSTER` (8) players are on teams.
@@ -55,6 +61,7 @@ or when more than `MAX_ROSTER` (8) players are on teams.
 | `sm_pug_sub` | `<token> <out64> <in64>` | 0.3.25 and later. The site's answer to a captain's `!sub` on a tournament box (`sm_pug_tournament 1`). The outgoing slot keeps its stats and is marked out (never placed by the team lock, no reconnect clock, no `!gg` vote); the sub is rostered on the same team from the maps finished so far (or gets their old slot back) and the team lock places them within two seconds. Answers `PUGOK sub out=<id64> in=<id64> slot=<n>`, `PUGOK sub already` for a sub already in place, or `PUGERR <reason>`. |
 | `sm_pug_adminpause` | `<token> on\|off ["by"]` | 0.3.25 and later. The staff freeze from the Events desk: `on` freezes the game (a Rotoblin pause now, or at the next go-live) that only staff lift, `off` lifts it; `"by"` is the name said in chat. Every change is echoed as a signed `PUG <token> ADMINPAUSE state= by= cause=` line. Answers `PUGOK adminpause=<state> frozen=<0\|1>`. |
 | `sm_pug_forfeit` | `<token> <a\|b>` | 0.3.26 and later, tournament box only. Staff ruled that this pug team forfeits the game (the Events desk's Forfeit the game). The game ends as a `!gg` does, with `forfeit=<team> forfeit_why=staff` and the other team as `winner=`. Answers `PUGOK forfeit team=<x>`, `PUGOK forfeit team=<x> already`, or `PUGERR <reason>`. |
+| `sm_pug_series` | `<matchid> <game> <prev a> <prev b> ["<name a>" "<name b>"]` | 0.3.49 and later. Game 2 (or later) of a total-score series: what the earlier games scored and the two team names, already in THIS game's pug-team order (a is the team on pug side a of this game). Display only, never added to a score: at every first-half go-live and on `!series` the box prints the earlier games, the total with this game so far and the gap. Latches onto the pending match like `sm_pug_carry`. Answers `PUGOK series game=<n> a=<x> b=<y>` or `PUGERR <reason>`; an older plugin answers `Unknown command`. |
 
 `sm_pug_dump`, `sm_pug_abort`, `sm_pug_leave`, `sm_pug_sub`, `sm_pug_adminpause` and `sm_pug_forfeit` all check `<token>` against the
 token set by the most recent `sm_pug_match` and reply `PUGERR bad token` if it
@@ -72,7 +79,7 @@ without eight people in the server.
 | `sm_pug_config` | `pug_match.cfg` | Config `!load_4v4p` execs. `pug_match.cfg` execs the pinned ruleset (`rotoblin_pug_4v4.cfg`, a clone of hardcore 4v4), loads `skill_detect` as a data source, and restores `sm_pug_min_orient 3`. Changing this changes the rules under every rating earned from here on. |
 | `sm_pug_record_demos` | `1` | `1` stops `tv_autorecord`'s file and records `pug_<token>_<ordinal>_<map>.dem` for each map of a match, so the demo is linked to the match by name rather than guessed at by timestamp. |
 | `sm_pug_end_kick` | `1` | 0.3.24 and later. `1` kicks everyone a few seconds after a backend match ends, so a queue PUG empties the box. `0` keeps everyone on; the site pushes `0` on a tournament box, which plays the next game of a series on the same server, and back to `1` when it releases a booked box. |
-| `sm_pug_tournament` | `0` | 0.3.25 and later. `1` is a tournament box, set by the site's booking runner with a tournament booking and back to `0` when it ends. Turns on `!sub` (between chapters), `!admin` as a staff call with a freeze only staff lift, and `!lift` (admin command `sm_pug_lift`, `ADMFLAG_GENERIC`), and from 0.3.26 `!tech <reason>` and `!flag [note]`. `0` leaves `!admin` to SourceMod's admin menu and `!sub` is plain chat. |
+| `sm_pug_tournament` | `0` | 0.3.25 and later. `1` is a tournament box, set by the site's booking runner with a tournament booking and back to `0` when it ends. Turns on `!sub` (between chapters), `!admin` as a staff call with a freeze only staff lift, and `!lift` (admin command `sm_pug_lift`, `ADMFLAG_GENERIC`), and from 0.3.26 `!tech <reason>` and `!flag [note]`. From 0.3.49 `!gg` is refused there ("Forfeiting is off in tournament matches.", GG `reason=tournament`); staff can still rule a forfeit with `sm_pug_forfeit`. `0` leaves `!admin` to SourceMod's admin menu and `!sub` is plain chat. |
 | `sm_pug_leave_budget` | `300` | Seconds each rostered player may spend disconnected over a whole backend match before it ends as an abandon. `0` disables leave tracking. The backend sets it at match setup from the `leave_budget_seconds` setting. |
 | `sm_pug_leave_autounpause` | `1` | `1` unpauses on a 10 second countdown once every disconnected player is back. `0` makes both teams type `!ready`. Set at match setup from `leave_auto_unpause`. |
 | `sm_pug_leave_hold_max` | `1800` | 0.3.4 and later. Longest an admin hold (`sm_pug_leave ... hold`) may freeze one player's allowance. The hold releases itself after this and says so, so a release that never arrives cannot pin a server paused. Set at match setup from `clock_hold_max_minutes`. Bounds 10 to 7200; the low bound exists so the ceiling can be tested in under a minute. |

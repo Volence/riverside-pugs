@@ -6,7 +6,7 @@ import { invalidateCampaignCache, setMissionsDirs } from '../src/campaignRegistr
 import * as R from '../src/events/room.js';
 import { legacyPresetConfig } from '../src/events/vetoConfig.js';
 import { restoreSnapshot, resumeLines } from '../src/bookings/restore.js';
-import { carryEntries, carryFor } from '../src/events/carry.js';
+import { carryEntries, carryFor, seriesFor } from '../src/events/carry.js';
 import { POOL7, TIMERS } from './roomFixture.js';
 import { A, B as BATS } from './entryFixture.js';
 import { HA, MIN, driveHomeAway, driveLoserPicks, seriesFixture, type SeriesFixture } from './seriesFixture.js';
@@ -86,6 +86,7 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
 
   it('carries nothing when the ruleset does not carry the score', async () => {
     f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
+    carryOn(f, false);
     const { g2 } = await toGame2(f);
     expect(carryFor(f.db, g2)).toBeNull();
     expect(carryEntries(f.db, g2)).toBeNull();
@@ -144,6 +145,88 @@ describe('carryFor: what a tournament game starts with (plan T6)', () => {
     const pug = Number(f.db.prepare("INSERT INTO matches (season_id, state, campaign, origin) VALUES ((SELECT id FROM seasons LIMIT 1), 'live', 'no_mercy', 'queue')").run().lastInsertRowid);
     expect(carryFor(f.db, pug)).toBeNull();
     expect(carryFor(f.db, 999999)).toBeNull();
+  });
+});
+
+describe('sm_pug_series: the series line in game 2 (pug-match 0.3.49, owner 2026-11-22)', () => {
+  let f: SeriesFixture;
+  afterEach(() => { vi.restoreAllMocks(); f?.close(); });
+
+  it('game 2 gets game 1 in its own pug-team order with the names, after sm_pug_carry; game 1 gets none', async () => {
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
+    carryOn(f);
+    const { g1, g2 } = await toGame2(f);
+    expect(sideAOf(f, g2)).toBe('a');
+    expect(seriesFor(f.db, g2)).toEqual({ game: 2, prevA: 500, prevB: 400, nameA: 'Rats', nameB: 'Bats' });
+    expect(seriesFor(f.db, g1)).toBeNull();
+    const at = f.sent.findIndex((c) => c.startsWith(`sm_pug_match ${g2} `));
+    expect(f.sent[at + 1]).toBe(`sm_pug_carry ${g2} 500 400`);
+    expect(f.sent[at + 2]).toBe(`sm_pug_series ${g2} 2 500 400 "Rats" "Bats"`);
+  });
+
+  it('orients by game 2\'s booking_side_a: Bats surviving first are pug team a, so their name and score come first', async () => {
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: (r) => driveHomeAway(r, 'survivors') });
+    carryOn(f);
+    const { g2 } = await toGame2(f);
+    expect(sideAOf(f, g2)).toBe('b');
+    expect(seriesFor(f.db, g2)).toEqual({ game: 2, prevA: 400, prevB: 500, nameA: 'Bats', nameB: 'Rats' });
+    expect(f.sent).toContain(`sm_pug_series ${g2} 2 400 500 "Bats" "Rats"`);
+    // Same order as the carry line, which the plugin adds to pug team a and b.
+    expect(f.sent).toContain(`sm_pug_carry ${g2} 400 500`);
+  });
+
+  it('is sent without the carry too (display only)', async () => {
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
+    carryOn(f, false);
+    const { g2 } = await toGame2(f);
+    expect(f.sent.some((c) => c.startsWith('sm_pug_carry'))).toBe(false);
+    const at = f.sent.findIndex((c) => c.startsWith(`sm_pug_match ${g2} `));
+    expect(f.sent[at + 1]).toBe(`sm_pug_series ${g2} 2 500 400 "Rats" "Bats"`);
+  });
+
+  it('makes a team name console-safe', async () => {
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
+    f.db.prepare("UPDATE event_entries SET name = ? WHERE name = 'Rats'").run('Ra"ts;quit');
+    const { g2 } = await toGame2(f);
+    expect(f.sent).toContain(`sm_pug_series ${g2} 2 500 400 "Ratsquit" "Bats"`);
+  });
+
+  it('a tiebreak and a best of 3 get none', async () => {
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
+    const { g2 } = await toGame2(f);
+    f.goLive(g2);
+    f.endGame(g2, [{ map: 'l4d_vs_hospital01_apartment', a: 100, b: 100, half1Surv: 'a' }, { map: 'l4d_vs_hospital02_subway', a: 200, b: 300, half1Surv: 'b' }]);
+    f.sent.length = 0;
+    f.t.t += MIN;
+    await f.tick();
+    const tb = f.gameOf(21).match_id!;
+    expect(seriesFor(f.db, tb)).toBeNull();
+    expect(f.sent.some((c) => c.startsWith('sm_pug_series'))).toBe(false);
+    f.close();
+    f = await seriesFixture({ pool: POOL7, veto: legacyPresetConfig('loser_picks', 7), drive: driveLoserPicks });
+    await f.tick();
+    const g1 = f.gameOf(1).match_id!;
+    f.goLive(g1);
+    f.endGame(g1, [{ map: 'm1', a: 300, b: 200 }]);
+    expect(seriesFor(f.db, g1)).toBeNull();
+    expect(f.sent.some((c) => c.startsWith('sm_pug_series'))).toBe(false);
+  });
+
+  it('a 0 s stage loads game 2 as soon as game 1 is recorded, without waiting for the minute watch', async () => {
+    f = await seriesFixture({ pool: HA, veto: legacyPresetConfig('home_away', 4), drive: driveHomeAway });
+    await f.tick();
+    const g1 = f.gameOf(1).match_id!;
+    f.goLive(g1);
+    f.sent.length = 0;
+    f.endGame(g1, [{ map: 'l4d_vs_smalltown01_caves', a: 500, b: 400 }]);
+    expect(Date.parse(f.booking().next_at!)).toBe(f.t.t);
+    // No clock tick, no time advanced: only the runner's own wake timer.
+    await new Promise((r) => setTimeout(r, 400));
+    await f.runner.idle();
+    const g2 = f.gameOf(2).match_id;
+    expect(g2).not.toBeNull();
+    expect(f.sent.some((c) => c.startsWith(`sm_pug_match ${g2} `))).toBe(true);
+    expect(f.sent.some((c) => c.includes('Next: game 2') && c.includes('in a few seconds'))).toBe(true);
   });
 });
 
@@ -222,6 +305,9 @@ describe('crash recovery and chapter replay of a carried game 2 (plan T6)', () =
     expect(lines[2]).toBe(`sm_pug_carry ${g2} 500 400`);
     expect(lines[3]).toMatch(/^sm_pug_resume_map /);
     expect(lines.at(-1)).toBe('sm_pug_resume_commit');
+    // pug-match 0.3.49: the series line after the roster, just before the commit.
+    expect(lines.at(-2)).toBe(`sm_pug_series ${g2} 2 500 400 "Rats" "Bats"`);
+    expect(resumeLines({ ...snap, series: null }).some((l) => l.startsWith('sm_pug_series'))).toBe(false);
     const bare = resumeLines({ ...snap, carry: null });
     expect(bare.some((l) => l.startsWith('sm_pug_carry') || l.startsWith('sm_pug_tournament'))).toBe(false);
     expect(bare).toEqual(lines.filter((l) => !l.startsWith('sm_pug_carry') && !l.startsWith('sm_pug_tournament')));

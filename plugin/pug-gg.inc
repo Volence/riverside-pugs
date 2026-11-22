@@ -355,6 +355,15 @@ bool Gg_Judge(int team, char[] msg, int msgLen, char[] code, int codeLen, int &g
 		strcopy(code, codeLen, "off");
 		return false;
 	}
+	// 0.3.49 (owner, Draft Tourney #2): a tournament game is never forfeited by
+	// a vote; staff can still rule one (sm_pug_forfeit). Not for the decided
+	// judgment (ignoreEnable, Gg_DecidedNow), which is a different question.
+	if (!ignoreEnable && TourneyOn())
+	{
+		strcopy(msg, msgLen, "Forfeiting is off in tournament matches.");
+		strcopy(code, codeLen, "tournament");
+		return false;
+	}
 	if (g_State != MS_Live)
 	{
 		strcopy(msg, msgLen, "There is no live match to forfeit.");

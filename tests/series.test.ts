@@ -400,7 +400,9 @@ describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
     await f.tick();
     // Rats did not pick, so Rats choose sides; with no saved side the clock takes survivors first.
     expect(f.gameOf(2).first_survivors).toBe(f.entryA);
-    expect(f.booking()).toMatchObject({ next_campaign: POOL7[6], games_allowed: 2 });
+    // The stage waits 0 s between games (2026-11-22), so the same watch loads it.
+    expect(f.booking()).toMatchObject({ next_campaign: null, games_allowed: 2 });
+    expect(f.gameOf(2).match_id).not.toBeNull();
     const rows = f.db.prepare('SELECT action, campaign, auto FROM event_vetoes ORDER BY step').all().slice(-2);
     expect(rows).toEqual([{ action: 'pick', campaign: POOL7[6], auto: 1 }, { action: 'survivors', campaign: null, auto: 1 }]);
   });
@@ -495,6 +497,7 @@ describe('SeriesEngine: games, picks, tiebreaks and the confirm window', () => {
     expect(soonText(60)).toBe('about a minute');
     expect(soonText(45)).toBe('about a minute');
     expect(soonText(180)).toBe('about 3 minutes');
+    expect(soonText(0)).toBe('a few seconds');
   });
 });
 
