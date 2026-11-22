@@ -183,6 +183,8 @@ export function burstName(count: number): string {
 export interface ClipJob {
   id: number; matchId: number; ordinal: number; half: number; steamid: string; times: number[];
   count: number; kind: 'skeet' | 'quad'; caption: string[];
+  /** The match's season and its look (seasons.theme): the corner caption is drawn in it (owner 2026-11-22). */
+  season: string | null; theme: string | null;
   /** seconds of track before the first moment and after the last */
   lead: number; tail: number;
 }
@@ -204,12 +206,14 @@ export function tournamentOf(db: DB, matchId: number): { event: string; entries:
 
 export function jobFor(db: DB, row: ClipRow): ClipJob {
   const name = getPlayer(db, row.player_id)?.name ?? row.player_id;
-  const m = db.prepare('SELECT campaign FROM matches WHERE id = ?').get(row.match_id) as { campaign: string } | undefined;
+  const m = db.prepare('SELECT m.campaign, s.name AS season, s.theme FROM matches m LEFT JOIN seasons s ON s.id = m.season_id WHERE m.id = ?')
+    .get(row.match_id) as { campaign: string; season: string | null; theme: string | null } | undefined;
   const campaign = campaignDisplayName(db, m?.campaign ?? '');
   const secs = (row.span_ms / 1000).toFixed(1);
   const base = {
     id: row.id, matchId: row.match_id, ordinal: row.map_ordinal, half: row.half, steamid: row.player_id,
     times: JSON.parse(row.times_json) as number[], count: row.count, kind: row.kind,
+    season: m?.season ?? null, theme: m?.theme ?? null,
   };
   const t = tournamentOf(db, row.match_id);
   const where = `${t ? t.event : `Match ${row.match_id}`} · ${campaign}, map ${row.map_ordinal + 1}`;
@@ -305,7 +309,8 @@ export function listClips(
   opts: { player?: string; before?: number; limit?: number; minCount?: number; kind?: 'skeet' | 'quad' } = {},
 ): PublicClip[] {
   const limit = Math.max(1, Math.min(60, opts.limit ?? 24));
-  const where = [`c.status = 'done'`, clipMatch('m')];
+  // a finished clip being rendered again (a new look) keeps showing its last video meanwhile
+  const where = [`(c.status = 'done' OR (c.done_at IS NOT NULL AND c.video_key IS NOT NULL AND c.status IN ('queued', 'rendering')))`, clipMatch('m')];
   const args: unknown[] = [];
   // a quad shows on all four cappers' profiles, not only the one whose eyes filmed it
   if (opts.player) { where.push(`(c.player_id = ? OR (c.kind = 'quad' AND EXISTS (SELECT 1 FROM json_each(c.people_json) WHERE value = ?)))`); args.push(opts.player, opts.player); }
@@ -334,5 +339,6 @@ export function clipVideoKey(db: DB, k: { matchId: number; steamid: string; mapO
   return r?.video_key ?? null;
 }
 
-export const clipVideoKeyFor = (matchId: number, id: number) => `clips/${matchId}/${id}.mp4`;
-export const clipThumbKeyFor = (matchId: number, id: number) => `clips/${matchId}/${id}.jpg`;
+// a render's own name (stamp): a clip rendered again lands under a new key, since the objects are cached as immutable
+export const clipVideoKeyFor = (matchId: number, id: number, stamp?: number) => `clips/${matchId}/${id}${stamp ? `-${stamp}` : ''}.mp4`;
+export const clipThumbKeyFor = (matchId: number, id: number, stamp?: number) => `clips/${matchId}/${id}${stamp ? `-${stamp}` : ''}.jpg`;

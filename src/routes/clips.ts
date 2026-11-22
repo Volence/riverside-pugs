@@ -71,7 +71,8 @@ export async function clipRoutes(app: FastifyInstance, opts: { db: DB; r2: R2Con
     if (!row) return;
     const body = req.body as Buffer | undefined;
     if (!Buffer.isBuffer(body) || body.length === 0) return reply.code(400).send({ error: 'empty body' });
-    const key = which === 'video' ? clipVideoKeyFor(row.match_id, row.id) : clipThumbKeyFor(row.match_id, row.id);
+    const stamp = Date.now();
+    const key = which === 'video' ? clipVideoKeyFor(row.match_id, row.id, stamp) : clipThumbKeyFor(row.match_id, row.id, stamp);
     const dir = await mkdtemp(join(tmpdir(), 'pug-clip-'));
     try {
       const file = join(dir, which === 'video' ? 'clip.mp4' : 'clip.jpg');
