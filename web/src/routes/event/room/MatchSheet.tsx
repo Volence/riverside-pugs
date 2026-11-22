@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api, entryLogoUrl, type MatchDemo, type MatchPlayerStats, type MatchRoomView, type PlayEntry, type RoomGame, type RoomPlayer } from '../../../api';
 import { campaignTint } from '../../../format';
 import { gameTitle } from './roomText';
+import { seriesMath } from './seriesMath';
 
 /**
  * The match page's scoreboard, game cards and lineup columns (owner,
@@ -32,11 +33,11 @@ export function MatchHero({ v, when }: { v: MatchRoomView; when: string | null }
   const s = v.series;
   // A total-score series still being played counts the live game's running
   // score too (owner 2026-11-22: the header should be the total of both games
-  // as it goes); the series row only adds games once they are recorded.
-  const live = s?.totalScore && !s.over ? v.games.filter((g) => g.state === 'live' && g.live) : [];
-  const running = (side: Side) => live.reduce((n, g) => n + (side === 'a' ? g.live!.scoreA : g.live!.scoreB), 0);
+  // as it goes); seriesMath is the one place that adds it, shared with the
+  // caster tools.
+  const math = seriesMath(v);
   const score = (side: Side): number | null => {
-    if (s) return s.totalScore ? (side === 'a' ? s.totalA : s.totalB) + running(side) : (side === 'a' ? s.winsA : s.winsB);
+    if (math) return side === 'a' ? math.a : math.b;
     if (v.result) return side === 'a' ? v.result.scoreA : v.result.scoreB;
     return null;
   };
@@ -71,7 +72,7 @@ export function MatchHero({ v, when }: { v: MatchRoomView; when: string | null }
           </p>
         ) : <p class="sheethero__vs">vs</p>}
         <p class="sheethero__format">
-          {s ? (s.totalScore ? (live.length > 0 ? 'Two games, total score so far' : 'Two games, total score') : `Best of ${s.bestOf}`) : v.vetoSummary.split(':')[0]}
+          {s ? (s.totalScore ? (math?.liveIncluded ? 'Two games, total score so far' : 'Two games, total score') : `Best of ${s.bestOf}`) : v.vetoSummary.split(':')[0]}
           {v.server?.name && <> · {v.server.name}</>}
         </p>
         {when && <p class="sheethero__when">{when}</p>}
