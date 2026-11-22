@@ -896,6 +896,14 @@ export interface OfflineCard {
   lastLiveAt: string | null;
 }
 
+/** A finished first-person highlight clip (GET /api/clips, src/clips.ts). */
+export interface ClipCard {
+  id: number; matchId: number; ordinal: number; half: number; tMs: number; count: number; spanMs: number;
+  kind: 'skeet' | 'quad'; people: { steamid: string; name: string }[];
+  player: { steamid: string; name: string; avatar: string | null }; campaign: string; doneAt: string;
+  video: string; thumb: string | null;
+}
+
 export interface StreamsView {
   /** True when the poll cache is too old to claim anyone is live. */
   stale: boolean;
@@ -3755,6 +3763,12 @@ export const api = {
     return get<MatchList>(qs ? `/api/matches?${qs}` : '/api/matches', signal);
   },
   live: (signal?: AbortSignal) => get<{ matches: LiveMatch[] }>('/api/live', signal),
+  clips: (opts: { player?: string; before?: number; min?: number; limit?: number; kind?: 'skeet' | 'quad' } = {}, signal?: AbortSignal) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v !== undefined) q.set(k, String(v));
+    const qs = q.toString();
+    return get<{ clips: ClipCard[] }>(qs ? `/api/clips?${qs}` : '/api/clips', signal);
+  },
   streams: (all = false, signal?: AbortSignal) =>
     get<StreamsView>(`/api/streams${all ? '?all=1' : ''}`, signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[]; multipliers?: SeasonMultipliers | null }>('/api/maps', signal),

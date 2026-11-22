@@ -3,7 +3,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { pruneDemos } from './demoPrune.js';
 import { sweepDemos } from './demoOffload.js';
 import { sweepReplays } from './replayOffload.js';
-import { r2FromEnv } from './r2.js';
+import { r2FromEnv, publicUrlFor } from './r2.js';
 import { reindexRecentMatches } from './reindex.js';
 import { claimNewcomerPosts } from './integrity/newcomer.js';
 import { recordInputStall } from './inputStalls.js';
@@ -164,6 +164,8 @@ import { wrappedRoutes } from './routes/wrapped.js';
 import { balancePublicRoutes } from './routes/balancePublic.js';
 import { replayRoutes } from './routes/replays.js';
 import { demoLiveRoutes } from './routes/demoLive.js';
+import { clipRoutes } from './routes/clips.js';
+import { scanClips } from './clips.js';
 import { DemoFeed } from './demoLive.js';
 import { practiceRoutes } from './routes/practice.js';
 import { PracticeLeases, TICK_MS as PRACTICE_TICK_MS, type LeaseRcon } from './practiceLeases.js';
@@ -2199,7 +2201,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         modCalls.start();
         weekly = new WeeklyPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         weekly.start();
-        skeetStreaks = new SkeetStreakPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
+        skeetStreaks = new SkeetStreakPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl, clipUrl: r2 ? (k: string) => publicUrlFor(r2, k) : undefined });
         skeetStreaks.start();
         newsPoster = new NewsPoster({ db: deps.db, transport: t, publicUrl: deps.config.publicUrl });
         newsPoster.start();
@@ -2431,6 +2433,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     db: deps.db, liveDir: deps.config.demoLiveDir, demoDir: deps.config.demoDir, local: deps.config.demoLiveLocal,
   });
   await app.register(demoLiveRoutes, { db: deps.db, feed: demoFeed });
+  // Highlight clips (src/clips.ts): queue every new double/triple skeet for the render box every 2 minutes.
+  await app.register(clipRoutes, { db: deps.db, r2 });
+  {
+    const scan = () => { try { const n = scanClips(deps.db); if (n) console.log(`[clips] queued ${n}`); } catch (err) { console.error('[clips] scan failed:', err); } };
+    const t = setTimeout(scan, 5_000); t.unref();
+    const iv = setInterval(scan, 2 * 60_000); iv.unref();
+    app.addHook('onClose', async () => { clearTimeout(t); clearInterval(iv); });
+  }
   if (!deps.demoFeed) {
     demoFeed.start();
     app.addHook('onClose', async () => { demoFeed.stop(); });

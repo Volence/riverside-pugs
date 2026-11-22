@@ -180,3 +180,22 @@ describe('SkeetStreakPoster', () => {
     });
   });
 });
+
+describe('SkeetStreakPoster clip video', () => {
+  it('adds the clip video to a posted triple by an edit, once', async () => {
+    const id = seedTripleMatch();
+    const p = new SkeetStreakPoster({ db, transport: t, publicUrl: 'https://pug.test', tickMs: 0, clipUrl: (k) => `https://assets.test/${k}` });
+    await p.tickNow();
+    expect(inWeekly()).toHaveLength(1);
+    expect(inWeekly()[0].payload.content).not.toContain('assets.test');
+    db.prepare(
+      `INSERT INTO clips (match_id, player_id, map_ordinal, half, t_ms, count, span_ms, times_json, status, video_key)
+       VALUES (?, ?, 1, 1, 0, 3, 2000, '[0,1000,2000]', 'done', ?)`,
+    ).run(id, PID, `clips/${id}/1.mp4`);
+    await p.tickNow();
+    expect(inWeekly()).toHaveLength(1);
+    expect(inWeekly()[0].payload.content).toContain(`\nhttps://assets.test/clips/${id}/1.mp4`);
+    expect((db.prepare('SELECT video_at FROM skeet_streaks').get() as { video_at: string | null }).video_at).not.toBeNull();
+    p.stop();
+  });
+});

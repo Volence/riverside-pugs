@@ -18,7 +18,7 @@ describe('NAV_LINKS', () => {
   // strip on its pages (components/SectionTabs.tsx).
   it('folds Matches and Campaigns into Stats, and News, Patch notes and the change log into News', () => {
     expect(NAV_LINKS.map(([, label]) => label)).toEqual([
-      'Play', 'Live', 'Streams', 'Leaderboard', 'Stats', 'News', 'Custom', 'HUD', 'How to play',
+      'Play', 'Live', 'Streams', 'Clips', 'Leaderboard', 'Stats', 'News', 'Custom', 'HUD', 'How to play',
     ]);
     expect(NAV_LINKS.find(([, l]) => l === 'Stats')?.[0]).toBe('/matches');
     expect(NAV_LINKS.find(([, l]) => l === 'News')?.[0]).toBe('/news');

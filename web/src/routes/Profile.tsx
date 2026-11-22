@@ -1,4 +1,5 @@
 import { api, ApiError, modApi, communityApi } from '../api';
+import { ProfileClips } from './Clips';
 import { ProfileEvents } from '../components/ProfileEvents';
 import { useFetch } from '../hooks/useFetch';
 import type { Profile as ProfileData, Standing } from '../api';
@@ -318,6 +319,7 @@ export function Profile(
                 </button>
               )}
             </Panel>
+            <ProfileClips steamid={steamid} />
           </div>
 
           <aside class="prof__aside" aria-label="About this player">

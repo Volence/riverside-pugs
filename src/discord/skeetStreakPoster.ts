@@ -2,6 +2,7 @@ import type { DB } from '../db.js';
 import { completedPug } from '../matchKinds.js';
 import { getSetting } from '../settings.js';
 import { findSkeetStreaks } from '../skeetStreaks.js';
+import { clipVideoKey } from '../clips.js';
 import { renderSkeetStreak, type SkeetStreakRow } from './skeetStreakCard.js';
 import type { BotTransport } from './transport.js';
 
@@ -38,7 +39,7 @@ export class SkeetStreakPoster {
   private chain: Promise<void> = Promise.resolve();
   private timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private deps: { db: DB; transport: BotTransport; publicUrl: string; tickMs?: number; now?: () => Date }) {}
+  constructor(private deps: { db: DB; transport: BotTransport; publicUrl: string; tickMs?: number; now?: () => Date; clipUrl?: (key: string) => string }) {}
 
   start(): void {
     void this.tickNow();
@@ -140,16 +141,45 @@ export class SkeetStreakPoster {
        WHERE s.posted_at IS NULL AND m.voided_at IS NULL
        ORDER BY m.ended_at, s.map_ordinal, s.half, s.t_ms`,
     ).all() as SkeetStreakRow[];
+    const videoOf = (row: SkeetStreakRow): string | null => {
+      if (!this.deps.clipUrl) return null;
+      const key = clipVideoKey(db, { matchId: row.match_id, steamid: row.player_id, mapOrdinal: row.map_ordinal, half: row.half, tMs: row.t_ms });
+      return key ? this.deps.clipUrl(key) : null;
+    };
     for (const row of pending) {
       try {
-        const messageId = await transport.send(channelId, renderSkeetStreak(db, row, publicUrl));
+        const video = videoOf(row);
+        const messageId = await transport.send(channelId, renderSkeetStreak(db, row, publicUrl, video));
         db.prepare(
-          `UPDATE skeet_streaks SET message_id = ?, posted_at = datetime('now')
+          `UPDATE skeet_streaks SET message_id = ?, posted_at = datetime('now'), video_at = ?
            WHERE match_id = ? AND player_id = ? AND map_ordinal = ? AND half = ? AND t_ms = ?`,
-        ).run(messageId, row.match_id, row.player_id, row.map_ordinal, row.half, row.t_ms);
+        ).run(messageId, video ? stamp(now) : null, row.match_id, row.player_id, row.map_ordinal, row.half, row.t_ms);
       } catch (err) {
         // Left pending: the next tick tries it again.
         console.error('[skeetstreak] post failed:', err);
+      }
+    }
+
+    // 5. A post that went out before its clip was rendered gets the video added
+    //    by an edit once the clip is done (older posts too: the triples since the
+    //    posts started are queued for clips). A message gone from Discord is
+    //    marked done as well, never retried.
+    const needVideo = db.prepare(
+      `SELECT s.* FROM skeet_streaks s JOIN matches m ON m.id = s.match_id
+       WHERE s.message_id IS NOT NULL AND s.video_at IS NULL AND s.posted_at NOT IN ('retracted', 'skipped')
+         AND m.voided_at IS NULL`,
+    ).all() as SkeetStreakRow[];
+    for (const row of needVideo) {
+      const video = videoOf(row);
+      if (!video) continue;
+      try {
+        await transport.edit(channelId, row.message_id!, renderSkeetStreak(db, row, publicUrl, video));
+        db.prepare(
+          `UPDATE skeet_streaks SET video_at = ?
+           WHERE match_id = ? AND player_id = ? AND map_ordinal = ? AND half = ? AND t_ms = ?`,
+        ).run(stamp(now), row.match_id, row.player_id, row.map_ordinal, row.half, row.t_ms);
+      } catch (err) {
+        console.error('[skeetstreak] video edit failed:', err);
       }
     }
   }

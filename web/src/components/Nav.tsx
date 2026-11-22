@@ -33,6 +33,7 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/', 'Play'],
   ['/live', 'Live'],
   ['/streams', 'Streams'],
+  ['/clips', 'Clips'],
   ['/leaderboard', 'Leaderboard'],
   ['/matches', 'Stats'],
   ['/news', 'News'],
@@ -40,6 +41,8 @@ export const NAV_LINKS: readonly (readonly [string, string, string?])[] = [
   ['/hud', 'HUD'],
   ['/how-to-play', 'How to play'],
 ];
+/** Compete goes right after Stats, wherever Stats sits. */
+const STATS_AT = NAV_LINKS.findIndex(([href]) => href === '/matches');
 
 /** Whether a nav item is the page being shown. The HUD item stands for its
  *  whole section, so it is current on the crosshair and community pages too,
@@ -81,7 +84,7 @@ export function Nav(
   // Compete only for viewers the competitive switch lets in (/api/me teams).
   // It lands on Events while a tournament is open or about to start.
   const links = me?.teams
-    ? [...NAV_LINKS.slice(0, 5), [me.competeHome === 'events' ? '/events' : '/scrims', 'Compete'] as const, ...NAV_LINKS.slice(5)]
+    ? [...NAV_LINKS.slice(0, STATS_AT + 1), [me.competeHome === 'events' ? '/events' : '/scrims', 'Compete'] as const, ...NAV_LINKS.slice(STATS_AT + 1)]
     : NAV_LINKS;
   const myTeams = me?.teams ? me.myTeams ?? [] : [];
 

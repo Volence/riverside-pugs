@@ -208,6 +208,8 @@ const KEYED: [table: string, column: string][] = [
   // somehow logged the same match/map/half/tMs (impossible in practice, one
   // human hit the burst), the survivor's row is kept and the other dropped.
   ['skeet_streaks', 'player_id'],
+  // Highlight clips (src/clips.ts): keyed on the same moment as skeet_streaks, same rule.
+  ['clips', 'player_id'],
   // Name history (src/playerNames.ts). A name is one row per match, so where
   // both accounts played one match under one name, that is one use, and the
   // alt's other names join the survivor's history. The scratch tables follow

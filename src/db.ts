@@ -1581,6 +1581,43 @@ CREATE TABLE IF NOT EXISTS skeet_streak_scans (
   scanned_at TEXT NOT NULL
 );
 
+-- First-person highlight clips (src/clips.ts): one row per double-or-better
+-- skeet burst or quad cap (kind; a quad's player is the fourth capper, whose
+-- eyes film it, and people_json all four infected), queued for the render box (clipd on a spare box: it claims a
+-- row over /api/clips/worker/*, renders it from the match demo in the 3D
+-- viewer and uploads the mp4 + a poster frame, which land on R2 under
+-- clips/<match>/<id>.*). times_json: every skeet's t_ms in the burst.
+-- status: queued -> rendering -> done | failed (attempts used up).
+CREATE TABLE IF NOT EXISTS clips (
+  id          INTEGER PRIMARY KEY,
+  match_id    INTEGER NOT NULL REFERENCES matches(id),
+  player_id   TEXT    NOT NULL REFERENCES players(steamid),
+  map_ordinal INTEGER NOT NULL,
+  half        INTEGER NOT NULL,
+  t_ms        INTEGER NOT NULL,
+  count       INTEGER NOT NULL,
+  span_ms     INTEGER NOT NULL,
+  times_json  TEXT    NOT NULL,
+  kind        TEXT    NOT NULL DEFAULT 'skeet' CHECK (kind IN ('skeet','quad')),
+  people_json TEXT,
+  status      TEXT    NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','rendering','done','failed')),
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  claimed_at  TEXT,
+  error       TEXT,
+  video_key   TEXT,
+  thumb_key   TEXT,
+  bytes       INTEGER,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  done_at     TEXT,
+  UNIQUE (match_id, player_id, map_ordinal, half, t_ms)
+);
+CREATE INDEX IF NOT EXISTS clips_status ON clips(status, id);
+CREATE INDEX IF NOT EXISTS clips_player ON clips(player_id, status);
+CREATE TABLE IF NOT EXISTS clip_scans (
+  match_id   INTEGER PRIMARY KEY REFERENCES matches(id),
+  scanned_at TEXT NOT NULL
+);
+
 -- Four-slot campaign ballots (src/ballot.ts), one row per lobby that drew
 -- one, for the owner to review. options_json: [{slug, slot, weight, base,
 -- bump, recentBy, freshest, ignoredBy}] in ballot order; votes_json: {slug:
@@ -2007,6 +2044,8 @@ export function openDb(path: string): DB {
   // has no current zip and is served raw until the next sweep makes one.
   ensureColumn(db, 'custom_campaigns', 'zip_key', 'TEXT');
   ensureColumn(db, 'custom_campaigns', 'zip_bytes', 'INTEGER');
+  // the triple post's video link went in (src/discord/skeetStreakPoster.ts, from clips)
+  ensureColumn(db, 'skeet_streaks', 'video_at', 'TEXT');
   ensureColumn(db, 'match_live', 'phase', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_since', 'TEXT');
   ensureColumn(db, 'match_live', 'phase_team', 'TEXT');

@@ -6753,3 +6753,26 @@ a.mapch__name:hover { color: var(--accent); }
 @media (max-width: 600px) {
   .ax__tag { font-size: 10px; padding: 0 4px; }
 }
+
+/* Highlight clips (routes/Clips.tsx) */
+.clipintro { color: var(--text-muted); margin: 0 0 var(--sp-3); }
+.clipfilter { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.clipgrid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.clipgrid--small { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+.cliptile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.cliptile--big { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.cliptile__video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.cliptile__body { padding: var(--sp-3); display: grid; gap: var(--sp-2); }
+.cliptile__what {
+  font-family: var(--font-label); font-size: var(--fs-label);
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--rating);
+}
+.cliptile__who { display: flex; gap: var(--sp-2); align-items: center; text-decoration: none; color: var(--text-bright); }
+.cliptile__avatar { width: 28px; height: 28px; object-fit: cover; flex: none; }
+.cliptile__avatar--blank { background: var(--surface-2); display: inline-block; }
+.cliptile__name { font-family: var(--font-display); font-size: var(--fs-h3); line-height: 1.1; }
+.cliptile__crew { color: var(--text-bright); }
+.cliptile__crew a { color: inherit; }
+.cliptile__where { font-size: var(--fs-label); color: var(--text-muted); }
+.clipmore { display: flex; justify-content: center; margin-top: var(--sp-4); }
+.prof__clips h3 { margin-bottom: var(--sp-3); }

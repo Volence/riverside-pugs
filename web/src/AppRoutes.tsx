@@ -9,6 +9,7 @@ import { BalanceNotes } from './routes/BalanceNotes';
 import { GameValues } from './routes/balance/GameValues';
 import { Live } from './routes/Live';
 import { Streams } from './routes/Streams';
+import { Clips } from './routes/Clips';
 import { MatchDetail } from './routes/MatchDetail';
 import { MapDetail } from './routes/MapDetail';
 import { Maps } from './routes/Maps';
@@ -134,6 +135,7 @@ export function AppRoutes(
       <Route path="/cast/studio" component={CastStudio} />
       <Route path="/cast/desk" component={CastDesk} />
       <Route path="/streams" component={Streams} />
+      <Route path="/clips" component={Clips} />
       <Route path="/match/:id" component={MatchDetail} me={me} staff={staff} />
       <Route path="/maps" component={Maps} />
       <Route path="/custom-campaigns" component={CustomCampaigns} />

@@ -15,6 +15,7 @@ export interface SkeetStreakRow {
   span_ms: number;
   message_id: string | null;
   posted_at: string | null;
+  video_at?: string | null;
 }
 
 /** "triple skeet" / "quad skeet" up to 4, then "<n>-skeet streak", matched
@@ -37,7 +38,9 @@ function names(count: number): { streak: string; skeets: string } {
  * grow an embed under it (see how ticketCard.ts's matchLinks avoids this by
  * only ever appearing inside an embed field, which never previews).
  */
-export function renderSkeetStreak(db: DB, row: SkeetStreakRow, publicUrl: string): MessagePayload {
+// videoUrl: the first-person clip (src/clips.ts) once rendered, as a bare link on its own line so Discord
+// plays it inline under the post (the replay link stays in <> so it never previews).
+export function renderSkeetStreak(db: DB, row: SkeetStreakRow, publicUrl: string, videoUrl?: string | null): MessagePayload {
   const player = getPlayer(db, row.player_id);
   const name = escapeName(player?.name ?? row.player_id);
   const match = db.prepare('SELECT campaign FROM matches WHERE id = ?').get(row.match_id) as { campaign: string } | undefined;
@@ -49,6 +52,7 @@ export function renderSkeetStreak(db: DB, row: SkeetStreakRow, publicUrl: string
   // not tell them apart), so the line says so: plain "skeets" means solo.
   const content =
     `**${name}** hit a **${streak}** in match ${row.match_id} on ${campaign}, ${skeets} (team skeets count) in ${seconds} seconds. `
-    + `[Watch it](<${link}>)`;
+    + `[Watch it](<${link}>)`
+    + (videoUrl ? `\n${videoUrl}` : '');
   return { content, embeds: [], components: [], mentionUserIds: [] };
 }
