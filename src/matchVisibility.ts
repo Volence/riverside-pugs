@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import { managesSide, sidesOf } from './bookings/bookings.js';
-import { fullyInvited } from './bookings/casters.js';
+import { casterMayWatch } from './bookings/casters.js';
 import { inGoodStanding } from './standing.js';
 import { roleOf } from './teams/teams.js';
 
@@ -61,13 +61,14 @@ export function canViewMatch(db: DB, viewer: Viewer, matchId: number): boolean {
   if (row.visibility !== 'participants' || !viewer.steamid) return false;
   if (db.prepare('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?').get(matchId, viewer.steamid)) return true;
   if (row.booking_id === null) return false;
-  return bookingParticipant(db, row.booking_id, viewer.steamid) || fullyInvited(db, row.booking_id, viewer.steamid);
+  return bookingParticipant(db, row.booking_id, viewer.steamid) || casterMayWatch(db, row.booking_id, viewer.steamid);
 }
 
 export function visibleMatchesSql(viewer: Viewer, alias: string): { sql: string; params: (string | number)[] } {
   if (viewer.staff) return { sql: '1 = 1', params: [] };
   if (!viewer.steamid) return { sql: `${alias}.visibility = 'public'`, params: [] };
-  // A caster both sides invited (src/bookings/casters.ts fullyInvited). The
+  // A caster both sides invited, or any caster on a tournament booking
+  // (src/bookings/casters.ts casterMayWatch). The
   // good-standing half of that rule is not expressible here, so the clause is
   // only added for a viewer who passes it right now (viewer.caster).
   const casterSql = viewer.caster
@@ -75,7 +76,8 @@ export function visibleMatchesSql(viewer: Viewer, alias: string): { sql: string;
             OR EXISTS (SELECT 1 FROM booking_casters vis_bc
               JOIN players vis_cp ON vis_cp.steamid = vis_bc.caster_steamid AND vis_cp.is_caster = 1
               WHERE vis_bc.booking_id = ${alias}.booking_id AND vis_bc.caster_steamid = ?
-                AND vis_bc.invited_by_a IS NOT NULL AND vis_bc.invited_by_b IS NOT NULL)`
+                AND vis_bc.invited_by_a IS NOT NULL AND vis_bc.invited_by_b IS NOT NULL)
+            OR EXISTS (SELECT 1 FROM bookings vis_tb WHERE vis_tb.id = ${alias}.booking_id AND vis_tb.purpose = 'tournament')`
     : '';
   return {
     sql: `(${alias}.visibility = 'public' OR (${alias}.visibility = 'participants' AND (
