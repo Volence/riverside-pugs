@@ -59,6 +59,7 @@ export function seriesTimings(db: DB): { serverAlertMs: number; presenceFallback
  *  loads a scheduled game on its minute pass, so a wait up to a minute reads
  *  as a minute. */
 export function soonText(seconds: number): string {
+  if (seconds <= 0) return 'a few seconds';
   return seconds <= 60 ? 'about a minute' : `about ${Math.ceil(seconds / 60)} minutes`;
 }
 

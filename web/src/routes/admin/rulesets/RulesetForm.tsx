@@ -101,8 +101,8 @@ export function RulesetForm({ ruleset, rules, busy, error, onSave, onCancel }: {
         <FormRow label="!admin cooldown" help="Seconds before the same player can call staff with !admin again. (30 to 600)" for={id('cooldown')}>
           <input id={id('cooldown')} aria-label="!admin cooldown" type="number" min={30} max={600} value={typed.cooldown} onInput={type('cooldown')} />
         </FormRow>
-        <FormRow label="Next game after" help="Seconds between two games of a series. The server loads it within about a minute after this. (30 to 600)" for={id('nextGame')}>
-          <input id={id('nextGame')} aria-label="Next game after" type="number" min={30} max={600} value={typed.nextGame} onInput={type('nextGame')} />
+        <FormRow label="Next game after" help="Seconds between two games of a series, counted from the moment the last game's result is in. 0 loads the next game straight away. (0 to 600)" for={id('nextGame')}>
+          <input id={id('nextGame')} aria-label="Next game after" type="number" min={0} max={600} value={typed.nextGame} onInput={type('nextGame')} />
         </FormRow>
         <ToggleRow label="Carry score into game 2" help="Best of 2 series only. Game 2 starts with game 1's totals on the in-game scoreboard, so from game 2's second chapter on the team ahead overall survives first. Game 2's first chapter keeps the sides from the veto. A tiebreak chapter always starts at 0." checked={d.series.carryScore}
           onChange={() => set({ series: { ...d.series, carryScore: !d.series.carryScore } })} />

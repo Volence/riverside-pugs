@@ -49,16 +49,28 @@ describe('rulesets', () => {
   it('reads series.carryScore (plan T6), false when a ruleset saved before it lacks it, and refuses a non-boolean', () => {
     const base = JSON.parse(JSON.stringify(TEMPLATES['Standard Cup'])) as Record<string, any>;
     delete base.series.carryScore;
-    expect(parseRules(JSON.stringify(base)).series).toEqual({ nextGameSeconds: 60, carryScore: false });
+    expect(parseRules(JSON.stringify(base)).series).toEqual({ nextGameSeconds: 0, carryScore: false });
     delete base.series;
-    expect(parseRules(JSON.stringify(base)).series).toEqual({ nextGameSeconds: 60, carryScore: false });
+    expect(parseRules(JSON.stringify(base)).series).toEqual({ nextGameSeconds: 0, carryScore: false });
     base.series = { nextGameSeconds: 90, carryScore: true };
     expect(parseRules(JSON.stringify(base)).series).toEqual({ nextGameSeconds: 90, carryScore: true });
     base.series = { nextGameSeconds: 90, carryScore: 'yes' };
     expect(() => parseRules(JSON.stringify(base))).toThrow('invalid rules: series.carryScore');
   });
-  it('every template carries carryScore false', () => {
-    for (const t of Object.values(TEMPLATES)) expect(t.series.carryScore).toBe(false);
+  it('Standard Cup (the event default) carries the score; PUG and Casual Scrim do not (owner 2026-11-22)', () => {
+    expect(TEMPLATES['Standard Cup'].series.carryScore).toBe(true);
+    expect(TEMPLATES.PUG.series.carryScore).toBe(false);
+    expect(TEMPLATES['Casual Scrim'].series.carryScore).toBe(false);
+    // An absent carryScore still reads false, so no older stage snapshot starts carrying.
+    expect(MATCH_PLAY_DEFAULTS.carryScore).toBe(false);
+  });
+
+  it('series.nextGameSeconds takes 0 to 600 and every template waits 0 (owner 2026-11-22)', () => {
+    const cup = TEMPLATES['Standard Cup'];
+    for (const t of Object.values(TEMPLATES)) expect(t.series.nextGameSeconds).toBe(0);
+    expect(MATCH_PLAY_DEFAULTS.nextGameSeconds).toBe(0);
+    for (const n of [0, 1, 30, 600]) expect(parseRules(JSON.stringify({ ...cup, series: { nextGameSeconds: n } })).series.nextGameSeconds).toBe(n);
+    for (const n of [-1, 601, 1.5, '0']) expect(() => parseRules(JSON.stringify({ ...cup, series: { nextGameSeconds: n } }))).toThrow('invalid rules: series.nextGameSeconds');
   });
 
   it('reads the plan T5 match-play fields, defaulting each one a ruleset saved before them lacks', () => {
@@ -73,12 +85,12 @@ describe('rulesets', () => {
     expect(r.pause.techSeconds).toBe(MATCH_PLAY_DEFAULTS.techSeconds);
     expect(r.disconnect).toEqual({ teamSeconds: 600 });
     expect(r.staffCall).toEqual({ cooldownSeconds: 180 });
-    expect(r.series).toEqual({ nextGameSeconds: 60, carryScore: false });
+    expect(r.series).toEqual({ nextGameSeconds: 0, carryScore: false });
     expect(r.subs).toEqual({ perMatch: 1, emergency: true, emergencyChargeSeconds: 0 });
     const custom = { ...cup, pause: { ...cup.pause, techSeconds: 120 }, disconnect: { teamSeconds: 900 }, staffCall: { cooldownSeconds: 60 }, series: { nextGameSeconds: 120, carryScore: true }, subs: { perMatch: 2, emergency: false, emergencyChargeSeconds: 30 } };
     expect(parseRules(JSON.stringify(custom))).toEqual(custom);
     for (const [field, bad] of [['pause.techSeconds', { ...cup, pause: { ...cup.pause, techSeconds: 30 } }], ['disconnect.teamSeconds', { ...cup, disconnect: { teamSeconds: 4000 } }],
-      ['staffCall.cooldownSeconds', { ...cup, staffCall: { cooldownSeconds: 'x' } }], ['series.nextGameSeconds', { ...cup, series: { nextGameSeconds: 10 } }],
+      ['staffCall.cooldownSeconds', { ...cup, staffCall: { cooldownSeconds: 'x' } }], ['series.nextGameSeconds', { ...cup, series: { nextGameSeconds: -10 } }],
       ['subs.emergency', { ...cup, subs: { perMatch: 2, emergency: 'yes' } }], ['subs.emergencyChargeSeconds', { ...cup, subs: { perMatch: 2, emergencyChargeSeconds: 601 } }]] as const) {
       expect(() => parseRules(JSON.stringify(bad))).toThrow(`invalid rules: ${field}`);
     }
@@ -99,7 +111,7 @@ describe('rulesets', () => {
       expect(t.pause.techSeconds).toBe(300);
       expect(t.disconnect).toEqual({ teamSeconds: 600 });
       expect(t.staffCall).toEqual({ cooldownSeconds: 180 });
-      expect(t.series).toEqual({ nextGameSeconds: 60, carryScore: false });
+      expect(t.series.nextGameSeconds).toBe(0);
       expect(t.subs).toEqual({ perMatch: 2, emergency: true, emergencyChargeSeconds: 0 });
     }
     expect(TEMPLATES.PUG.pause).toEqual({ limit: 3, seconds: 120, mutualUnpause: false, techPauses: 0, techSeconds: 300 });

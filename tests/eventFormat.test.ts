@@ -28,6 +28,7 @@ describe('rules lines', () => {
       'Technical pauses: 2 per team per game, 5:00 of technical time in all; past it a pause uses tactical pauses',
       'Reconnect time: 10:00 per team per game; at zero the team forfeits the game',
       'Subs: 2 per match, one may come in mid-chapter for a disconnected player',
+      "Best of 2: game 2 starts with game 1's score, so later chapters follow the running total",
       'No-show grace: 15 minutes',
       'Boss spawns: random, shown in game',
       'Teams are locked once the match is live',
@@ -66,7 +67,7 @@ describe('rules lines', () => {
 
 describe('rules lines (plan T6)', () => {
   it('names the score carry-over only when it is on', () => {
-    const r = parseRules(JSON.stringify(TEMPLATES['Standard Cup']));
+    const r = parseRules(JSON.stringify({ ...TEMPLATES['Standard Cup'], series: { nextGameSeconds: 0, carryScore: false } }));
     expect(rulesLines(r)).not.toContain("Best of 2: game 2 starts with game 1's score, so later chapters follow the running total");
     const on = { ...r, series: { ...r.series, carryScore: true } };
     expect(rulesLines(on)).toContain("Best of 2: game 2 starts with game 1's score, so later chapters follow the running total");

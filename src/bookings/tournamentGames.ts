@@ -4,7 +4,7 @@ import { newToken } from '../matchToken.js';
 import { currentSeasonId } from '../players.js';
 import { parseRules, type MatchRules } from '../rulesets.js';
 import { consoleText, quoted } from '../serverSetup.js';
-import { carryFor } from '../events/carry.js';
+import { carryFor, seriesFor, seriesLine } from '../events/carry.js';
 import { getBooking, logBookingEvent, type Side } from './bookings.js';
 
 /**
@@ -89,6 +89,7 @@ export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string |
   if (o.stopAfterMap !== null && !isMapName(o.stopAfterMap)) throw new Error(`stop map ${JSON.stringify(o.stopAfterMap)} is not a valid map name`);
   const roster = (tournamentRoster(db, o.matchId) ?? matchPlayersRoster(db, o.matchId)).map((r) => ({ player_id: r.steamid, team: r.team }));
   const carry = carryFor(db, o.matchId);
+  const series = seriesFor(db, o.matchId);
   return [
     // Before the match line, so the plugin has them when the game goes live (TOURNAMENT_LINES).
     ...TOURNAMENT_LINES,
@@ -96,6 +97,8 @@ export function gameLinesOf(db: DB, o: { matchId: number; stopAfterMap: string |
     `sm_pug_match ${o.matchId} ${m.token} ${m.campaign}${o.stopAfterMap ? ` "${o.stopAfterMap}"` : ''}`,
     // Plan T6: after sm_pug_match (whose reset would clear it), before go-live.
     ...(carry ? [`sm_pug_carry ${o.matchId} ${Math.trunc(carry.a)} ${Math.trunc(carry.b)}`] : []),
+    // pug-match 0.3.49: game 1's score and the series total in chat, carry or not. Same place, same reason.
+    ...(series ? [seriesLine(o.matchId, series, (n) => quoted(consoleText(n, 32)))] : []),
     // Quoted: the console splits an unquoted argument on ':' (orchestrator.ts).
     ...roster.filter((r) => /^\d{17}$/.test(r.player_id)).map((r) => `sm_pug_roster "${r.player_id}:${r.team}"`),
     `l4d_ready_league_notice ${quoted(consoleText(o.notice, 60))}`,

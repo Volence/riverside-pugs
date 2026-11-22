@@ -33,19 +33,23 @@ export interface MatchRules {
   disconnect: { teamSeconds: number };
   /** Plan T5, tournament boxes only: seconds between two !admin calls of one player. */
   staffCall: { cooldownSeconds: number };
-  /** Plan T5: seconds between two games of a series. Plan T6: carryScore
-   *  starts game 2 of a best of 2 with game 1's totals in the box's tally. */
+  /** Plan T5: seconds between two games of a series (0 loads the next game
+   *  as soon as the last one's result is in, owner 2026-11-22). Plan T6:
+   *  carryScore starts game 2 of a best of 2 with game 1's totals in the
+   *  box's tally (Standard Cup's default from 2026-11-22, owner). */
   series: { nextGameSeconds: number; carryScore: boolean };
 }
 
 /** Plan T5 Ruling 3: what a ruleset or stage snapshot saved before these
- *  fields reads as, and what every template carries. */
+ *  fields reads as, and what every template carries, except that Standard
+ *  Cup (the event default) carries the score from 2026-11-22 (owner). An
+ *  absent carryScore still reads false, so no older snapshot changes. */
 export const MATCH_PLAY_DEFAULTS = {
-  techSeconds: 300, teamSeconds: 600, emergency: true, emergencyChargeSeconds: 0, cooldownSeconds: 180, nextGameSeconds: 60, carryScore: false,
+  techSeconds: 300, teamSeconds: 600, emergency: true, emergencyChargeSeconds: 0, cooldownSeconds: 180, nextGameSeconds: 0, carryScore: false,
 } as const;
 /** Inclusive ranges, shared by parseRules and the editor (rulesetStore.ts). */
 export const RULE_RANGES = {
-  techPauses: [0, 5], techSeconds: [60, 1800], teamSeconds: [60, 3600], emergencyChargeSeconds: [0, 600], cooldownSeconds: [30, 600], nextGameSeconds: [30, 600],
+  techPauses: [0, 5], techSeconds: [60, 1800], teamSeconds: [60, 3600], emergencyChargeSeconds: [0, 600], cooldownSeconds: [30, 600], nextGameSeconds: [0, 600],
 } as const satisfies Record<string, readonly [number, number]>;
 
 const BOSSES: MatchRules['bosses'][] = ['random_published', 'fixed', 'voteboss'];
@@ -73,7 +77,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
     disconnect: { teamSeconds: 600 },
     staffCall: { cooldownSeconds: 180 },
-    series: { nextGameSeconds: 60, carryScore: false },
+    series: { nextGameSeconds: 0, carryScore: false },
   },
   'Standard Cup': {
     rated: false,
@@ -89,7 +93,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
     disconnect: { teamSeconds: 600 },
     staffCall: { cooldownSeconds: 180 },
-    series: { nextGameSeconds: 60, carryScore: false },
+    series: { nextGameSeconds: 0, carryScore: true },
   },
   'Casual Scrim': {
     rated: false,
@@ -105,7 +109,7 @@ export const TEMPLATES: Record<'PUG' | 'Standard Cup' | 'Casual Scrim', MatchRul
     subs: { perMatch: 2, emergency: true, emergencyChargeSeconds: 0 },
     disconnect: { teamSeconds: 600 },
     staffCall: { cooldownSeconds: 180 },
-    series: { nextGameSeconds: 60, carryScore: false },
+    series: { nextGameSeconds: 0, carryScore: false },
   },
 };
 
