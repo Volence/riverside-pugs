@@ -1,6 +1,6 @@
 import CastStudio from './CastStudio';
 import { DeskBody } from './DeskBody';
-import { sampleFeed } from '../overlay/sample';
+import { sampleFeed, sampleRoom } from '../overlay/sample';
 import { defaultStudioState } from '../../../src/cast/types';
 
 /**
@@ -11,7 +11,7 @@ import { defaultStudioState } from '../../../src/cast/types';
  */
 export default function CastDesk() {
   if (new URLSearchParams(location.search).has('sample')) {
-    return <div class="desk"><DeskBody feed={sampleFeed(defaultStudioState(), Date.now())} /></div>;
+    return <div class="desk"><DeskBody feed={sampleFeed(defaultStudioState(), Date.now())} room={sampleRoom(Date.now())} /></div>;
   }
   return <CastStudio desk />;
 }

@@ -111,7 +111,8 @@ function StepStrip({ ev }: { ev: AdminEventDetail }) {
 
 /** One event on the Events desk: lifecycle, fields, banner, stages, history.
  *  canEdit false (a mod) shows the same event with no control at all; the
- *  server refuses every write from a mod regardless. */
+ *  server refuses every write from a mod regardless, except Release hold on a
+ *  held match's card (owner 2026-11-22), which every staff member may use. */
 export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
   const { data: ev, error: loadError, reload } = useFetch((s) => adminApi.event(id, s), [id]);
   const { data: options, error: optionsError } = useFetch((s) => adminApi.eventOptions(s), []);
@@ -256,7 +257,7 @@ export function EventEditor({ id, canEdit }: { id: number; canEdit: boolean }) {
     ? <StandinsPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} />
     : null;
   const playPanel = hasEntries && ['registration', 'checkin', 'live', 'finished'].includes(ev.status)
-    ? <PlayPanel eventId={ev.id} canEdit={canEdit} gen={panelGen} onChange={panelsChanged} slug={ev.slug} />
+    ? <PlayPanel eventId={ev.id} canEdit={canEdit} canRelease gen={panelGen} onChange={panelsChanged} slug={ev.slug} />
     : null;
   /** Once a draft's teams are out, the matches are the work: Play leads and
    *  the finished draft folds below the teams. Before that the panels run in

@@ -1,3 +1,4 @@
+import type { MatchRoomView, RoomGame } from '../api';
 import type { CastDraftCard, CastDraftPick, CastDraftPlayer, CastDraftView, CastLiveRound, CastMatchView, CastPlayer, CastTeam, OverlayFeed, StudioState } from '../../../src/cast/types';
 
 /**
@@ -60,7 +61,7 @@ export function sampleFeed(studio: StudioState, now: number): OverlayFeed {
     players: [...a.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'a' as const, stats: { sidmg: [930, 610, 420, 300][i] ?? 0, sikill: [9, 6, 4, 3][i] ?? 0, ck: [88, 71, 52, 40][i] ?? 0, skeets: [2, 0, 1, 0][i] ?? 0 } })),
       ...b.players.map((p, i) => ({ steamid: p.steamid, name: p.name, team: 'b' as const, stats: { damage_as_si: [212, 180, 96, 60][i] ?? 0, dps_landed: [1, 0, 0, 0][i] ?? 0, survivors_biled: [0, 3, 0, 1][i] ?? 0, dmg_as_tank: [0, 0, 240, 0][i] ?? 0 } }))],
   };
-  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null), draft: sampleDraft(now) };
+  return { rev: 0, serverNow: now, studio, match, live, tankRecap: null, witchRecap: null, casterAvatars: studio.casters.map(() => null), draft: sampleDraft(now), room: sampleRoom(now) };
 }
 
 /** A made-up draft for the panel's preview (drafts plan D2b2 Ruling 12):
@@ -93,5 +94,46 @@ export function sampleDraft(now: number): CastDraftView {
     cards: Object.fromEntries(pool.slice(0, taken).map((c) => [c.steamid, c])),
     best: pool.slice(taken, taken + 3),
     poolLeft: 15 - taken,
+  };
+}
+
+/** A made-up tournament room for the panel's preview (owner 2026-11-22): a
+ *  total-score Bo2 with game 1 done and game 2 live, so the room scene and
+ *  the series math show every part. */
+export function sampleRoom(now: number): MatchRoomView {
+  const entry = (id: number, name: string, tag: string, seed: number) => ({ id, name, tag, logoKey: null, seed, out: false });
+  const game = (n: number, campaign: string, campaignName: string, over: Partial<RoomGame>): RoomGame => ({
+    id: n, game: n, ordinal: n, tiebreak: false, campaign, campaignName, map: null, pickedBy: null, sideBy: null, firstSurvivors: null,
+    matchId: null, state: 'upcoming', scoreA: null, scoreB: null, winner: null, forfeit: null, live: null, ...over,
+  });
+  const pool: MatchRoomView['pool'] = [
+    { slug: 'no_mercy', name: 'No Mercy', state: 'picked', by: 'a', game: 1 },
+    { slug: 'dead_air', name: 'Dead Air', state: 'banned', by: 'b', game: null },
+    { slug: 'death_toll', name: 'Death Toll', state: 'banned', by: 'a', game: null },
+    { slug: 'blood_harvest', name: 'Blood Harvest', state: 'picked', by: 'a', game: 2 },
+    { slug: 'dead_center', name: 'Dead Center', state: 'banned', by: 'b', game: null },
+    { slug: 'dark_carnival', name: 'Dark Carnival', state: 'open', by: null, game: null },
+  ];
+  return {
+    id: 0, eventSlug: 'sample', eventName: 'Sample Cup', roundLabel: 'Grand final', a: entry(1, 'Sample A', 'SMA', 1), b: entry(2, 'Sample B', 'SMB', 2),
+    phase: 'live', finishedAt: null, higher: 'a', deadline: null, serverNow: new Date(now).toISOString(), ready: { a: true, b: true },
+    vetoSummary: 'Two games, total score: bans, picks and sides', pool, log: [],
+    games: [
+      game(1, 'no_mercy', 'No Mercy', { pickedBy: 'a', sideBy: 'b', firstSurvivors: 'b', matchId: 1, state: 'done', scoreA: 2211, scoreB: 2480, winner: 'b' }),
+      game(2, 'blood_harvest', 'Blood Harvest', { pickedBy: 'a', sideBy: 'b', firstSurvivors: 'b', matchId: 2, state: 'live', live: { map: 'l4d_vs_farm03_bridge', scoreA: 930, scoreB: 148 } }),
+    ],
+    plan: [
+      { kind: 'order', by: 'a', game: null, state: 'done', tentative: false },
+      { kind: 'ban', by: 'b', game: null, state: 'done', tentative: false },
+      { kind: 'ban', by: 'a', game: null, state: 'done', tentative: false },
+      { kind: 'ban', by: 'b', game: null, state: 'done', tentative: false },
+      { kind: 'pick', by: 'a', game: 1, state: 'done', tentative: false },
+      { kind: 'side', by: 'b', game: 1, state: 'done', tentative: false },
+      { kind: 'pick', by: 'a', game: 2, state: 'done', tentative: false },
+      { kind: 'side', by: 'b', game: 2, state: 'done', tentative: false },
+    ],
+    next: null, lineups: { a: null, b: null, aLocked: true, bLocked: true }, holdReason: null, result: null, me: null,
+    series: { bestOf: 2, totalScore: true, winsA: 0, winsB: 1, totalA: 2211, totalB: 2480, over: false, winner: null },
+    server: null, confirm: null, dispute: null, frozen: false, schedule: null, pauses: [],
   };
 }

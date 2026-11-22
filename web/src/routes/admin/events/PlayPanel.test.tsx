@@ -356,6 +356,49 @@ describe('PlayPanel', () => {
     expect(confirm).toHaveBeenCalled();
   });
 
+  it('releases one held match from its own card, a hold the site put on included, after a confirm (owner 2026-11-22)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
+      m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'nobody_ready', holdFrom: 'veto' }) }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'game_lost', holdFrom: 'live' }) }),
+      m({ id: 9, slot: 3, a: team(5, 'Emus'), b: team(6, 'Foxes'), status: 'lineup', phase: 'lineup', desk: desk() }),
+    ] }] }] }));
+    mockAdmin.releaseEventHold.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit />);
+    const btn = await screen.findByRole('button', { name: 'Release hold: Rats vs Bats' });
+    // A hold over a lost game would only be held again: no button for it, nor for a match not on hold.
+    expect(screen.queryByRole('button', { name: 'Release hold: Cats vs Dogs' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Release hold: Emus vs Foxes' })).toBeNull();
+    fireEvent.click(btn);
+    await waitFor(() => expect(mockAdmin.releaseEventHold).toHaveBeenCalledWith(9, 7));
+    expect(mockAdmin.releaseEventHold).toHaveBeenCalledTimes(1);
+    expect(mockAdmin.releaseAllEventHolds).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Release the hold on Rats vs Bats?', body: expect.stringContaining('Held: Neither team readied up in time.'), confirmLabel: 'Release hold',
+    }));
+  });
+
+  it('gives a moderator (canRelease, not canEdit) Release hold and no other control (owner 2026-11-22)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
+      m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'nobody_ready', holdFrom: 'veto' }) }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'lineup', phase: 'lineup', desk: desk() }),
+    ] }] }] }));
+    mockAdmin.releaseEventHold.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit={false} canRelease />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Release hold: Rats vs Bats' }));
+    await waitFor(() => expect(mockAdmin.releaseEventHold).toHaveBeenCalledWith(9, 7));
+    expect(screen.queryByRole('button', { name: /Reset room|Hold:|Release staff holds|Hold all rooms/ })).toBeNull();
+    expect(screen.queryByText(/Staff tools:/)).toBeNull();
+  });
+
+  it('shows no Release hold to someone who cannot edit the event', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
+      m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'nobody_ready', holdFrom: 'veto' }) }),
+    ] }] }] }));
+    render(<PlayPanel eventId={9} canEdit={false} />);
+    await screen.findByText(/Rats/);
+    expect(screen.queryByRole('button', { name: /Release hold/ })).toBeNull();
+  });
+
   it('offers Extend grace in connect, Release hold on a hold, and Reopen veto before a game (plan T3c)', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'connect', phase: 'connect', desk: desk({ graceEndsAt: '2026-10-10T21:00:00.000Z' }) }),
@@ -368,8 +411,10 @@ describe('PlayPanel', () => {
     fireEvent.input(screen.getByLabelText('Minutes'), { target: { value: '10' } });
     fireEvent.click(screen.getByRole('button', { name: 'Extend grace' }));
     await waitFor(() => expect(mockAdmin.extendEventGrace).toHaveBeenCalledWith(9, 7, 10));
+    // Release hold sits on the held match's own card (owner 2026-11-22), not in its staff tools.
     fireEvent.click(screen.getByText('Staff tools: Cats vs Dogs'));
-    fireEvent.click(screen.getByRole('button', { name: 'Release hold' }));
+    expect(screen.queryByRole('button', { name: 'Release hold' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Release hold: Cats vs Dogs' }));
     await waitFor(() => expect(mockAdmin.releaseEventHold).toHaveBeenCalledWith(9, 8));
     fireEvent.click(screen.getByText('Staff tools: Emus vs Foxes'));
     fireEvent.click(screen.getByRole('button', { name: 'Reopen veto' }));
@@ -482,7 +527,7 @@ describe('PlayPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set time' }));
     await waitFor(() => expect(mockAdmin.setEventMatchTime).toHaveBeenCalledWith(9, 7, new Date('2026-10-20T21:00').toISOString()));
     expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('hold is released') }));
-    fireEvent.click(screen.getByRole('button', { name: 'Release hold' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release hold: Rats vs Bats' }));
     await waitFor(() => expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ body: expect.stringContaining('set a time') })));
   });
 

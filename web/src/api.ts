@@ -2438,6 +2438,10 @@ export interface StudioPickBooking {
 export interface StudioPickDraft {
   id: number; name: string; slug: string; status: 'ready' | 'running' | 'paused' | 'done'; picks: number; totalPicks: number;
 }
+/** A tournament room the caster may follow (owner 2026-11-22, src/cast/room.ts pickableRooms). */
+export interface StudioPickRoom {
+  id: number; eventName: string; roundLabel: string; a: string; b: string; phase: RoomPhase; finished: boolean;
+}
 export interface StudioPanel {
   studio: StudioState;
   rev: number;
@@ -2445,6 +2449,8 @@ export interface StudioPanel {
   matches: StudioPickMatch[];
   bookings: StudioPickBooking[];
   drafts: StudioPickDraft[];
+  /** Optional for an older server. */
+  rooms?: StudioPickRoom[];
   obsScenes: Record<string, string>;
 }
 export interface PrepSheet {

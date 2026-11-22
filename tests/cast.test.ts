@@ -44,11 +44,11 @@ const list = (as?: string) => app.inject({ method: 'GET', url: '/api/cast', cook
 const views = () => db.prepare("SELECT admin_id, target FROM admin_actions WHERE action = 'cast_connect'").all();
 
 describe('GET /api/cast', () => {
-  it('refuses anyone signed out, and players and moderators without the flag', async () => {
+  it('refuses anyone signed out and players without the flag; lets moderators in (staff, owner 2026-11-22)', async () => {
     expect((await list()).statusCode).toBe(401);
     expect((await list(PLAYER)).statusCode).toBe(403);
-    expect((await list(MOD)).statusCode).toBe(403);
     expect(views()).toEqual([]);
+    expect((await list(MOD)).statusCode).toBe(200);
   });
 
   it('refuses a caster who is banned', async () => {
