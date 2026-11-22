@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { ApiError, castApi, studioApi, type CastMatch, type PrepSheet, type StudioPanel, type StudioPickDraft } from '../api';
+import { ApiError, castApi, studioApi, type CastMatch, type MatchRoomView, type PrepSheet, type StudioPanel, type StudioPickDraft, type StudioPickRoom } from '../api';
 import { CastConnect } from './Cast';
 import { PageHeader } from '../components/PageHeader';
 import { GatePanel } from '../components/GatePanel';
@@ -9,6 +9,9 @@ import { Overlay, setOverlayKey } from '../overlay/Scenes';
 import { sampleFeed } from '../overlay/sample';
 import { CALLOUT_KINDS, sideOfEvent } from '../overlay/callouts';
 import { DeskBody } from './DeskBody';
+import { castRoomOf } from '../cast/room';
+import { SeriesBox } from '../cast/SeriesBox';
+import { PHASE_TEXT } from './event/room/roomText';
 import '../overlay/overlay.css';
 import {
   CALLOUT_KIND_LABELS, DEFAULT_INFECTED_RECT, HUD_STYLES, LAYERS, MAX_CASTERS, SCENE_HOTKEYS, SCENES, SCENE_LABELS, THEMES,
@@ -142,6 +145,13 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
       // a new choice and is refused.
       savedDraft.current = r.studio.draftEventId;
       replaceDraft(sentId, r.studio.draftEventId);
+      // The server drops a room that went off air (src/routes/castStudio.ts):
+      // take that, unless a newer pick has replaced the room meanwhile.
+      if (r.studio.roomMatchId !== next.roomMatchId) {
+        const sentRoom = next.roomMatchId;
+        setState((cur) => (cur && cur.roomMatchId === sentRoom ? { ...cur, roomMatchId: r.studio.roomMatchId } : cur));
+        if (pending.current && pending.current.roomMatchId === sentRoom) pending.current = { ...pending.current, roomMatchId: r.studio.roomMatchId };
+      }
       setFeed((f) => (f ? { ...f, studio: r.studio } : f));
     };
     try {
@@ -289,6 +299,7 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
             <div class="desk__pop" role="dialog" aria-label="Pick the match on air">
               <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
               <DraftOnAir drafts={panel.drafts ?? []} state={state} update={update} />
+              <RoomOnAir rooms={panel.rooms ?? []} state={state} update={update} room={castRoomOf(feed)} />
             </div>
           )}
           {open === 'obs' && (
@@ -302,7 +313,7 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
             </div>
           )}
         </div>
-        <DeskBody feed={feed} stale={feedStale} />
+        <DeskBody feed={feed} stale={feedStale} room={castRoomOf(feed)} />
       </div>
     );
   }
@@ -325,6 +336,7 @@ export default function CastStudio({ desk = false }: { desk?: boolean }) {
         <div class="studio__col">
           <OnAir panel={panel} state={state} update={update} onAirId={match?.id ?? state.matchId} connects={connects} />
           <DraftOnAir drafts={panel.drafts ?? []} state={state} update={update} />
+          <RoomOnAir rooms={panel.rooms ?? []} state={state} update={update} room={castRoomOf(feed)} />
           <ScenePad state={state} goScene={goScene} obsProgram={obsProgram} obsScenes={panel.obsScenes} />
           <Highlights state={state} match={match} update={update} onFire={async (c) => {
             try {
@@ -527,6 +539,55 @@ export function DraftOnAir({ drafts, state, update }: { drafts: StudioPickDraft[
         <span>Announce each pick with a strip over the other scenes (Program link)</span>
       </label>
       <p class="muted studio__hint">Cut to Draft board (B) or On the clock (C). Each new pick is revealed with a card on those two scenes by itself.</p>
+    </section>
+  );
+}
+
+/** The tournament room the room scene and the series math follow (owner
+ *  2026-11-22): picked on its own, since the veto runs before the match has
+ *  a booking. With none picked, the room of the followed booking is used. */
+export function RoomOnAir({ rooms, state, update, room }: { rooms: StudioPickRoom[]; state: StudioState; update: Update; room: MatchRoomView | null }) {
+  const pick = (id: number | null) => update((s) => ({ ...s, roomMatchId: id }), true);
+  const gone = state.roomMatchId !== null && !rooms.some((r) => r.id === state.roomMatchId);
+  const live = rooms.filter((r) => !r.finished);
+  const done = rooms.filter((r) => r.finished);
+  const row = (r: StudioPickRoom) => {
+    const on = state.roomMatchId === r.id;
+    return (
+      <button key={r.id} type="button" class={`studio__pick${on ? ' is-on' : ''}`} onClick={() => pick(on ? null : r.id)} aria-pressed={on}>
+        <span class="studio__pick-head">
+          <b>{r.a}</b> vs <b>{r.b}</b>
+          <span class={`studio__state studio__state--${r.finished ? 'completed' : r.phase === 'live' ? 'live' : 'configuring'}`}>{PHASE_TEXT[r.phase]}</span>
+        </span>
+        <span class="studio__pick-count">{`${r.eventName} · ${r.roundLabel}`}</span>
+      </button>
+    );
+  };
+  return (
+    <section class="panel">
+      <h3>Tournament room</h3>
+      {gone && (
+        <div class="studio__pick studio__pick--off">
+          <span class="studio__pick-head"><b>Saved room</b><span class="studio__state">Off air</span></span>
+          <button type="button" class="btn btn--ghost btn--sm" onClick={() => pick(null)}>Clear</button>
+        </div>
+      )}
+      {rooms.length === 0 ? (
+        <p class="muted">No tournament room to follow. A room shows here once both teams are known and its stage is live.</p>
+      ) : (
+        <>
+          {live.length > 0 && <div class="studio__picks">{live.map(row)}</div>}
+          {done.length > 0 && (
+            <>
+              <p class="eyebrow studio__sub">Finished in the last six hours</p>
+              <div class="studio__picks">{done.map(row)}</div>
+            </>
+          )}
+        </>
+      )}
+      {state.roomMatchId === null && room && <p class="muted studio__hint">Following the room of the booking on air. Pick one above to follow another.</p>}
+      {room && <SeriesBox room={room} />}
+      <p class="muted studio__hint">Cut to Tournament room (V) for the veto, the picked campaigns, sides and the series score, live.</p>
     </section>
   );
 }

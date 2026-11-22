@@ -12,6 +12,7 @@ import {
   canCastBooking, canCastDraft, canCastMatch, mayCast, pickableBookings, pickableDrafts, pickableMatches, resolveOnAir,
 } from '../cast/access.js';
 import { castDraftView, makeCardCache } from '../cast/draftView.js';
+import { canCastRoom, castRoom, pickableRooms } from '../cast/room.js';
 import type { Hub } from '../ws.js';
 import { buildMatchView } from '../cast/matchView.js';
 import { LiveRoundReader } from '../cast/liveRound.js';
@@ -94,6 +95,9 @@ export async function castStudioRoutes(
     const draftId = studio.state.draftEventId;
     const nowDate = new Date(nowMs);
     const draft = draftId !== null && canCastDraft(db, steamid, draftId, nowDate) ? castDraftView(db, draftId, nowDate, cards(draftId, nowMs)) : null;
+    // The tournament room (owner 2026-11-22): the picked room, else the
+    // followed booking's; the public view only, asked again on every build.
+    const room = castRoom(db, steamid, studio.state, onAir.matchId, nowDate);
     const feed: OverlayFeed = {
       rev: studio.rev, serverNow: nowMs, studio: studio.state, match, live,
       tankRecap: tank ? {
@@ -102,6 +106,7 @@ export async function castStudioRoutes(
       } : null,
       casterAvatars: casterAvatars(db, studio.state.casters),
       draft,
+      room,
       witchRecap: witch ? {
         agoMs: witch.agoMs, aliveS: witch.recap.aliveS, crown: witch.recap.crown, incaps: witch.recap.incaps,
         startled: nameOf(witch.recap.startled), killer: nameOf(witch.recap.killer), players: rows(witch.recap.players),
@@ -118,6 +123,7 @@ export async function castStudioRoutes(
       studio: s.state, rev: s.rev, key: keyFor(steamid),
       matches: pickableMatches(db, steamid), bookings: pickableBookings(db, steamid),
       drafts: pickableDrafts(db, steamid, new Date(clockNow())),
+      rooms: pickableRooms(db, steamid, new Date(clockNow())),
       scenes: [...SCENES], layers: [...LAYERS],
       obsScenes: Object.fromEntries([...SCENES, 'program' as const].map((k) => [k, obsSceneName(k)])),
     };
@@ -147,6 +153,10 @@ export async function castStudioRoutes(
       if (next.draftEventId !== prev.draftEventId) return reply.code(403).send({ error: 'not_castable_draft' });
       next.draftEventId = null;
     }
+    // A room that went off air (or was never castable: the picker offers
+    // only castable ones) is dropped rather than refused, so the rest of the
+    // save (a scene cut) always lands; the answer carries the cleared id.
+    if (next.roomMatchId !== null && !canCastRoom(db, me, next.roomMatchId, new Date(clockNow()))) next.roomMatchId = null;
     next.callout = prev.callout;
     const saved = saveStudio(db, me, next);
     return { studio: saved.state, rev: saved.rev };
@@ -248,7 +258,9 @@ export async function castStudioRoutes(
     if (!owner) return reply;
     const m = /^([0-9a-f]{64})\.png$/.exec((req.params as { file: string }).file);
     const feed = feedFor(owner);
-    const onAir = [feed.match?.teams.a.logoUrl, feed.match?.teams.b.logoUrl];
+    const room = feed.room as { a?: { logoKey: string | null } | null; b?: { logoKey: string | null } | null } | null | undefined;
+    const roomLogos = [room?.a?.logoKey, room?.b?.logoKey].filter((k): k is string => !!k).map((k) => `${k}.png`);
+    const onAir = [feed.match?.teams.a.logoUrl, feed.match?.teams.b.logoUrl, ...roomLogos];
     if (!m || !onAir.includes(`${m[1]}.png`)) return reply.code(404).send({ error: 'not found' });
     const bytes = opts.store().readLogo(m[1]!);
     if (!bytes) return reply.code(404).send({ error: 'not found' });

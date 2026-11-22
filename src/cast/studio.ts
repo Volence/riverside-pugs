@@ -133,6 +133,7 @@ export function cleanState(v: unknown): StudioState {
     matchId: posInt(o.matchId),
     bookingId: posInt(o.bookingId),
     draftEventId: posInt(o.draftEventId),
+    roomMatchId: posInt(o.roomMatchId),
     scene: SCENES.includes(o.scene as SceneKey) ? (o.scene as SceneKey) : d.scene,
     title: typeof o.title === 'string' ? str(o.title) : d.title,
     subtitle: str(o.subtitle),

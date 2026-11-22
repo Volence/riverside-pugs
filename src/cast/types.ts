@@ -7,11 +7,13 @@ export const SCENES = [
   'starting', 'casters', 'gameplay', 'mapintro', 'maps', 'lineups', 'stats', 'brb', 'winner', 'ending', 'results',
   // Drafts plan D2b2: appended, so the run-of-show keys never move.
   'draftboard', 'draftclock',
+  // Owner 2026-11-22 (DT2): a tournament room scene, the veto as it happens.
+  'room',
 ] as const;
 export type SceneKey = (typeof SCENES)[number];
 
 /** Scenes with a letter instead of a number: added after the run of show. */
-const LETTER_KEYS: Partial<Record<SceneKey, string>> = { results: 'R', draftboard: 'B', draftclock: 'C' };
+const LETTER_KEYS: Partial<Record<SceneKey, string>> = { results: 'R', draftboard: 'B', draftclock: 'C', room: 'V' };
 
 /** The panel's hotkey for each scene: 1-9 and 0 in order (the run of show
  *  casters learned), then letters for scenes added later. */
@@ -48,6 +50,7 @@ export const SCENE_LABELS: Record<SceneKey | LayerKey, string> = {
   draftboard: 'Draft board',
   draftclock: 'On the clock',
   draftreveal: 'Pick reveal',
+  room: 'Tournament room',
 };
 
 export const THEMES = ['riverside', 'safehouse', 'night', 'bile'] as const;
@@ -82,6 +85,11 @@ export interface StudioState {
   /** A live draft being followed (drafts plan D2b2 Ruling 1), or null.
    *  Independent of the match: a show can cut between the draft and a game. */
   draftEventId: number | null;
+  /** A tournament match room being followed (event_matches.id), or null:
+   *  the room scene and the series math. Picked on its own because the veto
+   *  runs before the match has a booking; with none picked, the room of the
+   *  followed booking (or the match on air) is used. */
+  roomMatchId: number | null;
   scene: SceneKey;
   title: string;
   subtitle: string;
@@ -237,6 +245,7 @@ export function defaultStudioState(): StudioState {
     matchId: null,
     bookingId: null,
     draftEventId: null,
+    roomMatchId: null,
     scene: 'starting',
     title: 'Riverside PUGs',
     subtitle: '',
@@ -573,4 +582,15 @@ export interface OverlayFeed {
   casterAvatars: (string | null)[];
   /** The draft the studio follows, when the caster may still follow it (drafts plan D2b2). */
   draft: CastDraftView | null;
+  /** The tournament room the studio follows (src/cast/room.ts castRoom):
+   *  the public match room, as an anonymous viewer reads it at
+   *  /api/events/:slug/matches/:id (src/events/roomViews.ts MatchRoomView;
+   *  typed in full on the web side as web/src/api.ts MatchRoomView). Null
+   *  with no room, or one the caster may no longer follow. Optional for a
+   *  feed from an older server. */
+  room?: CastRoomFeed | null;
 }
+
+/** See OverlayFeed.room. This file stays free of server imports (the web
+ *  build compiles it), so the room is typed by its readers. */
+export type CastRoomFeed = { id: number; eventSlug: string };

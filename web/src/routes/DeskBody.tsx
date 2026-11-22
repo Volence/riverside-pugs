@@ -6,6 +6,8 @@ import {
   type CastInfected, type CastLiveRound, type CastMatchView, type CastSurvivor, type CastTeam, type OverlayFeed,
 } from '../../../src/cast/types';
 import './castDesk.css';
+import type { MatchRoomView } from '../api';
+import { SeriesBox } from '../cast/SeriesBox';
 
 /**
  * Caster desk body (/cast/desk): a stats screen for a caster's second
@@ -18,18 +20,26 @@ import './castDesk.css';
 /** The desk's stats for the feed's match (or a "nothing on air" note). The
  *  controls (match pick, scene keys, OBS) come from the studio around it:
  *  CastStudio renders this in its desk view. */
-export function DeskBody({ feed, stale = false }: { feed: OverlayFeed | null; stale?: boolean }) {
+export function DeskBody({ feed, stale = false, room = null }: { feed: OverlayFeed | null; stale?: boolean; room?: MatchRoomView | null }) {
   const match = feed?.match ?? null;
+  // The series math of a tournament room (owner 2026-11-22): a strip of its
+  // own over the stats, there for the whole match (a PUG never has one), so
+  // it never comes and goes between rounds.
+  const series = room?.series ? <section class="desk__panel desk__series"><SeriesBox room={room} title={false} /></section> : null;
   if (!feed || !match) {
     return (
-      <div class="desk__nothing">
-        <p>{feed ? 'Nothing on air. Pick a match with the Match button above.' : 'Loading...'}</p>
-      </div>
+      <>
+        {series}
+        <div class="desk__nothing">
+          <p>{feed ? 'Nothing on air. Pick a match with the Match button above.' : 'Loading...'}</p>
+        </div>
+      </>
     );
   }
   return (
     <>
       <Scoreline match={match} live={feed.live} stale={stale} />
+      {series}
       {/* Every panel is always drawn, in a fixed place: a section with
           nothing to show says so instead of disappearing, so nothing moves
           between rounds or when a tank or a recap comes and goes. */}

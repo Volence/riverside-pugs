@@ -802,3 +802,78 @@
 .ov-bonus__need.is-ahead { color: var(--win); }
 .ov-plate .ov-bonus { width: 560px; margin: 0 auto; box-sizing: border-box; padding: 6px 20px; clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%); }
 .ov-round .ov-bonus { justify-content: flex-start; }
+
+/* ---------- tournament room (owner 2026-11-22, DT2) ---------- */
+.ov-room .ov-title { top: 64px; }
+.ov-room__band {
+  position: absolute; left: 120px; right: 120px; top: 236px; height: 168px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 720px minmax(0, 1fr); align-items: center;
+  background: var(--panel); border-bottom: 3px solid var(--accent); animation: ov-rise 600ms cubic-bezier(.2,.7,.2,1) both;
+}
+.ov-room__team { display: flex; align-items: center; gap: 22px; padding: 0 28px; min-width: 0; }
+.ov-room__team--a { --c: var(--team-a); border-left: 8px solid var(--team-a); height: 100%; }
+.ov-room__team--b { --c: var(--team-b); flex-direction: row-reverse; text-align: right; border-right: 8px solid var(--team-b); height: 100%; }
+.ov-room__who { display: flex; flex-direction: column; min-width: 0; }
+.ov-room__name { font: 400 48px/1.05 var(--font-display); text-transform: uppercase; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-room__meta { font: 500 20px var(--font-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
+.ov-room__team.is-lead .ov-room__name { color: #fff; }
+.ov-room__mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; padding: 0 12px; }
+.ov-room__score { display: flex; align-items: baseline; gap: 18px; font: 400 92px/1 var(--font-display); color: var(--bone); font-variant-numeric: tabular-nums; }
+.ov-room__score i { font-style: normal; color: var(--accent); font-size: 64px; }
+.ov-room__vs { font: 400 64px var(--stencil); color: var(--accent); text-transform: uppercase; }
+.ov-room__format { font: 500 20px var(--font-label); letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted); }
+.ov-room__needs { font: 600 21px var(--font-label); letter-spacing: 0.02em; color: var(--bone); max-width: 700px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-room__needs.is-chase { color: var(--accent); }
+
+.ov-room__plan {
+  position: absolute; left: 120px; right: 120px; top: 432px; margin: 0; padding: 0; list-style: none;
+  display: flex; flex-wrap: nowrap; gap: 8px; overflow: hidden; animation: ov-fade 500ms 200ms both;
+}
+.ov-room__step {
+  flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 6px 14px; font: 500 18px var(--font-label); letter-spacing: 0.06em; text-transform: uppercase;
+  background: var(--panel-2); color: var(--text-muted); border-left: 4px solid rgba(255, 255, 255, 0.18);
+}
+.ov-room__step.is-done { color: var(--text); border-left-color: rgba(255, 255, 255, 0.5); }
+.ov-room__step.is-now { color: #fff; border-left-color: var(--accent); background: color-mix(in oklab, var(--accent) 35%, #0b0908); animation: ov-breathe 1.4s ease-in-out infinite; }
+.ov-room__step--ban.is-done { text-decoration: none; }
+
+.ov-room__pool {
+  position: absolute; left: 120px; right: 120px; top: 500px; margin: 0; padding: 0; list-style: none;
+  display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 12px;
+}
+.ov-room__tile {
+  display: flex; flex-direction: column; justify-content: space-between; min-height: 120px; padding: 14px 16px;
+  background: var(--panel); border-top: 6px solid var(--tint); animation: ov-rise 500ms cubic-bezier(.2,.7,.2,1) both; min-width: 0;
+}
+.ov-room__tilename { font: 400 30px/1.05 var(--font-display); text-transform: uppercase; color: var(--bone); overflow-wrap: anywhere; }
+.ov-room__tilestate { font: 600 17px var(--font-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.ov-room__tile.is-banned { opacity: 0.5; filter: grayscale(0.8); }
+.ov-room__tile.is-banned .ov-room__tilename { text-decoration: line-through; text-decoration-color: var(--accent); text-decoration-thickness: 4px; }
+.ov-room__tile.is-picked, .ov-room__tile.is-decider { background: color-mix(in oklab, var(--tint) 28%, rgba(11, 9, 8, 0.92)); }
+.ov-room__tile.is-picked .ov-room__tilestate, .ov-room__tile.is-decider .ov-room__tilestate { color: #fff; }
+.ov-room__tile.is-picked.by-a { box-shadow: inset 0 -5px 0 var(--team-a); }
+.ov-room__tile.is-picked.by-b { box-shadow: inset 0 -5px 0 var(--team-b); }
+.ov-room__tile.is-banned.by-a { box-shadow: inset 0 -5px 0 var(--team-a); }
+.ov-room__tile.is-banned.by-b { box-shadow: inset 0 -5px 0 var(--team-b); }
+
+.ov-room__games { position: absolute; left: 120px; right: 120px; top: 664px; display: flex; gap: 16px; }
+.ov-room__game {
+  flex: 1 1 0; min-width: 0; padding: 16px 20px; background: var(--panel); border-left: 8px solid var(--tint);
+  display: flex; flex-direction: column; gap: 4px; animation: ov-rise 500ms 150ms cubic-bezier(.2,.7,.2,1) both;
+}
+.ov-room__game header { display: flex; justify-content: space-between; gap: 12px; font: 600 18px var(--font-label); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+.ov-room__game.is-live .ov-room__gamestate { color: var(--accent); animation: ov-breathe 1.4s ease-in-out infinite; }
+.ov-room__campaign { font: 400 40px/1.05 var(--font-display); text-transform: uppercase; color: var(--bone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-room__facts { font: 500 19px var(--font-label); letter-spacing: 0.04em; color: var(--text); }
+.ov-room__gamescore { display: flex; justify-content: space-between; margin-top: 6px; font: 400 40px/1 var(--font-display); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ov-room__gamescore .is-win { color: #fff; }
+
+.ov-room__status {
+  position: absolute; left: 120px; right: 120px; bottom: 64px; min-height: 72px; padding: 0 28px;
+  display: flex; align-items: center; gap: 24px; background: var(--panel); border-top: 3px solid var(--accent);
+  animation: ov-rise 600ms 300ms both;
+}
+.ov-room__statustext { font: 400 32px var(--font-display); text-transform: uppercase; color: var(--bone); }
+.ov-room__clock { font: 400 40px var(--font-display); color: var(--accent); font-variant-numeric: tabular-nums; }
+.ov-room__last { margin-left: auto; font: 500 19px var(--font-label); letter-spacing: 0.04em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -2,6 +2,8 @@ import { campaignTint, mapName } from '../format';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { Backdrop, Countdown, Title } from './pieces';
 import { DraftBoard, DraftRevealStrip, OnTheClock } from './DraftScenes';
+import { RoomScene } from './RoomScene';
+import { castRoomOf } from '../cast/room';
 import { wholePercent } from '../components/WinChart';
 import { emptyReveal, stepReveal, type DraftReveal } from './draftReveal';
 import { camSlots } from '../../../src/cast/layout';
@@ -91,6 +93,7 @@ function SceneBody({ scene, feed, now, auto, reveal }: { scene: OverlayKey; feed
     case 'draftboard': return <DraftBoard studio={studio} draft={feed.draft ?? null} now={now} reveal={reveal} />;
     case 'draftclock': return <OnTheClock studio={studio} draft={feed.draft ?? null} now={now} reveal={reveal} />;
     case 'draftreveal': return feed.draft && reveal ? <DraftRevealStrip draft={feed.draft} reveal={reveal} /> : null;
+    case 'room': return <RoomScene studio={studio} room={castRoomOf(feed)} now={now} logoSrc={(file) => `/api/overlay/logo/${file}?k=${encodeURIComponent(overlayKey)}`} />;
     case 'program': return null;
   }
 }

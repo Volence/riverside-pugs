@@ -1,0 +1,23 @@
+/* The series math table (web/src/cast/SeriesBox.tsx), for the caster studio
+ * panel and the caster desk. */
+.seriesbox { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.seriesbox__head { margin: 0; font-size: var(--fs-dense); color: var(--text-muted); }
+.seriesbox__head b { color: var(--text-bright); font-weight: 600; }
+.seriesbox__none { margin: 0; }
+.seriesbox__table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; }
+.seriesbox__table th, .seriesbox__table td { height: auto; padding: 4px 8px; text-align: right; border: 0; border-bottom: 1px solid var(--border); }
+.seriesbox__table thead th { font: 500 var(--fs-label) var(--font-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seriesbox__table .is-text { text-align: left; width: 55%; }
+.seriesbox__table tbody td { font-size: var(--fs-body); color: var(--text); }
+.seriesbox__table tbody td.is-text { font-size: var(--fs-dense); overflow-wrap: anywhere; }
+.seriesbox__table tbody tr.is-live td { color: var(--text-bright); }
+.seriesbox__table tbody tr.is-upcoming td { color: var(--text-muted); }
+.seriesbox__state { color: var(--text-muted); }
+.seriesbox__table tbody tr.is-live .seriesbox__state { color: var(--accent); }
+.seriesbox__table td.is-win { color: var(--text-bright); font-weight: 600; }
+.seriesbox__table tfoot th { font: 500 var(--fs-label) var(--font-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.seriesbox__table tfoot td { font: 400 1.5rem var(--font-display); color: var(--text-bright); }
+.seriesbox__table tfoot tr + tr td { font: 500 var(--fs-dense) var(--font-label); }
+.seriesbox__table tfoot td.is-lead { color: var(--accent); }
+.seriesbox__needs { margin: 0; padding: 6px 10px; background: var(--surface-2, var(--surface)); border-left: 3px solid var(--border-strong); font-weight: 600; color: var(--text-bright); }
+.seriesbox__needs.is-chase { border-left-color: var(--accent); }
