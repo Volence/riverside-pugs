@@ -112,6 +112,30 @@ describe('admin room tools', () => {
   });
 });
 
+describe('releasing one match\'s hold from its card (owner 2026-11-22)', () => {
+  const MOD = '76561199000000711';
+  it('releases a hold the site put on (nobody ready), admin only, and writes the audit row', async () => {
+    cookies[MOD] = authedCookie(app, f.db, MOD);
+    f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
+    const base = `/api/admin/events/${f.eventId}/matches/${f.matchId}`;
+    R.openRoom(f.db, { matchId: f.matchId, by: null, higher: 'a', seed: 0, timers: TIMERS });
+    // The room clock's own hold: no actor, so Release staff holds skips it.
+    must(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'nobody_ready' }));
+    expect((await post(`/api/admin/events/${f.eventId}/release-all`, ADMIN)).json()).toEqual({ released: 0, failed: 0 });
+    for (const who of [A[0], OUTSIDER, MOD]) expect((await post(`${base}/release-hold`, who)).statusCode, who).toBe(403);
+    expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'admin_hold', hold_reason: 'nobody_ready' });
+    expect((await post(`${base}/release-hold`, ADMIN)).statusCode).toBe(200);
+    const m = P.getMatch(f.db, f.matchId)!;
+    expect(m).toMatchObject({ status: 'veto', hold_reason: null, hold_from: null });
+    // Neither team was ready: the ready check starts again with a fresh clock.
+    expect(m.deadline).not.toBeNull();
+    const audit = f.db.prepare("SELECT admin_id, action, target, detail FROM admin_actions WHERE action = 'event_hold_release'").all() as { admin_id: string; action: string; target: string; detail: string }[];
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ admin_id: ADMIN, target: String(f.eventId) });
+    expect(JSON.parse(audit[0]!.detail)).toEqual({ matchId: f.matchId });
+  });
+});
+
 describe('final review: rooms follow results, disqualifications and cancels', () => {
   const MOD = '76561199000000711';
   const base = () => `/api/admin/events/${f.eventId}/matches/${f.matchId}`;

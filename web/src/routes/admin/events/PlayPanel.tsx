@@ -164,6 +164,25 @@ const FOUR_RE = /^\d{17}$/;
 /** Holds over a game the box no longer runs: a release would be held again at once (plan T3c final review). */
 const GAME_GONE = new Set(['game_aborted', 'game_lost']);
 
+/** Release one match's hold, whoever put it on (staff, or the site itself:
+ *  nobody ready, a lineup short, a dispute). Owner 2026-11-22 (DT2): on the
+ *  held match's own card, not only Release staff holds on the night bar,
+ *  which skips the holds the site put on. The same route and audit row
+ *  (event_hold_release) the staff tools always used. */
+function ReleaseHold({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; run: Run; busy: boolean }) {
+  const d = m.desk;
+  if (m.phase !== 'hold' || !d || GAME_GONE.has(d.holdReason ?? '')) return null;
+  const names = `${m.a?.name ?? 'TBD'} vs ${m.b?.name ?? 'TBD'}`;
+  const why = d.holdReason ? ` Held: ${holdText(d.holdReason)}` : '';
+  const back = d.holdFrom === 'waiting'
+    ? 'The match goes back to waiting. If its window has ended it keeps no window, so set a time for it in Staff tools (Set time also releases the hold).'
+    : `The match goes back to ${d.holdFrom ? (PHASE_TEXT[d.holdFrom === 'booking' ? 'server' : d.holdFrom as RoomPhase] ?? d.holdFrom).toLowerCase() : 'where it was'} with a fresh clock.${d.dispute ? ' The dispute is cleared.' : ''}`;
+  return (
+    <button class="btn btn--sm" aria-label={`Release hold: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.releaseEventHold(eventId, m.id),
+      { title: `Release the hold on ${names}?`, body: `${back}${why}`, confirmLabel: 'Release hold' })}>Release hold</button>
+  );
+}
+
 /** The staff tools (plan T3c Rulings 10 to 15 and 9), each behind a confirm. */
 function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; run: Run; busy: boolean }) {
   const [side, setSide] = useState<'a' | 'b'>('a');
@@ -268,12 +287,6 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
         {phase === 'hold' && GAME_GONE.has(d.holdReason ?? '') && (
           <p class="muted">The game on the server was aborted or lost: enter the result, or reset the room. Releasing the hold would only hold it again.</p>
         )}
-        {phase === 'hold' && !GAME_GONE.has(d.holdReason ?? '') && (
-          <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.releaseEventHold(eventId, m.id),
-            { title: 'Release the hold?', body: heldFromWaiting
-              ? 'The match goes back to waiting. If its window has ended it keeps no window, so set a time for it here (Set time also releases the hold).'
-              : `The match goes back to ${d.holdFrom ?? 'where it was'} with a fresh deadline. A dispute is cleared.` })}>Release hold</button>
-        )}
         {canBox && (d.frozen
           ? <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.unfreezeEventMatch(eventId, m.id), { title: 'Unfreeze the game?' })}>Unfreeze</button>
           : <button class="btn btn--ghost btn--sm" disabled={busy} onClick={() => void run(() => adminApi.freezeEventMatch(eventId, m.id), { title: 'Freeze the game?', body: phase === 'connect'
@@ -371,6 +384,7 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
           {editable && m.phase === 'waiting' && !holding && (
             <button class="btn btn--ghost btn--sm" aria-label={`Hold: ${names}`} disabled={busy} onClick={() => setHolding(true)}>Hold</button>
           )}
+          {editable && <ReleaseHold eventId={eventId} m={m} run={run} busy={busy} />}
           {editable && ROOM_LIVE.has(m.phase) && (
             <>
               <button class="btn btn--ghost btn--sm" aria-label={`Reset room: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.resetEventRoom(eventId, m.id), BOOKED.has(m.phase)
