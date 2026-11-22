@@ -182,7 +182,7 @@ export function burstName(count: number): string {
  *  the site, not on the render box). */
 export interface ClipJob {
   id: number; matchId: number; ordinal: number; half: number; steamid: string; times: number[];
-  count: number; kind: 'skeet' | 'quad'; caption: [string, string];
+  count: number; kind: 'skeet' | 'quad'; caption: string[];
   /** seconds of track before the first moment and after the last */
   lead: number; tail: number;
 }
@@ -217,10 +217,15 @@ export function jobFor(db: DB, row: ClipRow): ClipJob {
     const people = JSON.parse(row.people_json ?? '[]') as string[];
     // a tournament quad names the team (owner 11-22): the entry holding most of the four cappers
     const team = t?.entries.map((e) => ({ e, n: people.filter((p) => e.players.has(p)).length })).sort((a, b) => b.n - a.n)[0];
-    if (team && team.n >= 3) return { ...base, lead: 3, tail: 4.3, caption: [`${team.e.name}: QUAD CAP`, `${where} · 4 pins in ${secs} s`] };
     const names = people.map((id) => getPlayer(db, id)?.name ?? id);
+    // the tournament reel prints the team big, so the corner names the four who did it
+    if (team && team.n >= 3) return { ...base, lead: 3, tail: 4.3, caption: [names.join(', ')] };
     return { ...base, lead: 3, tail: 4.3, caption: [`QUAD CAP: ${names.join(', ')}`, `${where} · 4 pins in ${secs} s`] };
   }
+  // a tournament game's corner shows only the player's team (owner 11-22): the reel prints the name and the
+  // burst big, so the corner says the one thing it does not
+  const mine = t?.entries.find((e) => e.players.has(row.player_id));
+  if (mine) return { ...base, lead: 3.3, tail: 2.7, caption: [mine.name] };
   return { ...base, lead: 3.3, tail: 2.7, caption: [`${name}: ${burstName(row.count).toUpperCase()}`, `${where} · ${row.count} hunters in ${secs} s`] };
 }
 
