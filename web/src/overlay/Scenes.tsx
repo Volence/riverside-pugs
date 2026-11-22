@@ -4,6 +4,8 @@ import { Backdrop, Countdown, Title } from './pieces';
 import { DraftBoard, DraftRevealStrip, OnTheClock } from './DraftScenes';
 import { RoomScene } from './RoomScene';
 import { castRoomOf } from '../cast/room';
+import { seriesMath } from '../routes/event/room/seriesMath';
+import type { MatchRoomView } from '../api';
 import { wholePercent } from '../components/WinChart';
 import { emptyReveal, stepReveal, type DraftReveal } from './draftReveal';
 import { camSlots } from '../../../src/cast/layout';
@@ -79,7 +81,7 @@ function SceneBody({ scene, feed, now, auto, reveal }: { scene: OverlayKey; feed
     case 'starting': return <Starting studio={studio} match={match} now={now} />;
     case 'casters': return <Casters studio={studio} match={match} avatars={feed.casterAvatars ?? []} />;
     case 'gameplay': return <Gameplay studio={studio} match={match} live={live} now={now} auto={auto} feed={feed} />;
-    case 'scorebug': return match ? <Scorebug studio={studio} match={match} live={live} /> : null;
+    case 'scorebug': return match ? <Scorebug studio={studio} match={match} live={live} room={castRoomOf(feed)} /> : null;
     case 'roundhud': return <RoundHud studio={studio} match={match} live={live} force />;
     case 'lowerthird': return studio.lowerThird.show ? <LowerThird studio={studio} /> : null;
     case 'mapintro': return <MapIntro studio={studio} match={match} />;
@@ -685,7 +687,7 @@ function Gameplay({ studio, match, live, now, auto, feed }: {
   return (
     <div class={`ov-game ov-game--${studio.scorebugAt}`}>
       <div class="ov-game__col">
-        <Scorebug studio={studio} match={match} live={live} />
+        <Scorebug studio={studio} match={match} live={live} room={castRoomOf(feed)} />
         <RoundHud studio={studio} match={match} live={live} />
       </div>
       <Recap studio={studio} feed={feed} />
@@ -694,7 +696,30 @@ function Gameplay({ studio, match, live, now, auto, feed }: {
   );
 }
 
-function Scorebug({ studio, match, live }: { studio: StudioState; match: CastMatchView; live: CastLiveRound | null }) {
+/** The series line under the scorebug (owner 2026-11-22): a tournament
+ *  series only, and only when the room is the one the match on air belongs
+ *  to. By team tag, not left and right, since the room's sides and the
+ *  game's teams need not line up. Totals come from seriesMath, as everywhere. */
+export function BugSeries({ room, matchId }: { room: MatchRoomView | null; matchId: number }) {
+  if (!room?.series || !room.games.some((g) => g.matchId === matchId)) return null;
+  const m = seriesMath(room);
+  if (!m) return null;
+  const tag = (x: 'a' | 'b') => ((x === 'a' ? room.a : room.b)?.tag || (x === 'a' ? room.a : room.b)?.name || x.toUpperCase()).slice(0, 5).toUpperCase();
+  const tail = m.over
+    ? (m.winner ? `${tag(m.winner)} win` : 'Over')
+    : m.totalScore
+      ? (m.needs ? <>{`${tag(m.leader!)} +${m.gap} · `}<b>{`${tag(m.needs.side)} need ${m.needs.tie} to tie`}</b></> : 'Level')
+      : `First to ${Math.floor(m.bestOf / 2) + 1}`;
+  return (
+    <div class="ov-bug__series">
+      <span class="ov-bug__serieslabel">{m.totalScore ? (m.liveIncluded ? 'Series so far' : 'Series') : `Bo${m.bestOf}`}</span>
+      <span class="num">{`${tag('a')} ${m.a} · ${tag('b')} ${m.b}`}</span>
+      <span class="ov-bug__seriestail">{tail}</span>
+    </div>
+  );
+}
+
+function Scorebug({ studio, match, live, room = null }: { studio: StudioState; match: CastMatchView; live: CastLiveRound | null; room?: MatchRoomView | null }) {
   const { a, b } = match.teams;
   const chapter = match.chapters[match.mapNumber - 1];
   // Typed for this map, else from the server (bossFlows). 0 is "no boss".
@@ -723,6 +748,7 @@ function Scorebug({ studio, match, live }: { studio: StudioState; match: CastMat
           {witchPct !== null ? <span><b>Witch</b> {witchPct}%</span> : flows.witch === -2 ? <span><b>Witch</b> party</span> : null}
         </div>
       )}
+      <BugSeries room={room} matchId={match.id} />
     </div>
   );
 }

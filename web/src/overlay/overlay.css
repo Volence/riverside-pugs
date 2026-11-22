@@ -877,3 +877,13 @@
 .ov-room__statustext { font: 400 32px var(--font-display); text-transform: uppercase; color: var(--bone); }
 .ov-room__clock { font: 400 40px var(--font-display); color: var(--accent); font-variant-numeric: tabular-nums; }
 .ov-room__last { margin-left: auto; font: 500 19px var(--font-label); letter-spacing: 0.04em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The series line under the scorebug (owner 2026-11-22): tournament series only. */
+.ov-bug__series {
+  display: flex; justify-content: center; align-items: baseline; gap: 14px; width: fit-content; min-width: 300px; margin: 0 auto; padding: 4px 16px 5px;
+  background: var(--panel); border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font: 500 16px var(--font-label); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); white-space: nowrap;
+}
+.ov-bug__serieslabel { color: var(--text-muted); letter-spacing: 0.14em; }
+.ov-bug__series .num { color: var(--bone); font-variant-numeric: tabular-nums; }
+.ov-bug__seriestail b { color: var(--accent); font-weight: 600; }

@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/preact';
 import { Overlay } from './Scenes';
-import { sampleRoom } from './sample';
+import { sampleFeed, sampleRoom } from './sample';
 import type { MatchRoomView } from '../api';
 import { defaultStudioState, type OverlayFeed } from '../../../src/cast/types';
 
@@ -62,5 +62,30 @@ describe('room scene', () => {
   it('on the program link it follows the producer to the room scene', () => {
     const { container } = render(<Overlay which="program" feed={feedWith(sampleRoom(N))} now={N} />);
     expect(container.querySelector('.ov--room')).toBeTruthy();
+  });
+});
+
+describe('scorebug series line (owner 2026-11-22)', () => {
+  /** The sample match on air (id 0) as game 2 of the sample room. */
+  const onAir = (room: MatchRoomView | null, patch: Partial<OverlayFeed['studio']> = {}): OverlayFeed => {
+    const studio = { ...defaultStudioState(), scene: 'gameplay' as const, hudStyle: 'scorebug' as const, ...patch };
+    return { ...sampleFeed(studio, N), room: room as unknown as OverlayFeed['room'] };
+  };
+  const asGame2 = (r: MatchRoomView): MatchRoomView => ({ ...r, games: r.games.map((g) => (g.game === 2 ? { ...g, matchId: 0 } : g)) });
+
+  it('shows the series total, the gap and what the trailing team needs to tie, on the gameplay scorebug and the scorebug layer', () => {
+    for (const which of ['gameplay', 'scorebug'] as const) {
+      const { container, unmount } = render(<Overlay which={which} feed={onAir(asGame2(sampleRoom(N)))} now={N} />);
+      const line = container.querySelector('.ov-bug__series')!;
+      expect(line.querySelector('.ov-bug__serieslabel')!.textContent).toBe('Series so far');
+      expect(line.querySelector('.num')!.textContent).toBe('SMA 3141 · SMB 2628');
+      expect(line.querySelector('.ov-bug__seriestail')!.textContent).toBe('SMA +513 · SMB need 513 to tie');
+      unmount();
+    }
+  });
+
+  it('shows nothing for a PUG, or for a followed room the match on air is not part of', () => {
+    expect(render(<Overlay which="scorebug" feed={onAir(null)} now={N} />).container.querySelector('.ov-bug__series')).toBeNull();
+    expect(render(<Overlay which="scorebug" feed={onAir(sampleRoom(N))} now={N} />).container.querySelector('.ov-bug__series')).toBeNull();
   });
 });
