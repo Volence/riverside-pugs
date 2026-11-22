@@ -4597,6 +4597,34 @@ void CheckRosterMismatch()
 
 /** Rotoblin ready-up go-live signal (global forward; fires even if we never call
  *  the readyup natives). First live round flips Pending -> Live. */
+/** 0.3.49: l4dready's forward at the start of the go-live countdown, while
+ *  ready-up is still on (sm_resetscores only works in ready-up). */
+public void OnRoundIsLivePre()
+{
+	if (FreshTallyReset()) ServerCommand("sm_resetscores");
+}
+
+/** 0.3.49: a site-started game on a tournament box, with no carry and not
+ *  resumed, starts l4dscores' tally from 0 to 0. l4dscores only clears its
+ *  tally if the engine's campaign scores read 0 to 0 a tenth of a second
+ *  after ClearTeamScores on a first map, which is a race; a series box plays
+ *  game 2 without a restart, and twice on Draft Tourney #2 game 2 kept game
+ *  1's totals, on the wrong teams, so l4dscores sent the wrong team out first
+ *  on later maps. sm_resetscores (ResetCampaignScores + ResetRoundScores)
+ *  clears the tally AND the shadow health-run tally, so !scoresalt stays
+ *  whole; the sm_l4dscores_seed used for carry and resume marks it partial,
+ *  which is only true there. First chapter, half 1 only: later the tally
+ *  holds this game's own scores. Not a queue PUG (the box restarts before
+ *  every match) and not a self-started game. */
+bool FreshTallyReset()
+{
+	if (g_State != MS_Pending && g_State != MS_Live) return false;
+	if (g_bSelfStarted || !TourneyOn() || g_bResumed || HasCarry()) return false;
+	if (g_iMapCount != 0 || view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound"))) return false;
+	LogMessage("[pug] fresh match %d going live: l4dscores tally reset (sm_resetscores)", g_iMatchId);
+	return true;
+}
+
 public void OnRoundIsLive()
 {
 	g_bHalfWasLive = true;
@@ -4670,18 +4698,9 @@ public void OnRoundIsLive()
 	// only: l4dscores adds each half's round score to its tally at that half's
 	// round_end, so a seed at half 2's go-live would wipe half 1's score.
 	//
-	// 0.3.49: and every site-started game on a tournament box, carry or not.
-	// l4dscores only clears its tally if the engine's campaign scores read
-	// 0 to 0 a tenth of a second after ClearTeamScores on a first map, which
-	// is a race; a series box plays game 2 without a restart, and twice on
-	// Draft Tourney #2 game 2 kept game 1's totals, on the wrong teams, so
-	// l4dscores sent the wrong team out first on later maps. Seeding makes the
-	// tally the real one (0 to 0 plus any carry) whatever the race did. Not a
-	// queue PUG (the box restarts before every match, so the tally is fresh)
-	// and not a self-started game: the seed also marks l4dscores' shadow
-	// health-run tally partial, which !scoresalt then says.
-	bool freshSeed = !g_bSelfStarted && TourneyOn();
-	if (g_State == MS_Live && (g_bResumed || HasCarry() || freshSeed))
+	// A fresh tournament game (no carry, not resumed) is not seeded: it is
+	// cleared in OnRoundIsLivePre instead, see FreshTallyReset.
+	if (g_State == MS_Live && (g_bResumed || HasCarry()))
 	{
 		if (g_iCarrySeedMaps == -1) g_iCarrySeedMaps = g_iMapCount;
 		if (g_iMapCount == g_iCarrySeedMaps && !view_as<bool>(GameRules_GetProp("m_bInSecondHalfOfRound")))
@@ -5202,7 +5221,7 @@ void SeedL4dscoresTally()
 	int inf = (survPug == 1) ? b : a;
 	ServerCommand("sm_l4dscores_seed %d %d %d", surv, inf, g_iMapCount + 1);
 	LogMessage("[pug] %s match %d live: l4dscores seeded survivors=%d infected=%d (pug team %s on survivors, carry a=%d b=%d)",
-		g_bResumed ? "resumed" : HasCarry() ? "carried" : "fresh", g_iMatchId, surv, inf, survPug == 1 ? "a" : "b", g_iCarryA, g_iCarryB);
+		g_bResumed ? "resumed" : "carried", g_iMatchId, surv, inf, survPug == 1 ? "a" : "b", g_iCarryA, g_iCarryB);
 }
 
 void WinnerOf(int a, int b, char[] out, int maxlen)
