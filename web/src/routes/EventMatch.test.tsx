@@ -190,6 +190,23 @@ describe('EventMatchPage', () => {
     expect(screen.getByText('Live')).toBeTruthy();
   });
 
+  it('a total-score series header adds the live game to the finished games while it plays (owner 2026-11-22)', async () => {
+    const game = (n: number, state: 'live' | 'done', a: number | null, b: number | null, live: { map: string | null; scoreA: number; scoreB: number } | null) => ({
+      id: n, game: n, ordinal: n, tiebreak: false, campaign: 'no_mercy', campaignName: 'No Mercy', map: null, pickedBy: null, sideBy: 'b' as const,
+      firstSurvivors: 'b' as const, matchId: 7 + n, state, scoreA: a, scoreB: b, winner: null, forfeit: null, live,
+    });
+    mockEvents.room.mockResolvedValue(view({
+      phase: 'live', deadline: null,
+      series: { bestOf: 2, totalScore: true, winsA: 0, winsB: 1, totalA: 2211, totalB: 2480, over: false, winner: null },
+      games: [game(1, 'done', 2211, 2480, null), game(2, 'live', null, null, { map: 'mc5m3_cemetery', scoreA: 930, scoreB: 148 })],
+    }));
+    render(<EventMatchPage slug="cup" id="1" session={{ kind: 'guest' } as never} />);
+    const hero = await screen.findByRole('region', { name: 'Match result' });
+    expect(within(hero).getByText('3141')).toBeTruthy();
+    expect(within(hero).getByText('2628')).toBeTruthy();
+    expect(within(hero).getByText(/total score so far/)).toBeTruthy();
+  });
+
   it('confirms and disputes from the confirm panel (plan T3b)', async () => {
     mockEvents.room.mockResolvedValue(view({
       phase: 'confirming', deadline: '2026-10-06T00:15:00.000Z',
