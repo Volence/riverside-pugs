@@ -1,6 +1,6 @@
 import { campaignDisplayName } from './campaignRegistry.js';
 import type { DB } from './db.js';
-import { completedPug } from './matchKinds.js';
+import { completedPug, completedTournament } from './matchKinds.js';
 import { getPlayer } from './players.js';
 import { STREAK_MIN, streakRuns } from './skeetStreaks.js';
 
@@ -26,6 +26,10 @@ export const CLIP_TRIPLES_SINCE = '2026-09-28 02:00:00';
 /** A claim older than this is the worker dying mid-render: queued again. */
 export const CLAIM_TIMEOUT_MIN = 60;
 export const MAX_ATTEMPTS = 3;
+
+/** The matches clips come from: finished public PUGs, and finished tournament
+ *  games (public once over; owner 2026-11-22). Scrims stay out. */
+const clipMatch = (a: string) => `${a}.voided_at IS NULL AND ((${completedPug(a)} AND ${a}.visibility = 'public') OR (${completedTournament(a)}))`;
 
 export interface ClipBurst { steamid: string; mapOrdinal: number; half: number; times: number[]; kind?: 'skeet' | 'quad'; people?: string[] }
 
@@ -130,13 +134,15 @@ export function findClipBursts(db: DB, matchId: number): ClipBurst[] {
 
 const stamp = (d: Date) => d.toISOString().replace('T', ' ').slice(0, 19);
 
-/** Scan completed public pugs not scanned yet and queue their bursts. */
+/** Scan finished matches (clipMatch) not scanned yet and queue their bursts.
+ *  A tournament game gets doubles and quads whatever its date: there are few,
+ *  and a tournament's reel wants them all. */
 export function scanClips(db: DB): number {
   const matches = db.prepare(
-    `SELECT id, ended_at AS endedAt FROM matches
-     WHERE ${completedPug()} AND voided_at IS NULL AND visibility = 'public' AND ended_at >= ?
-       AND id NOT IN (SELECT match_id FROM clip_scans)`,
-  ).all(CLIP_TRIPLES_SINCE) as { id: number; endedAt: string }[];
+    `SELECT m.id, m.ended_at AS endedAt, m.kind FROM matches m
+     WHERE ${clipMatch('m')} AND m.ended_at >= ?
+       AND m.id NOT IN (SELECT match_id FROM clip_scans)`,
+  ).all(CLIP_TRIPLES_SINCE) as { id: number; endedAt: string; kind: string }[];
   const ins = db.prepare(
     `INSERT OR IGNORE INTO clips (match_id, player_id, map_ordinal, half, t_ms, count, span_ms, times_json, kind, people_json)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -146,7 +152,7 @@ export function scanClips(db: DB): number {
   const scanned = db.prepare('INSERT INTO clip_scans (match_id, scanned_at) VALUES (?, ?)');
   let n = 0;
   for (const m of matches) {
-    const doubles = m.endedAt >= CLIPS_SINCE;
+    const doubles = m.endedAt >= CLIPS_SINCE || m.kind === 'tournament';
     const bursts = findClipBursts(db, m.id).filter((b) => (doubles || b.times.length >= STREAK_MIN) && known.get(b.steamid));
     if (doubles && (quadStat.get(m.id) as { n: number }).n > 0) bursts.push(...findQuads(db, m.id).filter((b) => known.get(b.steamid)));
     db.transaction(() => {
@@ -251,14 +257,14 @@ export interface PublicClip {
   video: string; thumb: string | null;
 }
 
-/** Finished clips of public, non-voided pugs, newest first; `before` pages
+/** Finished clips (clipMatch), newest first; `before` pages
  *  by id. urlFor turns an R2 key into its public address. */
 export function listClips(
   db: DB, urlFor: (key: string) => string,
   opts: { player?: string; before?: number; limit?: number; minCount?: number; kind?: 'skeet' | 'quad' } = {},
 ): PublicClip[] {
   const limit = Math.max(1, Math.min(60, opts.limit ?? 24));
-  const where = [`c.status = 'done'`, 'm.voided_at IS NULL', `m.visibility = 'public'`, completedPug('m')];
+  const where = [`c.status = 'done'`, clipMatch('m')];
   const args: unknown[] = [];
   // a quad shows on all four cappers' profiles, not only the one whose eyes filmed it
   if (opts.player) { where.push(`(c.player_id = ? OR (c.kind = 'quad' AND EXISTS (SELECT 1 FROM json_each(c.people_json) WHERE value = ?)))`); args.push(opts.player, opts.player); }

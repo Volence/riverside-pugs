@@ -57,10 +57,13 @@ describe('scan, claim and finish', () => {
     const priv = match('2026-11-21 07:00:00', { visibility: 'staff' }); skeet(priv, [0, 1000]);
     const voided = match('2026-11-21 07:00:00'); skeet(voided, [0, 1000]);
     db.prepare("UPDATE matches SET voided_at = datetime('now') WHERE id = ?").run(voided);
-    expect(scanClips(db)).toBe(2);
+    const scrim = match('2026-11-21 07:00:00', { visibility: 'participants', kind: 'scrim' }); skeet(scrim, [0, 1000]);
+    // a finished tournament game counts, and its doubles from before CLIPS_SINCE too
+    const tourn = match('2026-10-24 01:00:00', { visibility: 'participants', kind: 'tournament' }); skeet(tourn, [0, 1000]);
+    expect(scanClips(db)).toBe(3);
     expect(scanClips(db)).toBe(0);
     const rows = db.prepare('SELECT match_id, count FROM clips ORDER BY match_id').all();
-    expect(rows).toEqual([{ match_id: matchId, count: 2 }, { match_id: old, count: 3 }]);
+    expect(rows).toEqual([{ match_id: matchId, count: 2 }, { match_id: old, count: 3 }, { match_id: tourn, count: 2 }]);
   });
 
   it('claims newest first, retries a failure, and lists only finished clips', () => {

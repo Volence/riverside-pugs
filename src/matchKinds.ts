@@ -28,3 +28,11 @@ export function completedPug(alias?: string): string {
   const p = alias ? `${alias}.` : '';
   return `${p}state = '${COMPLETED_STATE}' AND ${p}kind = 'pug'`;
 }
+
+/** A finished tournament game. It is stored as participants-only so nothing
+ *  leaks while it is played, and opens to everyone once it is over
+ *  (canViewMatch in src/matchVisibility.ts). Never PUG stats: highlights only. */
+export function completedTournament(alias?: string): string {
+  const p = alias ? `${alias}.` : '';
+  return `${p}state = '${COMPLETED_STATE}' AND ${p}kind = 'tournament'`;
+}
