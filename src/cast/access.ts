@@ -3,7 +3,7 @@ import { getPlayer } from '../players.js';
 import { inGoodStanding } from '../standing.js';
 import { canViewMatch, viewerFor } from '../matchVisibility.js';
 import { roleOf } from '../teams/teams.js';
-import { fullyInvited } from '../bookings/casters.js';
+import { casterMayWatch } from '../bookings/casters.js';
 import { getBooking, isOpen, managesSide, sideName, sidesOf } from '../bookings/bookings.js';
 import { campaignDisplayName } from '../campaignRegistry.js';
 import { competitiveAccess } from '../teams/access.js';
@@ -13,8 +13,9 @@ import type { DraftStatus } from './types.js';
 
 /**
  * What a caster may put on air (plan ruling 2). The same rule as /cast
- * (src/routes/cast.ts): every PUG and tournament match, and a booking's game
- * only for staff or a caster both sides invited. Asked again on every overlay
+ * (src/routes/cast.ts): every PUG and tournament match (a tournament booking's games
+ * included), and a scrim booking's game only for staff or a caster both sides
+ * invited. Asked again on every overlay
  * read, so a withdrawn invite, a cleared caster flag or a ban takes the feed
  * away at once.
  */
@@ -42,7 +43,7 @@ export function canCastBooking(db: DB, steamid: string, bookingId: number): bool
   if (!mayCast(db, steamid)) return false;
   if (!getBooking(db, bookingId)) return false;
   if (bookingStake(db, bookingId, steamid)) return false;
-  return viewerFor(db, steamid).staff || fullyInvited(db, bookingId, steamid);
+  return viewerFor(db, steamid).staff || casterMayWatch(db, bookingId, steamid);
 }
 
 /** How long a finished match stays in the picker, for the stats and winner scenes. */

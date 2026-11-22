@@ -84,6 +84,16 @@ export function fullyInvited(db: DB, bookingId: number, steamid: string): boolea
   return !!row && row.invited_by_a !== null && row.invited_by_b !== null && isActiveCaster(db, steamid);
 }
 
+/** Whether a caster may watch this booking's games. A tournament booking's
+ *  games are matches like any other, so every active caster may (owner
+ *  2026-11-22: casters get access to matches and join without a captain's
+ *  !allow, as allowList already lets them onto the box); a scrim's only to a
+ *  caster both sides invited. */
+export function casterMayWatch(db: DB, bookingId: number, steamid: string): boolean {
+  if (getBooking(db, bookingId)?.purpose === 'tournament') return isActiveCaster(db, steamid);
+  return fullyInvited(db, bookingId, steamid);
+}
+
 /** Casters a manager may pick from: is_caster and in good standing. */
 export function activeCasters(db: DB): { steamid: string; name: string; avatar: string | null }[] {
   const rows = db.prepare('SELECT steamid, name, avatar FROM players WHERE is_caster = 1 ORDER BY name COLLATE NOCASE')

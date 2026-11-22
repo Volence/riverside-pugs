@@ -7,7 +7,7 @@ import { campaignDisplayName, campaignRegistry } from '../campaignRegistry.js';
 import { phaseFor, roundInProgress } from '../liveView.js';
 import { makeRequireCaster } from './guards.js';
 import { viewerFor } from '../matchVisibility.js';
-import { fullyInvited } from '../bookings/casters.js';
+import { casterMayWatch } from '../bookings/casters.js';
 import { getBooking } from '../bookings/bookings.js';
 
 export interface CastMatch {
@@ -34,11 +34,11 @@ export interface CastMatch {
   teamB: string[];
   /** The game server itself, to join as an in-game spectator. Null for a
    *  match started in game: that runs on the box's own sv_password from
-   *  secrets.cfg, which the site never knows. Always null for a booking's
-   *  game: casters never get a booked box's game password. */
+   *  secrets.cfg, which the site never knows. For a booking's game only
+   *  on a tournament booking (its own password); never a scrim's. */
   connect: { host: string; port: number; password: string } | null;
   spectate: SpectateInfo | null;
-  /** A booking's game: watched through SourceTV only (connect is null). */
+  /** A booking's game (a scrim one is watched through SourceTV only). */
   booked: boolean;
 }
 
@@ -85,7 +85,7 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
     ).all() as {
       id: number; campaign: string; token: string | null; origin: string | null; serverId: number | null;
       bookingId: number | null; currentMap: string | null; serverName: string | null; host: string | null; port: number | null;
-    }[]).filter((r) => r.bookingId === null || staff || fullyInvited(db, r.bookingId, viewer));
+    }[]).filter((r) => r.bookingId === null || staff || casterMayWatch(db, r.bookingId, viewer));
     const teamOf = db.prepare(
       `SELECT p.name FROM match_players mp JOIN players p ON p.steamid = mp.player_id
        WHERE mp.match_id = ? AND mp.team = ? ORDER BY p.name COLLATE NOCASE`,
@@ -107,8 +107,13 @@ export async function castRoutes(app: FastifyInstance, opts: { db: DB }): Promis
     };
 
     const matches: CastMatch[] = rows.map((r) => {
-      const connect = r.bookingId === null && r.origin === 'queue' && r.token && r.host !== null && r.port !== null
-        ? { host: r.host, port: r.port, password: serverPasswordFor(r.token) }
+      // A tournament booking's game server too: allowList already lets every
+      // active caster onto the box, so they join it as a spectator (SourceTV
+      // has no arms). A scrim's game server stays the two sides' own.
+      const tourney = r.bookingId !== null ? getBooking(db, r.bookingId) : null;
+      const connect = r.host === null || r.port === null ? null
+        : r.bookingId === null && r.origin === 'queue' && r.token ? { host: r.host, port: r.port, password: serverPasswordFor(r.token) }
+        : tourney?.purpose === 'tournament' && tourney.password ? { host: r.host, port: r.port, password: tourney.password }
         : null;
       if (connect && !seen.get('cast_connect', viewer, String(r.id))) {
         logAdmin(db, viewer, 'cast_connect', r.id, { server: r.serverName }, { quiet: true });

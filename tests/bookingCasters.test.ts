@@ -325,3 +325,48 @@ describe('caster studio on a booked game (src/cast/access.ts)', () => {
     expect(canCastMatch(db, ADMIN, gameId)).toBe(true);
   });
 });
+
+describe('a tournament booking: every caster, no invites (owner 2026-11-22)', () => {
+  const makeTourney = () => {
+    db.prepare("UPDATE bookings SET purpose = 'tournament' WHERE id = ?").run(bookingId);
+    db.prepare("UPDATE matches SET kind = 'tournament' WHERE id = ?").run(gameId);
+  };
+
+  it('any active caster sees the game and may cast it without an invite; others still do not', async () => {
+    const { canCastMatch, canCastBooking } = await import('../src/cast/access.js');
+    makeTourney();
+    expect(seesGame(CASTER)).toBe(true);
+    expect(seesGame(HALF)).toBe(true);
+    expect(canCastMatch(db, CASTER, gameId)).toBe(true);
+    expect(canCastBooking(db, CASTER, bookingId)).toBe(true);
+    expect(hidesGame(STRANGER)).toBe(true);
+    db.prepare('UPDATE players SET is_caster = 0 WHERE steamid = ?').run(CASTER);
+    expect(canViewMatch(db, viewerFor(db, CASTER), gameId)).toBe(false);
+    expect(canCastMatch(db, CASTER, gameId)).toBe(false);
+  });
+
+  it('a caster with a stake in it still gets nothing in the studio', async () => {
+    const { canCastMatch } = await import('../src/cast/access.js');
+    makeTourney();
+    db.prepare("INSERT INTO booking_people (booking_id, side, steamid, role, status, added_by, added_at) VALUES (?, 'a', ?, 'spectator', 'accepted', ?, ?)")
+      .run(bookingId, CASTER, CAPT_A, new Date().toISOString());
+    expect(canCastMatch(db, CASTER, gameId)).toBe(false);
+  });
+
+  it("/api/cast hands a caster the game server line with the booking's password", async () => {
+    ready();
+    makeTourney();
+    const r = await call('GET', '/api/cast', CASTER);
+    const [m] = r.json().matches;
+    const b = getBooking(db, bookingId)!;
+    expect(m).toMatchObject({ id: gameId, booked: true, connect: { host: '9.9.9.9', port: 27017, password: b.password } });
+    expect(await call('GET', '/api/cast', STRANGER).then((x) => x.statusCode)).not.toBe(200);
+  });
+
+  it('a scrim booking still gives no game server line', async () => {
+    ready();
+    inviteBoth(CASTER);
+    const [m] = (await call('GET', '/api/cast', CASTER)).json().matches;
+    expect(m.connect).toBeNull();
+  });
+});
