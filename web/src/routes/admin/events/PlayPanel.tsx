@@ -357,13 +357,14 @@ function DeskTools({ eventId, m, run, busy }: { eventId: number; m: PlayMatch; r
   );
 }
 
-function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number; s: StagePlayView; m: PlayMatch; canEdit: boolean; run: Run; busy: boolean; slug?: string }) {
+function MatchRow({ eventId, s, m, canEdit, canRelease, run, busy, slug }: { eventId: number; s: StagePlayView; m: PlayMatch; canEdit: boolean; canRelease: boolean; run: Run; busy: boolean; slug?: string }) {
   const [correcting, setCorrecting] = useState(false);
   const [holding, setHolding] = useState(false);
   const editable = canEdit && s.status === 'live' && m.a !== null && m.b !== null;
   const correctable = editable && CORRECTABLE.has(m.status) && !correctionRefused(s, m);
   const names = m.a && m.b ? `${m.a.name} vs ${m.b.name}` : '';
   const hasRoomTools = editable && (m.phase === 'waiting' && m.a !== null && m.b !== null || ROOM_LIVE.has(m.phase));
+  const releasable = canRelease && s.status === 'live' && m.phase === 'hold' && m.a !== null && m.b !== null;
   return (
     <li class="deskmatch">
       <div class="deskmatch__head">
@@ -375,7 +376,7 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
         {m.a && m.b && slug && <a class="btn btn--sm deskmatch__room" href={`/event/${slug}/match/${m.id}`}>Open the room</a>}
       </div>
       <DeskLine m={m} />
-      {hasRoomTools && (
+      {(hasRoomTools || releasable) && (
         <div class="deskmatch__bar">
           {editable && m.phase === 'waiting' && m.a && m.b && (
             // Opens the room ahead of its time (the clock opens it otherwise).
@@ -384,7 +385,7 @@ function MatchRow({ eventId, s, m, canEdit, run, busy, slug }: { eventId: number
           {editable && m.phase === 'waiting' && !holding && (
             <button class="btn btn--ghost btn--sm" aria-label={`Hold: ${names}`} disabled={busy} onClick={() => setHolding(true)}>Hold</button>
           )}
-          {editable && <ReleaseHold eventId={eventId} m={m} run={run} busy={busy} />}
+          {releasable && <ReleaseHold eventId={eventId} m={m} run={run} busy={busy} />}
           {editable && ROOM_LIVE.has(m.phase) && (
             <>
               <button class="btn btn--ghost btn--sm" aria-label={`Reset room: ${names}`} disabled={busy} onClick={() => void run(() => adminApi.resetEventRoom(eventId, m.id), BOOKED.has(m.phase)
@@ -503,7 +504,9 @@ function NightBar({ eventId, matches, canEdit, run, busy }: { eventId: number; m
  *  the list is final; each started stage's matches by round with a result
  *  form on open ones and Correct on finished ones while the stage is live. A
  *  mod (canEdit false) reads the same list with no control. */
-export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { eventId: number; canEdit: boolean; gen?: number; onChange?: () => void; slug?: string }) {
+/** canRelease: Release hold on a held match's card, for any staff member
+ *  (a moderator too, owner 2026-11-22), where canEdit is admins only. */
+export function PlayPanel({ eventId, canEdit, canRelease = canEdit, gen = 0, onChange, slug }: { eventId: number; canEdit: boolean; canRelease?: boolean; gen?: number; onChange?: () => void; slug?: string }) {
   const { data, error: loadError, reload } = useFetch((s) => adminApi.eventPlay(eventId, s), [eventId, gen]);
   const { busy, error, run } = useAction(reload);
   // Owner 2026-10-24: while the event is live the desk follows the rooms by
@@ -552,7 +555,7 @@ export function PlayPanel({ eventId, canEdit, gen = 0, onChange, slug }: { event
             <div key={`${r.group}-${r.round}`}>
               <span class="eyebrow">{groupPrefix(s, r)}{r.label}</span>
               <ul class="deskmatches">
-                {r.matches.map((m) => <MatchRow key={m.id} eventId={eventId} s={s} m={m} canEdit={canEdit} run={run} busy={busy} slug={slug} />)}
+                {r.matches.map((m) => <MatchRow key={m.id} eventId={eventId} s={s} m={m} canEdit={canEdit} canRelease={canRelease} run={run} busy={busy} slug={slug} />)}
               </ul>
             </div>
           ))}

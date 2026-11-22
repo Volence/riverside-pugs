@@ -23,6 +23,7 @@ import { TIMERS, fakeBooking, roomFixture, type RoomFixture } from './roomFixtur
 const SECRET = 'k'.repeat(32);
 const CASTER = '76561199000000901';
 const PLAYER = OUTSIDER;
+const MOD = '76561199000000902';
 let f: RoomFixture;
 let app: FastifyInstance;
 
@@ -38,7 +39,8 @@ async function setup(): Promise<void> {
     store: () => { throw new Error('no community store in this test'); },
   });
   await app.ready();
-  for (const s of [CASTER, PLAYER, ADMIN]) authedCookie(app, f.db, s);
+  for (const s of [CASTER, PLAYER, ADMIN, MOD]) authedCookie(app, f.db, s);
+  f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
   f.db.prepare('UPDATE players SET is_caster = 1 WHERE steamid = ?').run(CASTER);
   f.db.prepare('UPDATE players SET is_admin = 1 WHERE steamid = ?').run(ADMIN);
 }
@@ -60,10 +62,12 @@ describe('the room scene', () => {
 });
 
 describe('who may follow a tournament room', () => {
-  it('a caster and an admin may; an ordinary player may not', async () => {
+  it('a caster and staff (an admin or a moderator) may; an ordinary player may not', async () => {
     await setup();
     expect(canCastRoom(f.db, CASTER, f.matchId)).toBe(true);
     expect(canCastRoom(f.db, ADMIN, f.matchId)).toBe(true);
+    expect(canCastRoom(f.db, MOD, f.matchId)).toBe(true);
+    expect((await as(MOD, 'GET', '/api/cast/studio')).statusCode).toBe(200);
     expect(canCastRoom(f.db, PLAYER, f.matchId)).toBe(false);
     expect(pickableRooms(f.db, CASTER)).toEqual([expect.objectContaining({ id: f.matchId, a: 'Rats', b: 'Bats', phase: 'ready', finished: false })]);
     expect(pickableRooms(f.db, PLAYER)).toEqual([]);
@@ -95,9 +99,9 @@ describe('who may follow a tournament room', () => {
 });
 
 describe('the overlay feed follows a room', () => {
-  it('serves the public room to a caster and an admin, never a viewer view', async () => {
+  it('serves the public room to a caster, an admin and a moderator, never a viewer view', async () => {
     await setup();
-    for (const who of [CASTER, ADMIN]) {
+    for (const who of [CASTER, ADMIN, MOD]) {
       expect((await as(who, 'PUT', '/api/cast/studio', { roomMatchId: f.matchId, scene: 'room' })).json().studio).toMatchObject({ roomMatchId: f.matchId, scene: 'room' });
       const res = await feed(who);
       expect(res.statusCode).toBe(200);

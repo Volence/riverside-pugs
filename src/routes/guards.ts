@@ -82,12 +82,11 @@ export function makeRequireMod(db: DB) {
   };
 }
 
-/** Per-route guard for the caster page: an active caster or admin's steamid,
- *  or the 401/403 reply sent and null. Moderators are not let in by their
- *  flag here either, but not for secrecy: a moderator already sees live
- *  match passwords on the Live desk (owner ruling 2026-09-28). This is role
- *  separation, not a password to withhold: casting is its own role, granted
- *  on its own, and working tickets is no reason to have it. */
+/** Per-route guard for the caster pages: an active caster's or staff
+ *  member's (admin or moderator) steamid, or the 401/403 reply sent and null.
+ *  Moderators were kept out as role separation (owner ruling 2026-09-28);
+ *  the owner let staff in on 2026-11-22 (DT2: staff produce event casts
+ *  too). A moderator already saw live match passwords on the Live desk. */
 export function makeRequireCaster(db: DB) {
   return function requireCaster(req: FastifyRequest, reply: FastifyReply): string | null {
     const steamid = getSession(req, db);
@@ -96,7 +95,7 @@ export function makeRequireCaster(db: DB) {
       return null;
     }
     const player = getPlayer(db, steamid);
-    if (!player || (player.is_admin !== 1 && player.is_caster !== 1) || !inGoodStanding(db, steamid)) {
+    if (!player || (player.is_admin !== 1 && player.is_mod !== 1 && player.is_caster !== 1) || !inGoodStanding(db, steamid)) {
       reply.code(403).send({ error: 'casters only' });
       return null;
     }

@@ -20,10 +20,11 @@ import type { DraftStatus } from './types.js';
  * away at once.
  */
 
-/** Holds the caster role (or is an admin) and is in good standing now. */
+/** Holds the caster role (or is staff: an admin or, since owner 2026-11-22,
+ *  a moderator) and is in good standing now. */
 export function mayCast(db: DB, steamid: string): boolean {
   const p = getPlayer(db, steamid);
-  return !!p && (p.is_admin === 1 || p.is_caster === 1) && inGoodStanding(db, steamid);
+  return !!p && (p.is_admin === 1 || p.is_mod === 1 || p.is_caster === 1) && inGoodStanding(db, steamid);
 }
 
 /**

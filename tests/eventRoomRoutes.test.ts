@@ -114,7 +114,7 @@ describe('admin room tools', () => {
 
 describe('releasing one match\'s hold from its card (owner 2026-11-22)', () => {
   const MOD = '76561199000000711';
-  it('releases a hold the site put on (nobody ready), admin only, and writes the audit row', async () => {
+  it('releases a hold the site put on (nobody ready), for staff (a moderator too), and writes the audit row', async () => {
     cookies[MOD] = authedCookie(app, f.db, MOD);
     f.db.prepare('UPDATE players SET is_mod = 1 WHERE steamid = ?').run(MOD);
     const base = `/api/admin/events/${f.eventId}/matches/${f.matchId}`;
@@ -122,16 +122,22 @@ describe('releasing one match\'s hold from its card (owner 2026-11-22)', () => {
     // The room clock's own hold: no actor, so Release staff holds skips it.
     must(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'nobody_ready' }));
     expect((await post(`/api/admin/events/${f.eventId}/release-all`, ADMIN)).json()).toEqual({ released: 0, failed: 0 });
-    for (const who of [A[0], OUTSIDER, MOD]) expect((await post(`${base}/release-hold`, who)).statusCode, who).toBe(403);
+    for (const who of [A[0], OUTSIDER]) expect((await post(`${base}/release-hold`, who)).statusCode, who).toBe(403);
     expect(P.getMatch(f.db, f.matchId)).toMatchObject({ status: 'admin_hold', hold_reason: 'nobody_ready' });
-    expect((await post(`${base}/release-hold`, ADMIN)).statusCode).toBe(200);
+    // Release staff holds (the night bar) stays admin only.
+    expect((await post(`/api/admin/events/${f.eventId}/release-all`, MOD)).statusCode).toBe(403);
+    expect((await post(`${base}/release-hold`, MOD)).statusCode).toBe(200);
     const m = P.getMatch(f.db, f.matchId)!;
     expect(m).toMatchObject({ status: 'veto', hold_reason: null, hold_from: null });
     // Neither team was ready: the ready check starts again with a fresh clock.
     expect(m.deadline).not.toBeNull();
     const audit = f.db.prepare("SELECT admin_id, action, target, detail FROM admin_actions WHERE action = 'event_hold_release'").all() as { admin_id: string; action: string; target: string; detail: string }[];
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ admin_id: ADMIN, target: String(f.eventId) });
+    expect(audit[0]).toMatchObject({ admin_id: MOD, target: String(f.eventId) });
+    // And an admin still may: hold it again and release.
+    must(R.holdMatch(f.db, { matchId: f.matchId, by: null, reason: 'nobody_ready' }));
+    expect((await post(`${base}/release-hold`, ADMIN)).statusCode).toBe(200);
+    expect(f.db.prepare("SELECT admin_id FROM admin_actions WHERE action = 'event_hold_release' ORDER BY id").all()).toEqual([{ admin_id: MOD }, { admin_id: ADMIN }]);
     expect(JSON.parse(audit[0]!.detail)).toEqual({ matchId: f.matchId });
   });
 });
@@ -294,7 +300,8 @@ describe('the desk tools (plan T3c)', () => {
     expect((await post(`${base()}/move-server`, ADMIN)).json()).toEqual({ error: EVENT_ERRORS.not_live_phase.text });
     expect((await post(`${base()}/replay-chapter`, ADMIN, { ordinal: 0 })).json()).toEqual({ error: EVENT_ERRORS.not_live_phase.text });
     expect(audit()).toEqual(['event_hold', 'event_hold_release', 'event_veto_reopen']);
-    for (const action of ['act', 'reopen-veto', 'replay-chapter', 'move-server', 'extend-grace', 'release-hold', 'freeze', 'unfreeze']) {
+    // Release hold is open to every staff member (owner 2026-11-22); the rest stay admin only.
+    for (const action of ['act', 'reopen-veto', 'replay-chapter', 'move-server', 'extend-grace', 'freeze', 'unfreeze']) {
       expect((await post(`${base()}/${action}`, MOD, { kind: 'ready', side: 'a', ordinal: 0, minutes: 5 })).statusCode, action).toBe(403);
     }
   });

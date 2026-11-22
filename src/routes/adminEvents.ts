@@ -989,9 +989,10 @@ export async function adminEventRoutes(
     action: 'reopen-veto' | 'move-server' | 'extend-grace' | 'release-hold' | 'freeze' | 'unfreeze' | 'tech-penalty', audit: string,
     call: (s: NonNullable<typeof opts.series>, matchId: number, me: string, body: Record<string, unknown>) => Promise<V.Checked<unknown>> | V.Checked<unknown>,
     detail: (body: Record<string, unknown>) => object = () => ({}),
+    guard: typeof requireAdmin = requireAdmin,
   ) =>
     app.post(`/api/admin/events/:id/matches/:matchId/${action}`, async (req, reply) => {
-      const me = requireAdmin(req, reply);
+      const me = guard(req, reply);
       if (!me) return;
       const p = req.params as { id: string; matchId: string };
       const ev = eventOf(p.id);
@@ -1029,7 +1030,9 @@ export async function adminEventRoutes(
   });
   deskTool('move-server', 'event_server_move', (s, id, me) => s.moveServer(id, me));
   deskTool('extend-grace', 'event_grace_extend', (s, id, me, body) => s.extendGrace(id, me, body.minutes), (body) => ({ minutes: body.minutes }));
-  deskTool('release-hold', 'event_hold_release', (s, id, me) => s.releaseHold(id, me));
+  // Owner 2026-11-22 (DT2): any staff member (a moderator too) may release
+  // one match's hold, from its card on the desk. Every other desk tool stays admin only.
+  deskTool('release-hold', 'event_hold_release', (s, id, me) => s.releaseHold(id, me), undefined, requireStaff);
   deskTool('freeze', 'event_freeze', (s, id, me) => s.freeze(id, me, true));
   deskTool('unfreeze', 'event_unfreeze', (s, id, me) => s.freeze(id, me, false));
   // Plan T5 Ruling 12: a warning or a forfeit of the game over a technical

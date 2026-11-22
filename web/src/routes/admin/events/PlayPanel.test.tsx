@@ -377,6 +377,19 @@ describe('PlayPanel', () => {
     }));
   });
 
+  it('gives a moderator (canRelease, not canEdit) Release hold and no other control (owner 2026-11-22)', async () => {
+    mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
+      m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'nobody_ready', holdFrom: 'veto' }) }),
+      m({ id: 8, slot: 2, a: team(3, 'Cats'), b: team(4, 'Dogs'), status: 'lineup', phase: 'lineup', desk: desk() }),
+    ] }] }] }));
+    mockAdmin.releaseEventHold.mockResolvedValue({});
+    render(<PlayPanel eventId={9} canEdit={false} canRelease />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Release hold: Rats vs Bats' }));
+    await waitFor(() => expect(mockAdmin.releaseEventHold).toHaveBeenCalledWith(9, 7));
+    expect(screen.queryByRole('button', { name: /Reset room|Hold:|Release staff holds|Hold all rooms/ })).toBeNull();
+    expect(screen.queryByText(/Staff tools:/)).toBeNull();
+  });
+
   it('shows no Release hold to someone who cannot edit the event', async () => {
     mockAdmin.eventPlay.mockResolvedValue(play({ stages: [{ ...play().stages[0]!, rounds: [{ group: 1, round: 1, label: 'Final', dates: null, defaultAt: null, window: null, matches: [
       m({ status: 'admin_hold', phase: 'hold', desk: desk({ holdReason: 'nobody_ready', holdFrom: 'veto' }) }),
