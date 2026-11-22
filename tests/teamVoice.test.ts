@@ -20,7 +20,7 @@ const disc = (steamid: string) => `d${steamid}`;
 function setup(db: DB): TeamVoice {
   db.prepare("UPDATE players SET discord_id = 'd' || steamid").run();
   setSetting(db, 'discord_voice_enabled', '1');
-  setSetting(db, 'discord_staff_role_id', 'staffrole');
+  setSetting(db, 'discord_staff_role_id', '111111111111111111');
   return new TeamVoice({ db, voice: () => (connected ? t.voice : null), now: () => clock });
 }
 
@@ -62,7 +62,7 @@ describe('TeamVoice', () => {
     for (const r of made) {
       const ch = t.channels.get(r.channel_id)!;
       expect(ch.name).toBe(N.getEntry(f.db, r.entry_id)!.name);
-      expect(ch).toMatchObject({ privateView: true, staffRoleId: 'staffrole' });
+      expect(ch).toMatchObject({ privateView: true, staffRoleIds: ['111111111111111111'] });
       expect([...ch.allowed].sort()).toEqual(rosterIds(f.db, r.entry_id));
       expect(teamVoiceChannel(f.db, r.entry_id)).toBe(r.channel_id);
     }
@@ -180,7 +180,7 @@ describe('TeamVoice', () => {
     const f = standinFixture();
     const tv = setup(f.db);
     setSetting(f.db, 'discord_lobby_channel_id', 'lobby');
-    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null, privateView: false });
+    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleIds: [], privateView: false });
     await tv.tick();
     const made = rows(f.db, f.eventId);
     const talker = disc(N.rosterOf(f.db, made[0].entry_id).starters[0]);

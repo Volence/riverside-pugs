@@ -384,7 +384,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
   /** A category with a voice channel per team, for createMatchChannels (two
    *  teams) and createTeamChannels (an event's every team). */
   const createChannelSet = async (
-    name: string, teams: { label: string; userIds: string[] }[], staffRoleId: string | null, privateView: boolean,
+    name: string, teams: { label: string; userIds: string[] }[], staffRoleIds: string[], privateView: boolean,
   ): Promise<{ categoryId: string; channelIds: string[]; staffDropped: boolean }> => {
     const me = client.user!.id;
     // An overwrite for someone who is not in the guild is rejected by
@@ -404,6 +404,14 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
     // behind for ever: nothing records a half-made set anywhere else.
     const made: string[] = [];
     let staffDropped = false;
+    // A role id that names no role (a typo, a deleted role) would fail every
+    // channel; leave it out up front and say so, keep the rest.
+    const roles: string[] = [];
+    for (const id of staffRoleIds) {
+      const role = await guild.roles.fetch(id).catch(() => null);
+      if (role) roles.push(id);
+      else { staffDropped = true; console.error(`[discord] staff role ${id} is not a role in this server; leaving it out`); }
+    }
     try {
       // Private: the category is named after both sides, so it is hidden as
       // well, with the bot let in to manage it. Public: no overwrites, as it
@@ -422,7 +430,7 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
         } : {}),
       });
       made.push(category.id);
-      const make = async (label: string, ids: string[], staff: string | null) => guild.channels.create({
+      const make = async (label: string, ids: string[], staff: string[]) => guild.channels.create({
         name: label,
         type: ChannelType.GuildVoice,
         parent: category.id,
@@ -440,10 +448,10 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
           })),
           // MoveMembers as well as Connect: sorting someone into the right
           // team channel is the reason staff are in here at all.
-          ...(staff ? [{
-            id: staff, type: OverwriteType.Role,
+          ...staff.map((id) => ({
+            id, type: OverwriteType.Role,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.MoveMembers],
-          }] : []),
+          })),
           {
             id: me, type: OverwriteType.Member,
             allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.MoveMembers, PermissionFlagsBits.ManageChannels],
@@ -456,13 +464,13 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
       // not be lost over it, so a failure retries once without staff and says
       // so, rather than taking the match's voice down with it.
       const makeSafe = async (label: string, ids: string[]) => {
-        if (!staffRoleId) return make(label, ids, null);
+        if (!roles.length) return make(label, ids, []);
         try {
-          return await make(label, ids, staffRoleId);
+          return await make(label, ids, roles);
         } catch (err) {
-          console.error(`[discord] staff role ${staffRoleId} could not be added to ${label}; creating it without:`, err);
+          console.error(`[discord] staff roles ${roles.join(', ')} could not be added to ${label}; creating it without:`, err);
           staffDropped = true;
-          return make(label, ids, null);
+          return make(label, ids, []);
         }
       };
       const channelIds: string[] = [];
@@ -484,12 +492,12 @@ export async function createDjsTransport(cfg: DiscordConfig): Promise<BotTranspo
   };
 
   const voice: VoiceOps = {
-    async createMatchChannels(name, teamA, teamB, staffRoleId, opts) {
-      const r = await createChannelSet(name, [teamA, teamB], staffRoleId, opts?.privateView ?? false);
+    async createMatchChannels(name, teamA, teamB, staffRoleIds, opts) {
+      const r = await createChannelSet(name, [teamA, teamB], staffRoleIds, opts?.privateView ?? false);
       return { categoryId: r.categoryId, teamAId: r.channelIds[0], teamBId: r.channelIds[1], staffDropped: r.staffDropped };
     },
-    async createTeamChannels(name, labels, staffRoleId) {
-      return createChannelSet(name, labels.map((label) => ({ label, userIds: [] })), staffRoleId, true);
+    async createTeamChannels(name, labels, staffRoleIds) {
+      return createChannelSet(name, labels.map((label) => ({ label, userIds: [] })), staffRoleIds, true);
     },
     async createPrivateCategory(name, afterId) {
       const me = client.user!.id;

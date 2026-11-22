@@ -2276,7 +2276,7 @@ describe('booking voice (plan 4c)', () => {
   it('the wind-down closes voice before the release', async () => {
     const order: string[] = [];
     setSetting(db, 'discord_lobby_channel_id', 'lobby');
-    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleIds: [] });
     const ops = { ...t.voice, deleteChannel: async (c: string) => { order.push(`delete ${c}`); await t.voice.deleteChannel(c); } };
     const r = build({
       voice: new BookingVoice({ db, voice: () => ops, now: () => now }),

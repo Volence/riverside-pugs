@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
+import { staffRoleIdsOf } from '../settingsSchema.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import type { VoiceOps } from '../discord/transport.js';
 import { bookingHeading, getBooking, sideName, sidesOf, voiceMembers, type Side } from './bookings.js';
@@ -93,7 +94,7 @@ export class BookingVoice {
         bookingHeading(db, b, nameA, nameB, NAME_MAX),
         { label: nameA.slice(0, NAME_MAX), userIds: want.a },
         { label: nameB.slice(0, NAME_MAX), userIds: want.b },
-        getSetting(db, 'discord_staff_role_id') || null,
+        staffRoleIdsOf(getSetting(db, 'discord_staff_role_id')),
         { privateView: true },
       );
       db.prepare('INSERT INTO booking_voice (booking_id, category_id, side_a_id, side_b_id, created_at) VALUES (?, ?, ?, ?, ?)')
@@ -102,7 +103,7 @@ export class BookingVoice {
       if (made.staffDropped) {
         publishAdminEvent({
           kind: 'problem',
-          text: `Booking ${bookingId}: Discord refused the staff role on its private voice channels, so staff cannot see them. Check the bot may grant discord_staff_role_id.`,
+          text: `Booking ${bookingId}: Discord refused a staff or caster role on its private voice channels, so those roles cannot see them. Check every id in discord_staff_role_id names a real role the bot may grant.`,
         });
       }
     } catch (err) {

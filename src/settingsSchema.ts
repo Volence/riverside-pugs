@@ -93,7 +93,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   { key: 'require_discord_to_queue', group: 'Discord', label: 'Require Discord to queue', help: 'Players must have Discord linked and be in the Discord server to join the queue.', type: { kind: 'bool' } },
   { key: 'require_voice_to_ready', group: 'Discord', label: 'Require voice to ready up', help: 'Players must be in a voice channel on the Discord server to press Ready, on the site and on the Discord card. Leaving voice during the ready check un-readies them. Allowed when the bot is down.', type: { kind: 'bool' } },
   { key: 'discord_invite_url', group: 'Discord', label: 'Discord invite link', help: 'Permanent invite shown on How to play and the signup checklist.', type: { kind: 'string', maxLength: 200, allowEmpty: true } },
-  { key: 'discord_staff_role_id', group: 'Discord', label: 'Staff role id', help: 'Role given access to every match\'s team voice channels, so staff can drop into either side. Empty gives no role access.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
+  { key: 'discord_staff_role_id', group: 'Discord', label: 'Staff and caster role ids', help: 'Roles let into every team voice channel the site makes (PUG matches, tournament team rooms, scrims), so staff and casters can drop into either side. One or more role ids, separated by commas. Empty gives no role access.', type: { kind: 'string', maxLength: 220, allowEmpty: true } },
   { key: 'discord_admin_channel_id', group: 'Discord', label: 'Admin channel id', help: 'Private channel for the admin feed. Empty turns the feed off, except lines that go to the mod channel when one is set.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'discord_mod_channel_id', group: 'Discord', label: 'Mod channel id', help: 'Channel for lines a moderator should act on: slurs, /staff messages, in-game calls, alt holds, spray crashes, SourceTV watch, reports and appeals (when there is no tickets forum), and bans, notes and ticket work. Empty sends them to the admin channel as before.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
   { key: 'discord_results_channel_id', group: 'Discord', label: 'Results channel id', help: 'Where match results are posted. Empty keeps them in the queue channel. Set it and the queue channel is left for queueing: a finished match\'s card and server-ready ping are removed once its result is posted.', type: { kind: 'string', maxLength: 32, allowEmpty: true } },
@@ -229,6 +229,13 @@ export function validateSetting(
       if ((key === 'mod_call_role_id' || key === 'discord_pug_role_id') && v !== '' && !/^\d{17,20}$/.test(v)) {
         return { ok: false, error: 'must be a Discord role id (17 to 20 digits), or empty' };
       }
+      // Staff and caster roles (owner 2026-11-22): any number of role ids, stored as "a, b".
+      if (key === 'discord_staff_role_id') {
+        const ids = v.split(/[\s,]+/).filter(Boolean);
+        if (ids.some((id) => !/^\d{17,20}$/.test(id))) return { ok: false, error: 'must be Discord role ids (17 to 20 digits) separated by commas, or empty' };
+        if (ids.length > 10) return { ok: false, error: 'at most 10 roles' };
+        return { ok: true, value: [...new Set(ids)].join(', ') };
+      }
       if (key === 'discord_queue_alert_channel_id' && v !== '' && !/^\d{17,20}$/.test(v)) {
         return { ok: false, error: 'must be a Discord channel id (17 to 20 digits), or empty' };
       }
@@ -260,4 +267,10 @@ export function validateSetting(
       return { ok: true, value: JSON.stringify(raw) };
     }
   }
+}
+
+/** The roles let into every team voice channel (discord_staff_role_id): staff
+ *  and casters, one or more ids. Older single-id values read the same way. */
+export function staffRoleIdsOf(value: string | null | undefined): string[] {
+  return [...new Set((value ?? '').split(/[\s,]+/).filter((id) => /^\d{17,20}$/.test(id)))];
 }

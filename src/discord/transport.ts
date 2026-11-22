@@ -199,9 +199,9 @@ export interface VoiceOps {
     name: string,
     teamA: { label: string; userIds: string[] },
     teamB: { label: string; userIds: string[] },
-    /** A role let into BOTH team channels, or null for none. Staff, so an
-     *  admin can drop into either side without being on the roster. */
-    staffRoleId: string | null,
+    /** Roles let into BOTH team channels (none: empty). Staff and casters,
+     *  so they can drop into either side without being on the roster. */
+    staffRoleIds: string[],
     /** `privateView`: @everyone is denied ViewChannel as well as Connect,
      *  instead of today's "anyone can see in, only the roster can join". For
      *  a booked scrim, where the side's players, ringers, approved spectators
@@ -213,7 +213,7 @@ export interface VoiceOps {
     opts?: { privateView?: boolean },
   ): Promise<{
     categoryId: string; teamAId: string; teamBId: string;
-    /** True when Discord refused the staff role overwrite and the channels
+    /** True when Discord refused a staff role overwrite and the channels
      *  were made without it (staff cannot see them unless let in one by one). */
     staffDropped?: boolean;
   }>;
@@ -222,7 +222,7 @@ export interface VoiceOps {
    *  teams are known. Nobody is let in here; setMemberAccess lets each team's
    *  players in afterwards. Takes back what it made on a failure and drops the
    *  staff role on a refusal, exactly as createMatchChannels does. */
-  createTeamChannels(name: string, labels: string[], staffRoleId: string | null): Promise<{
+  createTeamChannels(name: string, labels: string[], staffRoleIds: string[]): Promise<{
     categoryId: string; channelIds: string[]; staffDropped?: boolean;
   }>;
   /** A private category (hidden from @everyone, the bot let in), placed

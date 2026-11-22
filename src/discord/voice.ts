@@ -1,5 +1,6 @@
 import type { DB } from '../db.js';
 import { getSetting } from '../settings.js';
+import { staffRoleIdsOf } from '../settingsSchema.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import type { VoiceHook } from './sync.js';
 import type { VoiceOps } from './transport.js';
@@ -84,7 +85,7 @@ export class VoiceChannels implements VoiceHook {
         `PUG #${matchId}`,
         { label: 'Team A', userIds: ids('a') },
         { label: 'Team B', userIds: ids('b') },
-        getSetting(db, 'discord_staff_role_id') || null,
+        staffRoleIdsOf(getSetting(db, 'discord_staff_role_id')),
       );
       db.prepare('INSERT INTO discord_voice (match_id, category_id, team_a_id, team_b_id) VALUES (?, ?, ?, ?)')
         .run(matchId, made.categoryId, made.teamAId, made.teamBId);

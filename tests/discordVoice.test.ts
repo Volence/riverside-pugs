@@ -35,14 +35,23 @@ describe('VoiceChannels', () => {
     setSetting(db, 'discord_staff_role_id', '1539967662388551791');
     await v.ensure(matchId);
     const ids = v.channelsFor(matchId)!;
-    expect(t.channels.get(ids.teamAId)!.staffRoleId).toBe('1539967662388551791');
-    expect(t.channels.get(ids.teamBId)!.staffRoleId).toBe('1539967662388551791');
+    expect(t.channels.get(ids.teamAId)!.staffRoleIds).toEqual(['1539967662388551791']);
+    expect(t.channels.get(ids.teamBId)!.staffRoleIds).toEqual(['1539967662388551791']);
+  });
+
+  // Owner, 2026-11-22: casters as well as staff, so the setting takes several roles.
+  it('lets every configured role in: staff and casters', async () => {
+    setSetting(db, 'discord_staff_role_id', '1539967662388551791, 1441967662388551792');
+    await v.ensure(matchId);
+    const ids = v.channelsFor(matchId)!;
+    expect(t.channels.get(ids.teamAId)!.staffRoleIds).toEqual(['1539967662388551791', '1441967662388551792']);
+    expect(t.channels.get(ids.teamBId)!.staffRoleIds).toEqual(['1539967662388551791', '1441967662388551792']);
   });
 
   it('leaves the channels role-free when no staff role is set', async () => {
     await v.ensure(matchId);
     const ids = v.channelsFor(matchId)!;
-    expect(t.channels.get(ids.teamAId)!.staffRoleId).toBeNull();
+    expect(t.channels.get(ids.teamAId)!.staffRoleIds).toEqual([]);
   });
 
   it('creates one category with team channels open only to linked players, once', async () => {
@@ -130,7 +139,7 @@ describe('VoiceChannels', () => {
   describe('handing players back before the channels go', () => {
     /** Park a real channel in the fake for someone to have come from. */
     const parkIn = (userId: string, channelId: string) => {
-      if (!t.channels.has(channelId)) t.channels.set(channelId, { name: channelId, members: new Set(), allowed: [], staffRoleId: null });
+      if (!t.channels.has(channelId)) t.channels.set(channelId, { name: channelId, members: new Set(), allowed: [], staffRoleIds: [] });
       t.channels.get(channelId)!.members.add(userId);
       t.voiceOf.set(userId, channelId);
     };
@@ -145,7 +154,7 @@ describe('VoiceChannels', () => {
 
     it('hands everyone back the moment the match ends, not ten minutes later', async () => {
       setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
-      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleIds: [] });
       parkIn('900', 'general');
       await v.ensure(matchId);
       t.moves.length = 0;
@@ -171,7 +180,7 @@ describe('VoiceChannels', () => {
 
     it('sends a player with no remembered origin to the configured lobby', async () => {
       setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
-      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleIds: [] });
       await v.ensure(matchId);
       // Walked into the team channel on their own, so nothing was remembered.
       // voiceOf as well as members: that pair is what the fake keeps
@@ -187,7 +196,7 @@ describe('VoiceChannels', () => {
 
     it('falls back to the lobby when the channel they came from is gone', async () => {
       setSetting(db, 'discord_lobby_channel_id', 'main-lobby');
-      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+      t.channels.set('main-lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleIds: [] });
       parkIn('900', 'general');
       await v.ensure(matchId);
       t.channels.delete('general');

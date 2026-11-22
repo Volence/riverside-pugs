@@ -3,6 +3,7 @@ import type { VoiceOps } from '../discord/transport.js';
 import { publishAdminEvent } from '../adminFeed.js';
 import { getPlayer } from '../players.js';
 import { getSetting } from '../settings.js';
+import { staffRoleIdsOf } from '../settingsSchema.js';
 import * as N from './entries.js';
 import type { EventRow } from './events.js';
 
@@ -168,7 +169,7 @@ export class TeamVoice {
       const made = await voice.createTeamChannels(
         `${ev.name}: Teams`.slice(0, NAME_MAX),
         entries.map((e) => e.name.slice(0, NAME_MAX)),
-        getSetting(db, 'discord_staff_role_id') || null,
+        staffRoleIdsOf(getSetting(db, 'discord_staff_role_id')),
       );
       const at = this.nowIso();
       const ins = db.prepare('INSERT INTO event_entry_voice (entry_id, event_id, category_id, channel_id, created_at) VALUES (?, ?, ?, ?, ?)');
@@ -176,7 +177,7 @@ export class TeamVoice {
       if (made.staffDropped) {
         publishAdminEvent({
           kind: 'problem',
-          text: `${ev.name}: Discord refused the staff role on the team voice channels, so staff cannot see them. Check the bot may grant discord_staff_role_id.`,
+          text: `${ev.name}: Discord refused a staff or caster role on the team voice channels, so those roles cannot see them. Check every id in discord_staff_role_id names a real role the bot may grant.`,
         });
       }
     } catch (err) {

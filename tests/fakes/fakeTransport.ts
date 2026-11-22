@@ -32,7 +32,7 @@ export class FakeTransport implements BotTransport {
   private seq = 0;
 
   // Voice world.
-  channels = new Map<string, { name: string; members: Set<string>; allowed: string[]; staffRoleId: string | null; privateView?: boolean }>();
+  channels = new Map<string, { name: string; members: Set<string>; allowed: string[]; staffRoleIds: string[]; privateView?: boolean }>();
   voiceOf = new Map<string, string>();
   /** userId -> roles they hold. The queue-alert toggle is the only user. */
   rolesOf = new Map<string, Set<string>>();
@@ -419,14 +419,14 @@ export class FakeTransport implements BotTransport {
   };
 
   voice: VoiceOps = {
-    createMatchChannels: async (name, teamA, teamB, staffRoleId, opts) => {
+    createMatchChannels: async (name, teamA, teamB, staffRoleIds, opts) => {
       if (this.failVoice) throw new Error('missing permissions');
       const privateView = opts?.privateView ?? false;
       // The real transport hides the category only when privateView, and
       // gives it no staff role overwrite either way.
-      const staff = this.refuseStaffRole ? null : staffRoleId;
-      const steps: [step: 'category' | 'teamA' | 'teamB', id: string, name: string, allowed: string[], staffRoleId: string | null][] = [
-        ['category', `cat${++this.seq}`, name, [], null],
+      const staff = this.refuseStaffRole ? [] : [...staffRoleIds];
+      const steps: [step: 'category' | 'teamA' | 'teamB', id: string, name: string, allowed: string[], staffRoleIds: string[]][] = [
+        ['category', `cat${++this.seq}`, name, [], []],
         ['teamA', `va${++this.seq}`, teamA.label, teamA.userIds, staff],
         ['teamB', `vb${++this.seq}`, teamB.label, teamB.userIds, staff],
       ];
@@ -437,28 +437,28 @@ export class FakeTransport implements BotTransport {
           for (const done of made.reverse()) this.channels.delete(done);
           throw new Error('missing permissions');
         }
-        this.channels.set(id, { name: label, members: new Set(), allowed: [...allowed], staffRoleId: role, privateView });
+        this.channels.set(id, { name: label, members: new Set(), allowed: [...allowed], staffRoleIds: role, privateView });
         made.push(id);
       }
       const [categoryId, teamAId, teamBId] = made;
-      return { categoryId, teamAId, teamBId, staffDropped: staffRoleId !== null && this.refuseStaffRole };
+      return { categoryId, teamAId, teamBId, staffDropped: staffRoleIds.length > 0 && this.refuseStaffRole };
     },
-    createTeamChannels: async (name, labels, staffRoleId) => {
+    createTeamChannels: async (name, labels, staffRoleIds) => {
       if (this.failVoice) throw new Error('missing permissions');
-      const staff = this.refuseStaffRole ? null : staffRoleId;
+      const staff = this.refuseStaffRole ? [] : [...staffRoleIds];
       const categoryId = `cat${++this.seq}`;
-      this.channels.set(categoryId, { name, members: new Set(), allowed: [], staffRoleId: null, privateView: true });
+      this.channels.set(categoryId, { name, members: new Set(), allowed: [], staffRoleIds: [], privateView: true });
       const channelIds = labels.map((label) => {
         const id = `vt${++this.seq}`;
-        this.channels.set(id, { name: label, members: new Set(), allowed: [], staffRoleId: staff, privateView: true });
+        this.channels.set(id, { name: label, members: new Set(), allowed: [], staffRoleIds: staff, privateView: true });
         return id;
       });
-      return { categoryId, channelIds, staffDropped: staffRoleId !== null && this.refuseStaffRole };
+      return { categoryId, channelIds, staffDropped: staffRoleIds.length > 0 && this.refuseStaffRole };
     },
     createPrivateCategory: async (name, afterId) => {
       if (this.failVoice) throw new Error('missing permissions');
       const id = `cat${++this.seq}`;
-      this.channels.set(id, { name, members: new Set(), allowed: [], staffRoleId: null, privateView: true });
+      this.channels.set(id, { name, members: new Set(), allowed: [], staffRoleIds: [], privateView: true });
       this.categoryAfter.set(id, afterId);
       return id;
     },

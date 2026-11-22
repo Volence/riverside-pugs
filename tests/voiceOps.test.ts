@@ -10,7 +10,7 @@ import { FakeTransport } from './fakes/fakeTransport.js';
 describe('VoiceOps: createMatchChannels privateView', () => {
   it('without opts, behaves exactly as today: @everyone can see in, only the roster connects', async () => {
     const t = new FakeTransport();
-    const made = await t.voice.createMatchChannels('PUG #1', { label: 'Team A', userIds: ['1'] }, { label: 'Team B', userIds: ['2'] }, null);
+    const made = await t.voice.createMatchChannels('PUG #1', { label: 'Team A', userIds: ['1'] }, { label: 'Team B', userIds: ['2'] }, []);
     expect(t.channels.get(made.teamAId)!.privateView).toBe(false);
     expect(t.channels.get(made.teamBId)!.privateView).toBe(false);
     expect(t.channels.get(made.teamAId)!.allowed).toEqual(['1']);
@@ -19,7 +19,7 @@ describe('VoiceOps: createMatchChannels privateView', () => {
   it('privateView: false is the same as omitting it', async () => {
     const t = new FakeTransport();
     const made = await t.voice.createMatchChannels(
-      'PUG #1', { label: 'Team A', userIds: ['1'] }, { label: 'Team B', userIds: ['2'] }, null, { privateView: false },
+      'PUG #1', { label: 'Team A', userIds: ['1'] }, { label: 'Team B', userIds: ['2'] }, [], { privateView: false },
     );
     expect(t.channels.get(made.teamAId)!.privateView).toBe(false);
   });
@@ -27,7 +27,7 @@ describe('VoiceOps: createMatchChannels privateView', () => {
   it('privateView: true records it on the created channels', async () => {
     const t = new FakeTransport();
     const made = await t.voice.createMatchChannels(
-      'Booking #4', { label: 'Side A', userIds: ['1'] }, { label: 'Side B', userIds: ['2'] }, null, { privateView: true },
+      'Booking #4', { label: 'Side A', userIds: ['1'] }, { label: 'Side B', userIds: ['2'] }, [], { privateView: true },
     );
     expect(t.channels.get(made.teamAId)!.privateView).toBe(true);
     expect(t.channels.get(made.teamBId)!.privateView).toBe(true);
@@ -40,17 +40,17 @@ describe('VoiceOps: createMatchChannels privateView', () => {
 describe('VoiceOps: createMatchChannels, category, cleanup and staff fallback', () => {
   it('the category is private only with privateView', async () => {
     const t = new FakeTransport();
-    const pub = await t.voice.createMatchChannels('PUG #1', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, null);
+    const pub = await t.voice.createMatchChannels('PUG #1', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, []);
     expect(t.channels.get(pub.categoryId)!.privateView).toBe(false);
-    const priv = await t.voice.createMatchChannels('Scrim: X vs Y', { label: 'X', userIds: [] }, { label: 'Y', userIds: [] }, null, { privateView: true });
+    const priv = await t.voice.createMatchChannels('Scrim: X vs Y', { label: 'X', userIds: [] }, { label: 'Y', userIds: [] }, [], { privateView: true });
     expect(t.channels.get(priv.categoryId)!.privateView).toBe(true);
   });
 
   it.each(['category', 'teamA', 'teamB'] as const)('a failure at %s leaves nothing behind and rethrows', async (step) => {
     const t = new FakeTransport();
-    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleIds: [] });
     t.failVoiceAt = step;
-    await expect(t.voice.createMatchChannels('Scrim', { label: 'A', userIds: ['1'] }, { label: 'B', userIds: ['2'] }, 'staff', { privateView: true }))
+    await expect(t.voice.createMatchChannels('Scrim', { label: 'A', userIds: ['1'] }, { label: 'B', userIds: ['2'] }, ['staff'], { privateView: true }))
       .rejects.toThrow('missing permissions');
     expect([...t.channels.keys()]).toEqual(['lobby']);
   });
@@ -58,11 +58,11 @@ describe('VoiceOps: createMatchChannels, category, cleanup and staff fallback', 
   it('a refused staff role makes the channels without it and says staffDropped', async () => {
     const t = new FakeTransport();
     t.refuseStaffRole = true;
-    const made = await t.voice.createMatchChannels('Scrim', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, 'staff', { privateView: true });
+    const made = await t.voice.createMatchChannels('Scrim', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, ['staff'], { privateView: true });
     expect(made.staffDropped).toBe(true);
-    expect(t.channels.get(made.teamAId)!.staffRoleId).toBeNull();
+    expect(t.channels.get(made.teamAId)!.staffRoleIds).toEqual([]);
     t.refuseStaffRole = false;
-    const ok = await t.voice.createMatchChannels('Scrim', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, 'staff', { privateView: true });
+    const ok = await t.voice.createMatchChannels('Scrim', { label: 'A', userIds: [] }, { label: 'B', userIds: [] }, ['staff'], { privateView: true });
     expect(ok.staffDropped).toBe(false);
   });
 });
@@ -71,7 +71,7 @@ describe('VoiceOps: setMemberAccess', () => {
   it('allow: true adds the member to the channel', async () => {
     const t = new FakeTransport();
     const made = await t.voice.createMatchChannels(
-      'Booking #4', { label: 'Side A', userIds: [] }, { label: 'Side B', userIds: [] }, null, { privateView: true },
+      'Booking #4', { label: 'Side A', userIds: [] }, { label: 'Side B', userIds: [] }, [], { privateView: true },
     );
     await t.voice.setMemberAccess(made.teamAId, 'caster1', true);
     expect(t.channels.get(made.teamAId)!.allowed).toEqual(['caster1']);
@@ -80,7 +80,7 @@ describe('VoiceOps: setMemberAccess', () => {
   it('allow: true is a no-op when the member already has access', async () => {
     const t = new FakeTransport();
     const made = await t.voice.createMatchChannels(
-      'Booking #4', { label: 'Side A', userIds: ['1'] }, { label: 'Side B', userIds: [] }, null, { privateView: true },
+      'Booking #4', { label: 'Side A', userIds: ['1'] }, { label: 'Side B', userIds: [] }, [], { privateView: true },
     );
     await t.voice.setMemberAccess(made.teamAId, '1', true);
     expect(t.channels.get(made.teamAId)!.allowed).toEqual(['1']);
@@ -89,7 +89,7 @@ describe('VoiceOps: setMemberAccess', () => {
   it('allow: false removes the member', async () => {
     const t = new FakeTransport();
     const made = await t.voice.createMatchChannels(
-      'Booking #4', { label: 'Side A', userIds: ['1', '2'] }, { label: 'Side B', userIds: [] }, null, { privateView: true },
+      'Booking #4', { label: 'Side A', userIds: ['1', '2'] }, { label: 'Side B', userIds: [] }, [], { privateView: true },
     );
     await t.voice.setMemberAccess(made.teamAId, '1', false);
     expect(t.channels.get(made.teamAId)!.allowed).toEqual(['2']);
@@ -98,7 +98,7 @@ describe('VoiceOps: setMemberAccess', () => {
   it('allow: false on someone with no access is a no-op', async () => {
     const t = new FakeTransport();
     const made = await t.voice.createMatchChannels(
-      'Booking #4', { label: 'Side A', userIds: [] }, { label: 'Side B', userIds: [] }, null, { privateView: true },
+      'Booking #4', { label: 'Side A', userIds: [] }, { label: 'Side B', userIds: [] }, [], { privateView: true },
     );
     await expect(t.voice.setMemberAccess(made.teamAId, 'nobody', false)).resolves.toBeUndefined();
     expect(t.channels.get(made.teamAId)!.allowed).toEqual([]);

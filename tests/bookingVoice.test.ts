@@ -31,7 +31,7 @@ beforeEach(() => {
     db.prepare("UPDATE servers SET status = 'idle' WHERE id = ?").run(sid);
   }
   setSetting(db, 'discord_voice_enabled', '1');
-  setSetting(db, 'discord_staff_role_id', 'staffrole');
+  setSetting(db, 'discord_staff_role_id', '111111111111111111');
   t = new FakeTransport();
   connected = true;
   voice = new BookingVoice({ db, voice: () => (connected ? t.voice : null), now: () => NOW });
@@ -71,8 +71,8 @@ describe('BookingVoice.ensure', () => {
     const a = t.channels.get(r.side_a_id)!;
     const b = t.channels.get(r.side_b_id)!;
     expect(cat).toMatchObject({ name: "Scrim: p0's group vs p1's group", privateView: true });
-    expect(a).toMatchObject({ name: "p0's group", privateView: true, staffRoleId: 'staffrole' });
-    expect(b).toMatchObject({ name: "p1's group", privateView: true, staffRoleId: 'staffrole' });
+    expect(a).toMatchObject({ name: "p0's group", privateView: true, staffRoleIds: ['111111111111111111'] });
+    expect(b).toMatchObject({ name: "p1's group", privateView: true, staffRoleIds: ['111111111111111111'] });
     expect([...a.allowed].sort()).toEqual(['d0', 'd2']);
     expect([...b.allowed].sort()).toEqual(['d1', 'd3']);
     expect(events).toEqual([]);
@@ -150,7 +150,7 @@ describe('BookingVoice.ensure failures part way and the staff fallback', () => {
     const problems = events.filter((e) => e.kind === 'problem');
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatchObject({ text: expect.stringContaining(`Booking ${id}`) });
-    expect(problems[0]).toMatchObject({ text: expect.stringContaining('staff cannot see') });
+    expect(problems[0]).toMatchObject({ text: expect.stringContaining('roles cannot see') });
     await voice.ensure(id);
     expect(events.filter((e) => e.kind === 'problem')).toHaveLength(1);
   });
@@ -228,7 +228,7 @@ describe('BookingVoice.sync', () => {
 describe('BookingVoice.close', () => {
   it('moves everyone to the lobby, deletes both channels and the category, then does nothing the second time', async () => {
     setSetting(db, 'discord_lobby_channel_id', 'lobby');
-    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleId: null });
+    t.channels.set('lobby', { name: 'Lobby', members: new Set(), allowed: [], staffRoleIds: [] });
     const id = book();
     await voice.ensure(id);
     const r = row(id)!;
