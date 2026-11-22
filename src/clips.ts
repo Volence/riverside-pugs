@@ -187,6 +187,21 @@ export interface ClipJob {
   lead: number; tail: number;
 }
 
+/** The tournament a match was a game of: its name and the two entries with
+ *  everyone who was ever on their roster. Null for anything else. */
+export function tournamentOf(db: DB, matchId: number): { event: string; entries: { name: string; players: Set<string> }[] } | null {
+  const r = db.prepare(
+    `SELECT e.name AS event, em.entry_a AS a, em.entry_b AS b FROM event_games g
+     JOIN event_matches em ON em.id = g.event_match_id JOIN events e ON e.id = em.event_id WHERE g.match_id = ?`,
+  ).get(matchId) as { event: string; a: number | null; b: number | null } | undefined;
+  if (!r) return null;
+  const entries = [r.a, r.b].filter((id): id is number => id !== null).map((id) => ({
+    name: (db.prepare('SELECT name FROM event_entries WHERE id = ?').get(id) as { name: string }).name,
+    players: new Set((db.prepare('SELECT steamid FROM event_entry_players WHERE entry_id = ?').all(id) as { steamid: string }[]).map((x) => x.steamid)),
+  }));
+  return { event: r.event, entries };
+}
+
 export function jobFor(db: DB, row: ClipRow): ClipJob {
   const name = getPlayer(db, row.player_id)?.name ?? row.player_id;
   const m = db.prepare('SELECT campaign FROM matches WHERE id = ?').get(row.match_id) as { campaign: string } | undefined;
@@ -196,9 +211,14 @@ export function jobFor(db: DB, row: ClipRow): ClipJob {
     id: row.id, matchId: row.match_id, ordinal: row.map_ordinal, half: row.half, steamid: row.player_id,
     times: JSON.parse(row.times_json) as number[], count: row.count, kind: row.kind,
   };
-  const where = `Match ${row.match_id} · ${campaign}, map ${row.map_ordinal + 1}`;
+  const t = tournamentOf(db, row.match_id);
+  const where = `${t ? t.event : `Match ${row.match_id}`} · ${campaign}, map ${row.map_ordinal + 1}`;
   if (row.kind === 'quad') {
-    const names = (JSON.parse(row.people_json ?? '[]') as string[]).map((id) => getPlayer(db, id)?.name ?? id);
+    const people = JSON.parse(row.people_json ?? '[]') as string[];
+    // a tournament quad names the team (owner 11-22): the entry holding most of the four cappers
+    const team = t?.entries.map((e) => ({ e, n: people.filter((p) => e.players.has(p)).length })).sort((a, b) => b.n - a.n)[0];
+    if (team && team.n >= 3) return { ...base, lead: 3, tail: 4.3, caption: [`${team.e.name}: QUAD CAP`, `${where} · 4 pins in ${secs} s`] };
+    const names = people.map((id) => getPlayer(db, id)?.name ?? id);
     return { ...base, lead: 3, tail: 4.3, caption: [`QUAD CAP: ${names.join(', ')}`, `${where} · 4 pins in ${secs} s`] };
   }
   return { ...base, lead: 3.3, tail: 2.7, caption: [`${name}: ${burstName(row.count).toUpperCase()}`, `${where} · ${row.count} hunters in ${secs} s`] };
