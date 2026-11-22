@@ -120,6 +120,7 @@ describe('quad caps', () => {
   }
   it('finds match 1259 map 3 half 2: four pins in 1.06 s, filmed by the fourth capper', () => {
     [71172, 71492, 72086, 72227].forEach((t, i) => ev(matchId, 'pinned', I[i]!, S[i]!, t));
+    [74000, 74100, 75000, 76000].forEach((t, i) => ev(matchId, 'incap', S[i]!, I[i]!, t));
     expect(findQuads(db, matchId)).toEqual([{ kind: 'quad', steamid: I[3], mapOrdinal: 2, half: 2, times: [71172, 71492, 72086, 72227], people: I }]);
   });
   it('a pin cleared, or its attacker killed, before the fourth lands is no quad', () => {
@@ -127,16 +128,48 @@ describe('quad caps', () => {
     ev(matchId, 'cleared', S[3]!, S[0]!, 700);
     ev(matchId, 'pinned', I[3]!, S[3]!, 800);
     expect(findQuads(db, matchId)).toEqual([]);
-    ev(matchId, 'death', S[3]!, I[1]!, 850);   // the hunter on S[1] dies: S[1] is free
+    ev(matchId, 'death', I[1]!, S[3]!, 850);   // the hunter on S[1] dies: S[1] is free
     ev(matchId, 'pinned', I[0]!, S[0]!, 900);
+    expect(findQuads(db, matchId)).toEqual([]);
+  });
+  it('match 1242 map 1 half 2: a survivor cleared 40 ms after the fourth pin is no quad; 1242 map 2: everyone incapped is', () => {
+    [84672, 84914, 85367, 86102].forEach((t, i) => ev(matchId, 'pinned', I[i]!, S[i]!, t));
+    ev(matchId, 'cleared', S[3]!, S[1]!, 86141);
+    expect(findQuads(db, matchId)).toEqual([]);
+    const m2 = match('2026-11-21 07:00:00');
+    [157258, 157477, 158195, 159922].forEach((t, i) => ev(m2, 'pinned', I[i]!, S[i]!, t));
+    [161469, 167453, 168469, 168586].forEach((t, i) => ev(m2, 'incap', S[i]!, I[i]!, t));   // actor goes down
+    ev(m2, 'death', I[0]!, S[0]!, 169000);   // a capper dying after its victim is down frees nobody
+    expect(findQuads(db, m2)).toHaveLength(1);
+  });
+  it('match 1239 map 1 half 2: one smoker pinning a second survivor has let go of the first', () => {
+    ev(matchId, 'pinned', I[0]!, S[0]!, 63148);
+    ev(matchId, 'pinned', I[1]!, S[1]!, 64969);
+    ev(matchId, 'pinned', I[2]!, S[2]!, 65883);
+    ev(matchId, 'pinned', I[0]!, S[3]!, 68148);
+    expect(findQuads(db, matchId)).toEqual([]);
+  });
+  it('two survivors never seen going down (a tongue that broke without an event) means no quad; one is the round-ending incap', () => {
+    [0, 300, 600, 900].forEach((t, i) => ev(matchId, 'pinned', I[i]!, S[i]!, t));
+    [2000, 2100].forEach((t, i) => ev(matchId, 'incap', S[i]!, I[i]!, t));
+    expect(findQuads(db, matchId)).toEqual([]);
+    ev(matchId, 'incap', S[2]!, I[2]!, 2200);
+    expect(findQuads(db, matchId)).toHaveLength(1);
+  });
+  it('a revive before the round ends means someone got back up', () => {
+    [0, 300, 600, 900].forEach((t, i) => ev(matchId, 'pinned', I[i]!, S[i]!, t));
+    [2000, 2100, 2200, 2300].forEach((t, i) => ev(matchId, 'incap', S[i]!, I[i]!, t));
+    ev(matchId, 'revive', S[0]!, S[1]!, 9000);
     expect(findQuads(db, matchId)).toEqual([]);
   });
   it('is queued only when the match quad stat agrees, and lists on every capper', () => {
     for (const id of [...I, ...S]) db.prepare("INSERT INTO players (steamid, name, status) VALUES (?, ?, 'active')").run(id, `p${id.slice(-2)}`);
     [71172, 71492, 72086, 72227].forEach((t, i) => ev(matchId, 'pinned', I[i]!, S[i]!, t));
+    [74000, 74100, 75000, 76000].forEach((t, i) => ev(matchId, 'incap', S[i]!, I[i]!, t));
     expect(scanClips(db)).toBe(0);
     const m2 = match('2026-11-22 05:47:47');
     [71172, 71492, 72086, 72227].forEach((t, i) => ev(m2, 'pinned', I[i]!, S[i]!, t));
+    [74000, 74100, 75000, 76000].forEach((t, i) => ev(m2, 'incap', S[i]!, I[i]!, t));
     db.prepare("INSERT INTO match_player_stats (match_id, player_id, stat, value) VALUES (?, ?, 'quad_caps', 1)").run(m2, I[0]);
     expect(scanClips(db)).toBe(1);
     const row = claimClip(db)!;
