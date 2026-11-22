@@ -1618,6 +1618,18 @@ CREATE TABLE IF NOT EXISTS clip_scans (
   scanned_at TEXT NOT NULL
 );
 
+-- A tournament's highlight reel (owner 2026-11-22): its clips cut to a song
+-- (theatre-spike/clip/reel.mjs), uploaded through the clip worker routes and
+-- shown on the event page once it is over. One per event; a new upload
+-- replaces it under a new key (R2 objects are cached as immutable).
+CREATE TABLE IF NOT EXISTS event_reels (
+  event_id   INTEGER PRIMARY KEY REFERENCES events(id),
+  video_key  TEXT,
+  thumb_key  TEXT,
+  bytes      INTEGER,
+  updated_at TEXT NOT NULL
+);
+
 -- Four-slot campaign ballots (src/ballot.ts), one row per lobby that drew
 -- one, for the owner to review. options_json: [{slug, slot, weight, base,
 -- bump, recentBy, freshest, ignoredBy}] in ballot order; votes_json: {slug:

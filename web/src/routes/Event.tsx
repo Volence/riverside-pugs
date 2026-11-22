@@ -13,6 +13,7 @@ import { EntryPanel } from './event/EntryPanel';
 import { PrepPanel } from './event/PrepPanel';
 import { StagePlay } from './event/StagePlay';
 import { EventFigures, EventTimeline, StageRulesCard, TeamsGrid } from './event/EventOverview';
+import { EventReel } from './Clips';
 
 const BEFORE_START = new Set(['draft', 'announced', 'registration', 'checkin']);
 
@@ -195,6 +196,7 @@ export function EventPage({ slug, session }: { slug: string; session: Session })
       {ev.status === 'draft' && <p class="warning">Draft: only staff can see this page.</p>}
       {ev.status === 'cancelled' && <p class="warning">This event was cancelled{ev.cancelReason ? `: ${ev.cancelReason}` : '.'}</p>}
       <EventTimeline ev={ev} now={now} />
+      {ev.status === 'finished' && <EventReel slug={ev.slug} />}
       {/* Once play starts the bracket is what people come for, so it leads and the description follows. */}
       {ev.play.map((s) => <StagePlay key={s.ordinal} stage={s} slug={ev.slug} />)}
       {ev.play.length === 0 && ev.preview && <StagePlay stage={ev.preview} slug={ev.slug} />}

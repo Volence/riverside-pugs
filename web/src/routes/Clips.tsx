@@ -48,6 +48,25 @@ export function ClipTile({ clip, showPlayer = true }: { clip: ClipCard; showPlay
   );
 }
 
+/** A finished tournament's highlight reel at the top of its page: nothing at
+ *  all until one has been uploaded. */
+export function EventReel({ slug }: { slug: string }) {
+  const [reel, setReel] = useState<{ video: string; thumb: string | null } | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    setReel(null);
+    api.eventReel(slug, ac.signal).then(setReel).catch(() => {});
+    return () => ac.abort();
+  }, [slug]);
+  if (!reel) return null;
+  return (
+    <Panel class="evreel">
+      <h3>Highlights</h3>
+      <video class="evreel__video" src={reel.video} poster={reel.thumb ?? undefined} controls preload="none" playsInline />
+    </Panel>
+  );
+}
+
 const PAGE = 24;
 
 /** A grid of clips with "Show more"; player narrows it to one person's. */

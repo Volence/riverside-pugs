@@ -4,13 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
-  claimClip, clipThumbKeyFor, clipVideoKeyFor, failClip, finishClip, getClip, jobFor, listClips, setClipFile,
+  claimClip, clipThumbKeyFor, clipVideoKeyFor, failClip, finishClip, getClip, jobFor, listClips, reelOf, setClipFile, setReelFile,
 } from '../clips.js';
 import type { DB } from '../db.js';
 import { head, put, publicUrlFor, type R2Config } from '../r2.js';
 
 export const CLIP_VIDEO_LIMIT = 40 * 1024 * 1024;
 export const CLIP_THUMB_LIMIT = 2 * 1024 * 1024;
+export const REEL_VIDEO_LIMIT = 200 * 1024 * 1024;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 
 /**
@@ -25,13 +26,16 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
  *   POST <id>/done        the clip is finished (needs the video)
  *   POST <id>/fail        {error}: back in the queue, or failed after 3 tries
  *
- * Public: GET /api/clips?player=<steamid>&before=<id>&limit=<n>&min=<count>&kind=skeet|quad.
+ *   PUT  reel/<event slug>/video|thumb   a tournament's highlight reel (<= 200 MB) -> clips/reels/<slug>-<stamp>.mp4|.jpg
+ *
+ * Public: GET /api/clips?player=<steamid>&before=<id>&limit=<n>&min=<count>&kind=skeet|quad,
+ *         GET /api/clips/reel/<event slug> -> { video, thumb } | 404 (finished events only).
  */
 export async function clipRoutes(app: FastifyInstance, opts: { db: DB; r2: R2Config | null; token?: string }): Promise<void> {
   const { db, r2 } = opts;
   const token = opts.token ?? process.env.CLIP_WORKER_TOKEN?.trim() ?? '';
 
-  for (const [type, limit] of [['video/mp4', CLIP_VIDEO_LIMIT], ['image/jpeg', CLIP_THUMB_LIMIT]] as const) {
+  for (const [type, limit] of [['video/mp4', REEL_VIDEO_LIMIT], ['image/jpeg', CLIP_THUMB_LIMIT]] as const) {
     app.addContentTypeParser(type, { parseAs: 'buffer', bodyLimit: limit }, (_req, body, done) => done(null, body));
   }
 
@@ -83,6 +87,38 @@ export async function clipRoutes(app: FastifyInstance, opts: { db: DB; r2: R2Con
   };
   app.put('/api/clips/worker/:id/video', { bodyLimit: CLIP_VIDEO_LIMIT }, upload('video'));
   app.put('/api/clips/worker/:id/thumb', { bodyLimit: CLIP_THUMB_LIMIT }, upload('thumb'));
+
+  // a tournament's reel: replaced whole on a new upload, under a new key (the objects are cached as immutable)
+  const reelUpload = (which: 'video' | 'thumb') => async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!authed(req, reply)) return;
+    if (!r2) return reply.code(503).send({ error: 'R2 is not configured' });
+    const slug = (req.params as { slug: string }).slug;
+    const ev = db.prepare('SELECT id FROM events WHERE slug = ?').get(slug) as { id: number } | undefined;
+    if (!ev) return reply.code(404).send({ error: 'no such event' });
+    const body = req.body as Buffer | undefined;
+    if (!Buffer.isBuffer(body) || body.length === 0) return reply.code(400).send({ error: 'empty body' });
+    const key = `clips/reels/${slug}-${Date.now()}.${which === 'video' ? 'mp4' : 'jpg'}`;
+    const dir = await mkdtemp(join(tmpdir(), 'pug-reel-'));
+    try {
+      const file = join(dir, which === 'video' ? 'reel.mp4' : 'reel.jpg');
+      await writeFile(file, body);
+      await put(r2, key, file, { contentType: which === 'video' ? 'video/mp4' : 'image/jpeg', cacheControl: IMMUTABLE });
+      const got = await head(r2, key);
+      if (!got || got.bytes !== body.length) return reply.code(502).send({ error: 'upload did not land on R2' });
+      setReelFile(db, ev.id, which, key, body.length);
+      return { key, bytes: body.length };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  app.put('/api/clips/worker/reel/:slug/video', { bodyLimit: REEL_VIDEO_LIMIT }, reelUpload('video'));
+  app.put('/api/clips/worker/reel/:slug/thumb', { bodyLimit: CLIP_THUMB_LIMIT }, reelUpload('thumb'));
+
+  app.get('/api/clips/reel/:slug', async (req, reply) => {
+    const r = r2 ? reelOf(db, (req.params as { slug: string }).slug) : null;
+    if (!r || !r2) return reply.code(404).send({ error: 'no reel' });
+    return { video: publicUrlFor(r2, r.video), thumb: r.thumb ? publicUrlFor(r2, r.thumb) : null };
+  });
 
   app.post('/api/clips/worker/:id/done', async (req, reply) => {
     if (!authed(req, reply)) return;

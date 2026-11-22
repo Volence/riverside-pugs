@@ -6762,6 +6762,7 @@ a.mapch__name:hover { color: var(--accent); }
 .cliptile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .cliptile--big { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .cliptile__video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.evreel__video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); }
 .cliptile__body { padding: var(--sp-3); display: grid; gap: var(--sp-2); }
 .cliptile__what {
   font-family: var(--font-label); font-size: var(--fs-label);

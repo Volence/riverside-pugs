@@ -3775,6 +3775,9 @@ export const api = {
     const qs = q.toString();
     return get<{ clips: ClipCard[] }>(qs ? `/api/clips?${qs}` : '/api/clips', signal);
   },
+  /** A finished tournament's highlight reel (src/routes/clips.ts); 404 = none. */
+  eventReel: (slug: string, signal?: AbortSignal) =>
+    get<{ video: string; thumb: string | null }>(`/api/clips/reel/${encodeURIComponent(slug)}`, signal),
   streams: (all = false, signal?: AbortSignal) =>
     get<StreamsView>(`/api/streams${all ? '?all=1' : ''}`, signal),
   maps: (signal?: AbortSignal) => get<{ maps: MapIndexRow[]; pool: string[]; multipliers?: SeasonMultipliers | null }>('/api/maps', signal),

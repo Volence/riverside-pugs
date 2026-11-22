@@ -260,6 +260,22 @@ export function setClipFile(db: DB, id: number, which: 'video' | 'thumb', key: s
   else db.prepare('UPDATE clips SET thumb_key = ? WHERE id = ?').run(key, id);
 }
 
+/** A tournament's highlight reel (event_reels). */
+export function setReelFile(db: DB, eventId: number, which: 'video' | 'thumb', key: string, bytes?: number): void {
+  db.prepare(`INSERT INTO event_reels (event_id, updated_at) VALUES (?, datetime('now')) ON CONFLICT(event_id) DO NOTHING`).run(eventId);
+  if (which === 'video') db.prepare(`UPDATE event_reels SET video_key = ?, bytes = ?, updated_at = datetime('now') WHERE event_id = ?`).run(key, bytes ?? null, eventId);
+  else db.prepare(`UPDATE event_reels SET thumb_key = ?, updated_at = datetime('now') WHERE event_id = ?`).run(key, eventId);
+}
+
+/** The reel of a finished event, by slug: keys for its video and poster, or null. */
+export function reelOf(db: DB, slug: string): { video: string; thumb: string | null } | null {
+  const r = db.prepare(
+    `SELECT r.video_key AS video, r.thumb_key AS thumb FROM event_reels r JOIN events e ON e.id = r.event_id
+     WHERE e.slug = ? AND e.status = 'finished' AND r.video_key IS NOT NULL`,
+  ).get(slug) as { video: string; thumb: string | null } | undefined;
+  return r ?? null;
+}
+
 /** Done needs the video on R2 (the poster frame is optional). */
 export function finishClip(db: DB, id: number): boolean {
   return db.prepare(

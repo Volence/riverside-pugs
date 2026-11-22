@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import { openDb, type DB } from '../src/db.js';
 import {
   CLIP_TRIPLES_SINCE, CLIPS_SINCE, claimClip, failClip, findClipBursts, findQuads, finishClip, getClip, jobFor, listClips, scanClips, setClipFile,
+  setReelFile,
 } from '../src/clips.js';
 import { findSkeetStreaks } from '../src/skeetStreaks.js';
 import { clipRoutes } from '../src/routes/clips.js';
@@ -182,5 +183,23 @@ describe('quad caps', () => {
     setClipFile(db, row.id, 'video', 'clips/x.mp4', 1); finishClip(db, row.id);
     expect(listClips(db, (k) => k, { player: I[0] })).toHaveLength(1);
     expect(listClips(db, (k) => k, { minCount: 3 })).toHaveLength(0);
+  });
+});
+
+describe('event reels', () => {
+  it('upload behind the token, show only for a finished event', async () => {
+    db.prepare(`INSERT INTO events (slug, name, region, organizer_steamid, entry_kind, status, starts_at, eligibility_json, checkin_json, roster_json, created_at, updated_at)
+      VALUES ('cup', 'Cup', 'na', ?, 'team', 'live', '2026-11-22T00:00:00Z', '{}', '{}', '{}', '2026-11-22', '2026-11-22')`).run(PID);
+    const app = Fastify();
+    const sent: string[] = [];
+    const r2 = { endpoint: 'http://r2.invalid', bucket: 'b', accessKeyId: 'k', secretAccessKey: 's', region: 'auto', publicUrl: 'https://assets' } as never;
+    await app.register(clipRoutes, { db, r2, token: 'sekrit' });
+    expect((await app.inject({ method: 'PUT', url: '/api/clips/worker/reel/cup/video', payload: Buffer.from('x'), headers: { 'content-type': 'video/mp4' } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'PUT', url: '/api/clips/worker/reel/nope/video', payload: Buffer.from('x'), headers: { 'content-type': 'video/mp4', 'x-clip-token': 'sekrit' } })).statusCode).toBe(404);
+    setReelFile(db, 1, 'video', 'clips/reels/cup-1.mp4', 1);
+    expect((await app.inject({ method: 'GET', url: '/api/clips/reel/cup' })).statusCode).toBe(404);   // not finished yet
+    db.prepare("UPDATE events SET status = 'finished' WHERE slug = 'cup'").run();
+    expect((await app.inject({ method: 'GET', url: '/api/clips/reel/cup' })).json()).toEqual({ video: 'https://assets/clips/reels/cup-1.mp4', thumb: null });
+    expect(sent).toEqual([]);
   });
 });
